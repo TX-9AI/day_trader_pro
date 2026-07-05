@@ -1,0 +1,5 @@
+boto3>=1.34
+anthropic>=0.40
+requests>=2.31
+# optional, for exact market-holiday accuracy:
+# pandas_market_calendars>=4.4
