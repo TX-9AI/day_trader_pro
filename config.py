@@ -1,4 +1,4 @@
-# day_trader_pro/config.py — v0.1.0
+# day_trader_pro/config.py — v0.1.2
 """
 Central configuration for the day_trader_pro control server (orchestrator).
 
@@ -29,10 +29,12 @@ REGION = os.environ.get("DTP_REGION", "us-east-2")
 # is currently short of 30 on purpose — paste your full 30-symbol universe here
 # so the tag filter matches your fleet exactly. Order does not matter.
 UNIVERSE = [
-    "SPX", "QQQ", "SPY",
-    "AAPL", "MU", "NVDA", "MSFT", "TSLA", "NFLX", "META", "ORCL",
-    # TODO(Jason): add the remaining ~19 tickers from the live universe here.
-]
+    "AAPL", "AMD", "AMZN", "AVGO", "COST", "CRM", "CVX", "DIA", "GLD", "GOOGL",
+    "GS", "IWM", "JPM", "LLY", "META", "MSFT", "MU", "NFLX", "NVDA", "ORCL",
+    "PLTR", "QQQ", "SMCI", "SMH", "SPX", "TLT", "TSLA", "UNH", "XOM",
+]  # 29 confirmed. SPX + QQQ are ALWAYS_ON; the other 27 are discretionary.
+# SPY intentionally excluded: SPX runs daily and tracks the same underlying,
+# so a SPY box would be redundant and is never woken.
 
 # The reporter / control server's own tag Name. It is never woken or stopped.
 REPORTER_TAG = os.environ.get("DTP_REPORTER_TAG", "1-REPORTER")
