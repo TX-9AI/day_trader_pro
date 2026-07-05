@@ -1,4 +1,4 @@
-# day_trader_pro/config.py — v0.1.2
+# day_trader_pro/config.py — v0.1.3
 """
 Central configuration for the day_trader_pro control server (orchestrator).
 
@@ -82,7 +82,6 @@ START_POLL_INTERVAL = 10
 # --------------------------------------------------------------------------
 # Environment variable NAMES for secrets (values never stored here)
 # --------------------------------------------------------------------------
-ENV_ANTHROPIC_KEY = "ANTHROPIC_API_KEY"
 ENV_TELEGRAM_TOKEN = "DTP_TELEGRAM_TOKEN"
 ENV_TELEGRAM_CHAT = "DTP_TELEGRAM_CHAT_ID"
 
@@ -105,3 +104,25 @@ def set_mock(on: bool = True):
     """Force all mocks on/off at runtime (used by devtools / CLI --mock)."""
     global MOCK_MODE, MOCK_AWS, MOCK_LLM, MOCK_TELEGRAM
     MOCK_MODE = MOCK_AWS = MOCK_LLM = MOCK_TELEGRAM = bool(on)
+
+# --------------------------------------------------------------------------
+# SSH pull settings  (control server reads each bot's pnl_today.json)
+# --------------------------------------------------------------------------
+# The control server SSHes into each running bot at EOD to read its P&L file.
+# Private IP is the default: it is stable across stop/start (unlike public IP,
+# which changes unless you attach an EIP) and never leaves the VPC.
+SSH_KEY_PATH = os.environ.get("DTP_SSH_KEY", os.path.expanduser("~/.ssh/tx-9.pem"))
+SSH_USER = os.environ.get("DTP_SSH_USER", "ubuntu")
+SSH_USE_PUBLIC_IP = _flag("DTP_SSH_USE_PUBLIC", "0")
+SSH_CONNECT_TIMEOUT = int(os.environ.get("DTP_SSH_TIMEOUT", "12"))
+# Path to the P&L file on each BOT box, relative to that box's home dir.
+EOD_REMOTE_PNL_PATH = os.environ.get("DTP_EOD_REMOTE_PATH", "eod/pnl_today.json")
+
+# --------------------------------------------------------------------------
+# Master switch  (control ENABLED vs DISABLED)
+# --------------------------------------------------------------------------
+# When DISABLED, the orchestrator and EOD sweep no-op (log and exit). This is
+# your "control, stay out of the way today" toggle — flip it and run bots by
+# hand with zero interference. Backed by data/control_state.json so you can
+# toggle it from Termius via devtools without editing code.
+CONTROL_STATE_PATH = os.path.join(DATA_DIR, "control_state.json")

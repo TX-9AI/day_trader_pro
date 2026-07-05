@@ -1,4 +1,4 @@
-# day_trader_pro/orchestrator.py — v0.1.0
+# day_trader_pro/orchestrator.py — v0.1.2
 """
 Morning orchestration. Runs on the control server (the reporter box) on a
 pre-market systemd timer, AFTER market_brief_v1 has emitted report.json.
@@ -27,6 +27,7 @@ import json
 import sys
 
 import config
+import control_state
 import ec2ops
 import instance_registry
 import market_calendar
@@ -40,6 +41,12 @@ def load_report(path):
 
 
 def run(dry_run=False, gate=True, report_path=None):
+    # 0. Master switch
+    if not control_state.is_enabled():
+        print("Control is DISABLED — orchestrator no-op. "
+              "(python control_state.py enable to turn on)")
+        return 0
+
     # 1. Trading-day gate
     if gate and not market_calendar.is_trading_day():
         print("Not a trading day; nothing to do.")
@@ -81,7 +88,7 @@ def run(dry_run=False, gate=True, report_path=None):
     not_running = [iid for iid, ok in reached.items() if not ok]
 
     # 6/7. Compose and send the morning ack
-    msg = _format_ack(sel, resolved, missing, not_running, dry_run)
+    msg = _format_ack(sel, resolved, missing, reached, dry_run)
     notify.send(msg)
 
     if not_running:
@@ -91,25 +98,39 @@ def run(dry_run=False, gate=True, report_path=None):
     return 0
 
 
-def _format_ack(sel, resolved, missing, not_running, dry_run):
+def _short(iid):
+    return iid[-5:] if iid else "?????"
+
+
+def _format_ack(sel, resolved, missing, reached, dry_run):
+    """Explicit per-server morning message: which boxes, which IDs, what state."""
+    verb = "Would wake" if dry_run else "Woke"
     lines = ["*day_trader_pro — morning wake*"]
     if dry_run:
-        lines.append("_(dry run — no instances started)_")
+        lines.append("_(dry run — nothing was actually started)_")
     if sel["fallback"]:
         lines.append(f"⚠️ selection fell back to floor. err: {sel['error']}")
-    lines.append(f"Floor: {', '.join(sel['always_on'])}")
-    if sel["discretionary"]:
-        lines.append("Discretionary:")
-        for s in sel["discretionary"]:
-            why = sel["rationale"].get(s, "")
+
+    # Per-server list, floor first then discretionary, with confirmed state.
+    lines.append(f"*{verb} {len(resolved)} server(s):*")
+    ordered = [s for s in sel["always_on"] if s in resolved] + \
+              [s for s in sel["discretionary"] if s in resolved]
+    for s in ordered:
+        iid = resolved[s]
+        tag = "floor" if s in sel["always_on"] else "pick"
+        if dry_run:
+            mark = "•"
+        else:
+            mark = "✅" if reached.get(iid) else "🚨"
+        extra = ""
+        if s in sel["discretionary"]:
             conf = sel["confidence"].get(s)
-            conf_s = f" ({conf})" if conf is not None else ""
-            lines.append(f"  • {s}{conf_s} — {why}")
-    else:
-        lines.append("Discretionary: none")
-    lines.append(f"Started {len(resolved)} instance(s).")
+            why = sel["rationale"].get(s, "")
+            extra = f" — {why}" + (f" (conf {conf})" if conf is not None else "")
+        lines.append(f"  {mark} {s} [{tag}] `{_short(iid)}`{extra}")
+
     if missing:
-        lines.append(f"Unresolved: {', '.join(missing)}")
+        lines.append(f"⚠️ Unresolved (no live instance): {', '.join(missing)}")
     return "\n".join(lines)
 
 

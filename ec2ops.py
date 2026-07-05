@@ -1,4 +1,4 @@
-# day_trader_pro/ec2ops.py — v0.1.0
+# day_trader_pro/ec2ops.py — v0.1.1
 """
 Thin EC2 wrapper. Every AWS call in the project goes through here so that
 mock mode is a single, well-contained switch.
@@ -69,9 +69,13 @@ def _mock_describe(names):
     for name in names:
         rec = state.get(name)
         if rec is None:
-            rec = {"instance_id": _mock_instance_id(name), "state": "stopped"}
+            # deterministic fake private ip in the 10.0.x.y space
+            h = abs(hash(name))
+            rec = {"instance_id": _mock_instance_id(name), "state": "stopped",
+                   "private_ip": f"10.0.{h % 254}.{(h // 254) % 254}"}
             state[name] = rec
             changed = True
+        rec.setdefault("private_ip", "10.0.0.0")
         out[name] = dict(rec)
     if changed:
         _mock_save(state)
@@ -117,13 +121,15 @@ def describe_by_names(names):
             if name is None:
                 continue
             iid = inst["InstanceId"]
+            rec = {"instance_id": iid, "state": state,
+                   "private_ip": inst.get("PrivateIpAddress", "")}
             if name in found:
                 ambiguous.setdefault(name, [found[name]["instance_id"]]).append(iid)
                 # Prefer running > pending > stopped; keep first otherwise.
                 if _rank(state) > _rank(found[name]["state"]):
-                    found[name] = {"instance_id": iid, "state": state}
+                    found[name] = rec
             else:
-                found[name] = {"instance_id": iid, "state": state}
+                found[name] = rec
     if ambiguous:
         found["_ambiguous"] = ambiguous
     return found
