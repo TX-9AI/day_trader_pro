@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# day_trader_pro/devtools.sh — v0.2.0
+# day_trader_pro/devtools.sh — v0.3.0
 # Interactive debugging / operations menu for the control server.
 # Mobile-friendly (Termius): single-key selections, no arguments needed.
 
@@ -39,9 +39,14 @@ menu() {
    10) ENABLE control   (automation on)
    11) DISABLE control  (deco mode - run bots by hand)
 
+  FLEET (SSH management plane):
+   12) Fleet list        (symbol -> private IP -> state)
+   13) Fleet ping        (SSH echo-test running boxes)
+   14) Fleet run cmd     (prompt for a command, run on all running)
+
   COMPONENT TESTS:
-   12) Test selection on sample report   (mock model)
-   13) Test Telegram send                (REAL send)
+   15) Test selection on sample report   (mock model)
+   16) Test Telegram send                (REAL send)
 
     0) Exit
 ======================================================
@@ -59,8 +64,11 @@ EOF
     9)  echo; $PY control_state.py status; pause ;;
     10) echo; $PY control_state.py enable; pause ;;
     11) echo; $PY control_state.py disable; pause ;;
-    12) echo; $PY selector.py --test; pause ;;
-    13) echo; $PY notify.py --test; pause ;;
+    12) echo; $PY fleet.py list; pause ;;
+    13) echo; $PY fleet.py ping; pause ;;
+    14) echo; read -rp "Command to run on all running boxes: " fc; $PY fleet.py run "$fc"; pause ;;
+    15) echo; $PY selector.py --test; pause ;;
+    16) echo; $PY notify.py --test; pause ;;
     0)  exit 0 ;;
     *)  echo "Invalid selection."; sleep 1 ;;
   esac

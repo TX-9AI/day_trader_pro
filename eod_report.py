@@ -1,4 +1,4 @@
-# day_trader_pro/eod_report.py — v0.1.0
+# day_trader_pro/eod_report.py — v0.1.1
 """
 End-of-day aggregator, run on the control server (~15:55 ET) on a systemd
 timer, AFTER every bot has flattened (15:45) and written its P&L (15:50).
@@ -23,7 +23,6 @@ CLI:
 
 import argparse
 import json
-import subprocess
 import sys
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -33,6 +32,7 @@ import control_state
 import ec2ops
 import instance_registry
 import notify
+import ssh_util
 
 _ET = ZoneInfo("US/Eastern")
 
@@ -46,25 +46,11 @@ def _today_et():
 # --------------------------------------------------------------------------
 def _ssh_pull(ip):
     """Return (data_dict, error_str). data_dict is None on failure."""
-    remote = f"cat ~/{config.EOD_REMOTE_PNL_PATH}"
-    cmd = [
-        "ssh", "-i", config.SSH_KEY_PATH,
-        "-o", "BatchMode=yes",
-        "-o", "StrictHostKeyChecking=accept-new",
-        "-o", f"ConnectTimeout={config.SSH_CONNECT_TIMEOUT}",
-        f"{config.SSH_USER}@{ip}", remote,
-    ]
+    rc, out, err = ssh_util.ssh_run(ip, f"cat ~/{config.EOD_REMOTE_PNL_PATH}")
+    if rc != 0:
+        return None, (err.strip().splitlines() or ["ssh failed"])[-1][:100]
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True,
-                              timeout=config.SSH_CONNECT_TIMEOUT + 10)
-    except subprocess.TimeoutExpired:
-        return None, "ssh timeout"
-    except Exception as exc:  # noqa: BLE001
-        return None, f"ssh error: {exc}"
-    if proc.returncode != 0:
-        return None, (proc.stderr.strip().splitlines() or ["ssh failed"])[-1][:100]
-    try:
-        return json.loads(proc.stdout), None
+        return json.loads(out), None
     except json.JSONDecodeError:
         return None, "bad/empty P&L file"
 
