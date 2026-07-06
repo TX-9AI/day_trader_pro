@@ -1,30 +1,50 @@
-# day_trader_pro/notify.py — v0.1.0
+# day_trader_pro/notify.py — v0.2.0
 """
-Telegram notifier for the control server (orchestrator alerts + shutdown
-sweep summary). This is SEPARATE from the trading boxes' own Telegram alerts;
-the per-symbol daily P&L still comes from each box.
+Telegram notifier for the control server (orchestrator alerts + EOD summary).
+Separate from the trading boxes' own Telegram alerts.
 
 Reads token/chat from the environment (never hardcode):
     DTP_TELEGRAM_TOKEN
     DTP_TELEGRAM_CHAT_ID
 
-In mock mode, messages print to stdout instead of hitting the API.
+v0.2.0 — send as PLAIN TEXT (no parse_mode). Machine-generated P&L text is
+full of characters (- . _ + | negative numbers) that Telegram's Markdown
+parser rejects mid-message ("can't parse entities"), which would silently
+drop a wake/EOD confirmation. Plain text can never fail to render. Our message
+builders use *bold* / `code` markers for readability; we strip those markers
+here so plain output stays clean instead of showing literal * and `.
+
+In mock mode, messages print to stdout.
 
 CLI:
     python notify.py --test
 """
 
 import os
+import re
 import sys
 
 import config
 
+# Strip the emphasis markers our builders use (*bold*, `code`, _italic_)
+# so the plain-text message reads cleanly. Underscores inside words/IDs are
+# left alone; only paired _italic_ wrappers around parentheticals are removed.
+_STRIP = re.compile(r"[*`]")
+_ITALIC = re.compile(r"_(\([^)]*\))_")
+
+
+def _plain(text: str) -> str:
+    text = _ITALIC.sub(r"\1", text)
+    return _STRIP.sub("", text)
+
 
 def send(text, silent=False):
-    """Send a Telegram message. Returns True on success (or mock)."""
+    """Send a Telegram message as plain text. Returns True on success (or mock)."""
+    body = _plain(text)
+
     if config.MOCK_TELEGRAM:
         print("----- [MOCK TELEGRAM] -----")
-        print(text)
+        print(body)
         print("---------------------------")
         return True
 
@@ -39,10 +59,11 @@ def send(text, silent=False):
 
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     try:
+        # No parse_mode: Telegram treats the body literally and never raises
+        # an entity-parse error regardless of P&L content.
         r = requests.post(url, json={
             "chat_id": chat_id,
-            "text": text,
-            "parse_mode": "Markdown",
+            "text": body,
             "disable_notification": silent,
         }, timeout=15)
         ok = r.ok and r.json().get("ok", False)
@@ -57,7 +78,7 @@ def send(text, silent=False):
 
 def main(argv):
     if "--test" in argv:
-        ok = send("*day_trader_pro* notify test ✅")
+        ok = send("*day_trader_pro* notify test ✅ (plain-text mode)")
         print("sent" if ok else "failed")
         return 0 if ok else 1
     print("Usage: python notify.py --test")
