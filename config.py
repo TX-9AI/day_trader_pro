@@ -82,6 +82,7 @@ START_POLL_INTERVAL = 10
 # --------------------------------------------------------------------------
 # Environment variable NAMES for secrets (values never stored here)
 # --------------------------------------------------------------------------
+ENV_ANTHROPIC_KEY = "ANTHROPIC_API_KEY"
 ENV_TELEGRAM_TOKEN = "DTP_TELEGRAM_TOKEN"
 ENV_TELEGRAM_CHAT = "DTP_TELEGRAM_CHAT_ID"
 
