@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# day_trader_pro/devtools.sh — v0.3.0
+# day_trader_pro/devtools.sh — v0.4.0
 # Interactive debugging / operations menu for the control server.
 # Mobile-friendly (Termius): single-key selections, no arguments needed.
+# v0.4.0 — 2026-07-07 — added MAINTENANCE section: wake_and_bake (dry-run + real);
+#          component-test items renumbered 15/16 -> 17/18.
 
 set -uo pipefail
 cd "$(dirname "$0")"
@@ -44,9 +46,13 @@ menu() {
    13) Fleet ping        (SSH echo-test running boxes)
    14) Fleet run cmd     (prompt for a command, run on all running)
 
+  MAINTENANCE (wakes, resyncs to repo, restarts, then STOPS the fleet):
+   15) Wake & bake - DRY RUN   (plan only, changes nothing)
+   16) Wake & bake - REAL      (asks you to type the fleet size)
+
   COMPONENT TESTS:
-   15) Test selection on sample report   (mock model)
-   16) Test Telegram send                (REAL send)
+   17) Test selection on sample report   (mock model)
+   18) Test Telegram send                (REAL send)
 
     0) Exit
 ======================================================
@@ -67,8 +73,10 @@ EOF
     12) echo; $PY fleet.py list; pause ;;
     13) echo; $PY fleet.py ping; pause ;;
     14) echo; read -rp "Command to run on all running boxes: " fc; $PY fleet.py run "$fc"; pause ;;
-    15) echo; $PY selector.py --test; pause ;;
-    16) echo; $PY notify.py --test; pause ;;
+    15) echo; $PY wake_and_bake.py --dry-run; pause ;;
+    16) echo; $PY wake_and_bake.py; pause ;;
+    17) echo; $PY selector.py --test; pause ;;
+    18) echo; $PY notify.py --test; pause ;;
     0)  exit 0 ;;
     *)  echo "Invalid selection."; sleep 1 ;;
   esac
