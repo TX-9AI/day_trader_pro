@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
-# day_trader_pro/devtools.sh — v0.4.0
+# day_trader_pro/devtools.sh — v0.5.0
 # Interactive debugging / operations menu for the control server.
 # Mobile-friendly (Termius): single-key selections, no arguments needed.
+# v0.5.0 — 2026-07-09 — MAINTENANCE expanded for wake_and_bake v1.1 modes:
+#          added Wake only (17), Bake only (18), Leave on (19),
+#          Shutdown only (20). Component tests renumbered 17/18 -> 21/22.
 # v0.4.0 — 2026-07-07 — added MAINTENANCE section: wake_and_bake (dry-run + real);
 #          component-test items renumbered 15/16 -> 17/18.
 
@@ -46,13 +49,17 @@ menu() {
    13) Fleet ping        (SSH echo-test running boxes)
    14) Fleet run cmd     (prompt for a command, run on all running)
 
-  MAINTENANCE (wakes, resyncs to repo, restarts, then STOPS the fleet):
+  MAINTENANCE (wake_and_bake v1.1):
    15) Wake & bake - DRY RUN   (plan only, changes nothing)
-   16) Wake & bake - REAL      (asks you to type the fleet size)
+   16) Wake & bake - FULL      (wake -> bake -> restart -> STOP)
+   17) Wake only               (start fleet + ping, leave running)
+   18) Bake only               (ping -> git sync -> restart, no wake/stop)
+   19) Leave on                (full run: pycache+restart, SKIP shutdown)
+   20) Shutdown only           (pycache clear -> EOD report -> STOP)
 
   COMPONENT TESTS:
-   17) Test selection on sample report   (mock model)
-   18) Test Telegram send                (REAL send)
+   21) Test selection on sample report   (mock model)
+   22) Test Telegram send                (REAL send)
 
     0) Exit
 ======================================================
@@ -75,8 +82,12 @@ EOF
     14) echo; read -rp "Command to run on all running boxes: " fc; $PY fleet.py run "$fc"; pause ;;
     15) echo; $PY wake_and_bake.py --dry-run; pause ;;
     16) echo; $PY wake_and_bake.py; pause ;;
-    17) echo; $PY selector.py --test; pause ;;
-    18) echo; $PY notify.py --test; pause ;;
+    17) echo; $PY wake_and_bake.py --wake-only; pause ;;
+    18) echo; $PY wake_and_bake.py --bake-only; pause ;;
+    19) echo; $PY wake_and_bake.py --leave-running; pause ;;
+    20) echo; $PY wake_and_bake.py --shutdown-only; pause ;;
+    21) echo; $PY selector.py --test; pause ;;
+    22) echo; $PY notify.py --test; pause ;;
     0)  exit 0 ;;
     *)  echo "Invalid selection."; sleep 1 ;;
   esac
