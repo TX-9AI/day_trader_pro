@@ -1,29 +1,38 @@
-# day_trader_pro/orchestrator.py — v0.1.2
+# day_trader_pro/orchestrator.py — v0.2.0
 """
-Morning orchestration. Runs on the control server (the reporter box) on a
-pre-market systemd timer, AFTER market_brief_v1 has emitted report.json.
+Morning spool-up. Runs on the control server on a pre-market systemd timer
+(dtp-morning.timer, ~09:15 ET) and wakes the daily baseline fleet so it's up
+and warming its feed before the 09:30 open.
 
 Flow:
-  1. Gate on trading day (skip weekends/holidays) unless --no-gate.
-  2. Load the finished brief (report.json) or generate a sample in mock.
-  3. Ask the model which discretionary symbols to wake (selector.select).
-  4. Resolve symbols -> instance IDs by tag (instance_registry.resolve).
-  5. Start the instances (unless --dry-run/--mock).
-  6. Confirm they reach 'running'; page on any that don't.
-  7. Telegram the morning's selection + confirmations (or page on failure).
+  0. Master switch (control_state) — no-op if control is DISABLED.
+  1. Trading-day gate (skip weekends/holidays) unless --no-gate.
+  2. Resolve the baseline symbols (config.ALWAYS_ON = SPX + QQQ) to instance IDs.
+  3. Start them (unless --dry-run/--mock).
+  4. Confirm they reach 'running'; page on any that don't.
+  5. Telegram the morning wake summary (always sends; a silent failed morning
+     is the worst outcome).
 
-Failure philosophy: a silent failed morning is the worst outcome, so the
-selection ack ALWAYS sends, and any resolution/start problem is surfaced
-loudly. Selection itself never crashes the run (falls back to SPX+QQQ).
+DISCRETIONARY SELECTION RETIRED (v0.2.0): the model-driven "pick the top 5-6
+high-conviction names" step was removed. A week of running all 29 showed the
+strongest-R trades were NOT the names the model would have selected, so the
+pick added complexity and a report/LLM dependency for no proven edge. The
+orchestrator now wakes ONLY SPX + QQQ; start any additional names by hand.
+No report.json is read and no model is called.
 
 CLI:
   python orchestrator.py --mock --no-gate     # full offline spool-up
   python orchestrator.py --dry-run --no-gate   # real reads, no start
-  python orchestrator.py --report /path/report.json
+  python orchestrator.py                       # scheduled morning run
+
+Changelog:
+  v0.2.0 (2026-07-10) — retire discretionary selection. Wake SPX+QQQ only;
+    drop report.json load, selector.select, and all selection-ack fields.
+    Removed --report. (Rationale above.)
+  v0.1.2 — report-driven selection of up to MAX_DISCRETIONARY names + SPX/QQQ.
 """
 
 import argparse
-import json
 import sys
 
 import config
@@ -32,15 +41,9 @@ import ec2ops
 import instance_registry
 import market_calendar
 import notify
-import selector
 
 
-def load_report(path):
-    with open(path, "r") as fh:
-        return json.load(fh)
-
-
-def run(dry_run=False, gate=True, report_path=None):
+def run(dry_run=False, gate=True):
     # 0. Master switch
     if not control_state.is_enabled():
         print("Control is DISABLED — orchestrator no-op. "
@@ -52,34 +55,20 @@ def run(dry_run=False, gate=True, report_path=None):
         print("Not a trading day; nothing to do.")
         return 0
 
-    # 2. Load brief
-    if config.MOCK_LLM or config.MOCK_AWS:
-        report = selector.sample_report()
-        print("[MOCK] using built-in sample report.")
-    else:
-        try:
-            report = load_report(report_path or config.REPORT_JSON_PATH)
-        except Exception as exc:  # noqa: BLE001
-            notify.send(f"🚨 *day_trader_pro* could not read the brief "
-                        f"({report_path or config.REPORT_JSON_PATH}): {exc}\n"
-                        f"Falling back to SPX+QQQ only.")
-            report = {"scores": {}}
+    # 2. Baseline only — SPX + QQQ. No report, no model selection.
+    baseline = list(config.ALWAYS_ON)
+    print(f"Baseline wake: {baseline}")
 
-    # 3. Selection
-    sel = selector.select(report)
-    final = sel["final"]
-    print(f"Selection: {final}  (fallback={sel['fallback']})")
-
-    # 4. Resolve to instance IDs
-    resolved, missing = instance_registry.resolve(final)
+    # 3. Resolve to instance IDs
+    resolved, missing = instance_registry.resolve(baseline)
     if missing:
         notify.send("⚠️ *day_trader_pro* could not resolve instances for: "
                     f"{', '.join(missing)}. Check tags / run reconcile.")
 
-    # 5. Start
+    # 4. Start
     ids = list(resolved.values())
     if dry_run:
-        print(f"[DRY-RUN] would start {len(ids)} instances: {resolved}")
+        print(f"[DRY-RUN] would start {len(ids)} instance(s): {resolved}")
         reached = {i: True for i in ids}
     else:
         ec2ops.start(ids)
@@ -87,9 +76,8 @@ def run(dry_run=False, gate=True, report_path=None):
 
     not_running = [iid for iid, ok in reached.items() if not ok]
 
-    # 6/7. Compose and send the morning ack
-    msg = _format_ack(sel, resolved, missing, reached, dry_run)
-    notify.send(msg)
+    # 5. Morning ack (always sends)
+    notify.send(_format_ack(baseline, resolved, missing, reached, dry_run))
 
     if not_running:
         notify.send("🚨 *day_trader_pro* these instances did NOT reach running "
@@ -102,54 +90,39 @@ def _short(iid):
     return iid[-5:] if iid else "?????"
 
 
-def _format_ack(sel, resolved, missing, reached, dry_run):
+def _format_ack(baseline, resolved, missing, reached, dry_run):
     """Explicit per-server morning message: which boxes, which IDs, what state."""
     verb = "Would wake" if dry_run else "Woke"
-    lines = ["*day_trader_pro — morning wake*"]
+    lines = ["*day_trader_pro — morning wake (SPX + QQQ)*"]
     if dry_run:
         lines.append("_(dry run — nothing was actually started)_")
-    if sel["fallback"]:
-        lines.append(f"⚠️ selection fell back to floor. err: {sel['error']}")
-
-    # Per-server list, floor first then discretionary, with confirmed state.
-    lines.append(f"*{verb} {len(resolved)} server(s):*")
-    ordered = [s for s in sel["always_on"] if s in resolved] + \
-              [s for s in sel["discretionary"] if s in resolved]
-    for s in ordered:
+    lines.append(f"*{verb} {len(resolved)} baseline server(s):*")
+    for s in baseline:
+        if s not in resolved:
+            continue
         iid = resolved[s]
-        tag = "floor" if s in sel["always_on"] else "pick"
-        if dry_run:
-            mark = "•"
-        else:
-            mark = "✅" if reached.get(iid) else "🚨"
-        extra = ""
-        if s in sel["discretionary"]:
-            conf = sel["confidence"].get(s)
-            why = sel["rationale"].get(s, "")
-            extra = f" — {why}" + (f" (conf {conf})" if conf is not None else "")
-        lines.append(f"  {mark} {s} [{tag}] `{_short(iid)}`{extra}")
-
+        mark = "•" if dry_run else ("✅" if reached.get(iid) else "🚨")
+        lines.append(f"  {mark} {s} [floor] `{_short(iid)}`")
     if missing:
         lines.append(f"⚠️ Unresolved (no live instance): {', '.join(missing)}")
+    lines.append("_Discretionary selection retired — start extra names by hand._")
     return "\n".join(lines)
 
 
 def main(argv):
-    p = argparse.ArgumentParser(description="day_trader_pro orchestrator")
+    p = argparse.ArgumentParser(description="day_trader_pro morning spool-up (SPX+QQQ)")
     p.add_argument("--mock", action="store_true",
-                   help="force full offline mock (AWS+LLM+Telegram)")
+                   help="force full offline mock (AWS+Telegram)")
     p.add_argument("--dry-run", action="store_true",
                    help="real reads, but do not start instances")
     p.add_argument("--no-gate", action="store_true",
                    help="skip the trading-day gate")
-    p.add_argument("--report", default=None, help="path to report.json")
     args = p.parse_args(argv[1:])
 
     if args.mock:
         config.set_mock(True)
 
-    return run(dry_run=args.dry_run, gate=not args.no_gate,
-               report_path=args.report)
+    return run(dry_run=args.dry_run, gate=not args.no_gate)
 
 
 if __name__ == "__main__":
