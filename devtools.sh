@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
-# day_trader_pro/devtools.sh — v1.1
+# day_trader_pro/devtools.sh — v1.2
+# v1.2 — 2026-07-10 — NEW TRADES DATA item 39: consolidate a day's raw per-box
+#        trades.db into fleet_trades_<date>.json (+ .csv) via consolidate_trades.py
+#        (prompts for date, ENTER=today). Appended (not renumbered) so 12-38 keep
+#        their numbers.
 # v1.1 — 2026-07-10 — Wake (24) now scoped one/all/some (prompts for symbols,
 #        passes --only) so you can wake a single box like IWM after hours.
 #        Re-added CONTROL REPO force-sync: PUSH (37) / PULL (38).
@@ -149,6 +153,9 @@ menu() {
    37) PUSH -> GitHub  (FORCE; this server is source of truth)
    38) PULL <- GitHub  (FORCE; GitHub is source of truth)
 
+ TRADES DATA:
+   39) Consolidate a day's trades -> fleet_trades_<date>.json (+ .csv)
+
     0) Exit
 ======================================================
 EOF
@@ -192,6 +199,7 @@ EOF
     36) echo; $PY notify.py --test; pause ;;
     37) echo; repo_push_force; pause ;;
     38) echo; repo_pull_force; pause ;;
+    39) echo; read -rp "Day to consolidate (YYYY-MM-DD, ENTER=today): " D; D="${D:-$(date +%F)}"; $PY consolidate_trades.py --date "$D"; pause ;;
     0)  exit 0 ;;
     *)  echo "Invalid selection."; sleep 1 ;;
   esac
