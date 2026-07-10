@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# day_trader_pro/devtools.sh — v1.0
+# day_trader_pro/devtools.sh — v1.1
+# v1.1 — 2026-07-10 — Wake (24) now scoped one/all/some (prompts for symbols,
+#        passes --only) so you can wake a single box like IWM after hours.
+#        Re-added CONTROL REPO force-sync: PUSH (37) / PULL (38).
 # Interactive operations menu for the control server (mobile-friendly / Termius:
 # single-key selections, prompts default sensibly so you rarely type).
 #
@@ -66,6 +69,40 @@ snapshot_dir() {
   ls -lh "$tarball" 2>/dev/null
 }
 
+# Force-sync THIS control-server day_trader_pro checkout with GitHub.
+# PUSH = server is source of truth (overwrites GitHub).
+# PULL = GitHub is source of truth (discards local changes). Both confirm first.
+repo_push_force() {
+  cd "$SCRIPT_DIR" || return 1
+  echo "  PUSH (force): make THIS SERVER the source of truth — overwrites the"
+  echo "  day_trader_pro repo on GitHub with this checkout's state."
+  local c; read -rp "  Type PUSH to confirm: " c
+  [ "$c" = "PUSH" ] || { echo "  cancelled."; return 0; }
+  local br; br="$(git branch --show-current 2>/dev/null || echo main)"
+  git add -A
+  git commit -m "control-server sync $(date '+%Y-%m-%d %H:%M')" 2>/dev/null \
+    || echo "  (nothing new to commit — pushing current HEAD)"
+  if git push --force origin "$br"; then
+    echo "  ✅ force-pushed — GitHub now matches this server ($br)."
+  else
+    echo "  🚨 push failed — check errors above."
+  fi
+}
+
+repo_pull_force() {
+  cd "$SCRIPT_DIR" || return 1
+  echo "  PULL (force): make GITHUB the source of truth — DISCARDS any local"
+  echo "  changes in this checkout (git reset --hard to origin)."
+  local c; read -rp "  Type PULL to confirm: " c
+  [ "$c" = "PULL" ] || { echo "  cancelled."; return 0; }
+  local br; br="$(git branch --show-current 2>/dev/null || echo main)"
+  if git fetch origin && git reset --hard "origin/$br"; then
+    echo "  ✅ reset to GitHub state ($br) — local changes discarded."
+  else
+    echo "  🚨 pull failed — check errors above."
+  fi
+}
+
 menu() {
   clear
   cat <<'EOF'
@@ -96,7 +133,7 @@ menu() {
 
  MAINTENANCE (wake_and_bake):
    22) Dry-run                   23) FULL (wake->bake->restart->STOP)
-   24) Wake only                 25) Bake only (sync, no restart - RTH-safe)
+   24) Wake (one/all/some)       25) Bake only (sync, no restart - RTH-safe)
    26) Leave on (skip shutdown)  27) Shutdown only (EOD + stop)
 
  REPOINT (migrate fleet -> new repo):
@@ -107,6 +144,10 @@ menu() {
  SNAPSHOT & TESTS:
    34) Snapshot dir -> repo-ready tarball
    35) Test selection (mock)     36) Test Telegram (real)
+
+ CONTROL REPO (this checkout <-> GitHub, force sync):
+   37) PUSH -> GitHub  (FORCE; this server is source of truth)
+   38) PULL <- GitHub  (FORCE; GitHub is source of truth)
 
     0) Exit
 ======================================================
@@ -136,7 +177,7 @@ EOF
     21) echo; SC=$(ask_scope); $PY fleet.py run "tail -20 ${INSTALL_DIR}/bot.log" $SC; pause ;;
     22) echo; $PY wake_and_bake.py --dry-run; pause ;;
     23) echo; $PY wake_and_bake.py; pause ;;
-    24) echo; $PY wake_and_bake.py --wake-only; pause ;;
+    24) echo; SC=$(ask_scope); $PY wake_and_bake.py --wake-only $SC; pause ;;
     25) echo; $PY wake_and_bake.py --bake-only; pause ;;
     26) echo; $PY wake_and_bake.py --leave-running; pause ;;
     27) echo; $PY wake_and_bake.py --shutdown-only; pause ;;
@@ -149,6 +190,8 @@ EOF
     34) echo; snapshot_dir; pause ;;
     35) echo; $PY selector.py --test; pause ;;
     36) echo; $PY notify.py --test; pause ;;
+    37) echo; repo_push_force; pause ;;
+    38) echo; repo_pull_force; pause ;;
     0)  exit 0 ;;
     *)  echo "Invalid selection."; sleep 1 ;;
   esac
