@@ -1,4 +1,4 @@
-# day_trader_pro/wake_and_bake.py — v1.1
+# day_trader_pro/wake_and_bake.py — v1.2
 """
 One-touch fleet maintenance. Wake the whole universe, resolve every box to the
 GitHub repo (the single source of truth), restart the service, verify, and shut
@@ -18,17 +18,20 @@ Modes:
   (default)         full pipeline above
   --wake-only       WAKE + PING only, fleet is left running. No sync, no
                     restart, no shutdown.
-  --bake-only       fleet already awake: PING → BAKE → VERIFY → RESTART.
-                    No WAKE, no shutdown — fleet stays up.
+  --bake-only       fleet already awake: PING → BAKE → VERIFY, then STOP. Syncs
+                    files to disk and does NOT restart anything — running bots
+                    keep their in-memory code until a later restart. Safe to run
+                    inside RTH (mirrors `fleet.py update --no-restart`).
   --leave-running   full pipeline ("leave on"): pycache clear + restart still
                     happen, final SHUTDOWN is skipped.
   --shutdown-only   PING → clear __pycache__ on every reachable box → hand off
                     to eod_report.run() (P&L rollup + orderly fleet stop).
 
 Safety:
-  * Refuses to run during RTH (09:30-16:00 ET, Mon-Fri) unless --force, for
-    every mode that restarts services or stops boxes (full, bake-only,
-    shutdown-only). --wake-only is allowed during RTH (it stops nothing).
+  * Refuses to run during RTH (09:30-16:00 ET, Mon-Fri) unless --force, ONLY for
+    the modes that restart services or stop boxes: `full` and `shutdown-only`.
+    --wake-only (starts boxes only) and --bake-only (syncs files only, no
+    restart) are allowed during RTH.
   * Requires confirmation (type the fleet size) unless --yes.
   * In full mode, SHUTDOWN runs even if an earlier stage fails, so a
     maintenance run never strands boxes running.
@@ -37,7 +40,7 @@ CLI:
   python wake_and_bake.py                   # interactive full run
   python wake_and_bake.py --yes             # 1-click, no prompt
   python wake_and_bake.py --wake-only       # just wake the fleet
-  python wake_and_bake.py --bake-only       # ping + sync + restart (no wake/stop)
+  python wake_and_bake.py --bake-only       # ping + sync files, NO restart (RTH-safe)
   python wake_and_bake.py --shutdown-only   # pycache clear + EOD report + stop
   python wake_and_bake.py --leave-running   # full run, skip final shutdown
   python wake_and_bake.py --dry-run         # show the plan, mutate nothing
@@ -46,6 +49,14 @@ CLI:
   python wake_and_bake.py --only SPX,QQQ    # scope to specific boxes
 
 Changelog:
+  v1.2 (2026-07-10)
+    * --bake-only no longer restarts. It is now PING → BAKE → VERIFY only:
+      it syncs the new code to disk and leaves every running bot untouched
+      (matches `fleet.py update --no-restart`). Restart via a full run, or
+      bounce a specific service by hand, when you're ready.
+    * Because bake-only no longer restarts, it is EXEMPT from the RTH guard —
+      it can run any time, including mid-session, without --force. The guard
+      now blocks only `full` and `shutdown-only` during RTH.
   v1.1 (2026-07-09)
     * NEW modes: --wake-only, --bake-only, --shutdown-only.
     * SYNC stage renamed BAKE. Now runs `git diff --name-status HEAD
@@ -296,7 +307,7 @@ def stage_shutdown(mapping, dry):
 _MODE_DESC = {
     "full":     "WAKE, resync, restart, and STOP",
     "wake":     "WAKE (and leave running)",
-    "bake":     "resync + restart (no wake, no stop)",
+    "bake":     "resync files (no restart, no wake, no stop)",
     "shutdown": "pycache-clear, EOD report, and STOP",
 }
 
@@ -309,9 +320,11 @@ def run(only=None, assume_yes=False, dry=False, leave_running=False,
     _log("START", f"wake_and_bake [{mode}] — {expected} box(es) — "
                   f"{now:%Y-%m-%d %H:%M ET}{tags}")
 
-    # RTH guard: every mode that restarts services or stops boxes is blocked.
-    # wake-only stops/restarts nothing, so it's exempt.
-    if mode != "wake" and _in_rth(now) and not force and not config.MOCK_AWS:
+    # RTH guard: only modes that RESTART services or STOP boxes are blocked
+    # during market hours — that's `full` and `shutdown`. `wake` only starts
+    # boxes; `bake` only syncs files to disk (no restart), so both are safe to
+    # run inside RTH and are exempt.
+    if mode in ("full", "shutdown") and _in_rth(now) and not force and not config.MOCK_AWS:
         _log("ABORT", "inside RTH (09:30-16:00 ET). This mode restarts or stops "
                       "the fleet — refusing. Re-run with --force only if you "
                       "truly mean to.")
@@ -396,18 +409,26 @@ def run(only=None, assume_yes=False, dry=False, leave_running=False,
         else:
             _log("VERIFY", "[dry/mock] convergence check skipped")
 
-        # 5 RESTART (includes __pycache__ clear) — full + bake-only
-        bad = stage_restart(mapping, targets, dry)
-        if live:
-            if bad:
-                summary.append(f"restart bad: {', '.join(bad)}")
-                rc_final = 1
-            else:
-                _log("RESTART", f"✅ pycache cleared + optionsbot active on all "
-                               f"{len(targets)} box(es)")
+        # 5 RESTART (includes __pycache__ clear) — FULL mode only.
+        # bake-only deliberately does NOT restart: it syncs files to disk and
+        # leaves every running bot untouched, so it's safe to run inside RTH
+        # (mirrors `fleet.py update --no-restart`). Restart the bots later with
+        # a full run, or bounce a specific service by hand when you're ready.
+        if mode == "full":
+            bad = stage_restart(mapping, targets, dry)
+            if live:
+                if bad:
+                    summary.append(f"restart bad: {', '.join(bad)}")
+                    rc_final = 1
+                else:
+                    _log("RESTART", f"✅ pycache cleared + optionsbot active on all "
+                                   f"{len(targets)} box(es)")
 
         if mode == "bake":
-            summary.append("fleet left running (bake-only)")
+            _log("BAKE", "files synced to disk — bots NOT restarted (bake-only). "
+                         "Running bots keep their in-memory code until a later "
+                         "restart.")
+            summary.append("synced, not restarted (bake-only)")
 
     except _Abort as exc:
         _log("ABORT", str(exc))
