@@ -1,4 +1,4 @@
-# day_trader_pro/fleet.py — v0.4.0
+# day_trader_pro/fleet.py — v0.5.0
 """
 Fleet SSH fan-out. Pulls every monitored box's private IP from its tag and
 reaches each one, one at a time, from the control server.
@@ -34,9 +34,11 @@ CLI:
     python fleet.py repoint <url> --no-restart     # sync but don't restart the service
     python fleet.py repoint <url> --only SPX,QQQ   # scope to specific symbols
 
-    # pull files back from the boxes to ~/day_trader_pro/pulls/ (symbol-tagged):
-    python fleet.py pull db                         # every box's trades.db
+    # pull files back into the shared dated folder data/harvest/<date>/ (identical
+    # layout + names to harvest, so hand-pulls and harvested files interleave):
+    python fleet.py pull db                         # every box's trades.db -> today's folder
     python fleet.py pull db --only IWM,SPX          # scoped
+    python fleet.py pull db --day 2026-07-10        # force the target date folder
     python fleet.py pull ohlc --day 2026-07-10      # that day's OHLC csv per box
     python fleet.py pull ohlc --day 2026-07-10 --only IWM
 
@@ -62,10 +64,16 @@ deploy path, so make sure the NEW repo ships a push.sh that targets the new
 repo — the reset pulls it in automatically and keeps future deploys correct.
 
 Changelog:
+  v0.5.0 (2026-07-10)
+    * `pull db|ohlc` now lands IDENTICALLY to harvest: into data/harvest/<date>/
+      with names <SYM>_trades_<date>.db / <SYM>_OHLC_<date>.csv (was: flat
+      ~/day_trader_pro/pulls/ with a dateless trades.db). A hand-pull and a
+      harvested pull are now interchangeable and consolidate_trades.py picks up
+      either. db pulls WAL-checkpoint the box's trades.db before copying (clean
+      snapshot, same as harvest); date defaults to today, or --day to override.
   v0.4.0 (2026-07-10)
     * NEW action `pull db|ohlc`: download trades.db or a day's OHLC csv from
-      one/all/some boxes to ~/day_trader_pro/pulls/ with symbol-tagged names.
-      Uses ssh_util.scp_pull (v0.2.0). --day selects the OHLC date.
+      one/all/some boxes. Uses ssh_util.scp_pull (v0.2.0). --day selects the date.
   v0.3.0 (2026-07-09)
     * NEW action `repoint <new_repo_url>`: migrate the fleet from the current
       repo to a new one. Two-phase, collision-guarded (see above), fail-safe
@@ -83,6 +91,8 @@ import argparse
 import os
 import sys
 import time
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import config
 import instance_registry
@@ -90,10 +100,17 @@ import ssh_util
 
 INSTALL_DIR = "~/options-trader"
 SERVICE     = "optionsbot"
-# Where pulled files land on the control server (flat, symbol-tagged filenames).
-PULL_DIR    = os.path.expanduser("~/day_trader_pro/pulls")
+# Ad-hoc pulls land in the SAME dated layout harvest uses, so a hand-pulled file
+# is indistinguishable from a harvested one:
+#   data/harvest/<date>/<SYM>_trades_<date>.db  and  <SYM>_OHLC_<date>.csv
+_ET         = ZoneInfo("US/Eastern")
+HARVEST_DIR = os.path.join(config.DATA_DIR, "harvest")
 # Remote paths for scp are relative to the box's home dir (no leading ~/).
 REMOTE_HOME_REL = "options-trader"
+
+
+def _today_et():
+    return datetime.now(_ET).strftime("%Y-%m-%d")
 
 
 def get_fleet(only=None):
@@ -443,16 +460,20 @@ def cmd_repoint(new_url, only=None, restart=True, wake=False,
 # ─── Fleet pull (download trades.db / OHLC back to the control server) ────────
 
 def cmd_pull(what, only=None, day=None):
-    """Download a file from each targeted box to PULL_DIR, symbol-tagged.
-      what='db'   -> options-trader/trades.db          -> pulls/<SYM>_trades.db
+    """Download a box artifact into the shared dated harvest folder — IDENTICAL to
+    what harvest produces, so a hand-pull and a harvested pull are interchangeable:
+      what='db'   -> options-trader/trades.db  (WAL-checkpointed first)
+                     -> data/harvest/<date>/<SYM>_trades_<date>.db  (date = today, or --day)
       what='ohlc' -> options-trader/data/OHLC/<day>/<SYM>.csv
-                                                        -> pulls/<SYM>_OHLC_<day>.csv
+                     -> data/harvest/<date>/<SYM>_OHLC_<date>.csv    (date = --day, required)
     """
     if what == "ohlc" and not day:
         print("pull ohlc needs --day YYYY-MM-DD, e.g.:\n"
               "  python fleet.py pull ohlc --day 2026-07-10 --only IWM")
         return 2
-    os.makedirs(PULL_DIR, exist_ok=True)
+    date = day or _today_et()
+    dest = os.path.join(HARVEST_DIR, date)
+    os.makedirs(dest, exist_ok=True)
 
     fleet = get_fleet(only)
     running = [(s, ip, st) for s, ip, st in fleet if st == "running" and ip]
@@ -460,20 +481,26 @@ def cmd_pull(what, only=None, day=None):
         print("No running, SSH-reachable boxes to pull from.")
         return 1
 
-    label = "trades.db" if what == "db" else f"OHLC {day}"
-    print(f"Pulling {label} from {len(running)} box(es) -> {PULL_DIR}\n")
+    label = "trades.db" if what == "db" else f"OHLC {date}"
+    print(f"Pulling {label} from {len(running)} box(es) -> {dest}\n")
     ok = 0
     for s, ip, _ in running:
         if what == "db":
             remote = f"{REMOTE_HOME_REL}/trades.db"
-            local  = os.path.join(PULL_DIR, f"{s}_trades.db")
+            local  = os.path.join(dest, f"{s}_trades_{date}.db")
         else:
             remote = f"{REMOTE_HOME_REL}/data/OHLC/{day}/{s}.csv"
-            local  = os.path.join(PULL_DIR, f"{s}_OHLC_{day}.csv")
+            local  = os.path.join(dest, f"{s}_OHLC_{date}.csv")
         if config.MOCK_AWS:
             print(f"{s:<8}[mock] would scp {remote} -> {local}")
             ok += 1
             continue
+        # Checkpoint the WAL into the main db first so the copy is a complete
+        # snapshot — the same way harvest pulls it.
+        if what == "db":
+            ssh_util.ssh_run(
+                ip, f"sqlite3 ~/{REMOTE_HOME_REL}/trades.db "
+                    "'PRAGMA wal_checkpoint(TRUNCATE);' 2>/dev/null || true")
         rc, _out, err = ssh_util.scp_pull(ip, remote, local)
         if rc == 0 and os.path.exists(local):
             size = os.path.getsize(local)
@@ -482,7 +509,8 @@ def cmd_pull(what, only=None, day=None):
         else:
             msg = err.strip()[:60] or f"rc={rc}"
             print(f"{s:<8}🚨 {msg}")
-    print(f"\nDone. {ok}/{len(running)} pulled into {PULL_DIR}")
+    print(f"\nDone. {ok}/{len(running)} pulled into {dest}")
+    return 0 if ok == len(running) else 1
     return 0 if ok == len(running) else 1
 
 
@@ -497,7 +525,8 @@ def main(argv):
     p.add_argument("--all", action="store_true",
                    help="include stopped boxes (shown as skipped)")
     p.add_argument("--day", default=None,
-                   help="pull ohlc: date YYYY-MM-DD to fetch (data/OHLC/<day>/<SYM>.csv)")
+                   help="date YYYY-MM-DD: ohlc = which day's candles to fetch; "
+                        "db = target harvest folder (defaults to today)")
     p.add_argument("--no-restart", action="store_true",
                    help="update/repoint: sync only, don't restart the service")
     p.add_argument("--wake", action="store_true",
