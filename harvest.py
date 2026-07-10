@@ -1,19 +1,43 @@
-# day_trader_pro/harvest.py — v0.1.0
+# day_trader_pro/harvest.py — v0.3.0
 """
-Trade-anatomy harvester. Runs on the control server (~15:55 ET, after each bot
-writes trades_today.json at 15:50, BEFORE the 16:00 sweep stops the boxes).
+Trade-anatomy + raw-artifact harvester. Runs on the control server AFTER each bot
+has written trades_today.json (15:50) and the per-box candle-logger has written
+its full-session OHLC (16:05), and BEFORE the EOD sweep stops the fleet (16:15).
+Scheduled at 16:10 ET (dtp-harvest.timer).
 
-It SSH-pulls every running box's full closed-trade detail and folds it into ONE
-analysis file: daily_trades_<date>.json. That single file is what you hand to
-Claude for "study the fleet's trades today" — every trade, every column, plus
-fleet-wide stats and the morning's selection (what was chosen vs how it did).
+It is the fleet's single forensic collector (pure read — it never stops a box):
 
-Pure read: it never stops a box. Safe to run any time to snapshot current state.
+  1. Trade anatomy — SSH-pull every running box's ~/eod/trades_today.json and fold
+     it into ONE analysis file, daily_trades_<date>.json (fleet stats, by_setup /
+     by_grade, morning selection). This is the file you hand to Claude.
+  2. Raw OHLC — scp each box's full-session 1-min CSV
+     (options-trader/data/OHLC/<date>/<SYM>.csv).
+  3. Raw trades.db — WAL-checkpoint then scp each box's SQLite ground-truth db.
+
+Everything for a day lands together in  data/harvest/<date>/ :
+     daily_trades_<date>.json
+     <SYM>_OHLC_<date>.csv
+     <SYM>_trades_<date>.db
+Raw per-box files carry BOTH symbol and date, so 29 boxes never collide.
+
+Every box is PINGED first; unreachable boxes are skipped and reported, never block
+the others. trades.db is safe to copy here — bots flatten at 15:45, so it is
+quiescent by 16:10, and the checkpoint folds the WAL into the main file.
 
 CLI:
-  python harvest.py            # pull + aggregate + write + Telegram note
+  python harvest.py            # pull anatomy + raw OHLC + raw trades.db + Telegram note
   python harvest.py --quiet     # no Telegram
-  python harvest.py --mock       # offline demo
+  python harvest.py --mock       # offline demo (fake fleet, placeholder raw files)
+
+Changelog:
+  v0.3.0 (2026-07-10) — after the sweep, auto-runs consolidate_trades to merge the
+    pulled per-box trades.db into ONE full-fidelity fleet_trades_<date>.json (+ .csv)
+    — the single deliverable for the trades-analysis thread. Never fatal to harvest.
+  v0.2.0 (2026-07-10) — added the raw sweep (OHLC CSV + trades.db) with a ping-first
+    gate and symbol+date filenames; consolidated all of a day's artifacts (incl. the
+    daily_trades JSON, moved from data/harvest/ into data/harvest/<date>/). Paired
+    with dtp-harvest.timer moving 15:55 -> 16:10 so the 16:05 OHLC exists to collect.
+  v0.1.0 — trade-anatomy JSON aggregation only.
 """
 
 import argparse
@@ -25,6 +49,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import config
+import consolidate_trades
 import instance_registry
 import notify
 import ssh_util
@@ -32,6 +57,9 @@ import ssh_util
 _ET = ZoneInfo("US/Eastern")
 HARVEST_DIR = os.path.join(config.DATA_DIR, "harvest")
 SELECTION_LOG = os.path.join(config.DATA_DIR, "selection_log.jsonl")
+
+# Repo dir on each bot box (relative to the box's home — resolves under scp too).
+REMOTE_REPO = "options-trader"
 
 
 def _today_et():
@@ -46,6 +74,34 @@ def _pull(ip):
         return json.loads(out), None
     except json.JSONDecodeError:
         return None, "bad/empty trades file"
+
+
+def _ping(ip):
+    """True if the box answers a keyed SSH echo."""
+    rc, _out, _err = ssh_util.ssh_run(ip, "echo OK")
+    return rc == 0
+
+
+def _pull_raw(ip, sym, today, day_dir):
+    """Pull this box's OHLC CSV and (WAL-checkpointed) trades.db into day_dir with
+    symbol+date names. Returns (ohlc_ok, db_ok)."""
+    ohlc_ok = db_ok = False
+
+    remote_csv = f"{REMOTE_REPO}/data/OHLC/{today}/{sym}.csv"
+    local_csv = os.path.join(day_dir, f"{sym}_OHLC_{today}.csv")
+    rc, _out, _err = ssh_util.scp_pull(ip, remote_csv, local_csv)
+    ohlc_ok = rc == 0 and os.path.exists(local_csv) and os.path.getsize(local_csv) > 0
+
+    # Checkpoint the WAL into the main db so the copy is a complete snapshot
+    # (best-effort — bots are flat by now, so this is quiescent).
+    ssh_util.ssh_run(
+        ip, f"sqlite3 ~/{REMOTE_REPO}/trades.db 'PRAGMA wal_checkpoint(TRUNCATE);' 2>/dev/null || true")
+    remote_db = f"{REMOTE_REPO}/trades.db"
+    local_db = os.path.join(day_dir, f"{sym}_trades_{today}.db")
+    rc, _out, _err = ssh_util.scp_pull(ip, remote_db, local_db)
+    db_ok = rc == 0 and os.path.exists(local_db) and os.path.getsize(local_db) > 0
+
+    return ohlc_ok, db_ok
 
 
 def _mock_pull(sym):
@@ -116,18 +172,51 @@ def run(quiet=False):
     mapping, _ = instance_registry.discover(config.UNIVERSE)
     running = {s: r for s, r in mapping.items() if r.get("state") == "running"}
     today = _today_et()
+    day_dir = os.path.join(HARVEST_DIR, today)
+    os.makedirs(day_dir, exist_ok=True)
 
     per_symbol = {}
     all_trades = []
-    missing = []
+    missing = []              # trade-anatomy JSON missing (but box reachable)
+    unreachable = []          # failed the ping — skipped entirely
+    n_ohlc = 0
+    n_db = 0
+    raw_gaps = []             # per-box notes on which raw artifact didn't come back
 
     for sym in sorted(running):
         ip = running[sym].get("private_ip", "")
-        data, err = _mock_pull(sym) if config.MOCK_AWS else (
-            _pull(ip) if ip else (None, "no private IP"))
-        if data is None:
-            missing.append(f"{sym} ({err})")
-            continue
+
+        if config.MOCK_AWS:
+            data, _err = _mock_pull(sym)
+            # placeholder raw files so the offline demo shows the layout
+            open(os.path.join(day_dir, f"{sym}_OHLC_{today}.csv"), "w").write(
+                "timestamp,open,high,low,close,volume\n")
+            open(os.path.join(day_dir, f"{sym}_trades_{today}.db"), "wb").write(b"SQLite mock")
+            n_ohlc += 1
+            n_db += 1
+        else:
+            if not ip:
+                unreachable.append(f"{sym} (no ip)")
+                continue
+            if not _ping(ip):
+                unreachable.append(f"{sym} (ssh)")
+                continue
+            data, err = _pull(ip)
+            if data is None:
+                missing.append(f"{sym} ({err})")
+            ohlc_ok, db_ok = _pull_raw(ip, sym, today, day_dir)
+            n_ohlc += 1 if ohlc_ok else 0
+            n_db += 1 if db_ok else 0
+            if not ohlc_ok or not db_ok:
+                gap = []
+                if not ohlc_ok:
+                    gap.append("OHLC")
+                if not db_ok:
+                    gap.append("trades.db")
+                raw_gaps.append(f"{sym}: no {'/'.join(gap)}")
+            if data is None:
+                continue
+
         trades = data.get("trades", [])
         for t in trades:
             t["symbol"] = sym          # tag each trade with its box
@@ -141,13 +230,18 @@ def run(quiet=False):
             "trades": trades,
         }
 
+    reachable = len(running) - len(unreachable)
+
     report = {
         "date_et": today,
         "generated_utc": datetime.now(ZoneInfo("UTC")).isoformat(),
         "fleet": {
             "running": len(running),
+            "reachable": reachable,
             "reporting": len(per_symbol),
             "missing": missing,
+            "unreachable": unreachable,
+            "raw_pulled": {"ohlc": n_ohlc, "trades_db": n_db, "gaps": raw_gaps},
         },
         "selection": _load_selection(),   # what Claude picked this morning
         "fleet_stats": _stats(all_trades),
@@ -155,34 +249,58 @@ def run(quiet=False):
         "all_trades": all_trades,         # flat, each tagged with "symbol"
     }
 
-    os.makedirs(HARVEST_DIR, exist_ok=True)
-    out = os.path.join(HARVEST_DIR, f"daily_trades_{today}.json")
+    out = os.path.join(day_dir, f"daily_trades_{today}.json")
     tmp = out + ".tmp"
     with open(tmp, "w") as fh:
         json.dump(report, fh, indent=2, default=str)
     os.replace(tmp, out)
 
+    # Consolidate the raw per-box trades.db into the single full-fidelity
+    # deliverable for the analysis thread. Non-fatal: the sweep + daily_trades
+    # are already saved, so a hiccup here never loses the collected data.
+    fleet_json = None
+    try:
+        _b, fleet_json, _c = consolidate_trades.consolidate(day_dir=day_dir, date=today)
+    except Exception as exc:  # noqa: BLE001
+        print(f"consolidate_trades failed (non-fatal): {exc}")
+
     st = report["fleet_stats"]
-    print(f"harvest {today}: {len(per_symbol)}/{len(running)} boxes, "
+    print(f"harvest {today}: {len(per_symbol)}/{len(running)} boxes reporting, "
           f"{st['n_trades']} trades, net {st['net_pnl']:+.2f}, "
           f"win rate {st['win_rate']:.0%}")
+    print(f"raw: OHLC {n_ohlc}/{reachable}, trades.db {n_db}/{reachable} -> {day_dir}")
     print(f"wrote {out}")
+    if fleet_json:
+        print(f"deliverable: {fleet_json}")
+    if unreachable:
+        print(f"unreachable: {', '.join(unreachable)}")
     if missing:
-        print(f"missing: {', '.join(missing)}")
+        print(f"no trade JSON: {', '.join(missing)}")
+    if raw_gaps:
+        print(f"raw gaps: {', '.join(raw_gaps)}")
 
     if not quiet:
         msg = (f"*trade harvest {today}*\n"
                f"{len(per_symbol)}/{len(running)} boxes · {st['n_trades']} trades · "
                f"net {st['net_pnl']:+.2f} · win {st['win_rate']:.0%}\n"
-               f"saved daily_trades_{today}.json")
+               f"raw: OHLC {n_ohlc}/{reachable} · db {n_db}/{reachable}\n"
+               + (f"deliverable: fleet_trades_{today}.json\n" if fleet_json else "")
+               + f"saved daily_trades_{today}.json")
+        flags = []
+        if unreachable:
+            flags.append(f"unreachable: {', '.join(unreachable)}")
+        if raw_gaps:
+            flags.append(f"gaps: {', '.join(raw_gaps)}")
         if missing:
-            msg += f"\n⚠️ no trade file: {', '.join(missing)}"
+            flags.append(f"no trade JSON: {', '.join(missing)}")
+        if flags:
+            msg += "\n⚠️ " + " | ".join(flags)
         notify.send(msg)
     return 0
 
 
 def main(argv):
-    p = argparse.ArgumentParser(description="day_trader_pro trade harvester")
+    p = argparse.ArgumentParser(description="day_trader_pro trade + raw-artifact harvester")
     p.add_argument("--mock", action="store_true", help="offline demo")
     p.add_argument("--quiet", action="store_true", help="no Telegram note")
     args = p.parse_args(argv[1:])
