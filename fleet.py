@@ -1,4 +1,4 @@
-# day_trader_pro/fleet.py — v0.3.0
+# day_trader_pro/fleet.py — v0.4.0
 """
 Fleet SSH fan-out. Pulls every monitored box's private IP from its tag and
 reaches each one, one at a time, from the control server.
@@ -34,6 +34,12 @@ CLI:
     python fleet.py repoint <url> --no-restart     # sync but don't restart the service
     python fleet.py repoint <url> --only SPX,QQQ   # scope to specific symbols
 
+    # pull files back from the boxes to ~/day_trader_pro/pulls/ (symbol-tagged):
+    python fleet.py pull db                         # every box's trades.db
+    python fleet.py pull db --only IWM,SPX          # scoped
+    python fleet.py pull ohlc --day 2026-07-10      # that day's OHLC csv per box
+    python fleet.py pull ohlc --day 2026-07-10 --only IWM
+
 Add --mock to preview offline.
 
 repoint is TWO-PHASE and fails safe:
@@ -56,6 +62,10 @@ deploy path, so make sure the NEW repo ships a push.sh that targets the new
 repo — the reset pulls it in automatically and keeps future deploys correct.
 
 Changelog:
+  v0.4.0 (2026-07-10)
+    * NEW action `pull db|ohlc`: download trades.db or a day's OHLC csv from
+      one/all/some boxes to ~/day_trader_pro/pulls/ with symbol-tagged names.
+      Uses ssh_util.scp_pull (v0.2.0). --day selects the OHLC date.
   v0.3.0 (2026-07-09)
     * NEW action `repoint <new_repo_url>`: migrate the fleet from the current
       repo to a new one. Two-phase, collision-guarded (see above), fail-safe
@@ -70,6 +80,7 @@ Changelog:
 """
 
 import argparse
+import os
 import sys
 import time
 
@@ -79,6 +90,10 @@ import ssh_util
 
 INSTALL_DIR = "~/options-trader"
 SERVICE     = "optionsbot"
+# Where pulled files land on the control server (flat, symbol-tagged filenames).
+PULL_DIR    = os.path.expanduser("~/day_trader_pro/pulls")
+# Remote paths for scp are relative to the box's home dir (no leading ~/).
+REMOTE_HOME_REL = "options-trader"
 
 
 def get_fleet(only=None):
@@ -425,15 +440,64 @@ def cmd_repoint(new_url, only=None, restart=True, wake=False,
     return 0 if fails == 0 else 1
 
 
+# ─── Fleet pull (download trades.db / OHLC back to the control server) ────────
+
+def cmd_pull(what, only=None, day=None):
+    """Download a file from each targeted box to PULL_DIR, symbol-tagged.
+      what='db'   -> options-trader/trades.db          -> pulls/<SYM>_trades.db
+      what='ohlc' -> options-trader/data/OHLC/<day>/<SYM>.csv
+                                                        -> pulls/<SYM>_OHLC_<day>.csv
+    """
+    if what == "ohlc" and not day:
+        print("pull ohlc needs --day YYYY-MM-DD, e.g.:\n"
+              "  python fleet.py pull ohlc --day 2026-07-10 --only IWM")
+        return 2
+    os.makedirs(PULL_DIR, exist_ok=True)
+
+    fleet = get_fleet(only)
+    running = [(s, ip, st) for s, ip, st in fleet if st == "running" and ip]
+    if not running:
+        print("No running, SSH-reachable boxes to pull from.")
+        return 1
+
+    label = "trades.db" if what == "db" else f"OHLC {day}"
+    print(f"Pulling {label} from {len(running)} box(es) -> {PULL_DIR}\n")
+    ok = 0
+    for s, ip, _ in running:
+        if what == "db":
+            remote = f"{REMOTE_HOME_REL}/trades.db"
+            local  = os.path.join(PULL_DIR, f"{s}_trades.db")
+        else:
+            remote = f"{REMOTE_HOME_REL}/data/OHLC/{day}/{s}.csv"
+            local  = os.path.join(PULL_DIR, f"{s}_OHLC_{day}.csv")
+        if config.MOCK_AWS:
+            print(f"{s:<8}[mock] would scp {remote} -> {local}")
+            ok += 1
+            continue
+        rc, _out, err = ssh_util.scp_pull(ip, remote, local)
+        if rc == 0 and os.path.exists(local):
+            size = os.path.getsize(local)
+            print(f"{s:<8}✅ {os.path.basename(local)} ({size:,} bytes)")
+            ok += 1
+        else:
+            msg = err.strip()[:60] or f"rc={rc}"
+            print(f"{s:<8}🚨 {msg}")
+    print(f"\nDone. {ok}/{len(running)} pulled into {PULL_DIR}")
+    return 0 if ok == len(running) else 1
+
+
 def main(argv):
     p = argparse.ArgumentParser(description="day_trader_pro fleet SSH fan-out")
-    p.add_argument("action", choices=["list", "ping", "run", "update", "repoint"])
+    p.add_argument("action", choices=["list", "ping", "run", "update", "repoint", "pull"])
     p.add_argument("command", nargs="?", default=None,
-                   help="command string (for 'run') or new repo URL (for 'repoint')")
+                   help="command string (for 'run'), new repo URL (for 'repoint'), "
+                        "or 'db'/'ohlc' (for 'pull')")
     p.add_argument("--only", default=None,
                    help="comma-separated symbols to target (e.g. SPX,QQQ)")
     p.add_argument("--all", action="store_true",
                    help="include stopped boxes (shown as skipped)")
+    p.add_argument("--day", default=None,
+                   help="pull ohlc: date YYYY-MM-DD to fetch (data/OHLC/<day>/<SYM>.csv)")
     p.add_argument("--no-restart", action="store_true",
                    help="update/repoint: sync only, don't restart the service")
     p.add_argument("--wake", action="store_true",
@@ -469,6 +533,14 @@ def main(argv):
         return cmd_repoint(args.command, only=only, restart=not args.no_restart,
                            wake=args.wake, check_only=args.check_only,
                            assume_yes=args.yes)
+    if args.action == "pull":
+        what = (args.command or "").lower()
+        if what not in ("db", "ohlc"):
+            print("pull needs 'db' or 'ohlc', e.g.:\n"
+                  "  python fleet.py pull db --only IWM\n"
+                  "  python fleet.py pull ohlc --day 2026-07-10 --only IWM")
+            return 2
+        return cmd_pull(what, only=only, day=args.day)
     return 2
 
 
