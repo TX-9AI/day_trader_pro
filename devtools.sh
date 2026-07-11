@@ -1,5 +1,14 @@
 #!/usr/bin/env bash
-# day_trader_pro/devtools.sh — v1.2
+# day_trader_pro/devtools.sh — v1.4
+# v1.4 — 2026-07-11 — REGIME VALIDATION expanded: 42 now reprints the SAVED report
+#        (not a line count) via validate_regime.sh --report; NEW 43 view diary,
+#        44 backfill missing days (disk-driven, skip-occupied, --rebuild option).
+#        All items are thin wrappers; validate_regime.sh is the single brain.
+# v1.3 — 2026-07-11 — NEW REGIME VALIDATION section (40-42): run the Layer-1
+#        confluence replay over a day's harvested OHLC via ~/validate_regime.sh
+#        (manual/on-demand). 40=today, 41=pick date, 42=view latest tick log.
+#        Thin wrappers — validate_regime.sh stays the single source of truth.
+#        Appended so 12-39 keep their numbers.
 # v1.2 — 2026-07-10 — NEW TRADES DATA item 39: consolidate a day's raw per-box
 #        trades.db into fleet_trades_<date>.json (+ .csv) via consolidate_trades.py
 #        (prompts for date, ENTER=today). Appended (not renumbered) so 12-38 keep
@@ -32,6 +41,8 @@ PY="${PYTHON:-python3}"
 DEFAULT_V3="https://github.com/TX-9AI/options_trader_v3.git"
 INSTALL_DIR="~/options-trader"
 FEED_DB="~/options-trader/data/feed_store.db"
+VALIDATE_SH="$HOME/validate_regime.sh"
+HARVEST_DIR="$HOME/day_trader_pro/data/harvest"
 
 pause() { read -rp $'\nPress Enter to continue...' _; }
 
@@ -156,6 +167,11 @@ menu() {
  TRADES DATA:
    39) Consolidate a day's trades -> fleet_trades_<date>.json (+ .csv)
 
+ REGIME VALIDATION (Layer-1 confluence; manual, tape-only):
+   40) Run replay - today        41) Run replay - pick a date
+   42) View a day's report       43) View the diary (all days)
+   44) Backfill missing days      (fills diary gaps that have tape)
+
     0) Exit
 ======================================================
 EOF
@@ -200,6 +216,11 @@ EOF
     37) echo; repo_push_force; pause ;;
     38) echo; repo_pull_force; pause ;;
     39) echo; read -rp "Day to consolidate (YYYY-MM-DD, ENTER=today): " D; D="${D:-$(date +%F)}"; $PY consolidate_trades.py --date "$D"; pause ;;
+    40) echo; if [ -x "$VALIDATE_SH" ]; then "$VALIDATE_SH"; else echo "missing/non-exec $VALIDATE_SH (chmod +x ~/validate_regime.sh?)"; fi; pause ;;
+    41) echo; read -rp "Date (YYYY-MM-DD, ENTER=today): " D; D="${D:-$(date +%F)}"; if [ -x "$VALIDATE_SH" ]; then "$VALIDATE_SH" "$D"; else echo "missing/non-exec $VALIDATE_SH"; fi; pause ;;
+    42) echo; D_DEF="$(date +%F)"; read -rp "Date to view (YYYY-MM-DD, ENTER=${D_DEF}): " D; D="${D:-$D_DEF}"; if [ -x "$VALIDATE_SH" ]; then "$VALIDATE_SH" --report "$D"; else echo "missing/non-exec $VALIDATE_SH"; fi; pause ;;
+    43) echo; if [ -x "$VALIDATE_SH" ]; then "$VALIDATE_SH" --diary; else echo "missing/non-exec $VALIDATE_SH"; fi; pause ;;
+    44) echo; read -rp "Rebuild ALL dated tapes (else only fill gaps)? [y/N]: " RB; if [ -x "$VALIDATE_SH" ]; then if [ "$RB" = "y" ]; then "$VALIDATE_SH" --backfill --rebuild; else "$VALIDATE_SH" --backfill; fi; else echo "missing/non-exec $VALIDATE_SH"; fi; pause ;;
     0)  exit 0 ;;
     *)  echo "Invalid selection."; sleep 1 ;;
   esac
