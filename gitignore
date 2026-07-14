@@ -1,0 +1,20 @@
+# day_trader_pro/.gitignore — 2026-07-14 — layout consolidation:
+# every data-collection root stays LOCAL ONLY; the repo carries code, not tape.
+__pycache__/
+*.pyc
+.env
+
+# ── data products (consolidated 2026-07-14) — never committed ─────────────────
+ohlc/
+trades/
+reports/
+
+# legacy locations (pre-consolidation stragglers; migrate_data_layout.sh empties them)
+pulls/
+data/harvest/
+
+# operational state (local runtime files)
+data/instance_map.json
+data/mock_state.json
+data/report.json
+data/selection_log.jsonl
