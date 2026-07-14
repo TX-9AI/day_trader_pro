@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # day_trader_pro/devtools.sh — v1.4
+# 2026-07-14 — layout consolidation: tape days under ohlc/, aggregates under reports/.
 # v1.4 — 2026-07-11 — REGIME VALIDATION expanded: 42 now reprints the SAVED report
 #        (not a line count) via validate_regime.sh --report; NEW 43 view diary,
 #        44 backfill missing days (disk-driven, skip-occupied, --rebuild option).
@@ -42,7 +43,8 @@ DEFAULT_V3="https://github.com/TX-9AI/options_trader_v3.git"
 INSTALL_DIR="~/options-trader"
 FEED_DB="~/options-trader/data/feed_store.db"
 VALIDATE_SH="$HOME/validate_regime.sh"
-HARVEST_DIR="$HOME/day_trader_pro/data/harvest"
+OHLC_DIR="$HOME/day_trader_pro/ohlc"          # 2026-07-14 layout consolidation
+REPORTS_DIR="$HOME/day_trader_pro/reports"
 
 pause() { read -rp $'\nPress Enter to continue...' _; }
 
