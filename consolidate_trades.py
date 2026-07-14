@@ -1,4 +1,6 @@
 # day_trader_pro/consolidate_trades.py — v1.0.0
+# 2026-07-14 — layout consolidation: reads trades/<date>/ (new *_<date>_trades.db
+#   names), indexes ohlc/<date>/, writes fleet_trades_* to reports/.
 """
 Fleet trades consolidator. Merges the raw per-box trades.db files that harvest
 pulled into data/harvest/<date>/ into ONE full-fidelity deliverable for the
@@ -50,7 +52,7 @@ from zoneinfo import ZoneInfo
 import config
 
 _ET = ZoneInfo("US/Eastern")
-HARVEST_DIR = os.path.join(config.DATA_DIR, "harvest")
+TRADES_ROOT = config.TRADES_DIR   # 2026-07-14 layout consolidation
 SELECTION_LOG = os.path.join(config.DATA_DIR, "selection_log.jsonl")
 
 _DB_RE = re.compile(r"^(?P<sym>.+)_trades_(?P<date>\d{4}-\d{2}-\d{2})\.db$")
@@ -142,9 +144,9 @@ def _stats(trades):
 
 def consolidate(day_dir=None, date=None, write_csv=True):
     date = date or _today_et()
-    day_dir = day_dir or os.path.join(HARVEST_DIR, date)
+    day_dir = day_dir or os.path.join(TRADES_ROOT, date)
 
-    dbs = sorted(glob.glob(os.path.join(day_dir, f"*_trades_{date}.db")))
+    dbs = sorted(glob.glob(os.path.join(day_dir, f"*_{date}_trades.db")))
     trades = []
     regime = []
     breaker = []
@@ -191,7 +193,7 @@ def consolidate(day_dir=None, date=None, write_csv=True):
     breaker.sort(key=lambda b: (str(b.get("event_time") or ""), str(b.get("box", ""))))
 
     ohlc_index = sorted(os.path.basename(p)
-                        for p in glob.glob(os.path.join(day_dir, f"*_OHLC_{date}.csv")))
+                        for p in glob.glob(os.path.join(config.OHLC_DIR, date, f"*_ohlc_{date}.csv")))
 
     n_closed = sum(1 for t in trades if str(t.get("status", "")).lower() == "closed")
     bundle = OrderedDict([
@@ -214,7 +216,8 @@ def consolidate(day_dir=None, date=None, write_csv=True):
         ("trades", trades),                              # every row, every column
     ])
 
-    out_json = os.path.join(day_dir, f"fleet_trades_{date}.json")
+    os.makedirs(config.REPORTS_DIR, exist_ok=True)
+    out_json = os.path.join(config.REPORTS_DIR, f"fleet_trades_{date}.json")
     tmp = out_json + ".tmp"
     with open(tmp, "w") as fh:
         json.dump(bundle, fh, indent=2, default=str)
@@ -222,7 +225,7 @@ def consolidate(day_dir=None, date=None, write_csv=True):
 
     out_csv = None
     if write_csv and trades:
-        out_csv = os.path.join(day_dir, f"fleet_trades_{date}.csv")
+        out_csv = os.path.join(config.REPORTS_DIR, f"fleet_trades_{date}.csv")
         fieldnames = ["box"] + [c for c in col_union if c != "box"]
         tmpc = out_csv + ".tmp"
         with open(tmpc, "w", newline="") as fh:
