@@ -1,4 +1,12 @@
-# day_trader_pro/harvest.py — v0.3.0
+# day_trader_pro/harvest.py — v0.4.0
+# v0.4.0 (2026-07-14) — LAYOUT CONSOLIDATION + doc truth. Products now land in
+#   ONE home each (see config.py): tape -> ohlc/<date>/<SYM>_ohlc_<date>.csv,
+#   raw DBs -> trades/<date>/<SYM>_<date>_trades.db, the daily_trades aggregate
+#   -> reports/. data/harvest is retired (migrate_data_layout.sh moves history).
+#   TIMELINE CORRECTED: boxes write session tape at 15:50 (eod_summary), this
+#   runs at 15:55 (dtp-harvest.timer — installer is truth; the old header's
+#   16:05/16:10 text described a move that never shipped), dtp-eod stops the
+#   fleet at 16:15, dtp-regime replays+diaries at 16:30 from LOCAL files.
 """
 Trade-anatomy + raw-artifact harvester. Runs on the control server AFTER each bot
 has written trades_today.json (15:50) and the per-box candle-logger has written
@@ -14,10 +22,10 @@ It is the fleet's single forensic collector (pure read — it never stops a box)
      (options-trader/data/OHLC/<date>/<SYM>.csv).
   3. Raw trades.db — WAL-checkpoint then scp each box's SQLite ground-truth db.
 
-Everything for a day lands together in  data/harvest/<date>/ :
-     daily_trades_<date>.json
-     <SYM>_OHLC_<date>.csv
-     <SYM>_trades_<date>.db
+Products land in ONE home each (config.py roots; migrate_data_layout.sh moves history):
+     reports/daily_trades_<date>.json
+     ohlc/<date>/<SYM>_ohlc_<date>.csv
+     trades/<date>/<SYM>_<date>_trades.db
 Raw per-box files carry BOTH symbol and date, so 29 boxes never collide.
 
 Every box is PINGED first; unreachable boxes are skipped and reported, never block
@@ -55,7 +63,9 @@ import notify
 import ssh_util
 
 _ET = ZoneInfo("US/Eastern")
-HARVEST_DIR = os.path.join(config.DATA_DIR, "harvest")
+OHLC_DIR    = config.OHLC_DIR       # v0.4.0: consolidated product roots
+TRADES_DIR  = config.TRADES_DIR
+REPORTS_DIR = config.REPORTS_DIR
 SELECTION_LOG = os.path.join(config.DATA_DIR, "selection_log.jsonl")
 
 # Repo dir on each bot box (relative to the box's home — resolves under scp too).
@@ -82,13 +92,14 @@ def _ping(ip):
     return rc == 0
 
 
-def _pull_raw(ip, sym, today, day_dir):
-    """Pull this box's OHLC CSV and (WAL-checkpointed) trades.db into day_dir with
+def _pull_raw(ip, sym, today, ohlc_day, trades_day):
+    """Pull this box's OHLC CSV and (WAL-checkpointed) trades.db into their
+    consolidated dated homes (ohlc/<date>/, trades/<date>/) with
     symbol+date names. Returns (ohlc_ok, db_ok)."""
     ohlc_ok = db_ok = False
 
     remote_csv = f"{REMOTE_REPO}/data/OHLC/{today}/{sym}.csv"
-    local_csv = os.path.join(day_dir, f"{sym}_OHLC_{today}.csv")
+    local_csv = os.path.join(ohlc_day, f"{sym}_ohlc_{today}.csv")
     rc, _out, _err = ssh_util.scp_pull(ip, remote_csv, local_csv)
     ohlc_ok = rc == 0 and os.path.exists(local_csv) and os.path.getsize(local_csv) > 0
 
@@ -97,7 +108,7 @@ def _pull_raw(ip, sym, today, day_dir):
     ssh_util.ssh_run(
         ip, f"sqlite3 ~/{REMOTE_REPO}/trades.db 'PRAGMA wal_checkpoint(TRUNCATE);' 2>/dev/null || true")
     remote_db = f"{REMOTE_REPO}/trades.db"
-    local_db = os.path.join(day_dir, f"{sym}_trades_{today}.db")
+    local_db = os.path.join(trades_day, f"{sym}_{today}_trades.db")
     rc, _out, _err = ssh_util.scp_pull(ip, remote_db, local_db)
     db_ok = rc == 0 and os.path.exists(local_db) and os.path.getsize(local_db) > 0
 
@@ -172,8 +183,11 @@ def run(quiet=False):
     mapping, _ = instance_registry.discover(config.UNIVERSE)
     running = {s: r for s, r in mapping.items() if r.get("state") == "running"}
     today = _today_et()
-    day_dir = os.path.join(HARVEST_DIR, today)
-    os.makedirs(day_dir, exist_ok=True)
+    ohlc_day   = os.path.join(OHLC_DIR, today)
+    trades_day = os.path.join(TRADES_DIR, today)
+    os.makedirs(ohlc_day, exist_ok=True)
+    os.makedirs(trades_day, exist_ok=True)
+    os.makedirs(REPORTS_DIR, exist_ok=True)
 
     per_symbol = {}
     all_trades = []
@@ -189,9 +203,9 @@ def run(quiet=False):
         if config.MOCK_AWS:
             data, _err = _mock_pull(sym)
             # placeholder raw files so the offline demo shows the layout
-            open(os.path.join(day_dir, f"{sym}_OHLC_{today}.csv"), "w").write(
+            open(os.path.join(ohlc_day, f"{sym}_ohlc_{today}.csv"), "w").write(
                 "timestamp,open,high,low,close,volume\n")
-            open(os.path.join(day_dir, f"{sym}_trades_{today}.db"), "wb").write(b"SQLite mock")
+            open(os.path.join(trades_day, f"{sym}_{today}_trades.db"), "wb").write(b"SQLite mock")
             n_ohlc += 1
             n_db += 1
         else:
@@ -204,7 +218,7 @@ def run(quiet=False):
             data, err = _pull(ip)
             if data is None:
                 missing.append(f"{sym} ({err})")
-            ohlc_ok, db_ok = _pull_raw(ip, sym, today, day_dir)
+            ohlc_ok, db_ok = _pull_raw(ip, sym, today, ohlc_day, trades_day)
             n_ohlc += 1 if ohlc_ok else 0
             n_db += 1 if db_ok else 0
             if not ohlc_ok or not db_ok:
@@ -249,7 +263,7 @@ def run(quiet=False):
         "all_trades": all_trades,         # flat, each tagged with "symbol"
     }
 
-    out = os.path.join(day_dir, f"daily_trades_{today}.json")
+    out = os.path.join(REPORTS_DIR, f"daily_trades_{today}.json")
     tmp = out + ".tmp"
     with open(tmp, "w") as fh:
         json.dump(report, fh, indent=2, default=str)
@@ -260,7 +274,7 @@ def run(quiet=False):
     # are already saved, so a hiccup here never loses the collected data.
     fleet_json = None
     try:
-        _b, fleet_json, _c = consolidate_trades.consolidate(day_dir=day_dir, date=today)
+        _b, fleet_json, _c = consolidate_trades.consolidate(date=today)
     except Exception as exc:  # noqa: BLE001
         print(f"consolidate_trades failed (non-fatal): {exc}")
 
@@ -268,7 +282,7 @@ def run(quiet=False):
     print(f"harvest {today}: {len(per_symbol)}/{len(running)} boxes reporting, "
           f"{st['n_trades']} trades, net {st['net_pnl']:+.2f}, "
           f"win rate {st['win_rate']:.0%}")
-    print(f"raw: OHLC {n_ohlc}/{reachable}, trades.db {n_db}/{reachable} -> {day_dir}")
+    print(f"raw: OHLC {n_ohlc}/{reachable} -> {ohlc_day}  |  trades.db {n_db}/{reachable} -> {trades_day}")
     print(f"wrote {out}")
     if fleet_json:
         print(f"deliverable: {fleet_json}")
