@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# day_trader_pro/nightly_regime.sh — v1.2
+# day_trader_pro/nightly_regime.sh — v1.3
+# v1.3 — 2026-07-14 — invoke validate_regime.sh via `bash` (GitHub web uploads
+#        strip the exec bit; direct execution died rc=126 Permission denied).
+#        Exec permissions are now irrelevant forever.
 # v1.2 — 2026-07-14 — LAYOUT CONSOLIDATION: tape lives in ohlc/<date>/, all
 #        products (replay jsonl + rolling diary) in reports/. Paths only.
 # v1.1 — 2026-07-14 — surgical rewrite: no fleet pull (dtp-harvest at 15:55
@@ -19,10 +22,10 @@ if [ ! -d "$OHLC/$D" ]; then
   echo "[dtp-regime] $D — no tape folder yet (holiday, or dtp-harvest failed); backfill catches it tomorrow"
 else
   echo "[dtp-regime] $D — replay + diary from $OHLC/$D"
-  "$HOME/validate_regime.sh" "$D" || echo "[dtp-regime] replay rc=$? (rc=2 = acceptance-check fail, still diaried)"
+  bash "$HOME/validate_regime.sh" "$D" || echo "[dtp-regime] replay rc=$? (rc=2 = acceptance-check fail, still diaried)"
 fi
 
 echo "[dtp-regime] backfill sweep (gap days with tape)"
-"$HOME/validate_regime.sh" --backfill
+bash "$HOME/validate_regime.sh" --backfill
 
 echo "[dtp-regime] done — diary: $HOME/day_trader_pro/reports/regime_diary.md"
