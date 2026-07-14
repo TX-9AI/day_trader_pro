@@ -1,6 +1,0 @@
-__pycache__/
-*.pyc
-.env
-data/instance_map.json
-data/mock_state.json
-data/report.json
