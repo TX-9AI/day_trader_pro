@@ -63,6 +63,18 @@ MODEL_MAX_TOKENS = int(os.environ.get("DTP_MODEL_MAX_TOKENS", "1500"))
 # --------------------------------------------------------------------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
+
+# ── DATA-PRODUCT ROOTS (2026-07-14 layout consolidation) ──────────────────────
+# ONE home per product class; date-keyed subfolders; symbol+date in filenames.
+#   ohlc/<date>/<SYM>_ohlc_<date>.csv        — raw fleet tape
+#   trades/<date>/<SYM>_<date>_trades.db     — raw per-box trade DBs
+#   reports/                                  — every aggregate/derived product
+#     daily_trades_<date>.json · fleet_trades_<date>.json/.csv ·
+#     regime_replay_<date>.jsonl · regime_diary.jsonl/.md
+# data/ keeps OPERATIONAL STATE ONLY (instance_map, mock_state, selection_log).
+OHLC_DIR    = os.path.join(BASE_DIR, "ohlc")
+TRADES_DIR  = os.path.join(BASE_DIR, "trades")
+REPORTS_DIR = os.path.join(BASE_DIR, "reports")
 INSTANCE_MAP_PATH = os.path.join(DATA_DIR, "instance_map.json")
 MOCK_STATE_PATH = os.path.join(DATA_DIR, "mock_state.json")
 
