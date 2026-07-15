@@ -1,4 +1,4 @@
-# day_trader_pro/fleet.py — v0.5.0
+# day_trader_pro/fleet.py — v0.6.0
 """
 Fleet SSH fan-out. Pulls every monitored box's private IP from its tag and
 reaches each one, one at a time, from the control server.
@@ -65,8 +65,6 @@ repo — the reset pulls it in automatically and keeps future deploys correct.
 
 Changelog:
   v0.5.0 (2026-07-10)
-    * 2026-07-14 layout consolidation: pull db -> trades/<date>/<SYM>_<date>_trades.db,
-      pull ohlc -> ohlc/<date>/<SYM>_ohlc_<date>.csv (roots in config.py).
     * `pull db|ohlc` now lands IDENTICALLY to harvest: into data/harvest/<date>/
       with names <SYM>_trades_<date>.db / <SYM>_OHLC_<date>.csv (was: flat
       ~/day_trader_pro/pulls/ with a dateless trades.db). A hand-pull and a
@@ -106,8 +104,6 @@ SERVICE     = "optionsbot"
 # is indistinguishable from a harvested one:
 #   data/harvest/<date>/<SYM>_trades_<date>.db  and  <SYM>_OHLC_<date>.csv
 _ET         = ZoneInfo("US/Eastern")
-OHLC_DIR   = config.OHLC_DIR      # 2026-07-14: consolidated product roots
-TRADES_DIR = config.TRADES_DIR
 # Remote paths for scp are relative to the box's home dir (no leading ~/).
 REMOTE_HOME_REL = "options-trader"
 
@@ -466,16 +462,16 @@ def cmd_pull(what, only=None, day=None):
     """Download a box artifact into the shared dated harvest folder — IDENTICAL to
     what harvest produces, so a hand-pull and a harvested pull are interchangeable:
       what='db'   -> options-trader/trades.db  (WAL-checkpointed first)
-                     -> trades/<date>/<SYM>_<date>_trades.db   (date = today, or --day)
+                     -> trades/<date>/<SYM>_trades_<date>.db   (date = today, or --day)
       what='ohlc' -> options-trader/data/OHLC/<day>/<SYM>.csv
-                     -> ohlc/<date>/<SYM>_ohlc_<date>.csv       (date = --day, required)
+                     -> ohlc/<date>/<SYM>_ohlc_<date>.csv      (date = --day, required)
     """
     if what == "ohlc" and not day:
         print("pull ohlc needs --day YYYY-MM-DD, e.g.:\n"
               "  python fleet.py pull ohlc --day 2026-07-10 --only IWM")
         return 2
     date = day or _today_et()
-    dest = os.path.join(TRADES_DIR if what == "db" else OHLC_DIR, date)
+    dest = os.path.join(config.TRADES_DIR if what == "db" else config.OHLC_DIR, date)
     os.makedirs(dest, exist_ok=True)
 
     fleet = get_fleet(only)
@@ -490,7 +486,7 @@ def cmd_pull(what, only=None, day=None):
     for s, ip, _ in running:
         if what == "db":
             remote = f"{REMOTE_HOME_REL}/trades.db"
-            local  = os.path.join(dest, f"{s}_{date}_trades.db")
+            local  = os.path.join(dest, f"{s}_trades_{date}.db")
         else:
             remote = f"{REMOTE_HOME_REL}/data/OHLC/{day}/{s}.csv"
             local  = os.path.join(dest, f"{s}_ohlc_{date}.csv")

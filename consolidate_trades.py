@@ -1,6 +1,4 @@
-# day_trader_pro/consolidate_trades.py — v1.0.0
-# 2026-07-14 — layout consolidation: reads trades/<date>/ (new *_<date>_trades.db
-#   names), indexes ohlc/<date>/, writes fleet_trades_* to reports/.
+# day_trader_pro/consolidate_trades.py — v1.1.0
 """
 Fleet trades consolidator. Merges the raw per-box trades.db files that harvest
 pulled into data/harvest/<date>/ into ONE full-fidelity deliverable for the
@@ -52,7 +50,6 @@ from zoneinfo import ZoneInfo
 import config
 
 _ET = ZoneInfo("US/Eastern")
-TRADES_ROOT = config.TRADES_DIR   # 2026-07-14 layout consolidation
 SELECTION_LOG = os.path.join(config.DATA_DIR, "selection_log.jsonl")
 
 _DB_RE = re.compile(r"^(?P<sym>.+)_trades_(?P<date>\d{4}-\d{2}-\d{2})\.db$")
@@ -142,11 +139,20 @@ def _stats(trades):
     }
 
 
-def consolidate(day_dir=None, date=None, write_csv=True):
+def consolidate(date=None, write_csv=True):
     date = date or _today_et()
-    day_dir = day_dir or os.path.join(TRADES_ROOT, date)
+    trades_dir = os.path.join(config.TRADES_DIR, date)   # <SYM>_trades_<date>.db
+    ohlc_dir = os.path.join(config.OHLC_DIR, date)       # <SYM>_ohlc_<date>.csv
+    os.makedirs(config.REPORTS_DIR, exist_ok=True)       # flat aggregates land here
 
-    dbs = sorted(glob.glob(os.path.join(day_dir, f"*_{date}_trades.db")))
+    dbs = sorted(glob.glob(os.path.join(trades_dir, f"*_trades_{date}.db")))
+    if not dbs:
+        cause = ("no trades/ folder yet — harvest hasn't run for this date"
+                 if not os.path.isdir(trades_dir) else f"no *_trades_{date}.db there")
+        print(f"⚠️  nothing to consolidate for {date}: {cause}.")
+        print(f"    looked in: {trades_dir}")
+        print("    run harvest first (python harvest.py), or stage dbs as "
+              "trades/<date>/<SYM>_trades_<date>.db.")
     trades = []
     regime = []
     breaker = []
@@ -192,8 +198,9 @@ def consolidate(day_dir=None, date=None, write_csv=True):
     regime.sort(key=lambda r: (str(r.get("logged_at") or ""), str(r.get("box", ""))))
     breaker.sort(key=lambda b: (str(b.get("event_time") or ""), str(b.get("box", ""))))
 
-    ohlc_index = sorted(os.path.basename(p)
-                        for p in glob.glob(os.path.join(config.OHLC_DIR, date, f"*_ohlc_{date}.csv")))
+    ohlc_index = sorted(os.path.basename(p) for p in (
+        glob.glob(os.path.join(ohlc_dir, f"*_ohlc_{date}.csv"))
+        + glob.glob(os.path.join(ohlc_dir, f"*_OHLC_{date}.csv"))))
 
     n_closed = sum(1 for t in trades if str(t.get("status", "")).lower() == "closed")
     bundle = OrderedDict([
@@ -216,7 +223,6 @@ def consolidate(day_dir=None, date=None, write_csv=True):
         ("trades", trades),                              # every row, every column
     ])
 
-    os.makedirs(config.REPORTS_DIR, exist_ok=True)
     out_json = os.path.join(config.REPORTS_DIR, f"fleet_trades_{date}.json")
     tmp = out_json + ".tmp"
     with open(tmp, "w") as fh:
@@ -241,11 +247,9 @@ def consolidate(day_dir=None, date=None, write_csv=True):
 def main(argv):
     p = argparse.ArgumentParser(description="Consolidate the fleet's raw trades.db into one bundle")
     p.add_argument("--date", default=None, help="YYYY-MM-DD (default: today ET)")
-    p.add_argument("--dir", default=None, help="explicit harvest day folder")
     p.add_argument("--no-csv", action="store_true", help="write JSON only")
     args = p.parse_args(argv[1:])
-    bundle, out_json, out_csv = consolidate(
-        day_dir=args.dir, date=args.date, write_csv=not args.no_csv)
+    bundle, out_json, out_csv = consolidate(date=args.date, write_csv=not args.no_csv)
     m = bundle["meta"]
     st = bundle["fleet_stats"]
     print(f"consolidated {m['date_et']}: {len(m['boxes_reporting'])} boxes, "

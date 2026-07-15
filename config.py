@@ -46,9 +46,8 @@ REPORTER_TAG = os.environ.get("DTP_REPORTER_TAG", "1-REPORTER")
 ALWAYS_ON = ["SPX", "QQQ"]
 # Max additional discretionary picks the model is allowed to wake.
 # Total running fleet is therefore between len(ALWAYS_ON) and
-# len(ALWAYS_ON) + MAX_DISCRETIONARY  (i.e. exactly 10: 2 baseline + 8).
-# 2026-07-15: EXACTLY 8 discretionary (fixed fleet size), was up-to-4.
-MAX_DISCRETIONARY = 8
+# len(ALWAYS_ON) + MAX_DISCRETIONARY  (i.e. 2..6 by default).
+MAX_DISCRETIONARY = 4
 
 # --------------------------------------------------------------------------
 # Anthropic model used for the selection call
@@ -64,17 +63,13 @@ MODEL_MAX_TOKENS = int(os.environ.get("DTP_MODEL_MAX_TOKENS", "1500"))
 # --------------------------------------------------------------------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
-
-# ── DATA-PRODUCT ROOTS (2026-07-14 layout consolidation) ──────────────────────
-# ONE home per product class; date-keyed subfolders; symbol+date in filenames.
-#   ohlc/<date>/<SYM>_ohlc_<date>.csv        — raw fleet tape
-#   trades/<date>/<SYM>_<date>_trades.db     — raw per-box trade DBs
-#   reports/                                  — every aggregate/derived product
-#     daily_trades_<date>.json · fleet_trades_<date>.json/.csv ·
-#     regime_replay_<date>.jsonl · regime_diary.jsonl/.md
-# data/ keeps OPERATIONAL STATE ONLY (instance_map, mock_state, selection_log).
-OHLC_DIR    = os.path.join(BASE_DIR, "ohlc")
+# Canonical on-disk layout (repo root, shared with the regime harness):
+#   trades/<date>/<SYM>_trades_<date>.db   — raw per-box trade DBs
+#   ohlc/<date>/<SYM>_ohlc_<date>.csv      — raw per-box 1-min tape (harness reads here)
+#   reports/                                — FLAT: every aggregate (fleet_trades_*,
+#                                             daily_trades_*, regime_diary.*, regime_replay_*)
 TRADES_DIR  = os.path.join(BASE_DIR, "trades")
+OHLC_DIR    = os.path.join(BASE_DIR, "ohlc")
 REPORTS_DIR = os.path.join(BASE_DIR, "reports")
 INSTANCE_MAP_PATH = os.path.join(DATA_DIR, "instance_map.json")
 MOCK_STATE_PATH = os.path.join(DATA_DIR, "mock_state.json")
