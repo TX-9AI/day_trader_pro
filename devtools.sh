@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
-# day_trader_pro/devtools.sh — v1.4
-# 2026-07-14 — layout consolidation: tape days under ohlc/, aggregates under reports/.
+# day_trader_pro/devtools.sh — v1.6
+# v1.6 — 2026-07-11 — NEW 46 live P&L standings (standings.py, read-only) and 47 EOD
+#        conductor (eod_conductor.py: dry-run preview then the full gated EOD chain).
+#        Appended — 1-45 keep their numbers.
+# v1.5 — 2026-07-11 — NEW OHLC BACKFILL item 45: eod_backfill.py brings up sat-out
+#        symbols in capacity-safe batches (wake->produce->pull->stop) to fetch their
+#        missing 1-min candles. Previews a --dry-run plan and confirms before touching
+#        the fleet. Appended (not renumbered) so 1-44 keep their numbers.
 # v1.4 — 2026-07-11 — REGIME VALIDATION expanded: 42 now reprints the SAVED report
 #        (not a line count) via validate_regime.sh --report; NEW 43 view diary,
 #        44 backfill missing days (disk-driven, skip-occupied, --rebuild option).
@@ -43,8 +49,7 @@ DEFAULT_V3="https://github.com/TX-9AI/options_trader_v3.git"
 INSTALL_DIR="~/options-trader"
 FEED_DB="~/options-trader/data/feed_store.db"
 VALIDATE_SH="$HOME/validate_regime.sh"
-OHLC_DIR="$HOME/day_trader_pro/ohlc"          # 2026-07-14 layout consolidation
-REPORTS_DIR="$HOME/day_trader_pro/reports"
+HARVEST_DIR="$HOME/day_trader_pro/data/harvest"
 
 pause() { read -rp $'\nPress Enter to continue...' _; }
 
@@ -174,6 +179,13 @@ menu() {
    42) View a day's report       43) View the diary (all days)
    44) Backfill missing days      (fills diary gaps that have tape)
 
+ OHLC BACKFILL (bring up sat-out symbols -> fetch candles -> pull -> stop):
+   45) Backfill missing 1-min OHLC for a day  (auto-batched, capacity-safe)
+
+ EOD CONDUCTOR & LIVE P&L:
+   46) Live P&L standings (read-only)
+   47) EOD conductor - full gated EOD (dry-run preview -> confirm -> run)
+
     0) Exit
 ======================================================
 EOF
@@ -223,6 +235,9 @@ EOF
     42) echo; D_DEF="$(date +%F)"; read -rp "Date to view (YYYY-MM-DD, ENTER=${D_DEF}): " D; D="${D:-$D_DEF}"; if [ -x "$VALIDATE_SH" ]; then "$VALIDATE_SH" --report "$D"; else echo "missing/non-exec $VALIDATE_SH"; fi; pause ;;
     43) echo; if [ -x "$VALIDATE_SH" ]; then "$VALIDATE_SH" --diary; else echo "missing/non-exec $VALIDATE_SH"; fi; pause ;;
     44) echo; read -rp "Rebuild ALL dated tapes (else only fill gaps)? [y/N]: " RB; if [ -x "$VALIDATE_SH" ]; then if [ "$RB" = "y" ]; then "$VALIDATE_SH" --backfill --rebuild; else "$VALIDATE_SH" --backfill; fi; else echo "missing/non-exec $VALIDATE_SH"; fi; pause ;;
+    45) echo; read -rp "Backfill date (YYYY-MM-DD, ENTER=today): " D; D="${D:-$(date +%F)}"; read -rp "Batch size (ENTER=5): " B; B="${B:-5}"; read -rp "Stream cap (ENTER=10): " C; C="${C:-10}"; echo; $PY eod_backfill.py --date "$D" --batch "$B" --stream-cap "$C" --dry-run; echo; read -rp "Proceed with LIVE backfill (wakes/stops boxes)? [y/N]: " GO; [ "$GO" = "y" ] && $PY eod_backfill.py --date "$D" --batch "$B" --stream-cap "$C"; pause ;;
+    46) echo; read -rp "Push to Telegram too? [y/N]: " S; if [ "$S" = "y" ]; then $PY standings.py --send; else $PY standings.py; fi; pause ;;
+    47) echo; read -rp "Backfill batch size (ENTER=5): " B; B="${B:-5}"; echo; $PY eod_conductor.py --batch "$B" --dry-run; echo; read -rp "Run the LIVE EOD conductor now (gate->harvest->P&L+stop->backfill->consolidate->diary)? [y/N]: " GO; [ "$GO" = "y" ] && $PY eod_conductor.py --batch "$B"; pause ;;
     0)  exit 0 ;;
     *)  echo "Invalid selection."; sleep 1 ;;
   esac
