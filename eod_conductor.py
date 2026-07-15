@@ -1,4 +1,4 @@
-# day_trader_pro/eod_conductor.py — v1.0.0
+# day_trader_pro/eod_conductor.py — v1.0.1
 """
 End-of-day conductor (control server). ONE ordered, completion-gated chain that
 calls the existing helpers in sequence — it rewrites none of them, it sequences
@@ -21,8 +21,8 @@ Order (each gated on the last):
                  recorded in the summary.
   5. CONSOLIDATE — consolidate_trades.py: final fleet_trades bundle over the now-
                  complete tape. Gate: bundle written.
-  6. REGIME    — ~/validate_regime.sh <date>: replay confluence over ohlc/<date>/
-                 (chatter metric) + upsert the diary. Runs LAST, on complete tape.
+  6. REGIME    — nightly_regime.sh: replay confluence over ohlc/<date>/ (+ gap-day
+                 backfill sweep, holiday-safe). Runs LAST, on complete tape.
 
 CLI:
   python eod_conductor.py              # run the full chain for today
@@ -51,7 +51,10 @@ import ssh_util
 
 _ET = ZoneInfo("US/Eastern")
 REMOTE_REPO = "options-trader"
-VALIDATE_SH = os.path.expanduser("~/validate_regime.sh")
+# The complete regime runner (today's replay+diary + gap-day backfill sweep,
+# holiday-safe). Owned by the conductor now — its standalone dtp-regime.timer
+# is retired so it can't race the backfill or double-run the diary.
+NIGHTLY_REGIME = os.path.expanduser("~/day_trader_pro/nightly_regime.sh")
 
 GATE_TIMEOUT = 420          # s to wait for all traded boxes to finish producing
 GATE_POLL = 15              # s between gate polls
@@ -185,20 +188,21 @@ def phase_consolidate(date, dry):
 
 def phase_regime(date, dry):
     if dry:
-        _log("REGIME", f"[dry] would run {VALIDATE_SH} {date}")
+        _log("REGIME", f"[dry] would run bash {NIGHTLY_REGIME} (replay + diary + backfill sweep)")
         return
-    if not (os.path.isfile(VALIDATE_SH) and os.access(VALIDATE_SH, os.X_OK)):
-        _halt("REGIME", f"{VALIDATE_SH} missing/non-executable (chmod +x ~/validate_regime.sh?)")
-    _log("REGIME", f"{VALIDATE_SH} {date} — replay + diary over complete tape")
+    if not os.path.isfile(NIGHTLY_REGIME):
+        _halt("REGIME", f"{NIGHTLY_REGIME} not found — is it deployed on control?")
+    _log("REGIME", f"{NIGHTLY_REGIME} — replay + diary + gap-day sweep over complete tape")
     try:
-        rc = subprocess.run([VALIDATE_SH, date], timeout=1800).returncode
+        # invoked via bash (GitHub web uploads strip the exec bit); does today + --backfill.
+        rc = subprocess.run(["bash", NIGHTLY_REGIME], timeout=1800).returncode
     except Exception as exc:  # noqa: BLE001
-        _halt("REGIME", f"validate_regime.sh raised: {exc}")
+        _halt("REGIME", f"nightly_regime.sh raised: {exc}")
         return
     # replay acceptance codes: 0 = pass, 2 = acceptance-fail but diary still upserted.
     if rc not in (0, 2):
-        _halt("REGIME", f"validate_regime.sh returned rc={rc}")
-    _log("REGIME", f"✅ diary upserted for {date} (replay rc={rc})")
+        _halt("REGIME", f"nightly_regime.sh returned rc={rc}")
+    _log("REGIME", f"✅ diary upserted + gap sweep done (rc={rc})")
 
 
 def run(date=None, batch=5, dry=False, do_regime=True):
