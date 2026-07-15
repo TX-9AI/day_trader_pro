@@ -26,6 +26,13 @@ CLI:
   python orchestrator.py                       # scheduled morning run
 
 Changelog:
+  v0.3.0 (2026-07-15) — RESTORE report-driven selection at fixed fleet size.
+    Wakes ALWAYS_ON (SPX+QQQ) + EXACTLY MAX_DISCRETIONARY (8) discretionary
+    names chosen by selector.select() from market_brief's move_ranked (model
+    concurs/swaps; deterministic backfill guarantees the count). After each
+    box reaches running, writes ~/brief_flags.json onto it (its signed
+    move-strength) for the bot's setup-score nudge. Selection failure falls
+    back to ALWAYS_ON-only — never blocks the wake.
   v0.2.0 (2026-07-10) — retire discretionary selection. Wake SPX+QQQ only;
     drop report.json load, selector.select, and all selection-ack fields.
     Removed --report. (Rationale above.)
@@ -36,6 +43,8 @@ import argparse
 import sys
 
 import config
+import json as _json
+import os as _os
 import control_state
 import ec2ops
 import instance_registry
@@ -55,12 +64,19 @@ def run(dry_run=False, gate=True):
         print("Not a trading day; nothing to do.")
         return 0
 
-    # 2. Baseline only — SPX + QQQ. No report, no model selection.
+    # 2. Baseline + discretionary. Load the brief, let the model concur on the
+    #    reporter's move_ranked, backfill to EXACTLY MAX_DISCRETIONARY.
     baseline = list(config.ALWAYS_ON)
-    print(f"Baseline wake: {baseline}")
+    sel = _load_selection()          # {"final","discretionary","brief_strength",...}
+    wake_list = sel["final"]         # baseline + exactly-N discretionary
+    brief_strength = sel.get("brief_strength", {})
+    if sel.get("fallback"):
+        notify.send("⚠️ *day_trader_pro* selection fell back to baseline-only "
+                    f"({sel.get('error')}). Waking SPX+QQQ; no discretionary names.")
+    print(f"Wake list ({len(wake_list)}): {wake_list}")
 
     # 3. Resolve to instance IDs
-    resolved, missing = instance_registry.resolve(baseline)
+    resolved, missing = instance_registry.resolve(wake_list)
     if missing:
         notify.send("⚠️ *day_trader_pro* could not resolve instances for: "
                     f"{', '.join(missing)}. Check tags / run reconcile.")
@@ -76,8 +92,12 @@ def run(dry_run=False, gate=True):
 
     not_running = [iid for iid, ok in reached.items() if not ok]
 
+    # 4b. Deliver each box its signed move-strength for the setup-score nudge.
+    if not dry_run:
+        _push_brief_flags(resolved, reached, brief_strength)
+
     # 5. Morning ack (always sends)
-    notify.send(_format_ack(baseline, resolved, missing, reached, dry_run))
+    notify.send(_format_ack(wake_list, baseline, resolved, missing, reached, dry_run))
 
     if not_running:
         notify.send("🚨 *day_trader_pro* these instances did NOT reach running "
@@ -86,26 +106,78 @@ def run(dry_run=False, gate=True):
     return 0
 
 
+def _load_selection():
+    """Load report.json and run selector.select(). Never raises — returns a
+    baseline-only fallback dict on any failure."""
+    try:
+        import selector
+        path = _os.environ.get("DTP_REPORT_JSON") or _os.path.join(
+            config.DATA_DIR if hasattr(config, "DATA_DIR") else ".", "report.json")
+        if not _os.path.isfile(path):
+            # try the reporter's default drop next to this project
+            alt = _os.path.expanduser("~/market_brief/out/report.json")
+            path = alt if _os.path.isfile(alt) else path
+        with open(path) as fh:
+            report = _json.load(fh)
+        return selector.select(report)
+    except Exception as exc:  # noqa: BLE001
+        return {"final": list(config.ALWAYS_ON), "discretionary": [],
+                "always_on": list(config.ALWAYS_ON), "brief_strength": {},
+                "rationale": {}, "confidence": {}, "fallback": True,
+                "error": f"{type(exc).__name__}: {exc}"}
+
+
+def _push_brief_flags(resolved, reached, brief_strength):
+    """Write ~/brief_flags.json onto each running box: {symbol, strength, date}.
+    Best-effort per box; a delivery failure never fails the wake (the bot's
+    setup_scorer treats a missing/blank flag as strength 0 = no nudge).
+    IPs come from fleet.get_fleet() — the same (symbol, ip, state) source the
+    fleet uses for all its SSH."""
+    import ssh_util, base64, datetime as _dt
+    try:
+        import fleet
+        ip_by_sym = {s: ip for s, ip, st in fleet.get_fleet()
+                     if st == "running" and ip}
+    except Exception:  # noqa: BLE001
+        return
+    today = _dt.date.today().isoformat()
+    for sym, iid in resolved.items():
+        if not reached.get(iid):
+            continue
+        ip = ip_by_sym.get(sym)
+        if not ip:
+            continue
+        strength = float(brief_strength.get(sym, 0.0))
+        payload = _json.dumps({"symbol": sym, "strength": strength, "date": today})
+        b64 = base64.b64encode(payload.encode()).decode()
+        cmd = f"echo {b64} | base64 -d > ~/brief_flags.json"
+        try:
+            ssh_util.ssh_run(ip, cmd, timeout=15)
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def _short(iid):
     return iid[-5:] if iid else "?????"
 
 
-def _format_ack(baseline, resolved, missing, reached, dry_run):
+def _format_ack(wake_list, baseline, resolved, missing, reached, dry_run):
     """Explicit per-server morning message: which boxes, which IDs, what state."""
     verb = "Would wake" if dry_run else "Woke"
-    lines = ["*day_trader_pro — morning wake (SPX + QQQ)*"]
+    n_disc = len([s for s in wake_list if s not in baseline])
+    lines = [f"*day_trader_pro — morning wake (2 baseline + {n_disc} discretionary)*"]
     if dry_run:
         lines.append("_(dry run — nothing was actually started)_")
-    lines.append(f"*{verb} {len(resolved)} baseline server(s):*")
-    for s in baseline:
+    lines.append(f"*{verb} {len(resolved)} server(s):*")
+    for s in wake_list:
         if s not in resolved:
             continue
         iid = resolved[s]
         mark = "•" if dry_run else ("✅" if reached.get(iid) else "🚨")
-        lines.append(f"  {mark} {s} [floor] `{_short(iid)}`")
+        tag = "floor" if s in baseline else "disc"
+        lines.append(f"  {mark} {s} [{tag}] `{_short(iid)}`")
     if missing:
         lines.append(f"⚠️ Unresolved (no live instance): {', '.join(missing)}")
-    lines.append("_Discretionary selection retired — start extra names by hand._")
     return "\n".join(lines)
 
 

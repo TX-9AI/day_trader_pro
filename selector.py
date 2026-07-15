@@ -1,4 +1,12 @@
-# day_trader_pro/selector.py — v0.1.0
+# day_trader_pro/selector.py — v0.2.0
+# v0.2.0 (2026-07-15) — EXACTLY-N discretionary (was up-to-N) + consume the
+#   brief's move_ranked sidecar. The reporter (market_brief_v1 emit v1.3.0)
+#   now pre-ranks the top names by open-move probability; the model's job is
+#   to CONCUR or SWAP with justification, not pick from scratch. select()
+#   ALWAYS returns exactly MAX_DISCRETIONARY discretionary names, backfilled
+#   deterministically from move_ranked/scores if the model returns fewer, so
+#   the fleet wakes to a fixed size every day. Emits per-name signed strength
+#   for the bot's setup-score nudge (Stage 3).', tag='hdr
 """
 Turns a finished market brief into a validated list of symbols to wake.
 
@@ -24,18 +32,22 @@ import config
 
 
 SYSTEM_PROMPT = """You are the trade-selection stage of an automated day-trading suite.
-You are given a pre-market sentiment/analysis brief. Choose the symbols with the
-highest-probability intraday setups for TODAY.
+The pre-market brief already RANKED its top names by probability of a tradable
+move at the open (field: move_ranked). Your job is to CONCUR with that ranking
+or SWAP names you judge weaker, using the brief's signals — not to pick from
+scratch.
 
 Rules:
+- Return EXACTLY {max_disc} symbols. This is a fixed fleet size, not a maximum.
 - Choose ONLY from the provided universe list.
-- Choose at most {max_disc} symbols. Fewer is fine — quality over quantity.
 - Do NOT include SPX or QQQ; they always trade and are added automatically.
-- Base picks on the brief's signals: composite score, catalysts, and any
-  event risk flagged. Prefer names with a clear, high-conviction edge.
+- Start from move_ranked (already ordered best-first). Keep it unless the brief's
+  composite score, direction, conviction, earnings, or landmines give you a
+  concrete reason to swap a name for another universe name with a better edge.
+- Prefer a clear directional or event catalyst likely to move the name early.
 
 Respond with RAW JSON ONLY. No markdown, no code fences, no prose. Schema:
-{{"selected_symbols": ["TICK", ...],
+{{"selected_symbols": ["TICK", ...],   // EXACTLY {max_disc}, best-first
   "rationale": {{"TICK": "one short sentence", ...}},
   "confidence": {{"TICK": 0.0-1.0, ...}}}}"""
 
@@ -62,8 +74,12 @@ def _call_anthropic(report):
     universe = [s for s in config.UNIVERSE if s not in config.ALWAYS_ON]
     sys_prompt = SYSTEM_PROMPT.format(max_disc=config.MAX_DISCRETIONARY)
 
+    move_ranked = report.get("move_ranked", [])
+    pre = ", ".join(f"{r.get('ticker')}({r.get('strength')})" for r in move_ranked) or "(none)"
     user_msg = (
         f"UNIVERSE (choose only from these): {', '.join(universe)}\n\n"
+        f"REPORTER'S PRE-RANKED TOP (move_ranked, best-first): {pre}\n\n"
+        f"Return exactly {config.MAX_DISCRETIONARY} symbols — concur or swap.\n\n"
         f"PRE-MARKET BRIEF (JSON):\n{json.dumps(report, indent=2)}"
     )
 
@@ -82,16 +98,18 @@ def _mock_select(report):
     Deterministic offline stand-in: rank the brief's per-ticker composite
     scores and take the top MAX_DISCRETIONARY (excluding ALWAYS_ON).
     """
+    mr = [r.get("ticker") for r in report.get("move_ranked", [])
+          if r.get("ticker") not in config.ALWAYS_ON]
     scores = report.get("scores", {})
-    ranked = sorted(
-        ((s, v) for s, v in scores.items() if s not in config.ALWAYS_ON),
-        key=lambda kv: kv[1], reverse=True,
-    )
-    picks = [s for s, _ in ranked[:config.MAX_DISCRETIONARY]]
+    if not mr:
+        mr = [s for s, _ in sorted(
+            ((s, v) for s, v in scores.items() if s not in config.ALWAYS_ON),
+            key=lambda kv: kv[1], reverse=True)]
+    picks = mr[:config.MAX_DISCRETIONARY]
     return {
         "selected_symbols": picks,
-        "rationale": {s: f"top composite score ({scores[s]})" for s in picks},
-        "confidence": {s: round(min(0.99, scores[s] / 100.0), 2) for s in picks},
+        "rationale": {s: "reporter move_ranked / composite" for s in picks},
+        "confidence": {s: 0.6 for s in picks},
     }
 
 
@@ -107,7 +125,7 @@ def _validate(raw):
         if s in universe and s not in seen:
             clean.append(s)
             seen.add(s)
-    clean = clean[:config.MAX_DISCRETIONARY]
+    clean = clean[:config.MAX_DISCRETIONARY]   # hard cap; backfill in select() enforces the floor
     rationale = raw.get("rationale", {}) if isinstance(raw, dict) else {}
     confidence = raw.get("confidence", {}) if isinstance(raw, dict) else {}
     return clean, rationale, confidence
@@ -128,11 +146,39 @@ def select(report):
         fallback, error = True, f"{type(exc).__name__}: {exc}"
         disc, rationale, confidence = [], {}, {}
 
+    # EXACTLY-N: backfill from the reporter's move_ranked (then raw scores) so
+    # the fleet wakes to a fixed size even if the model returned fewer.
+    want = config.MAX_DISCRETIONARY
+    universe = [s for s in config.UNIVERSE if s not in config.ALWAYS_ON]
+    backfill_order = [r.get("ticker") for r in report.get("move_ranked", [])
+                      if r.get("ticker") in universe]
+    if len(backfill_order) < want:
+        scores = report.get("scores", {})
+        for s, _ in sorted(((s, v) for s, v in scores.items() if s in universe),
+                           key=lambda kv: kv[1], reverse=True):
+            if s not in backfill_order:
+                backfill_order.append(s)
+    seen = set(disc)
+    for s in backfill_order:
+        if len(disc) >= want:
+            break
+        if s not in seen:
+            disc.append(s); seen.add(s)
+            rationale.setdefault(s, "backfill: reporter rank")
+            confidence.setdefault(s, 0.4)
+    disc = disc[:want]
+
+    # signed strength per discretionary name for the bot's setup nudge (Stage 3)
+    strength_by_sym = {r.get("ticker"): r.get("strength", 0.0)
+                       for r in report.get("move_ranked", [])}
+    brief_strength = {s: round(float(strength_by_sym.get(s, 0.3)), 3) for s in disc}
+
     final = list(config.ALWAYS_ON) + [s for s in disc if s not in config.ALWAYS_ON]
     return {
         "final": final,
         "discretionary": disc,
         "always_on": list(config.ALWAYS_ON),
+        "brief_strength": brief_strength,
         "rationale": rationale,
         "confidence": confidence,
         "fallback": fallback,

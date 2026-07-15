@@ -46,8 +46,9 @@ REPORTER_TAG = os.environ.get("DTP_REPORTER_TAG", "1-REPORTER")
 ALWAYS_ON = ["SPX", "QQQ"]
 # Max additional discretionary picks the model is allowed to wake.
 # Total running fleet is therefore between len(ALWAYS_ON) and
-# len(ALWAYS_ON) + MAX_DISCRETIONARY  (i.e. 2..6 by default).
-MAX_DISCRETIONARY = 4
+# len(ALWAYS_ON) + MAX_DISCRETIONARY  (i.e. exactly 10: 2 baseline + 8).
+# 2026-07-15: EXACTLY 8 discretionary (fixed fleet size), was up-to-4.
+MAX_DISCRETIONARY = 8
 
 # --------------------------------------------------------------------------
 # Anthropic model used for the selection call
