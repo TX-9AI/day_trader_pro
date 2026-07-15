@@ -1,35 +1,40 @@
-# day_trader_pro/eod_conductor.py — v1.0.1
+# day_trader_pro/eod_conductor.py — v1.2.0
+# v1.2.0 — 2026-07-15 — box-state-independent recovery: BACKFILL/CONSOLIDATE/REGIME
+#          ALWAYS run regardless of whether traded boxes are up/down/never-ran; the
+#          upstream gate/harvest/report steps now WARN-and-proceed instead of halting,
+#          so box state can never block the candle recovery. (Same code as the v1.1.0
+#          fix; version re-stamped for deploy clarity.)
+# v1.0.1 — 2026-07-15 — regime phase calls nightly_regime.sh (today + gap-day sweep).
+# v1.0.0 — 2026-07-11 — initial gated conductor.
 """
-End-of-day conductor (control server). ONE ordered, completion-gated chain that
-calls the existing helpers in sequence — it rewrites none of them, it sequences
-them. Every step blocks on the previous one succeeding, and any failure HALTS
-LOUDLY (Telegram + stderr) leaving the fleet exactly as-is so you can troubleshoot
-and re-run. Replaces the independent dtp-harvest + dtp-eod timers with one timer.
+End-of-day conductor (control server). ONE ordered chain that calls the existing
+helpers in sequence — it sequences them, it rewrites none of them.
 
-Order (each gated on the last):
-  1. GATE      — poll every TRADED (running) box until it has produced everything
-                 the server needs: ~/eod/pnl_today.json, ~/eod/trades_today.json,
-                 and its OHLC CSV (with bars). Nothing downstream runs until this
-                 passes; timeout ⇒ HALT (boxes left up).
-  2. HARVEST   — harvest.py: pull trades.db + OHLC + trade JSON → trades/ ohlc/,
-                 aggregate + consolidate → reports/. Gate: the raw dirs populated.
-  3. REPORT    — eod_report.py: unified P&L Telegram, then STOP the traded boxes
-                 (frees vCPU/streams for the backfill). Gate: all stopped.
-  4. BACKFILL  — eod_backfill.py --batch 5: wake the SAT-OUT symbols five at a time,
-                 produce → pull → stop, until every symbol's OHLC is on the server.
-                 Still-missing ⇒ loud WARNING (not a halt: may be unfetchable next-day),
-                 recorded in the summary.
-  5. CONSOLIDATE — consolidate_trades.py: final fleet_trades bundle over the now-
-                 complete tape. Gate: bundle written.
-  6. REGIME    — nightly_regime.sh: replay confluence over ohlc/<date>/ (+ gap-day
-                 backfill sweep, holiday-safe). Runs LAST, on complete tape.
+v1.1.0 principle: the WHOLE point of EOD is to end up with complete tape + diary,
+so the recovery path (BACKFILL → CONSOLIDATE → REGIME) ALWAYS runs — regardless of
+whether the traded boxes are up, down, never ran, or errored. The upstream steps
+(gate/harvest/report) only act on boxes that are actually running; if there's
+nothing to collect they SKIP, and any problem is a LOUD WARNING, never a dead-end.
+Every warning is surfaced (Telegram + stderr) and rolled into the final summary so
+nothing fails silently — but box state can never stop the candle recovery.
+
+Order:
+  1. GATE        — if traded boxes are up, wait until they've produced pnl/trades
+                   JSON + OHLC; laggards after the timeout are a warning, not a stop.
+  2. HARVEST     — if boxes are up: pull trades.db + OHLC + trade JSON, consolidate.
+                   No boxes up ⇒ skip (backfill will fetch the candles).
+  3. REPORT      — if boxes are up: unified P&L Telegram, then stop them.
+  4. BACKFILL    — ALWAYS: wake the sat-out symbols in batches, produce → pull →
+                   stop, until every symbol's OHLC is on the server.
+  5. CONSOLIDATE — ALWAYS: fleet_trades bundle over whatever tape is present.
+  6. REGIME      — ALWAYS: nightly_regime.sh (replay + diary + gap-day sweep).
 
 CLI:
-  python eod_conductor.py              # run the full chain for today
-  python eod_conductor.py --date D     # a specific date
-  python eod_conductor.py --dry-run    # show the plan + gate status, mutate nothing
-  python eod_conductor.py --batch 5    # sat-out backfill batch size (default 5)
-  python eod_conductor.py --no-regime  # skip step 6 (e.g. harness not synced yet)
+  python eod_conductor.py              # full chain for today
+  python eod_conductor.py --date D
+  python eod_conductor.py --dry-run
+  python eod_conductor.py --batch 5
+  python eod_conductor.py --no-regime
 """
 
 import argparse
@@ -51,13 +56,10 @@ import ssh_util
 
 _ET = ZoneInfo("US/Eastern")
 REMOTE_REPO = "options-trader"
-# The complete regime runner (today's replay+diary + gap-day backfill sweep,
-# holiday-safe). Owned by the conductor now — its standalone dtp-regime.timer
-# is retired so it can't race the backfill or double-run the diary.
 NIGHTLY_REGIME = os.path.expanduser("~/day_trader_pro/nightly_regime.sh")
 
-GATE_TIMEOUT = 420          # s to wait for all traded boxes to finish producing
-GATE_POLL = 15              # s between gate polls
+GATE_TIMEOUT = 420
+GATE_POLL = 15
 
 
 def _today_et():
@@ -68,24 +70,18 @@ def _log(tag, msg):
     print(f"[{tag:<11}] {msg}", flush=True)
 
 
-class _Halt(Exception):
-    """Raised to stop the chain loudly at a failed gate."""
-
-
-def _halt(phase, msg):
-    line = (f"🚨 EOD conductor HALTED at {phase}: {msg}\n"
-            f"Fleet left as-is — troubleshoot and re-run eod_conductor.py.")
-    _log("HALT", msg)
+def _warn(warns, phase, msg):
+    """Loud, non-fatal: log + Telegram + record for the summary. Never stops the chain."""
+    _log(phase, f"⚠️ {msg}")
+    warns.append(f"{phase}: {msg}")
     try:
-        notify.send(line)
+        notify.send(f"⚠️ EOD conductor [{phase}] {msg}")
     except Exception:  # noqa: BLE001
         pass
-    raise _Halt(msg)
 
 
-# ── step 1: GATE on bot production ────────────────────────────────────────────
+# ── 1. GATE ───────────────────────────────────────────────────────────────────
 def _box_ready(ip, sym, date):
-    """True once this box has pnl_today.json + trades_today.json + an OHLC csv with bars."""
     cmd = (f'D={date}; test -s ~/eod/pnl_today.json && test -s ~/eod/trades_today.json '
            f'&& f=~/{REMOTE_REPO}/data/OHLC/$D/{sym}.csv && [ -s "$f" ] '
            f'&& [ "$(wc -l < "$f")" -gt 1 ] && echo READY || echo WAIT')
@@ -93,14 +89,16 @@ def _box_ready(ip, sym, date):
     return rc == 0 and "READY" in out
 
 
-def phase_gate(running, date, dry):
-    who = ", ".join(sorted(running))
-    _log("GATE", f"waiting on {len(running)} traded box(es) to finish producing: {who}")
+def phase_gate(running, date, dry, warns):
+    if not running:
+        _log("GATE", "no traded boxes up — nothing to wait on")
+        return
+    _log("GATE", f"waiting on {len(running)} traded box(es): {', '.join(sorted(running))}")
     if dry:
         _log("GATE", "[dry] would poll each box for pnl/trades JSON + OHLC csv")
         return
     deadline = time.time() + GATE_TIMEOUT
-    pending = dict(running)     # sym -> ip
+    pending = dict(running)
     while pending and time.time() < deadline:
         for sym in list(pending):
             if _box_ready(pending[sym], sym, date):
@@ -108,13 +106,17 @@ def phase_gate(running, date, dry):
         if pending:
             time.sleep(GATE_POLL)
     if pending:
-        _halt("GATE", f"boxes never finished producing after {GATE_TIMEOUT}s: "
-                      f"{', '.join(sorted(pending))}")
-    _log("GATE", "✅ all traded boxes have produced — proceeding")
+        _warn(warns, "GATE", f"{len(pending)} box(es) never finished producing "
+                             f"({', '.join(sorted(pending))}) — proceeding; backfill covers OHLC")
+    else:
+        _log("GATE", "✅ all traded boxes have produced")
 
 
-# ── step wrappers ─────────────────────────────────────────────────────────────
-def phase_harvest(date, dry):
+# ── 2. HARVEST ────────────────────────────────────────────────────────────────
+def phase_harvest(date, running, dry, warns):
+    if not running:
+        _log("HARVEST", "no traded boxes up — skipping (backfill will fetch missing candles)")
+        return
     if dry:
         _log("HARVEST", "[dry] would run harvest.py (pull + consolidate)")
         return
@@ -122,18 +124,20 @@ def phase_harvest(date, dry):
     try:
         harvest.run(quiet=False)
     except Exception as exc:  # noqa: BLE001
-        _halt("HARVEST", f"harvest.run raised: {exc}")
-    # gate: today's raw dirs must be populated
-    td = os.path.join(config.TRADES_DIR, date)
+        _warn(warns, "HARVEST", f"harvest.run raised: {exc} — proceeding to backfill")
+        return
     od = os.path.join(config.OHLC_DIR, date)
-    if not (os.path.isdir(td) and os.listdir(td)):
-        _halt("HARVEST", f"no trades pulled into {td}")
     if not (os.path.isdir(od) and os.listdir(od)):
-        _halt("HARVEST", f"no OHLC pulled into {od}")
-    _log("HARVEST", "✅ raw trades/ + ohlc/ populated")
+        _warn(warns, "HARVEST", "boxes were up but no OHLC came back — backfill will retry")
+    else:
+        _log("HARVEST", "✅ raw trades/ + ohlc/ populated")
 
 
-def phase_report(dry):
+# ── 3. REPORT ─────────────────────────────────────────────────────────────────
+def phase_report(running, dry, warns):
+    if not running:
+        _log("REPORT", "no traded boxes up — skipping P&L/stop")
+        return
     if dry:
         _log("REPORT", "[dry] would run eod_report.py (P&L + stop traded boxes)")
         return
@@ -141,68 +145,69 @@ def phase_report(dry):
     try:
         rc = eod_report.run(dry_run=False)
     except Exception as exc:  # noqa: BLE001
-        _halt("REPORT", f"eod_report.run raised: {exc}")
+        _warn(warns, "REPORT", f"eod_report raised: {exc}")
         return
     if rc != 0:
-        _halt("REPORT", f"eod_report returned rc={rc} (a box failed to stop) — check EC2")
-    _log("REPORT", "✅ P&L sent + traded boxes stopped")
+        _warn(warns, "REPORT", f"rc={rc} — a box may not have stopped (backfill's cap guard protects it)")
+    else:
+        _log("REPORT", "✅ P&L sent + traded boxes stopped")
 
 
-def phase_backfill(date, batch, dry):
+# ── 4. BACKFILL (always) ──────────────────────────────────────────────────────
+def phase_backfill(date, batch, dry, warns):
     _log("BACKFILL", f"eod_backfill.py — sat-out symbols, {batch} at a time")
     if dry:
         eod_backfill.run(date=date, batch=batch, dry=True)
         return []
     try:
-        rc = eod_backfill.run(date=date, batch=batch)
+        eod_backfill.run(date=date, batch=batch)
     except Exception as exc:  # noqa: BLE001
-        _halt("BACKFILL", f"eod_backfill.run raised: {exc}")
+        _warn(warns, "BACKFILL", f"eod_backfill raised: {exc}")
         return []
-    still = eod_backfill._missing(date)     # re-check what's left
+    still = eod_backfill._missing(date)
     if still:
-        msg = f"⚠️ backfill left {len(still)} symbol(s) without candles: {', '.join(still)}"
-        _log("BACKFILL", msg)
-        try:
-            notify.send("🛠️ EOD conductor — " + msg + " (continuing; diary runs on tape present)")
-        except Exception:  # noqa: BLE001
-            pass
+        _warn(warns, "BACKFILL", f"{len(still)} symbol(s) still without candles "
+                                 f"({', '.join(still)}) — DXFeed history may be gone")
     else:
         _log("BACKFILL", "✅ every symbol has OHLC on the server")
     return still
 
 
-def phase_consolidate(date, dry):
+# ── 5. CONSOLIDATE (always) ───────────────────────────────────────────────────
+def phase_consolidate(date, dry, warns):
     if dry:
-        _log("CONSOLIDATE", "[dry] would run consolidate_trades.py over complete tape")
+        _log("CONSOLIDATE", "[dry] would run consolidate_trades.py over the tape present")
         return
-    _log("CONSOLIDATE", "consolidate_trades.py — final fleet_trades bundle")
+    _log("CONSOLIDATE", "consolidate_trades.py — fleet_trades bundle")
     try:
         _b, out_json, _c = consolidate_trades.consolidate(date=date)
     except Exception as exc:  # noqa: BLE001
-        _halt("CONSOLIDATE", f"consolidate raised: {exc}")
+        _warn(warns, "CONSOLIDATE", f"raised: {exc}")
         return
-    if not (out_json and os.path.exists(out_json)):
-        _halt("CONSOLIDATE", "no fleet_trades bundle written")
-    _log("CONSOLIDATE", f"✅ {os.path.basename(out_json)}")
+    if out_json and os.path.exists(out_json):
+        _log("CONSOLIDATE", f"✅ {os.path.basename(out_json)}")
+    else:
+        _log("CONSOLIDATE", "no trades to bundle (tape-only day)")
 
 
-def phase_regime(date, dry):
+# ── 6. REGIME (always) ────────────────────────────────────────────────────────
+def phase_regime(dry, warns):
     if dry:
         _log("REGIME", f"[dry] would run bash {NIGHTLY_REGIME} (replay + diary + backfill sweep)")
         return
     if not os.path.isfile(NIGHTLY_REGIME):
-        _halt("REGIME", f"{NIGHTLY_REGIME} not found — is it deployed on control?")
+        _warn(warns, "REGIME", f"{NIGHTLY_REGIME} not found — diary NOT updated")
+        return
     _log("REGIME", f"{NIGHTLY_REGIME} — replay + diary + gap-day sweep over complete tape")
     try:
-        # invoked via bash (GitHub web uploads strip the exec bit); does today + --backfill.
         rc = subprocess.run(["bash", NIGHTLY_REGIME], timeout=1800).returncode
     except Exception as exc:  # noqa: BLE001
-        _halt("REGIME", f"nightly_regime.sh raised: {exc}")
+        _warn(warns, "REGIME", f"nightly_regime.sh raised: {exc}")
         return
-    # replay acceptance codes: 0 = pass, 2 = acceptance-fail but diary still upserted.
     if rc not in (0, 2):
-        _halt("REGIME", f"nightly_regime.sh returned rc={rc}")
-    _log("REGIME", f"✅ diary upserted + gap sweep done (rc={rc})")
+        _warn(warns, "REGIME", f"nightly_regime.sh rc={rc}")
+    else:
+        _log("REGIME", f"✅ diary upserted + gap sweep done (rc={rc})")
 
 
 def run(date=None, batch=5, dry=False, do_regime=True):
@@ -210,44 +215,47 @@ def run(date=None, batch=5, dry=False, do_regime=True):
     mapping, _ = instance_registry.discover(config.UNIVERSE)
     running = {s: r.get("private_ip", "") for s, r in mapping.items()
               if r.get("state") == "running"}
-    started = datetime.now(_ET).strftime("%H:%M")
+    warns = []
     _log("START", f"EOD conductor {date} — {len(running)} traded box(es) up, "
-                  f"{('DRY-RUN' if dry else 'LIVE')} @ {started} ET")
+                  f"{('DRY-RUN' if dry else 'LIVE')} @ {datetime.now(_ET).strftime('%H:%M')} ET")
     if not dry:
         try:
-            notify.send(f"🛠️ EOD conductor started {date} — {len(running)} traded boxes")
+            notify.send(f"🛠️ EOD conductor started {date} — {len(running)} traded boxes up")
         except Exception:  # noqa: BLE001
             pass
 
-    try:
-        phase_gate(running, date, dry)
-        phase_harvest(date, dry)
-        phase_report(dry)
-        still = phase_backfill(date, batch, dry)
-        phase_consolidate(date, dry)
-        if do_regime:
-            phase_regime(date, dry)
-        else:
-            _log("REGIME", "skipped (--no-regime)")
-    except _Halt:
-        return 1
+    phase_gate(running, date, dry, warns)
+    phase_harvest(date, running, dry, warns)
+    phase_report(running, dry, warns)
+    still = phase_backfill(date, batch, dry, warns)
+    phase_consolidate(date, dry, warns)
+    if do_regime:
+        phase_regime(dry, warns)
+    else:
+        _log("REGIME", "skipped (--no-regime)")
 
-    tail = f" | ⚠️ still missing: {', '.join(still)}" if still else ""
-    _log("DONE", f"✅ EOD conductor complete for {date}{tail}")
+    if warns:
+        _log("DONE", f"⚠️ EOD conductor finished {date} with {len(warns)} warning(s):")
+        for w in warns:
+            _log("DONE", f"   • {w}")
+    else:
+        _log("DONE", f"✅ EOD conductor complete for {date}")
     if not dry:
+        tail = (" — ⚠️ " + " | ".join(warns)) if warns else ""
         try:
-            notify.send(f"✅ EOD conductor complete {date}{tail}")
+            notify.send((f"{'⚠️' if warns else '✅'} EOD conductor {date} "
+                        f"{'with warnings' if warns else 'complete'}{tail}")[:900])
         except Exception:  # noqa: BLE001
             pass
-    return 0
+    return 1 if warns else 0
 
 
 def main(argv):
-    p = argparse.ArgumentParser(description="Control-side EOD conductor (gated, fail-loud)")
-    p.add_argument("--date", default=None, help="YYYY-MM-DD (default: today ET)")
-    p.add_argument("--batch", type=int, default=5, help="sat-out backfill batch size")
-    p.add_argument("--dry-run", action="store_true", help="show the plan, mutate nothing")
-    p.add_argument("--no-regime", action="store_true", help="skip the regime replay/diary step")
+    p = argparse.ArgumentParser(description="Control-side EOD conductor (always reaches backfill)")
+    p.add_argument("--date", default=None)
+    p.add_argument("--batch", type=int, default=5)
+    p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--no-regime", action="store_true")
     args = p.parse_args(argv[1:])
     return run(date=args.date, batch=args.batch, dry=args.dry_run, do_regime=not args.no_regime)
 
