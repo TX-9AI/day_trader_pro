@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
-# day_trader_pro/devtools.sh — v1.6
+# day_trader_pro/devtools.sh — v1.7
+# v1.7 — 2026-07-16 — MERGE: restored items lost to a v1.6 collision with a parallel
+#        edit — 46 live P&L standings (standings.py), 47 OHLC backfill (eod_backfill.py),
+#        48 EOD conductor (eod_conductor.py). Fable's 45 excursion report kept as-is.
+# v1.6 — 2026-07-15 — (parallel edit) NEW TRADES DATA item 45: MFE/MAE excursion report
 # v1.6 — 2026-07-15 — item 45 repointed at the AUTO-COLLECTED per-symbol DBs
 #        (trades/<date>/*_trades.db, landed by the EOD chain) — no
 #        consolidation prerequisite; runnable the moment the DBs are down.
@@ -184,6 +188,10 @@ menu() {
    42) View a day's report       43) View the diary (all days)
    44) Backfill missing days      (fills diary gaps that have tape)
 
+ EOD CONDUCTOR, BACKFILL & LIVE P&L:
+   46) Live P&L standings (read-only)     47) Backfill missing OHLC (auto-batched)
+   48) EOD conductor - full gated EOD (dry-run preview -> confirm -> run)
+
     0) Exit
 ======================================================
 EOF
@@ -238,6 +246,9 @@ EOF
         read -rp "Live rows? [y/N]: " LV; \
         ARGS="--date $D"; [ -n "$S" ] && ARGS="$ARGS --since $S"; [ "$LV" = "y" ] && ARGS="$ARGS --live"; \
         $PY excursion_report.py $ARGS; pause ;;
+    46) echo; read -rp "Push to Telegram too? [y/N]: " S; if [ "$S" = "y" ]; then $PY standings.py --send; else $PY standings.py; fi; pause ;;
+    47) echo; read -rp "Backfill date (YYYY-MM-DD, ENTER=today): " D; D="${D:-$(date +%F)}"; read -rp "Batch size (ENTER=5): " B; B="${B:-5}"; echo; $PY eod_backfill.py --date "$D" --batch "$B" --dry-run; echo; read -rp "Proceed with LIVE backfill (wakes/stops boxes)? [y/N]: " GO; [ "$GO" = "y" ] && $PY eod_backfill.py --date "$D" --batch "$B"; pause ;;
+    48) echo; read -rp "Backfill batch size (ENTER=5): " B; B="${B:-5}"; echo; $PY eod_conductor.py --batch "$B" --dry-run; echo; read -rp "Run the LIVE EOD conductor now (gate->harvest->P&L+stop->backfill->consolidate->diary)? [y/N]: " GO; [ "$GO" = "y" ] && $PY eod_conductor.py --batch "$B"; pause ;;
     0)  exit 0 ;;
     *)  echo "Invalid selection."; sleep 1 ;;
   esac
