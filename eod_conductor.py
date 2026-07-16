@@ -1,4 +1,10 @@
-# day_trader_pro/eod_conductor.py — v1.2.0
+# day_trader_pro/eod_conductor.py — v1.3.0
+# v1.3.0 — 2026-07-16 — NEW final phase 7 EXCURSION: runs excursion_report.py
+#          over the day's harvested per-symbol DBs (MFE/MAE distributions →
+#          reports/excursions_<date>.txt) and Telegrams the headline. ALWAYS
+#          runs (recovery-path rule); any failure is a loud warning, never a
+#          stop. DTP_EXCURSION_LIVE=1 additionally produces the live-rows
+#          report (written with a _live suffix once live boxes exist).
 # v1.2.0 — 2026-07-15 — box-state-independent recovery: BACKFILL/CONSOLIDATE/REGIME
 #          ALWAYS run regardless of whether traded boxes are up/down/never-ran; the
 #          upstream gate/harvest/report steps now WARN-and-proceed instead of halting,
@@ -28,6 +34,9 @@ Order:
                    stop, until every symbol's OHLC is on the server.
   5. CONSOLIDATE — ALWAYS: fleet_trades bundle over whatever tape is present.
   6. REGIME      — ALWAYS: nightly_regime.sh (replay + diary + gap-day sweep).
+  7. EXCURSION   — ALWAYS: excursion_report.py over the harvested trade DBs
+                   (MFE/MAE per exit reason + floor/leash verdicts) →
+                   reports/excursions_<date>.txt, headline to Telegram.
 
 CLI:
   python eod_conductor.py              # full chain for today
@@ -210,6 +219,50 @@ def phase_regime(dry, warns):
         _log("REGIME", f"✅ diary upserted + gap sweep done (rc={rc})")
 
 
+EXCURSION_PY = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            "excursion_report.py")
+
+
+def phase_excursion(date, dry, warns):
+    """Phase 7 — MFE/MAE excursion report over the day's harvested DBs.
+    Runs AFTER harvest/consolidate so trades/<date>/ is as complete as it will
+    get. Non-fatal by the recovery-path rule: a failed report is a loud
+    warning, never a stop. Telegrams the headline so the report arrives even
+    when nobody remembers to ask for it."""
+    if dry:
+        _log("EXCURSION", f"[dry] would run excursion_report.py --date {date} "
+                          f"(paper; +live if DTP_EXCURSION_LIVE=1)")
+        return
+    if not os.path.isfile(EXCURSION_PY):
+        _warn(warns, "EXCURSION", f"{EXCURSION_PY} not found — report NOT written")
+        return
+    modes = [[]]
+    if os.environ.get("DTP_EXCURSION_LIVE", "") == "1":
+        modes.append(["--live"])
+    for extra in modes:
+        label = "live" if extra else "paper"
+        _log("EXCURSION", f"excursion_report.py --date {date} ({label})")
+        try:
+            proc = subprocess.run(
+                [sys.executable, EXCURSION_PY, "--date", date] + extra,
+                capture_output=True, text=True, timeout=180)
+        except Exception as exc:  # noqa: BLE001
+            _warn(warns, "EXCURSION", f"excursion_report.py ({label}) raised: {exc}")
+            continue
+        if proc.returncode != 0:
+            _warn(warns, "EXCURSION",
+                  f"excursion_report.py ({label}) rc={proc.returncode}: "
+                  f"{(proc.stderr or '').strip()[:200]}")
+            continue
+        headline = next((ln for ln in proc.stdout.splitlines() if ln.strip()), "")
+        _log("EXCURSION", f"✅ {headline}")
+        try:
+            notify.send(f"📐 {headline} → reports/excursions_{date}"
+                        f"{'_live' if extra else ''}.txt")
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def run(date=None, batch=5, dry=False, do_regime=True):
     date = date or _today_et()
     mapping, _ = instance_registry.discover(config.UNIVERSE)
@@ -233,6 +286,7 @@ def run(date=None, batch=5, dry=False, do_regime=True):
         phase_regime(dry, warns)
     else:
         _log("REGIME", "skipped (--no-regime)")
+    phase_excursion(date, dry, warns)
 
     if warns:
         _log("DONE", f"⚠️ EOD conductor finished {date} with {len(warns)} warning(s):")

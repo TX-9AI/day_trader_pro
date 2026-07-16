@@ -2,6 +2,13 @@
 """
 day_trader_pro/excursion_report.py — MFE/MAE distributions from the fleet's
 auto-collected per-symbol trade DBs.
+v2.2 — 2026-07-16 — --live writes excursions_<date>_live.txt (own file, so
+        the nightly paper report is never clobbered); ran automatically as
+        EOD conductor phase 7 (v1.3.0) — devtools 45 remains the manual path.
+v2.1 — 2026-07-16 — self-diagnosing empty states: says WHY a report is
+        empty (ran intraday before the EOD chain lands trades/<date>/ at
+        ~16:05 ET; live filter on a paper fleet; rows skipped for missing
+        telemetry) instead of the misleading "deploy trade_logger v3.8" hint.
 v2.0 — 2026-07-15 — READS trades/<date>/*_trades.db DIRECTLY (the raw per-box
         SQLite snapshots the EOD chain already lands on this server) — no
         consolidation step required; runnable the moment the DBs are down.
@@ -176,7 +183,7 @@ def pct(x):
 
 # ── the report ───────────────────────────────────────────────────────────────
 
-def build_report(rows, day, src, skipped, mode,
+def build_report(rows, day, src, skipped, mode, hints=None,
                  old_floor=0.25, new_floor=0.40) -> str:
     out = []
     w = out.append
@@ -187,8 +194,9 @@ def build_report(rows, day, src, skipped, mode,
          if skipped else ""))
     if not rows:
         w("")
-        w("Nothing to report yet — telemetry fills from the first session")
-        w("after trade_logger v3.8 deploys to the fleet.")
+        w("Nothing to report for this selection. Likely reasons:")
+        for h in (hints or ["no closed trades with telemetry matched the filters"]):
+            w(f"  • {h}")
         return "\n".join(out) + "\n"
 
     buckets = {}
@@ -276,13 +284,32 @@ def main():
                   if fnum(r, "max_premium_seen") is None
                   or fnum(r, "min_premium_seen") is None)
 
+    hints = []
+    if not rows:
+        if "(" not in src:   # fell back to fleet_trades json/csv — DBs absent
+            hints.append(f"trades/{args.date}/ per-symbol DBs not collected yet "
+                         f"— the EOD chain lands them ~16:05 ET; re-run after "
+                         f"the close (fallback file {os.path.basename(src)} "
+                         f"had nothing usable)")
+        other = [r for r in closed if usable(r, paper=args.live)]
+        if other:
+            want, have = ("LIVE", "PAPER") if args.live else ("PAPER", "LIVE")
+            hints.append(f"{len(other)} telemetry row(s) exist but are {have}, "
+                         f"not {want} — answer {'N' if args.live else 'y'} to "
+                         f"the Live prompt")
+        if skipped:
+            hints.append(f"{skipped} closed row(s) have no telemetry "
+                         f"(entered/closed before the v3.8 columns were live)")
+        if not hints:
+            hints.append("no trades closed in this window yet")
     window = (f"since {args.since}" if args.since else "that day only")
     text = build_report(rows, f"{args.date} ({window})", src, skipped,
-                        "LIVE" if args.live else "PAPER")
+                        "LIVE" if args.live else "PAPER", hints=hints)
     print(text)
 
     os.makedirs(REPORTS_DIR, exist_ok=True)
-    out_path = os.path.join(REPORTS_DIR, f"excursions_{args.date}.txt")
+    suffix = "_live" if args.live else ""
+    out_path = os.path.join(REPORTS_DIR, f"excursions_{args.date}{suffix}.txt")
     with open(out_path, "w") as f:
         f.write(text)
     print(f"Report written: {out_path}")
