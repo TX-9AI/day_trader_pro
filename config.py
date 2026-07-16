@@ -10,7 +10,7 @@ the mock switches used for offline development.
 Design intent:
   - The control server auto-discovers instances by their tag "Name".
     You never hardcode instance IDs here; the registry resolves them.
-  - SPX and QQQ always trade. The model may add up to MAX_DISCRETIONARY more.
+  - SPX and QQQ always trade. The model adds EXACTLY MAX_DISCRETIONARY more.
   - Everything can run end-to-end with zero real credentials via MOCK_MODE.
 """
 
@@ -46,8 +46,8 @@ REPORTER_TAG = os.environ.get("DTP_REPORTER_TAG", "1-REPORTER")
 ALWAYS_ON = ["SPX", "QQQ"]
 # Max additional discretionary picks the model is allowed to wake.
 # Total running fleet is therefore between len(ALWAYS_ON) and
-# len(ALWAYS_ON) + MAX_DISCRETIONARY  (i.e. 2..6 by default).
-MAX_DISCRETIONARY = 4
+# len(ALWAYS_ON) + MAX_DISCRETIONARY  (i.e. exactly 10: 2 baseline + 8).
+MAX_DISCRETIONARY = 8
 
 # --------------------------------------------------------------------------
 # Anthropic model used for the selection call
