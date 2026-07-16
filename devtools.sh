@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # day_trader_pro/devtools.sh — v1.6
-# v1.6 — 2026-07-11 — NEW 46 live P&L standings (standings.py, read-only) and 47 EOD
-#        conductor (eod_conductor.py: dry-run preview then the full gated EOD chain).
-#        Appended — 1-45 keep their numbers.
-# v1.5 — 2026-07-11 — NEW OHLC BACKFILL item 45: eod_backfill.py brings up sat-out
-#        symbols in capacity-safe batches (wake->produce->pull->stop) to fetch their
-#        missing 1-min candles. Previews a --dry-run plan and confirms before touching
-#        the fleet. Appended (not renumbered) so 1-44 keep their numbers.
+# v1.6 — 2026-07-15 — item 45 repointed at the AUTO-COLLECTED per-symbol DBs
+#        (trades/<date>/*_trades.db, landed by the EOD chain) — no
+#        consolidation prerequisite; runnable the moment the DBs are down.
+#        Optional since-date prompt turns a snapshot into a CUMULATIVE report
+#        (each snapshot holds full history). Item 39 relabeled: consolidation
+#        is automatic; 39 is the manual re-run.
+# v1.5 — 2026-07-15 — NEW TRADES DATA item 45: MFE/MAE excursion report for a
+#        day via excursion_report.py, reading the consolidated fleet file.
+#        Appended so 12-44 keep their numbers.
 # v1.4 — 2026-07-11 — REGIME VALIDATION expanded: 42 now reprints the SAVED report
 #        (not a line count) via validate_regime.sh --report; NEW 43 view diary,
 #        44 backfill missing days (disk-driven, skip-occupied, --rebuild option).
@@ -129,7 +131,7 @@ menu() {
   clear
   cat <<'EOF'
 ======================================================
-  day_trader_pro — devtools  v1.0
+  day_trader_pro — devtools  v1.6
 ======================================================
  ORCHESTRATION:
     1) Full spool-up (mock)       2) EOD aggregate (mock)
@@ -172,19 +174,15 @@ menu() {
    38) PULL <- GitHub  (FORCE; GitHub is source of truth)
 
  TRADES DATA:
-   39) Consolidate a day's trades -> fleet_trades_<date>.json (+ .csv)
+   39) Re-run consolidation -> fleet_trades_<date>.json (+ .csv)
+       (EOD chain does this automatically; manual re-run only)
+   45) Excursion report (MFE/MAE) -> reports/excursions_<date>.txt
+       (reads trades/<date>/*_trades.db — auto-collected, ready now)
 
  REGIME VALIDATION (Layer-1 confluence; manual, tape-only):
    40) Run replay - today        41) Run replay - pick a date
    42) View a day's report       43) View the diary (all days)
    44) Backfill missing days      (fills diary gaps that have tape)
-
- OHLC BACKFILL (bring up sat-out symbols -> fetch candles -> pull -> stop):
-   45) Backfill missing 1-min OHLC for a day  (auto-batched, capacity-safe)
-
- EOD CONDUCTOR & LIVE P&L:
-   46) Live P&L standings (read-only)
-   47) EOD conductor - full gated EOD (dry-run preview -> confirm -> run)
 
     0) Exit
 ======================================================
@@ -235,9 +233,11 @@ EOF
     42) echo; D_DEF="$(date +%F)"; read -rp "Date to view (YYYY-MM-DD, ENTER=${D_DEF}): " D; D="${D:-$D_DEF}"; if [ -x "$VALIDATE_SH" ]; then "$VALIDATE_SH" --report "$D"; else echo "missing/non-exec $VALIDATE_SH"; fi; pause ;;
     43) echo; if [ -x "$VALIDATE_SH" ]; then "$VALIDATE_SH" --diary; else echo "missing/non-exec $VALIDATE_SH"; fi; pause ;;
     44) echo; read -rp "Rebuild ALL dated tapes (else only fill gaps)? [y/N]: " RB; if [ -x "$VALIDATE_SH" ]; then if [ "$RB" = "y" ]; then "$VALIDATE_SH" --backfill --rebuild; else "$VALIDATE_SH" --backfill; fi; else echo "missing/non-exec $VALIDATE_SH"; fi; pause ;;
-    45) echo; read -rp "Backfill date (YYYY-MM-DD, ENTER=today): " D; D="${D:-$(date +%F)}"; read -rp "Batch size (ENTER=5): " B; B="${B:-5}"; read -rp "Stream cap (ENTER=10): " C; C="${C:-10}"; echo; $PY eod_backfill.py --date "$D" --batch "$B" --stream-cap "$C" --dry-run; echo; read -rp "Proceed with LIVE backfill (wakes/stops boxes)? [y/N]: " GO; [ "$GO" = "y" ] && $PY eod_backfill.py --date "$D" --batch "$B" --stream-cap "$C"; pause ;;
-    46) echo; read -rp "Push to Telegram too? [y/N]: " S; if [ "$S" = "y" ]; then $PY standings.py --send; else $PY standings.py; fi; pause ;;
-    47) echo; read -rp "Backfill batch size (ENTER=5): " B; B="${B:-5}"; echo; $PY eod_conductor.py --batch "$B" --dry-run; echo; read -rp "Run the LIVE EOD conductor now (gate->harvest->P&L+stop->backfill->consolidate->diary)? [y/N]: " GO; [ "$GO" = "y" ] && $PY eod_conductor.py --batch "$B"; pause ;;
+    45) echo; read -rp "Day (YYYY-MM-DD, ENTER=today): " D; D="${D:-$(date +%F)}"; \
+        read -rp "Cumulative since (YYYY-MM-DD, ENTER=that day only): " S; \
+        read -rp "Live rows? [y/N]: " LV; \
+        ARGS="--date $D"; [ -n "$S" ] && ARGS="$ARGS --since $S"; [ "$LV" = "y" ] && ARGS="$ARGS --live"; \
+        $PY excursion_report.py $ARGS; pause ;;
     0)  exit 0 ;;
     *)  echo "Invalid selection."; sleep 1 ;;
   esac
