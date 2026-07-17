@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
-# day_trader_pro/devtools.sh — v1.7
+# day_trader_pro/devtools.sh — v1.8
+# v1.8 — 2026-07-17 — NEW UTILITIES section: 49 fetch 1m OHLC CSV (tests/ohlc_fetch.py,
+#        prompts symbol, default ^VIX); 50/51 open a shell in the options-trader-v3 /
+#        market-brief checkout via tmux (a menu item can't cd the parent shell). Item
+#        47 broken onto its own line (was wrapping on mobile). In-menu header synced to
+#        the real version (was still printing v1.6).
 # v1.7 — 2026-07-16 — MERGE: restored items lost to a v1.6 collision with a parallel
 #        edit — 46 live P&L standings (standings.py), 47 OHLC backfill (eod_backfill.py),
 #        48 EOD conductor (eod_conductor.py). Fable's 45 excursion report kept as-is.
@@ -56,6 +61,26 @@ INSTALL_DIR="~/options-trader"
 FEED_DB="~/options-trader/data/feed_store.db"
 VALIDATE_SH="$HOME/validate_regime.sh"
 HARVEST_DIR="$HOME/day_trader_pro/data/harvest"
+OPTIONS_DIR="$HOME/options-trader-v3"     # control-server options_trader_v3 checkout
+MARKET_BRIEF_DIR="$HOME/market-brief"     # control-server market-brief checkout
+
+# Open an interactive shell in a directory via tmux (a menu item can't cd the
+# parent shell). Inside tmux -> new window; otherwise attach-or-create a session.
+open_in_tmux() {
+  local dir="$1" name="$2"
+  dir="${dir/#\~/$HOME}"
+  if ! command -v tmux >/dev/null 2>&1; then
+    echo "  tmux not installed. cd manually:  cd $dir"; return 1
+  fi
+  if [ ! -d "$dir" ]; then echo "  Not a directory: $dir"; return 1; fi
+  if [ -n "${TMUX:-}" ]; then
+    tmux new-window -c "$dir" -n "$name"
+    echo "  opened tmux window '$name' in $dir"
+  else
+    echo "  attaching tmux session '$name' in $dir (Ctrl-b d to detach back here)"
+    tmux new-session -A -s "$name" -c "$dir"
+  fi
+}
 
 pause() { read -rp $'\nPress Enter to continue...' _; }
 
@@ -135,7 +160,7 @@ menu() {
   clear
   cat <<'EOF'
 ======================================================
-  day_trader_pro — devtools  v1.6
+  day_trader_pro — devtools  v1.8
 ======================================================
  ORCHESTRATION:
     1) Full spool-up (mock)       2) EOD aggregate (mock)
@@ -189,8 +214,13 @@ menu() {
    44) Backfill missing days      (fills diary gaps that have tape)
 
  EOD CONDUCTOR, BACKFILL & LIVE P&L:
-   46) Live P&L standings (read-only)     47) Backfill missing OHLC (auto-batched)
+   46) Live P&L standings (read-only)
+   47) Backfill missing OHLC (auto-batched)
    48) EOD conductor - full gated EOD (dry-run preview -> confirm -> run)
+
+ UTILITIES:
+   49) Fetch 1m OHLC CSV (ohlc_fetch.py; prompts symbol, default ^VIX)
+   50) Shell in options-trader-v3 (tmux)   51) Shell in market-brief (tmux)
 
     0) Exit
 ======================================================
@@ -249,6 +279,9 @@ EOF
     46) echo; read -rp "Push to Telegram too? [y/N]: " S; if [ "$S" = "y" ]; then $PY standings.py --send; else $PY standings.py; fi; pause ;;
     47) echo; read -rp "Backfill date (YYYY-MM-DD, ENTER=today): " D; D="${D:-$(date +%F)}"; read -rp "Batch size (ENTER=5): " B; B="${B:-5}"; echo; $PY eod_backfill.py --date "$D" --batch "$B" --dry-run; echo; read -rp "Proceed with LIVE backfill (wakes/stops boxes)? [y/N]: " GO; [ "$GO" = "y" ] && $PY eod_backfill.py --date "$D" --batch "$B"; pause ;;
     48) echo; read -rp "Backfill batch size (ENTER=5): " B; B="${B:-5}"; echo; $PY eod_conductor.py --batch "$B" --dry-run; echo; read -rp "Run the LIVE EOD conductor now (gate->harvest->P&L+stop->backfill->consolidate->diary)? [y/N]: " GO; [ "$GO" = "y" ] && $PY eod_conductor.py --batch "$B"; pause ;;
+    49) echo; read -rp "Symbol [^VIX]: " SY; SY="${SY:-^VIX}"; $PY tests/ohlc_fetch.py --symbol "$SY"; pause ;;
+    50) echo; open_in_tmux "$OPTIONS_DIR" opt-v3; pause ;;
+    51) echo; open_in_tmux "$MARKET_BRIEF_DIR" mkt-brief; pause ;;
     0)  exit 0 ;;
     *)  echo "Invalid selection."; sleep 1 ;;
   esac
