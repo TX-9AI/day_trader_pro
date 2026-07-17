@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
-# day_trader_pro/devtools.sh — v1.11
+# day_trader_pro/devtools.sh — v1.12
+# v1.12 — 2026-07-17 — REDO the items 50/51 fix. v1.11 over-engineered it
+#        (detached create + send-keys/switch-client) and nested tmux-in-tmux,
+#        dropping you back at a day_trader_pro prompt with [exited]. Correct fix:
+#        outside tmux, kill any STALE same-named session then plain
+#        `new-session -c <dir>` and attach; inside tmux, `new-window -c <dir>`.
+#        Verified in a sandbox: stale opt-v3 in the wrong dir no longer wins.
 # v1.11 — 2026-07-17 — fix items 50/51: open_in_tmux forced the working dir on
 #        create but not on attach — `new-session -A` re-attached a stale same-named
 #        session (opt-v3 was landing in day_trader_pro). Now creates detached with
@@ -79,21 +85,18 @@ open_in_tmux() {
     echo "  tmux not installed. cd manually:  cd $dir"; return 1
   fi
   if [ ! -d "$dir" ]; then echo "  Not a directory: $dir"; return 1; fi
-  # Force the working dir on BOTH paths. `new-session -A` (attach-if-exists)
-  # ignores -c when it attaches, so a stale same-named session created in
-  # another dir would drop you there (seen: opt-v3 landing in day_trader_pro).
-  # Create detached with -c when missing; if it already exists, cd it first.
-  if tmux has-session -t "$name" 2>/dev/null; then
-    tmux send-keys -t "$name" "cd '$dir'" C-m
-  else
-    tmux new-session -d -s "$name" -c "$dir"
-  fi
   if [ -n "${TMUX:-}" ]; then
-    echo "  switching to tmux session '$name' in $dir"
-    tmux switch-client -t "$name"
+    # Already inside tmux: a new window in the current session is correct and
+    # honors -c. Do NOT create/switch a same-named session (that targets self).
+    tmux new-window -c "$dir" -n "$name"
+    echo "  opened tmux window '$name' in $dir"
   else
+    # Outside tmux: kill any STALE same-named session first (an old one may sit
+    # in the wrong dir — that was the opt-v3 -> day_trader_pro bug), then create
+    # fresh in the right dir and attach. Plain new-session -c, no send-keys.
+    tmux kill-session -t "$name" 2>/dev/null
     echo "  attaching tmux session '$name' in $dir (Ctrl-b d to detach back here)"
-    tmux attach -t "$name"
+    tmux new-session -s "$name" -c "$dir"
   fi
 }
 
@@ -175,7 +178,7 @@ menu() {
   clear
   cat <<'EOF'
 ======================================================
-  day_trader_pro — devtools  v1.11
+  day_trader_pro — devtools  v1.12
 ======================================================
  ORCHESTRATION:
     1) Full spool-up (mock)       2) EOD aggregate (mock)
