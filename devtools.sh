@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# day_trader_pro/devtools.sh — v1.9
+# day_trader_pro/devtools.sh — v1.10
+# v1.10 — 2026-07-17 — shorten item 49 label (drop "ohlc_fetch.py") so it fits one line.
 # v1.9 — 2026-07-17 — relabel item 49 to "OHLC 21-day fetch from yfinance".
 # v1.8 — 2026-07-17 — NEW UTILITIES section: 49 fetch 1m OHLC CSV (tests/ohlc_fetch.py,
 #        prompts symbol, default ^VIX); 50/51 open a shell in the options-trader-v3 /
@@ -161,7 +162,7 @@ menu() {
   clear
   cat <<'EOF'
 ======================================================
-  day_trader_pro — devtools  v1.9
+  day_trader_pro — devtools  v1.10
 ======================================================
  ORCHESTRATION:
     1) Full spool-up (mock)       2) EOD aggregate (mock)
@@ -220,7 +221,7 @@ menu() {
    48) EOD conductor - full gated EOD (dry-run preview -> confirm -> run)
 
  UTILITIES:
-   49) OHLC 21-day fetch from yfinance (ohlc_fetch.py; prompts symbol, default ^VIX)
+   49) OHLC 21-day fetch from yfinance (prompts symbol, default ^VIX)
    50) Shell in options-trader-v3 (tmux)   51) Shell in market-brief (tmux)
 
     0) Exit
