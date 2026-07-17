@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
-# day_trader_pro/devtools.sh — v1.12
+# day_trader_pro/devtools.sh — v1.13
+# v1.13 — 2026-07-17 — items 50/51 REWORKED: a menu item can't hand the terminal
+#        to an interactive tmux while the read-loop owns it (every prior attempt
+#        [exited] or nested). Now they QUEUE `cd <repo> && source venv/bin/activate`
+#        into the tty input buffer (TIOCSTI) and exit the menu, so the command runs
+#        in YOUR shell — lands in the repo with its venv active. Prints the command
+#        as a fallback if TIOCSTI is kernel-restricted. Labels updated (no more tmux).
 # v1.12 — 2026-07-17 — REDO the items 50/51 fix. v1.11 over-engineered it
 #        (detached create + send-keys/switch-client) and nested tmux-in-tmux,
 #        dropping you back at a day_trader_pro prompt with [exited]. Correct fix:
@@ -79,25 +85,24 @@ MARKET_BRIEF_DIR="$HOME/market-brief"     # control-server market-brief checkout
 # Open an interactive shell in a directory via tmux (a menu item can't cd the
 # parent shell). Inside tmux -> new window; otherwise attach-or-create a session.
 open_in_tmux() {
+  # Drop the user into a repo (with its venv) in their OWN shell. A menu item
+  # can't hand the terminal to an interactive program while the devtools
+  # read-loop owns it (exec kills the menu; attach [exit]s). So instead we
+  # QUEUE the command into the tty input buffer via TIOCSTI, then exit the
+  # menu — the shell that launched devtools reads and runs it next. Falls back
+  # to printing the command if TIOCSTI is restricted (hardened kernels).
   local dir="$1" name="$2"
   dir="${dir/#\~/$HOME}"
-  if ! command -v tmux >/dev/null 2>&1; then
-    echo "  tmux not installed. cd manually:  cd $dir"; return 1
-  fi
   if [ ! -d "$dir" ]; then echo "  Not a directory: $dir"; return 1; fi
-  if [ -n "${TMUX:-}" ]; then
-    # Already inside tmux: a new window in the current session is correct and
-    # honors -c. Do NOT create/switch a same-named session (that targets self).
-    tmux new-window -c "$dir" -n "$name"
-    echo "  opened tmux window '$name' in $dir"
-  else
-    # Outside tmux: kill any STALE same-named session first (an old one may sit
-    # in the wrong dir — that was the opt-v3 -> day_trader_pro bug), then create
-    # fresh in the right dir and attach. Plain new-session -c, no send-keys.
-    tmux kill-session -t "$name" 2>/dev/null
-    echo "  attaching tmux session '$name' in $dir (Ctrl-b d to detach back here)"
-    tmux new-session -s "$name" -c "$dir"
+  local cmd="cd '$dir'"
+  [ -f "$dir/venv/bin/activate" ] && cmd="$cmd && source venv/bin/activate"
+  if perl -e 'require "sys/ioctl.ph"; ioctl(STDIN,&TIOCSTI,$_) for split "",$ARGV[0]' \
+       "$cmd"$'\n' 2>/dev/null; then
+    exit 0        # leave the menu so the queued command runs in the shell
   fi
+  echo "  auto-type unavailable on this kernel — run:"
+  echo "    $cmd"
+  return 1
 }
 
 pause() { read -rp $'\nPress Enter to continue...' _; }
@@ -178,7 +183,7 @@ menu() {
   clear
   cat <<'EOF'
 ======================================================
-  day_trader_pro — devtools  v1.12
+  day_trader_pro — devtools  v1.13
 ======================================================
  ORCHESTRATION:
     1) Full spool-up (mock)       2) EOD aggregate (mock)
@@ -238,7 +243,7 @@ menu() {
 
  UTILITIES:
    49) OHLC 21-day fetch from yfinance (prompts symbol, default ^VIX)
-   50) Shell in options-trader-v3 (tmux)   51) Shell in market-brief (tmux)
+   50) cd to options-trader-v3 (+venv)   51) cd to market-brief (+venv)
 
     0) Exit
 ======================================================
