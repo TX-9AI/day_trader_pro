@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
-# day_trader_pro/devtools.sh — v1.10
+# day_trader_pro/devtools.sh — v1.11
+# v1.11 — 2026-07-17 — fix items 50/51: open_in_tmux forced the working dir on
+#        create but not on attach — `new-session -A` re-attached a stale same-named
+#        session (opt-v3 was landing in day_trader_pro). Now creates detached with
+#        -c, or cd's an existing session, then attaches/switch-clients.
 # v1.10 — 2026-07-17 — shorten item 49 label (drop "ohlc_fetch.py") so it fits one line.
 # v1.9 — 2026-07-17 — relabel item 49 to "OHLC 21-day fetch from yfinance".
 # v1.8 — 2026-07-17 — NEW UTILITIES section: 49 fetch 1m OHLC CSV (tests/ohlc_fetch.py,
@@ -75,12 +79,21 @@ open_in_tmux() {
     echo "  tmux not installed. cd manually:  cd $dir"; return 1
   fi
   if [ ! -d "$dir" ]; then echo "  Not a directory: $dir"; return 1; fi
+  # Force the working dir on BOTH paths. `new-session -A` (attach-if-exists)
+  # ignores -c when it attaches, so a stale same-named session created in
+  # another dir would drop you there (seen: opt-v3 landing in day_trader_pro).
+  # Create detached with -c when missing; if it already exists, cd it first.
+  if tmux has-session -t "$name" 2>/dev/null; then
+    tmux send-keys -t "$name" "cd '$dir'" C-m
+  else
+    tmux new-session -d -s "$name" -c "$dir"
+  fi
   if [ -n "${TMUX:-}" ]; then
-    tmux new-window -c "$dir" -n "$name"
-    echo "  opened tmux window '$name' in $dir"
+    echo "  switching to tmux session '$name' in $dir"
+    tmux switch-client -t "$name"
   else
     echo "  attaching tmux session '$name' in $dir (Ctrl-b d to detach back here)"
-    tmux new-session -A -s "$name" -c "$dir"
+    tmux attach -t "$name"
   fi
 }
 
@@ -162,7 +175,7 @@ menu() {
   clear
   cat <<'EOF'
 ======================================================
-  day_trader_pro — devtools  v1.10
+  day_trader_pro — devtools  v1.11
 ======================================================
  ORCHESTRATION:
     1) Full spool-up (mock)       2) EOD aggregate (mock)
