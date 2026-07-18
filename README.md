@@ -81,6 +81,9 @@ fallback tool (`eod_summary.py --send`).
 | `market_calendar.py` | trading-day gate |
 | `check_iam.py` | verify the IAM role sees the fleet |
 | `devtools.sh` | interactive menu (mock spool-up, EOD, fleet, switch) |
+| `eod_conductor.py` | EOD chain conductor: backfill → consolidate → regime → excursion (always-run, warn-never-stop) |
+| `validate_regime.sh` | **control-side Layer-1 regime replay** — inert code library (`~/options-trader-v3`) + read-only replay over harvest's OHLC tape → per-day jsonl + rolling diary. Tape-only, never reads trades. |
+| `label_day.sh` | **EOD Tier-B session labeler (v1.0, 2026-07-18)** — tags each day's trend/sweep/pin/breakout symbols → `reports/session_labels.jsonl`; `--gaps` prints the Layer-1 Tier-B shopping list. The habit that fills the regime-truth tape gaps (see options_trader_v3 `docs/REPLAY_VALIDATION.md`). |
 
 On the **bot boxes** (options_trader_v2): `eod_summary.py` (writes the P&L file)
 and `notifications/alert_manager.py` (v1.3, adds the summary formatter).
@@ -113,6 +116,13 @@ python eod_report.py                     # pull + aggregate + stop all + one msg
 # safety / verify
 python check_iam.py                     # role can see the 29 boxes?
 python notify.py --test                  # Telegram works?
+
+# regime validation + Tier-B labeling (control-side, tape-only)
+./validate_regime.sh                    # replay TODAY's harvest tape -> diary
+./validate_regime.sh 2026-07-20         # a specific date
+./validate_regime.sh --diary            # view the rolling regime diary
+./label_day.sh                          # EOD: tag trend/sweep/pin/breakout symbols
+./label_day.sh --gaps                   # Tier-B shopping list (what tape is still missing)
 ```
 
 Add `--mock` to orchestrator / eod_report / fleet for a fully offline dry run
@@ -149,15 +159,41 @@ SSH pull settings (defaults usually fine): `DTP_SSH_KEY=~/.ssh/tx-9.pem`,
 
 ---
 
-## Current status (2026-07-05)
+## Current status (2026-07-18)
+
+**The daily lifecycle runs unattended and clean** — morning startup, report, staged
+small-group wake of non-trading boxes to pull candles, trading day, wind-down, and EOD
+aggregation all ran flawlessly (2026-07-18 milestone). The operational layer that took weeks
+to stabilize now "just runs," which is why attention has moved to strategy and regime work.
+
+**Control server's regime role (added since the v2-era status below):** the EOD conductor
+(`eod_conductor.py`, wired into the timer chain) runs backfill → consolidate → **regime replay**
+(`validate_regime.sh` / `nightly_regime.sh`, the Layer-1 diary) → excursion report, always-run
+and warn-never-stop. Harvest tape lands at `ohlc/<date>/`; regime products at `reports/`. The
+control checkout of the trading engine is `~/options-trader-v3` (inert library — no credentials,
+no live path), pulled fresh so the replay scores tape with the same engines the fleet runs (the
+parity invariant).
+
+**New 2026-07-18:** `label_day.sh` for the EOD Tier-B labeling habit — the manual step that
+tags each session's trend/sweep/pin/breakout symbols so the Layer-1 regime truths can finish
+validating (the tape gaps are the only thing between the confluence scorer and Layer-2
+calibration). Run it right after the conductor each day; `--gaps` shows what's still missing.
+
+**Protect the EOD chain:** it is finally flawless. The pending offline-replay **bookmark**
+(rolling HTF bar window, options_trader_v3 defect S) must be built and proven inert on the tester
+before it is grafted onto `validate_regime.sh` — do not disturb the working conductor to add it.
+
+---
+
+### Historical status (2026-07-05) — the v2-era autonomy checklist, now met
 
 **Working & proven:** IAM role, tag discovery, private-IP resolution, SSH reach
 (fleet ping 7/7), orchestrator wake, EOD aggregate + unified message, master
 switch, bot-side P&L writer (tested vs a real SQLite schema), emit -> selector
 chain (tested end to end).
 
-**Remaining to full autonomy:** deploy `eod_summary.py` + `alert_manager.py` to
-the bot boxes; wire `emit.py` into the brief; set `ANTHROPIC_API_KEY` +
+**Remaining to full autonomy (as of 2026-07-05; since achieved):** deploy `eod_summary.py` +
+`alert_manager.py` to the bot boxes; wire `emit.py` into the brief; set `ANTHROPIC_API_KEY` +
 `DTP_REPORT_JSON` in the orchestrator env; then add the systemd timers. Until the
 timers exist, the daily flow is run by hand — which is the intended way to watch
 the first live day.
