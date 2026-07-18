@@ -367,12 +367,10 @@ def run(only=None, assume_yes=False, dry=False, leave_running=False,
                     if (mode == "full" and leave_running)
                     else _MODE_DESC[mode])
             ans = input(f"This will {desc} {expected} servers.\n"
-                        f"Type the fleet size ({expected}) to proceed: ").strip()
-            if ans != str(expected):
-                _log("ABORT", "confirmation did not match; nothing done.")
+                        f"Press ENTER to proceed, or Ctrl-C to cancel: ").strip()
+            if ans.lower() in ("n", "no", "q", "quit", "cancel"):
+                _log("ABORT", "cancelled; nothing done.")
                 return 2
-            _log("ABORT", "confirmation did not match; nothing done.")
-            return 2
 
     live = not dry and not config.MOCK_AWS
     if live:
