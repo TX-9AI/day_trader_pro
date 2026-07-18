@@ -1,5 +1,16 @@
 #!/usr/bin/env bash
-# day_trader_pro/devtools.sh — v1.14
+# day_trader_pro/devtools.sh — v1.16
+# v1.16 — 2026-07-18 — NEW item 51: read-only fleet credential AUDIT
+#        (rotate_tokens.py --audit). Reports which of the 8 bootstrap vars are set
+#        per box — non-secrets in full, secrets as SET/MISSING + len/last-4
+#        fingerprint (never the value) — and flags TT_* drift between the bot and
+#        candle-feed units. No changes, no restarts.
+# v1.15 — 2026-07-18 — NEW item 50: fleet token/secret rotation (rotate_tokens.py).
+#        Prompts once per variable (TT client secret / refresh / account, Telegram
+#        token / chat ID, GitHub owner-repo / token); <ENTER> leaves a var unchanged.
+#        Secrets go straight to the boxes over SSH stdin — never written to a file on
+#        control, never passed as an argument. Updates the inline Environment= lines
+#        in optionsbot.service + candle-feed.service, daemon-reloads, restarts both.
 # v1.14 — 2026-07-17 — REMOVED items 50/51 (local cd-to-repo shortcuts) and the
 #        open_in_tmux helper. A menu item runs as a child process and cannot change
 #        the parent shell's directory; the workarounds (TIOCSTI keystroke inject —
@@ -220,6 +231,8 @@ menu() {
 
  UTILITIES:
    49) OHLC 21-day fetch from yfinance (prompts symbol, default ^VIX)
+   50) Rotate fleet tokens/secrets (prompts each; <ENTER>=no change; pushes to running boxes)
+   51) Audit fleet credentials (read-only; shows which vars are set, no values)
 
     0) Exit
 ======================================================
@@ -279,6 +292,10 @@ EOF
     47) echo; read -rp "Backfill date (YYYY-MM-DD, ENTER=today): " D; D="${D:-$(date +%F)}"; read -rp "Batch size (ENTER=5): " B; B="${B:-5}"; echo; $PY eod_backfill.py --date "$D" --batch "$B" --dry-run; echo; read -rp "Proceed with LIVE backfill (wakes/stops boxes)? [y/N]: " GO; [ "$GO" = "y" ] && $PY eod_backfill.py --date "$D" --batch "$B"; pause ;;
     48) echo; read -rp "Backfill batch size (ENTER=5): " B; B="${B:-5}"; echo; $PY eod_conductor.py --batch "$B" --dry-run; echo; read -rp "Run the LIVE EOD conductor now (gate->harvest->P&L+stop->backfill->consolidate->diary)? [y/N]: " GO; [ "$GO" = "y" ] && $PY eod_conductor.py --batch "$B"; pause ;;
     49) echo; read -rp "Symbol [^VIX]: " SY; SY="${SY:-^VIX}"; $PY tests/ohlc_fetch.py --symbol "$SY"; pause ;;
+    50) echo; read -rp "Rotate against a SUBSET of symbols? (ENTER=all running): " SUBSET; \
+        if [ -n "$SUBSET" ]; then $PY rotate_tokens.py --only $SUBSET; else $PY rotate_tokens.py; fi; pause ;;
+    51) echo; read -rp "Audit a SUBSET of symbols? (ENTER=all running): " SUBSET; \
+        if [ -n "$SUBSET" ]; then $PY rotate_tokens.py --audit --only $SUBSET; else $PY rotate_tokens.py --audit; fi; pause ;;
     0)  exit 0 ;;
     *)  echo "Invalid selection."; sleep 1 ;;
   esac
