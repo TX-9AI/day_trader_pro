@@ -316,8 +316,9 @@ def run(only=None, assume_yes=False, dry=False, leave_running=False,
         strict=False, force=False, mode="full"):
     expected = len(only or config.UNIVERSE)
     now = datetime.now(_ET)
+    mode_label = "full-leave-on" if (mode == "full" and leave_running) else mode
     tags = (" [DRY-RUN]" if dry else "") + (" [MOCK]" if config.MOCK_AWS else "")
-    _log("START", f"wake_and_bake [{mode}] — {expected} box(es) — "
+    _log("START", f"wake_and_bake [{mode_label}] — {expected} box(es) — "
                   f"{now:%Y-%m-%d %H:%M ET}{tags}")
 
     # RTH guard: only modes that RESTART services or STOP boxes are blocked
@@ -331,7 +332,12 @@ def run(only=None, assume_yes=False, dry=False, leave_running=False,
         return 2
 
     if not assume_yes and not dry:
-        ans = input(f"This will {_MODE_DESC[mode]} {expected} servers.\n"
+        # leave_running is a full run that SKIPS the final shutdown — say so,
+        # rather than showing the plain "full" banner that ends in STOP.
+        desc = ("WAKE, resync, restart, and LEAVE RUNNING (no stop)"
+                if (mode == "full" and leave_running)
+                else _MODE_DESC[mode])
+        ans = input(f"This will {desc} {expected} servers.\n"
                     f"Type the fleet size ({expected}) to proceed: ").strip()
         if ans != str(expected):
             _log("ABORT", "confirmation did not match; nothing done.")
@@ -339,7 +345,10 @@ def run(only=None, assume_yes=False, dry=False, leave_running=False,
 
     live = not dry and not config.MOCK_AWS
     if live:
-        notify.send(f"🛠️ wake_and_bake [{mode}]: {_MODE_DESC[mode]} — "
+        notify_desc = ("WAKE, resync, restart, and LEAVE RUNNING (no stop)"
+                       if (mode == "full" and leave_running)
+                       else _MODE_DESC[mode])
+        notify.send(f"🛠️ wake_and_bake [{mode_label}]: {notify_desc} — "
                     f"{expected} boxes…")
 
     mapping = _discover(only)
