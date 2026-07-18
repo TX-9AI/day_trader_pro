@@ -74,6 +74,7 @@ Changelog:
 """
 
 import argparse
+import os
 import sys
 import time
 from datetime import datetime, time as dtime
@@ -308,7 +309,7 @@ _MODE_DESC = {
     "full":     "WAKE, resync, restart, and STOP",
     "wake":     "WAKE (and leave running)",
     "bake":     "resync files (no restart, no wake, no stop)",
-    "shutdown": "pycache-clear, EOD report, and STOP",
+    "shutdown": "EMERGENCY STOP the fleet NOW (no EOD, no pycache, RTH-exempt)",
 }
 
 
@@ -325,21 +326,51 @@ def run(only=None, assume_yes=False, dry=False, leave_running=False,
     # during market hours — that's `full` and `shutdown`. `wake` only starts
     # boxes; `bake` only syncs files to disk (no restart), so both are safe to
     # run inside RTH and are exempt.
-    if mode in ("full", "shutdown") and _in_rth(now) and not force and not config.MOCK_AWS:
-        _log("ABORT", "inside RTH (09:30-16:00 ET). This mode restarts or stops "
-                      "the fleet — refusing. Re-run with --force only if you "
-                      "truly mean to.")
+    # RTH guard: blocks `full` during market hours because it RESTARTS bots
+    # (yanking them mid-position). `shutdown` is DELIBERATELY exempt — it is the
+    # emergency kill switch; stopping a misbehaving fleet during RTH is exactly
+    # when you need it. `wake`/`bake` only start boxes or sync files (no restart),
+    # so they're safe in RTH too.
+    if mode == "full" and _in_rth(now) and not force and not config.MOCK_AWS:
+        _log("ABORT", "inside RTH (09:30-16:00 ET). A full run restarts the "
+                      "fleet mid-session — refusing. Re-run with --force only if "
+                      "you truly mean to. (For an emergency stop, use shutdown.)")
         return 2
 
     if not assume_yes and not dry:
-        # leave_running is a full run that SKIPS the final shutdown — say so,
-        # rather than showing the plain "full" banner that ends in STOP.
-        desc = ("WAKE, resync, restart, and LEAVE RUNNING (no stop)"
-                if (mode == "full" and leave_running)
-                else _MODE_DESC[mode])
-        ans = input(f"This will {desc} {expected} servers.\n"
-                    f"Type the fleet size ({expected}) to proceed: ").strip()
-        if ans != str(expected):
+        if mode == "shutdown":
+            # Emergency kill switch — a deliberate "HALT" gate instead of the
+            # numeric confirm. This ALWAYS shows: reaching for the kill switch
+            # means you should see the position-abandonment warning every time.
+            in_rth = _in_rth(now) and not config.MOCK_AWS
+            live_fleet = os.environ.get("OT_PAPER_TRADING", "True") == "False"
+            print("\n" + "═" * 60)
+            print("⚠️  WARNING — Open Positions will no longer be managed!")
+            if in_rth and live_fleet:
+                print("    LIVE fleet, INSIDE market hours: any open 0DTE")
+                print("    positions are abandoned at the broker with NO exit")
+                print("    logic until you restart. This is irreversible for")
+                print("    the current session.")
+            elif in_rth:
+                print("    Paper fleet, inside market hours: boxes stop")
+                print("    mid-session (no real positions at risk).")
+            print(f"    Stopping {expected} box(es).")
+            print("═" * 60)
+            ans = input('Type "HALT" to proceed: ').strip()
+            if ans != "HALT":
+                _log("ABORT", "not confirmed (expected HALT); nothing done.")
+                return 2
+        else:
+            # leave_running is a full run that SKIPS the final shutdown — say so,
+            # rather than showing the plain "full" banner that ends in STOP.
+            desc = ("WAKE, resync, restart, and LEAVE RUNNING (no stop)"
+                    if (mode == "full" and leave_running)
+                    else _MODE_DESC[mode])
+            ans = input(f"This will {desc} {expected} servers.\n"
+                        f"Type the fleet size ({expected}) to proceed: ").strip()
+            if ans != str(expected):
+                _log("ABORT", "confirmation did not match; nothing done.")
+                return 2
             _log("ABORT", "confirmation did not match; nothing done.")
             return 2
 
@@ -382,17 +413,19 @@ def run(only=None, assume_yes=False, dry=False, leave_running=False,
             return rc_final  # finally-block still runs (no shutdown in wake mode)
 
         if mode == "shutdown":
-            # pycache clear first, then hand off to the EOD report, which
-            # pulls P&L and performs the orderly fleet stop itself.
-            bad = stage_pyclear(mapping, targets, dry)
-            if bad:
-                summary.append(f"pyclear bad: {', '.join(bad)}")
-                rc_final = 1
-            _log("EOD", "handing off to eod_report.run() for P&L rollup + stop…")
-            eod_rc = eod_report.run(dry_run=dry)
-            summary.append("EOD report + stop "
-                           + ("✅" if eod_rc == 0 else f"🚨 rc={eod_rc}"))
-            rc_final = rc_final or eod_rc
+            # EMERGENCY CLEAN STOP: no pycache, no EOD/P&L harvest — the fastest
+            # safe path to a fully stopped fleet. Use when something has gone
+            # wrong and you want every box DOWN now. RTH-exempt (see the guard
+            # below): killing the fleet is the correct move in a bad-state
+            # emergency regardless of market hours. The nightly eod_report timer
+            # owns P&L; this does not touch it. Changed 2026-07-18.
+            if stage_shutdown(mapping, dry):
+                if not dry:
+                    summary.append("fleet stopped (emergency, no EOD/pyclear)")
+            elif not dry:
+                _log("SHUTDOWN", "🚨 some boxes did NOT reach 'stopped' — CHECK EC2 CONSOLE")
+                summary.append("shutdown incomplete")
+                rc_final = rc_final or 1
             return rc_final
 
         # 3 BAKE — full + bake-only
@@ -490,7 +523,7 @@ def main(argv):
     modes.add_argument("--bake-only", action="store_true",
                        help="fleet already awake: PING + git sync + restart; no wake/stop")
     modes.add_argument("--shutdown-only", action="store_true",
-                       help="pycache clear, then EOD report (P&L rollup + fleet stop)")
+                       help="pycache clear, then a clean fleet stop (NO EOD/P&L harvest)")
     args = p.parse_args(argv[1:])
 
     if args.mock:

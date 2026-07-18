@@ -198,7 +198,7 @@ menu() {
  MAINTENANCE (wake_and_bake):
    22) Dry-run                   23) FULL (wake->bake->restart->STOP)
    24) Wake (one/all/some)       25) Bake only (sync, no restart - RTH-safe)
-   26) Leave on (skip shutdown)  27) Shutdown only (EOD + stop)
+   26) Leave on (skip shutdown)  27) EMERGENCY STOP (no EOD/pycache, RTH-exempt)
 
  REPOINT (migrate fleet -> new repo):
    28) Check only                29) FULL
