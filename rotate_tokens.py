@@ -54,6 +54,7 @@ import ssh_util       # ssh_run(ip, command, timeout)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REMOTE_SCRIPT = os.path.join(HERE, "rotate_env_remote.sh")
+VERIFY_SCRIPT = os.path.join(HERE, "verify_creds_remote.py")
 
 # (prompt label, env var name, secret?) — order shown to the operator.
 FIELDS = [
@@ -143,6 +144,65 @@ def run_audit(running, skipped, script_b64):
     return 0
 
 
+def _verify_flags_for(rotated_vars):
+    """Given the set of vars that were rotated, return the --skip-* flags so
+    verify only exercises the credential groups that actually changed. If
+    rotated_vars is None (standalone --verify), check everything."""
+    if rotated_vars is None:
+        return []
+    tt = {"TT_CLIENT_SECRET", "TT_REFRESH_TOKEN", "TT_ACCOUNT_NUMBER"}
+    tg = {"TELEGRAM_TOKEN", "TELEGRAM_CHAT_ID"}
+    gh = {"GITHUB_TOKEN", "GITHUB_REPO"}
+    flags = []
+    if not (set(rotated_vars) & tt): flags.append("--skip-tt")
+    if not (set(rotated_vars) & tg): flags.append("--skip-telegram")
+    if not (set(rotated_vars) & gh): flags.append("--skip-github")
+    return flags
+
+
+def verify_box(symbol, ip, verify_b64, flags):
+    """Ship verify_creds_remote.py (base64) to the box, run it under the box's
+    venv python so the tastytrade SDK is importable, return its report."""
+    flag_str = " ".join(flags)
+    remote_cmd = (
+        "set -e; "
+        "d=$(mktemp --suffix=.py); "
+        f"echo {verify_b64} | base64 -d > \"$d\"; "
+        # Prefer the box's venv python (has tastytrade); fall back to python3.
+        "PY=~/options-trader/venv/bin/python; [ -x \"$PY\" ] || PY=python3; "
+        f"\"$PY\" \"$d\" {flag_str}; "
+        "rc=$?; rm -f \"$d\"; exit $rc"
+    )
+    rc, out, err = ssh_util.ssh_run(ip, remote_cmd, timeout=90)
+    return rc, out.strip(), err.strip()
+
+
+def run_verify(running, skipped, verify_b64, rotated_vars=None, header=True):
+    """Functional credential verification on each running box. Echoes per-box
+    SUCCESS/FAIL. rotated_vars narrows the checks; None = check all."""
+    flags = _verify_flags_for(rotated_vars)
+    if header:
+        scope = ("rotated creds" if rotated_vars is not None else "ALL creds")
+        print(f"\n=== Functional credential verification ({scope}) — "
+              f"live checks, read-only ===")
+    ok = fail = 0
+    for symbol, ip, _ in running:
+        rc, out, err = verify_box(symbol, ip, verify_b64, flags)
+        passed = (rc == 0 and "VERIFY: SUCCESS" in out)
+        marker = "✅" if passed else "🚨"
+        print(f"── {marker} {symbol} ({ip}) ──")
+        # indent the remote report
+        for ln in (out or err or "(no output)").splitlines():
+            print(f"    {ln}")
+        if passed:
+            ok += 1
+        else:
+            fail += 1
+    print(f"\nVerify: {ok} SUCCESS, {fail} FAIL"
+          + (f", {len(skipped)} skipped (not running)" if skipped else ""))
+    return 0 if fail == 0 else 1
+
+
 def push_to_box(symbol, ip, script_b64, payload):
     """Ship the updater (base64, decoded remotely) and feed the KEY=VALUE
     payload to it on stdin — all in one SSH invocation. The secret payload is
@@ -188,6 +248,11 @@ def main(argv):
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--audit", action="store_true",
                     help="read-only: report which vars are set per box, no changes")
+    ap.add_argument("--verify", action="store_true",
+                    help="functional check: prove creds actually WORK on each box "
+                         "(TT auth+balances, Telegram send, GitHub API). Read-only.")
+    ap.add_argument("--no-verify", action="store_true",
+                    help="skip the automatic post-rotation functional verify")
     args = ap.parse_args(argv)
 
     if not os.path.exists(REMOTE_SCRIPT):
@@ -195,6 +260,10 @@ def main(argv):
         return 1
     with open(REMOTE_SCRIPT, "rb") as fh:
         script_b64 = base64.b64encode(fh.read()).decode()
+    verify_b64 = None
+    if os.path.exists(VERIFY_SCRIPT):
+        with open(VERIFY_SCRIPT, "rb") as fh:
+            verify_b64 = base64.b64encode(fh.read()).decode()
 
     fleet_rows = fleet.get_fleet(args.only)
     running = [(s, ip, st) for s, ip, st in fleet_rows if st == "running" and ip]
@@ -211,12 +280,20 @@ def main(argv):
     if args.audit:
         return run_audit(running, skipped, script_b64)
 
+    # Standalone functional verify — read-only, checks ALL creds, no rotation.
+    if args.verify:
+        if verify_b64 is None:
+            print(f"ERROR: verify script not found at {VERIFY_SCRIPT}")
+            return 1
+        return run_verify(running, skipped, verify_b64, rotated_vars=None)
+
     values = prompt_values()
     if not confirm(values, running, args.dry_run):
         print("Aborted — nothing pushed.")
         return 0
 
     payload = build_stdin_payload(values)
+    rotated_vars = list(values)   # remember what changed BEFORE we scrub
 
     print("\n--- Pushing ---")
     ok = fail = 0
@@ -240,6 +317,18 @@ def main(argv):
               + ", ".join(f"{s}({st})" for s, st in skipped))
     if fail:
         print("  Re-run against the failed symbols with --only once reachable.")
+
+    # Auto functional-verify the boxes that took the push — proves the new
+    # creds actually WORK, not just that they landed. Narrowed to the groups
+    # that were rotated. Skip with --no-verify.
+    pushed = [(s, ip, st) for s, ip, st in running]  # all attempted
+    if not args.no_verify and verify_b64 and pushed and rotated_vars:
+        print("\n--- Auto-verify (functional) ---")
+        run_verify(pushed, skipped, verify_b64,
+                   rotated_vars=rotated_vars, header=False)
+    elif verify_b64 is None:
+        print("  (verify script absent — skipping functional check)")
+
     return 0 if fail == 0 else 1
 
 

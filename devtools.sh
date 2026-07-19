@@ -1,5 +1,12 @@
 #!/usr/bin/env bash
-# day_trader_pro/devtools.sh — v1.16
+# day_trader_pro/devtools.sh — v1.17
+# v1.17 — 2026-07-18 — NEW item 52: functional credential VERIFY
+#        (rotate_tokens.py --verify). Proves the landed creds actually WORK on
+#        each running box — Tastytrade OAuth handshake + read-only balances +
+#        account-number match (mirrors the bot's auth path), Telegram getMe +
+#        sendMessage, GitHub repo API. Read-only, no trades. Also runs
+#        automatically after item 50 rotation (narrowed to the rotated groups;
+#        suppress with --no-verify). Each box echoes SUCCESS/FAIL.
 # v1.16 — 2026-07-18 — NEW item 51: read-only fleet credential AUDIT
 #        (rotate_tokens.py --audit). Reports which of the 8 bootstrap vars are set
 #        per box — non-secrets in full, secrets as SET/MISSING + len/last-4
@@ -234,6 +241,7 @@ menu() {
    49) OHLC 21-day fetch from yfinance (prompts symbol, default ^VIX)
    50) Rotate fleet tokens/secrets (prompts each; <ENTER>=no change; pushes to running boxes)
    51) Audit fleet credentials (read-only; shows which vars are set, no values)
+   52) Verify fleet credentials WORK (TT SDK, Telegram, GitHub)
 
     0) Exit
 ======================================================
@@ -297,6 +305,8 @@ EOF
         if [ -n "$SUBSET" ]; then $PY rotate_tokens.py --only $SUBSET; else $PY rotate_tokens.py; fi; pause ;;
     51) echo; read -rp "Audit a SUBSET of symbols? (ENTER=all running): " SUBSET; \
         if [ -n "$SUBSET" ]; then $PY rotate_tokens.py --audit --only $SUBSET; else $PY rotate_tokens.py --audit; fi; pause ;;
+    52) echo; read -rp "Verify a SUBSET of symbols? (ENTER=all running): " SUBSET; \
+        if [ -n "$SUBSET" ]; then $PY rotate_tokens.py --verify --only $SUBSET; else $PY rotate_tokens.py --verify; fi; pause ;;
     0)  exit 0 ;;
     *)  echo "Invalid selection."; sleep 1 ;;
   esac

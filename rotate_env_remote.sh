@@ -1,10 +1,22 @@
 #!/usr/bin/env bash
 # rotate_env_remote.sh — RUNS ON EACH TRADING BOX (pushed + executed by the
-# control-side rotate_tokens.py). v1.1 — 2026-07-18.
+# control-side rotate_tokens.py). LIVES IN ~/day_trader_pro on control; shipped
+# to a box over SSH, run once from a temp file, deleted. v1.2 — 2026-07-19.
+#
+# CHANGELOG:
+#   v1.2 (2026-07-19) — replace_var now ADDS a var that is absent from the unit
+#                       (inserted after [Service]) instead of silently skipping
+#                       it. The v1.1 version only REPLACED an existing
+#                       Environment= line, so a box missing a var entirely (e.g.
+#                       AAPL had no GITHUB_REPO/GITHUB_TOKEN) received nothing
+#                       while the run still reported "rotated=N OK" — a false
+#                       success. Now a missing var is genuinely added.
+#   v1.1 (2026-07-18) — added --audit mode.
+#   v1.0 (2026-07-18) — initial: rotate inline Environment= secrets, restart.
 #
 # TWO MODES:
-#   (default, reads stdin)  rotate: update the Environment= lines for the vars
-#                           supplied as KEY=VALUE on stdin; restart services.
+#   (default, reads stdin)  rotate: update/add the Environment= lines for the
+#                           vars supplied as KEY=VALUE on stdin; restart services.
 #   --audit                 report which vars are set (non-secrets shown in full;
 #                           secrets shown as SET/MISSING + len/last-4 fingerprint,
 #                           never the value) and flag bot/feed cred drift.
@@ -99,25 +111,50 @@ fi
 replace_var() {
     local file="$1" var="$2" value="$3"
     [ -f "$file" ] || { echo "SKIP: $file absent"; return 0; }
-    # Only act if the unit actually declares this var.
-    if ! grep -q "^Environment=${var}=" "$file"; then
-        return 0
-    fi
     local tmp; tmp="$(mktemp)"
+    local src; src="$(mktemp)"
+    # Replace the existing Environment=<var>= line if present; if it is ABSENT,
+    # ADD it inside the [Service] section. (v1.1 only REPLACED an existing line,
+    # so a box missing a var got nothing while the run reported OK — the AAPL
+    # bug.) The unit is root-owned mode 600, so read it via `sudo cat` into a
+    # readable temp file that python then opens. We CANNOT pipe the unit into
+    # `python3 - <<HEREDOC` — the pipe and the heredoc collide on stdin and
+    # python sees an empty unit (that collision truncated the v1.2 attempt).
+    sudo cat "$file" > "$src" 2>/dev/null
+    if [ ! -s "$src" ]; then
+        echo "ABORT: could not read $file (sudo cat empty); leaving original"
+        rm -f "$tmp" "$src"
+        return 1
+    fi
     # shellcheck disable=SC2016
-    RV_VALUE="$value" python3 - "$file" "$var" > "$tmp" <<'PYEOF'
+    RV_VALUE="$value" python3 - "$src" "$var" > "$tmp" <<'PYEOF'
 import os, sys
 path, var = sys.argv[1], sys.argv[2]
 new = os.environ["RV_VALUE"]
-out = []
 prefix = f"Environment={var}="
-for ln in open(path):
+lines = open(path).readlines()
+replaced = False
+out = []
+for ln in lines:
     if ln.startswith(prefix):
         out.append(f"{prefix}{new}\n")
+        replaced = True
     else:
         out.append(ln)
+if not replaced:
+    inserted = False
+    final = []
+    for ln in out:
+        final.append(ln)
+        if ln.strip() == "[Service]" and not inserted:
+            final.append(f"{prefix}{new}\n")
+            inserted = True
+    if not inserted:
+        final.append(f"{prefix}{new}\n")
+    out = final
 sys.stdout.write("".join(out))
 PYEOF
+    rm -f "$src"
     # Safety: refuse to install a suspiciously small result.
     if [ ! -s "$tmp" ] || [ "$(wc -l < "$tmp")" -lt 5 ]; then
         echo "ABORT: rewrite of $file looked truncated; leaving original"
