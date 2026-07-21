@@ -1,4 +1,7 @@
-# day_trader_pro/orchestrator.py — v0.2.0
+# day_trader_pro/orchestrator.py — v0.2.1
+# v0.2.1 (2026-07-21) — wake message now shows each discretionary box's reporter rank
+#   and signal strength/score, plus a 'just missed' near-miss list below the
+#   cutoff, to support tuning MAX_DISCRETIONARY from observed signal spread.
 """
 Morning spool-up. Runs on the control server on a pre-market systemd timer
 (dtp-morning.timer, ~09:15 ET) and wakes the daily baseline fleet so it's up
@@ -97,7 +100,7 @@ def run(dry_run=False, gate=True):
         _push_brief_flags(resolved, reached, brief_strength)
 
     # 5. Morning ack (always sends)
-    notify.send(_format_ack(wake_list, baseline, resolved, missing, reached, dry_run))
+    notify.send(_format_ack(wake_list, baseline, resolved, missing, reached, dry_run, sel))
 
     if not_running:
         notify.send("🚨 *day_trader_pro* these instances did NOT reach running "
@@ -123,7 +126,7 @@ def _load_selection():
     except Exception as exc:  # noqa: BLE001
         return {"final": list(config.ALWAYS_ON), "discretionary": [],
                 "always_on": list(config.ALWAYS_ON), "brief_strength": {},
-                "rationale": {}, "confidence": {}, "fallback": True,
+                "ranked": [], "rationale": {}, "confidence": {}, "fallback": True,
                 "error": f"{type(exc).__name__}: {exc}"}
 
 
@@ -161,21 +164,57 @@ def _short(iid):
     return iid[-5:] if iid else "?????"
 
 
-def _format_ack(wake_list, baseline, resolved, missing, reached, dry_run):
-    """Explicit per-server morning message: which boxes, which IDs, what state."""
+def _fmt_score(r, strength=None):
+    """Compact 'str +0.92 sc 88' from a ranked row (+ optional brief strength)."""
+    parts = []
+    st = r.get("strength") if r.get("strength") is not None else strength
+    if st is not None:
+        parts.append(f"str {st:+.2f}")
+    if r.get("score") is not None:
+        parts.append(f"sc {r['score']}")
+    return " ".join(parts) if parts else "n/a"
+
+
+def _format_ack(wake_list, baseline, resolved, missing, reached, dry_run, sel):
+    """Per-server morning message with WHY each box was selected: its reporter
+    rank and signal strength/score, plus the near-miss names just below the
+    cutoff — so the discretionary cutoff can be tuned from what you observe."""
     verb = "Would wake" if dry_run else "Woke"
-    n_disc = len([s for s in wake_list if s not in baseline])
-    lines = [f"*day_trader_pro — morning wake (2 baseline + {n_disc} discretionary)*"]
+    disc = [s for s in wake_list if s not in baseline]
+    lines = [f"*day_trader_pro — morning wake (2 baseline + {len(disc)} discretionary)*"]
     if dry_run:
         lines.append("_(dry run — nothing was actually started)_")
     lines.append(f"*{verb} {len(resolved)} server(s):*")
-    for s in wake_list:
+
+    ranked = sel.get("ranked", [])
+    rank_by = {r["symbol"]: r for r in ranked}
+    strength = sel.get("brief_strength", {})
+
+    # Baseline (floor) first
+    for s in baseline:
+        if s in resolved:
+            iid = resolved[s]
+            mark = "•" if dry_run else ("✅" if reached.get(iid) else "🚨")
+            lines.append(f"  {mark} {s} [floor] `{_short(iid)}`")
+
+    # Discretionary, in wake order, each with rank + strength/score
+    for s in disc:
         if s not in resolved:
             continue
         iid = resolved[s]
         mark = "•" if dry_run else ("✅" if reached.get(iid) else "🚨")
-        tag = "floor" if s in baseline else "disc"
-        lines.append(f"  {mark} {s} [{tag}] `{_short(iid)}`")
+        r = rank_by.get(s, {})
+        rk = f"#{r['rank']}" if r.get("rank") else "#?"
+        lines.append(f"  {mark} {s} [{rk} {_fmt_score(r, strength.get(s))}] `{_short(iid)}`")
+
+    # Near-miss: highest-ranked names that did NOT make the cut — the boundary
+    # you use to judge whether the discretionary count is right.
+    misses = [r for r in ranked if not r.get("selected")][:6]
+    if misses:
+        lines.append("*— cutoff — just missed:*")
+        for r in misses:
+            lines.append(f"  · {r['symbol']} [#{r['rank']} {_fmt_score(r)}]")
+
     if missing:
         lines.append(f"⚠️ Unresolved (no live instance): {', '.join(missing)}")
     return "\n".join(lines)

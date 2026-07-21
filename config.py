@@ -1,4 +1,4 @@
-# day_trader_pro/config.py — v0.1.3
+# day_trader_pro/config.py — v0.1.4
 """
 Central configuration for the day_trader_pro control server (orchestrator).
 
@@ -46,8 +46,8 @@ REPORTER_TAG = os.environ.get("DTP_REPORTER_TAG", "1-REPORTER")
 ALWAYS_ON = ["SPX", "QQQ"]
 # Max additional discretionary picks the model is allowed to wake.
 # Total running fleet is therefore between len(ALWAYS_ON) and
-# len(ALWAYS_ON) + MAX_DISCRETIONARY  (i.e. exactly 10: 2 baseline + 8).
-MAX_DISCRETIONARY = 8
+# len(ALWAYS_ON) + MAX_DISCRETIONARY  (i.e. exactly 15: 2 baseline + 13).
+MAX_DISCRETIONARY = 13
 
 # --------------------------------------------------------------------------
 # Anthropic model used for the selection call

@@ -19,3 +19,4 @@ data/mock_state.json
 data/report.json
 data/selection_log.jsonl
 *.patch
+*.csv

@@ -1,4 +1,8 @@
-# day_trader_pro/selector.py — v0.2.0
+# day_trader_pro/selector.py — v0.2.1
+# v0.2.1 (2026-07-21) — add ranked[] to select(): the full discretionary universe as
+#   the reporter ranked it (symbol, strength, score, rank, selected). Powers
+#   the wake message's per-pick scores and near-miss cutoff view. No change to
+#   selection logic itself.
 # v0.2.0 (2026-07-15) — EXACTLY-N discretionary (was up-to-N) + consume the
 #   brief's move_ranked sidecar. The reporter (market_brief_v1 emit v1.3.0)
 #   now pre-ranks the top names by open-move probability; the model's job is
@@ -174,11 +178,35 @@ def select(report):
     brief_strength = {s: round(float(strength_by_sym.get(s, 0.3)), 3) for s in disc}
 
     final = list(config.ALWAYS_ON) + [s for s in disc if s not in config.ALWAYS_ON]
+
+    # Ranked view (for wake-message transparency + cutoff tuning): the full
+    # discretionary universe as the reporter ranked it, each with signed
+    # strength, composite score, rank, and whether it made the cut. Lets you
+    # see exactly where the MAX_DISCRETIONARY line fell and what just missed.
+    ranked, seen_r = [], set()
+    for r in report.get("move_ranked", []):
+        t = r.get("ticker")
+        if t in universe and t not in seen_r:
+            ranked.append({"symbol": t,
+                           "strength": round(float(r.get("strength", 0.0)), 3),
+                           "score": report.get("scores", {}).get(t),
+                           "selected": t in disc})
+            seen_r.add(t)
+    for s, v in sorted(report.get("scores", {}).items(),
+                       key=lambda kv: (kv[1] is not None, kv[1]), reverse=True):
+        if s in universe and s not in seen_r:
+            ranked.append({"symbol": s, "strength": None, "score": v,
+                           "selected": s in disc})
+            seen_r.add(s)
+    for i, row in enumerate(ranked):
+        row["rank"] = i + 1
+
     return {
         "final": final,
         "discretionary": disc,
         "always_on": list(config.ALWAYS_ON),
         "brief_strength": brief_strength,
+        "ranked": ranked,
         "rationale": rationale,
         "confidence": confidence,
         "fallback": fallback,
