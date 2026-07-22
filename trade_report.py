@@ -1,42 +1,36 @@
-# day_trader_pro/trade_report.py — v1.1
+# day_trader_pro/trade_report.py — v1.2
+# v1.2 — 2026-07-22 — Machine-readable artifact + new dimensions. Writes
+#        reports/trade_report_<last-session>.json containing every bucket with
+#        full stats plus a FINDINGS block (best/worst regime, strategy, setup,
+#        symbol, hour, weekday, exit reason, regime x strategy, and the single
+#        best/worst trade). New display dimensions: by symbol, by hour (ET), by
+#        weekday, by session phase, by session date. Best/worst claims only
+#        consider buckets with n >= --min-n so a 1-trade bucket cannot win.
 # v1.1 — 2026-07-22 — CRITICAL FIX: de-duplicate by trade_id. harvest.py scp's
 #        each box's ENTIRE trades.db and consolidate_trades.py does a bare
 #        SELECT * with no date filter, so every fleet_trades_<date>.json holds
 #        that box's FULL history — pooling N bundles counted each trade up to N
-#        times (1195 rows for what was really ~200 trades). Now keyed on
-#        trade_id, preferring the most complete row. Session dates are derived
-#        from entry_time, not the bundle filename. Also normalises exit_reason
-#        (strips the ' pnl=...' suffix, matching excursion_report.norm_reason)
-#        which was exploding one reason into dozens of thin buckets.
+#        times. Now keyed on trade_id; session dates derived from entry_time.
+#        Also normalises exit_reason (strips ' pnl=...'), matching
+#        excursion_report.norm_reason.
+# v1.0 — 2026-07-22 — NEW. Cross-day trade breakdown ranked by net.
 """
 Cross-day trade breakdown — what actually made and lost money, ranked.
 
-Read-only, offline. Pools every closed trade from the fleet_trades_<date>.json
-bundles that consolidate_trades.py already writes, then ranks performance across
-the dimensions that matter:
+Read-only. Pools every closed trade from the fleet_trades_<date>.json bundles
+consolidate_trades.py writes, de-duplicates, and ranks across every dimension
+that matters. Prints a summary and writes a data-rich JSON for further analysis
+(or to hand to Claude).
 
-    by regime          which market states pay
-    by strategy        which trade types pay
-    by setup_type      which setups pay
-    by setup_grade     does the grade actually predict outcome
-    by exit_reason     how trades end, and what each ending costs
-    regime x strategy  the cross-cut that matters most: a strategy is rarely
-                       good or bad outright, it is good or bad IN A REGIME
-
-Also derives HOLD DURATION (exit_time - entry_time), which is computed nowhere
-else, and pairs it with the MFE/MAE telemetry (max/min_premium_seen) so exit
-behaviour is visible: did winners get room to run, were losers cut before or
-after they went against you.
-
-Small buckets are flagged, not hidden -- a 3-trade bucket with a great win rate
-is noise, and the report says so rather than letting it look like signal.
+Timestamps in the DB are UTC ISO (ts_for_db); hour-of-day and weekday are
+converted to ET so "the 10 o'clock hour" means the market's 10 o'clock.
 
 Usage:
     python trade_report.py                     # all banked sessions
-    python trade_report.py --since 2026-07-14  # from a date forward
-    python trade_report.py --min-n 10          # flag threshold (default 8)
-    python trade_report.py --live              # live trades only (default: all)
-    python trade_report.py --paper             # paper trades only
+    python trade_report.py --since 2026-07-14
+    python trade_report.py --min-n 10          # thin-bucket threshold (default 8)
+    python trade_report.py --live | --paper
+    python trade_report.py --no-json           # display only
 """
 
 from __future__ import annotations
@@ -48,68 +42,32 @@ import os
 import statistics
 import sys
 from collections import defaultdict
-from datetime import datetime
-from typing import Any, Dict, List, Optional
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional, Tuple
 
 try:
     import config
     REPORTS_DIR = getattr(config, "REPORTS_DIR",
                           os.path.expanduser("~/day_trader_pro/reports"))
-except Exception:                                     # standalone use
+except Exception:                                     # standalone
     REPORTS_DIR = os.path.expanduser("~/day_trader_pro/reports")
 
 BUNDLE_GLOB = os.path.join(REPORTS_DIR, "fleet_trades_*.json")
 
+try:
+    from zoneinfo import ZoneInfo
+    _ET = ZoneInfo("America/New_York")
+except Exception:                                     # no tzdata
+    _ET = None
 
-# ── loading ──────────────────────────────────────────────────────────────────
-def load_trades(since: Optional[str], mode: Optional[str]) -> tuple:
-    files = sorted(glob.glob(BUNDLE_GLOB))
-    seen: Dict[str, dict] = {}          # trade_id -> best row (dedupe)
-    raw = 0
-    for path in files:
-        date = os.path.basename(path)[len("fleet_trades_"):-len(".json")]
-        if since and date < since:
-            continue
-        try:
-            with open(path) as fh:
-                bundle = json.load(fh)
-        except Exception as exc:                       # noqa: BLE001
-            print(f"  ! skipped {os.path.basename(path)}: {exc}", file=sys.stderr)
-            continue
-        rows = bundle.get("trades") or []
-        closed = [r for r in rows if (r.get("status") or "") == "closed"]
-        if mode == "live":
-            closed = [r for r in closed if not _truthy(r.get("paper_trade"))]
-        elif mode == "paper":
-            closed = [r for r in closed if _truthy(r.get("paper_trade"))]
-        raw += len(closed)
-        for r in closed:
-            tid = str(r.get("trade_id") or "")
-            if not tid:                                  # no id -> synth a key
-                tid = f"{r.get('box')}|{r.get('entry_time')}|{r.get('strike')}"
-            # keep the row with the most populated fields (latest harvest wins)
-            prev = seen.get(tid)
-            if prev is None or sum(1 for v in r.values() if v not in (None, "")) > \
-                               sum(1 for v in prev.values() if v not in (None, "")):
-                seen[tid] = r
-
-    trades = list(seen.values())
-    # the trade's own session comes from entry_time, NOT the bundle filename
-    by_day: Dict[str, int] = defaultdict(int)
-    for r in trades:
-        d = str(r.get("entry_time") or "")[:10] or "(no date)"
-        r["_date"] = d
-        by_day[d] += 1
-    if since:
-        trades = [r for r in trades if r["_date"] >= since]
-        by_day = {d: n for d, n in by_day.items() if d >= since}
-    used = sorted(by_day.items())
-    return trades, used, raw
+_DOW = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday",
+        "Saturday", "Sunday"]
 
 
+# ── helpers ──────────────────────────────────────────────────────────────────
 def norm_reason(reason) -> str:
-    """Match excursion_report.norm_reason — exit_reason carries a ' pnl=...'
-    suffix, which would otherwise split one reason into dozens of buckets."""
+    """exit_reason carries a ' pnl=...' suffix — strip it, or one reason
+    shatters into dozens of thin buckets. Matches excursion_report."""
     r = (reason or "unknown").strip()
     if r.startswith("hard_close"):
         return "hard_close"
@@ -118,7 +76,7 @@ def norm_reason(reason) -> str:
 
 def _truthy(v) -> bool:
     if isinstance(v, str):
-        return v.strip().lower() in ("1", "true", "yes", "t")
+        return v.strip().lower() in ("1", "true", "yes", "t", "1.0")
     return bool(v)
 
 
@@ -131,178 +89,332 @@ def _f(v) -> Optional[float]:
         return None
 
 
-def hold_minutes(row: Dict[str, Any]) -> Optional[float]:
-    """exit_time - entry_time in minutes. Timestamps are UTC ISO from ts_for_db()."""
-    a, b = row.get("entry_time"), row.get("exit_time")
-    if not a or not b:
+def _dt(v) -> Optional[datetime]:
+    if not v:
         return None
     try:
-        t0 = datetime.fromisoformat(str(a).replace("Z", "+00:00"))
-        t1 = datetime.fromisoformat(str(b).replace("Z", "+00:00"))
-        m = (t1 - t0).total_seconds() / 60.0
-        return m if m >= 0 else None
+        d = datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+        return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
     except (TypeError, ValueError):
         return None
 
 
+def to_et(v) -> Optional[datetime]:
+    d = _dt(v)
+    if d is None:
+        return None
+    return d.astimezone(_ET) if _ET else d - timedelta(hours=4)
+
+
+def hold_minutes(row) -> Optional[float]:
+    a, b = _dt(row.get("entry_time")), _dt(row.get("exit_time"))
+    if not a or not b:
+        return None
+    m = (b - a).total_seconds() / 60.0
+    return m if m >= 0 else None
+
+
+def session_phase(et: Optional[datetime]) -> str:
+    if et is None:
+        return "(unknown)"
+    m = et.hour * 60 + et.minute
+    if m < 10 * 60:
+        return "1 open 09:30-10:00"
+    if m < 11 * 60:
+        return "2 morning 10:00-11:00"
+    if m < 14 * 60:
+        return "3 midday 11:00-14:00"
+    if m < 15 * 60 + 30:
+        return "4 afternoon 14:00-15:30"
+    return "5 close 15:30-16:00"
+
+
+# ── loading ──────────────────────────────────────────────────────────────────
+def load_trades(since, mode) -> Tuple[List[dict], List[tuple], int]:
+    seen: Dict[str, dict] = {}
+    raw = 0
+    for path in sorted(glob.glob(BUNDLE_GLOB)):
+        try:
+            with open(path) as fh:
+                bundle = json.load(fh)
+        except Exception as exc:                       # noqa: BLE001
+            print(f"  ! skipped {os.path.basename(path)}: {exc}", file=sys.stderr)
+            continue
+        rows = [r for r in (bundle.get("trades") or [])
+                if (r.get("status") or "") == "closed"]
+        if mode == "live":
+            rows = [r for r in rows if not _truthy(r.get("paper_trade"))]
+        elif mode == "paper":
+            rows = [r for r in rows if _truthy(r.get("paper_trade"))]
+        raw += len(rows)
+        for r in rows:
+            tid = str(r.get("trade_id") or "") or \
+                  f"{r.get('box')}|{r.get('entry_time')}|{r.get('strike')}"
+            prev = seen.get(tid)
+            if prev is None or _filled(r) > _filled(prev):
+                seen[tid] = r
+
+    trades = list(seen.values())
+    by_day: Dict[str, int] = defaultdict(int)
+    for r in trades:
+        et = to_et(r.get("entry_time"))
+        r["_date"] = et.strftime("%Y-%m-%d") if et else "(no date)"
+        r["_hour_et"] = f"{et.hour:02d}:00 ET" if et else "(unknown)"
+        r["_dow"] = _DOW[et.weekday()] if et else "(unknown)"
+        r["_phase"] = session_phase(et)
+        r["_hold"] = hold_minutes(r)
+        r["_sym"] = str(r.get("symbol") or r.get("box") or "(none)")
+        by_day[r["_date"]] += 1
+    if since:
+        trades = [r for r in trades if r["_date"] >= since]
+        by_day = {d: n for d, n in by_day.items() if d >= since}
+    return trades, sorted(by_day.items()), raw
+
+
+def _filled(r) -> int:
+    return sum(1 for v in r.values() if v not in (None, ""))
+
+
 # ── aggregation ──────────────────────────────────────────────────────────────
 def bucket(trades: List[dict], key: str) -> Dict[str, dict]:
-    agg: Dict[str, dict] = defaultdict(
-        lambda: {"n": 0, "wins": 0, "net": 0.0, "pnls": [], "holds": []})
+    agg: Dict[str, list] = defaultdict(list)
     for t in trades:
-        k = norm_reason(t.get(key)) if key == "exit_reason" else (t.get(key) or "(none)")
+        if _f(t.get("pnl_usd")) is None:
+            continue
+        if key == "exit_reason":
+            k = norm_reason(t.get("exit_reason"))
+        elif key.startswith("_"):
+            k = t.get(key) or "(none)"
+        else:
+            k = t.get(key) or "(none)"
+        agg[str(k)].append(t)
+    return {k: stats_of(v) for k, v in agg.items()}
+
+
+def stats_of(rows: List[dict]) -> dict:
+    pnls = [_f(r.get("pnl_usd")) for r in rows]
+    pnls = [p for p in pnls if p is not None]
+    holds = [r["_hold"] for r in rows if r.get("_hold") is not None]
+    wins = [p for p in pnls if p > 0]
+    n = len(pnls)
+    return {
+        "n": n,
+        "wins": len(wins),
+        "losses": n - len(wins),
+        "win_rate": round(len(wins) / n, 4) if n else 0.0,
+        "net": round(sum(pnls), 2),
+        "avg": round(sum(pnls) / n, 2) if n else 0.0,
+        "median": round(statistics.median(pnls), 2) if pnls else 0.0,
+        "stdev": round(statistics.stdev(pnls), 2) if len(pnls) > 1 else 0.0,
+        "best": round(max(pnls), 2) if pnls else 0.0,
+        "worst": round(min(pnls), 2) if pnls else 0.0,
+        "gross_win": round(sum(wins), 2),
+        "gross_loss": round(sum(p for p in pnls if p <= 0), 2),
+        "median_hold_min": round(statistics.median(holds), 1) if holds else None,
+    }
+
+
+def cross(trades: List[dict], k1: str, k2: str) -> Dict[str, dict]:
+    agg: Dict[str, list] = defaultdict(list)
+    for t in trades:
+        if _f(t.get("pnl_usd")) is None:
+            continue
+        a = norm_reason(t.get(k1)) if k1 == "exit_reason" else (t.get(k1) or "(none)")
+        b = norm_reason(t.get(k2)) if k2 == "exit_reason" else (t.get(k2) or "(none)")
+        agg[f"{a} / {b}"].append(t)
+    return {k: stats_of(v) for k, v in agg.items()}
+
+
+def rank(d: Dict[str, dict], min_n: int, worst: bool = False):
+    """Best/worst by NET among buckets meeting the sample floor."""
+    elig = {k: v for k, v in d.items() if v["n"] >= min_n}
+    if not elig:
+        return None
+    k = (min if worst else max)(elig, key=lambda x: elig[x]["net"])
+    return {"key": k, **elig[k]}
+
+
+def trade_extremes(trades: List[dict]) -> Tuple[Optional[dict], Optional[dict]]:
+    scored = [t for t in trades if _f(t.get("pnl_usd")) is not None]
+    if not scored:
+        return None, None
+    keys = ("trade_id", "_date", "_sym", "strategy", "setup_type", "setup_grade",
+            "regime", "pnl_usd", "exit_reason", "contracts", "entry_premium",
+            "exit_premium", "entry_time", "exit_time", "_hold")
+    def slim(t):
+        return {k: t.get(k) for k in keys}
+    return (slim(max(scored, key=lambda t: _f(t["pnl_usd"]))),
+            slim(min(scored, key=lambda t: _f(t["pnl_usd"]))))
+
+
+def exit_behaviour(trades: List[dict]) -> dict:
+    wh, lh, mfe, mae = [], [], [], []
+    for t in trades:
         p = _f(t.get("pnl_usd"))
         if p is None:
             continue
-        a = agg[str(k)]
-        a["n"] += 1
-        a["net"] += p
-        a["pnls"].append(p)
-        if p > 0:
-            a["wins"] += 1
-        h = hold_minutes(t)
-        if h is not None:
-            a["holds"].append(h)
-    return agg
-
-
-def fmt_row(name: str, a: dict, min_n: int, width: int = 26) -> str:
-    n = a["n"]
-    win = a["wins"] / n if n else 0.0
-    avg = a["net"] / n if n else 0.0
-    hold = statistics.median(a["holds"]) if a["holds"] else None
-    flag = "  <- thin" if n < min_n else ""
-    hold_s = f"{hold:>7.1f}" if hold is not None else "      -"
-    return (f"  {name[:width]:<{width}}{n:>5}{win:>7.0%}"
-            f"{a['net']:>11.2f}{avg:>9.2f}{hold_s}{flag}")
-
-
-def print_dimension(title: str, agg: Dict[str, dict], min_n: int) -> None:
-    if not agg:
-        return
-    print(f"\n{title}")
-    print(f"  {'':<26}{'N':>5}{'WIN%':>7}{'NET $':>11}{'AVG $':>9}{'HOLD m':>7}")
-    for name, a in sorted(agg.items(), key=lambda kv: -kv[1]["net"]):
-        print(fmt_row(name, a, min_n))
-
-
-def print_cross(trades: List[dict], min_n: int) -> None:
-    """regime x strategy — where a strategy actually earns or bleeds."""
-    agg: Dict[tuple, dict] = defaultdict(
-        lambda: {"n": 0, "wins": 0, "net": 0.0, "pnls": [], "holds": []})
-    for t in trades:
-        p = _f(t.get("pnl_usd"))
-        if p is None:
-            continue
-        k = (str(t.get("regime") or "(none)"), str(t.get("strategy") or "(none)"))
-        a = agg[k]
-        a["n"] += 1
-        a["net"] += p
-        a["pnls"].append(p)
-        if p > 0:
-            a["wins"] += 1
-        h = hold_minutes(t)
-        if h is not None:
-            a["holds"].append(h)
-    if not agg:
-        return
-    print("\nREGIME x STRATEGY  (the cross-cut: a strategy is good IN a regime)")
-    print(f"  {'':<26}{'N':>5}{'WIN%':>7}{'NET $':>11}{'AVG $':>9}{'HOLD m':>7}")
-    for (reg, strat), a in sorted(agg.items(), key=lambda kv: -kv[1]["net"]):
-        print(fmt_row(f"{reg[:14]} / {strat[:11]}", a, min_n))
-
-
-def print_excursion(trades: List[dict]) -> None:
-    """Winners vs losers: hold time and how far each ran / bled (MFE/MAE)."""
-    win_h, los_h, win_mfe, los_mae = [], [], [], []
-    for t in trades:
-        p = _f(t.get("pnl_usd"))
-        if p is None:
-            continue
-        h = hold_minutes(t)
-        entry = _f(t.get("entry_premium"))
+        h, e = t.get("_hold"), _f(t.get("entry_premium"))
         mx, mn = _f(t.get("max_premium_seen")), _f(t.get("min_premium_seen"))
         if p > 0:
             if h is not None:
-                win_h.append(h)
-            if entry and mx:
-                win_mfe.append((mx - entry) / entry)
+                wh.append(h)
+            if e and mx:
+                mfe.append((mx - e) / e)
         else:
             if h is not None:
-                los_h.append(h)
-            if entry and mn:
-                los_mae.append((mn - entry) / entry)
-    if not (win_h or los_h):
+                lh.append(h)
+            if e and mn:
+                mae.append((mn - e) / e)
+    med = lambda v: round(statistics.median(v), 4) if v else None   # noqa: E731
+    out = {
+        "winner_median_hold_min": round(statistics.median(wh), 1) if wh else None,
+        "loser_median_hold_min": round(statistics.median(lh), 1) if lh else None,
+        "winner_median_mfe_pct": med(mfe),
+        "loser_median_mae_pct": med(mae),
+        "n_winners": len(wh), "n_losers": len(lh),
+    }
+    if wh and lh and statistics.median(lh) > 0:
+        r = statistics.median(wh) / statistics.median(lh)
+        out["winner_loser_hold_ratio"] = round(r, 2)
+        out["flag_runners_cut_early"] = r < 1.2
+    return out
+
+
+# ── display ──────────────────────────────────────────────────────────────────
+def show(title: str, d: Dict[str, dict], min_n: int, width: int = 26) -> None:
+    if not d:
         return
-    print("\nEXIT BEHAVIOUR  (did winners get room, were losers cut early)")
-    if win_h:
-        print(f"  winners   n={len(win_h):<5} median hold {statistics.median(win_h):>7.1f} min")
-    if los_h:
-        print(f"  losers    n={len(los_h):<5} median hold {statistics.median(los_h):>7.1f} min")
-    if win_mfe:
-        print(f"  winners   median MFE {statistics.median(win_mfe):>+7.1%} of entry premium")
-    if los_mae:
-        print(f"  losers    median MAE {statistics.median(los_mae):>+7.1%} of entry premium")
-    if win_h and los_h:
-        wm, lm = statistics.median(win_h), statistics.median(los_h)
-        if lm > 0 and wm / lm < 1.2:
-            print("  NOTE winners are not being held meaningfully longer than losers —")
-            print("       exits may be cutting runners as fast as they cut mistakes.")
+    print(f"\n{title}")
+    print(f"  {'':<{width}}{'N':>5}{'WIN%':>7}{'NET $':>11}{'AVG $':>9}{'HOLD m':>7}")
+    for k, a in sorted(d.items(), key=lambda kv: -kv[1]["net"]):
+        h = f"{a['median_hold_min']:>7.1f}" if a["median_hold_min"] is not None else "      -"
+        flag = "  <- thin" if a["n"] < min_n else ""
+        print(f"  {k[:width]:<{width}}{a['n']:>5}{a['win_rate']:>7.0%}"
+              f"{a['net']:>11.2f}{a['avg']:>9.2f}{h}{flag}")
 
 
 def main(argv: List[str]) -> int:
     ap = argparse.ArgumentParser(description="cross-day trade breakdown")
-    ap.add_argument("--since", help="only sessions on/after this date (YYYY-MM-DD)")
+    ap.add_argument("--since", help="only sessions on/after YYYY-MM-DD")
     ap.add_argument("--min-n", type=int, default=8,
-                    help="flag buckets thinner than this (default 8)")
+                    help="thin-bucket flag AND best/worst sample floor (default 8)")
+    ap.add_argument("--no-json", action="store_true", help="display only")
     g = ap.add_mutually_exclusive_group()
-    g.add_argument("--live", action="store_true", help="live trades only")
-    g.add_argument("--paper", action="store_true", help="paper trades only")
+    g.add_argument("--live", action="store_true")
+    g.add_argument("--paper", action="store_true")
     args = ap.parse_args(argv[1:])
-    mode = "live" if args.live else ("paper" if args.paper else None)
+    mode = "live" if args.live else ("paper" if args.paper else "all")
 
-    trades, used, raw = load_trades(args.since, mode)
+    trades, used, raw = load_trades(args.since, None if mode == "all" else mode)
     if not trades:
         print(f"No closed trades found in {BUNDLE_GLOB}")
-        print("Run the consolidation first (devtools: re-run consolidation).")
         return 2
 
-    print(f"{raw} row(s) across the bundles -> {len(trades)} unique trade(s) "
-          f"after de-duplication by trade_id")
+    print(f"{raw} row(s) across bundles -> {len(trades)} unique trade(s) "
+          f"(de-duplicated by trade_id)")
     print(f"{len(used)} session(s), dated from entry_time:")
-    for date, n in used:
-        print(f"   {date}   {n:>5} closed trades")
+    for d, n in used:
+        print(f"   {d}   {n:>5} closed trades")
 
-    pnls = [_f(t.get("pnl_usd")) for t in trades]
-    pnls = [p for p in pnls if p is not None]
-    wins = [p for p in pnls if p > 0]
-    holds = [h for h in (hold_minutes(t) for t in trades) if h is not None]
+    dims = {
+        "by_regime":        bucket(trades, "regime"),
+        "by_strategy":      bucket(trades, "strategy"),
+        "by_setup_type":    bucket(trades, "setup_type"),
+        "by_setup_grade":   bucket(trades, "setup_grade"),
+        "by_exit_reason":   bucket(trades, "exit_reason"),
+        "by_symbol":        bucket(trades, "_sym"),
+        "by_hour_et":       bucket(trades, "_hour_et"),
+        "by_day_of_week":   bucket(trades, "_dow"),
+        "by_session_phase": bucket(trades, "_phase"),
+        "by_session_date":  bucket(trades, "_date"),
+    }
+    crosses = {
+        "regime_x_strategy": cross(trades, "regime", "strategy"),
+        "symbol_x_strategy": cross(trades, "_sym", "strategy"),
+        "phase_x_strategy":  cross(trades, "_phase", "strategy"),
+    }
+    overall = stats_of(trades)
+    best_t, worst_t = trade_extremes(trades)
+
+    findings = {"min_n_applied": args.min_n}
+    for label, d in [("regime", dims["by_regime"]), ("strategy", dims["by_strategy"]),
+                     ("setup_type", dims["by_setup_type"]),
+                     ("setup_grade", dims["by_setup_grade"]),
+                     ("exit_reason", dims["by_exit_reason"]),
+                     ("symbol", dims["by_symbol"]), ("hour_et", dims["by_hour_et"]),
+                     ("day_of_week", dims["by_day_of_week"]),
+                     ("session_phase", dims["by_session_phase"]),
+                     ("session_date", dims["by_session_date"]),
+                     ("regime_x_strategy", crosses["regime_x_strategy"]),
+                     ("symbol_x_strategy", crosses["symbol_x_strategy"])]:
+        findings[f"best_{label}"] = rank(d, args.min_n)
+        findings[f"worst_{label}"] = rank(d, args.min_n, worst=True)
+    findings["best_trade"] = best_t
+    findings["worst_trade"] = worst_t
 
     print("\n" + "=" * 74)
-    label = {"live": "LIVE", "paper": "PAPER"}.get(mode, "ALL")
-    print(f"TRADE BREAKDOWN — {len(pnls)} closed trades [{label}]")
+    print(f"TRADE BREAKDOWN — {overall['n']} closed trades [{mode.upper()}]")
     print("=" * 74)
-    print(f"  net {sum(pnls):+.2f}   win rate {len(wins)/len(pnls):.0%}   "
-          f"avg {sum(pnls)/len(pnls):+.2f}   "
-          f"best {max(pnls):+.2f}   worst {min(pnls):+.2f}")
-    if holds:
-        print(f"  median hold {statistics.median(holds):.1f} min   "
-              f"({len(holds)}/{len(pnls)} rows have both timestamps)")
-    else:
-        print("  hold duration unavailable (entry_time/exit_time missing)")
+    print(f"  net {overall['net']:+.2f}   win rate {overall['win_rate']:.0%}   "
+          f"avg {overall['avg']:+.2f}   best {overall['best']:+.2f}   "
+          f"worst {overall['worst']:+.2f}")
+    if overall["median_hold_min"] is not None:
+        print(f"  median hold {overall['median_hold_min']} min")
 
-    print_dimension("BY REGIME", bucket(trades, "regime"), args.min_n)
-    print_dimension("BY STRATEGY", bucket(trades, "strategy"), args.min_n)
-    print_dimension("BY SETUP TYPE", bucket(trades, "setup_type"), args.min_n)
-    print_dimension("BY SETUP GRADE", bucket(trades, "setup_grade"), args.min_n)
-    print_dimension("BY EXIT REASON", bucket(trades, "exit_reason"), args.min_n)
-    print_cross(trades, args.min_n)
-    print_excursion(trades)
+    show("BY REGIME", dims["by_regime"], args.min_n)
+    show("BY STRATEGY", dims["by_strategy"], args.min_n)
+    show("BY SYMBOL", dims["by_symbol"], args.min_n)
+    show("BY SETUP TYPE", dims["by_setup_type"], args.min_n)
+    show("BY SETUP GRADE", dims["by_setup_grade"], args.min_n)
+    show("BY EXIT REASON", dims["by_exit_reason"], args.min_n)
+    show("BY SESSION PHASE (ET)", dims["by_session_phase"], args.min_n)
+    show("BY HOUR (ET)", dims["by_hour_et"], args.min_n)
+    show("BY DAY OF WEEK", dims["by_day_of_week"], args.min_n)
+    show("REGIME x STRATEGY", crosses["regime_x_strategy"], args.min_n)
 
-    print("\n" + "=" * 74)
-    print(f"Rows are sorted by NET. '<- thin' marks fewer than {args.min_n} trades —")
-    print("those win rates are noise, not signal. Read the cross-cut before")
-    print("concluding a strategy is bad: it may only be bad in one regime.")
+    eb = exit_behaviour(trades)
+    print("\nEXIT BEHAVIOUR")
+    print(f"  winners n={eb['n_winners']:<5} median hold "
+          f"{eb['winner_median_hold_min']} min   MFE {eb['winner_median_mfe_pct']}")
+    print(f"  losers  n={eb['n_losers']:<5} median hold "
+          f"{eb['loser_median_hold_min']} min   MAE {eb['loser_median_mae_pct']}")
+    if eb.get("flag_runners_cut_early"):
+        print("  NOTE winners are not held meaningfully longer than losers —")
+        print("       exits may be cutting runners as fast as mistakes.")
+
+    print("\nHEADLINE")
+    for lab in ("regime", "strategy", "symbol", "session_phase", "day_of_week"):
+        b, w = findings.get(f"best_{lab}"), findings.get(f"worst_{lab}")
+        if b:
+            print(f"  best {lab:<14} {b['key'][:30]:<30} net {b['net']:>+10.2f} (n={b['n']})")
+        if w:
+            print(f"  worst {lab:<13} {w['key'][:30]:<30} net {w['net']:>+10.2f} (n={w['n']})")
+
+    if not args.no_json:
+        payload = {
+            "generated_utc": datetime.now(timezone.utc).isoformat(),
+            "scope": {"mode": mode, "since": args.since,
+                      "sessions": [d for d, _ in used],
+                      "first_session": used[0][0] if used else None,
+                      "last_session": used[-1][0] if used else None},
+            "dedup": {"raw_rows": raw, "unique_trades": len(trades)},
+            "overall": overall,
+            "findings": findings,
+            "dimensions": dims,
+            "crosses": crosses,
+            "exit_behaviour": eb,
+        }
+        os.makedirs(REPORTS_DIR, exist_ok=True)
+        stamp = used[-1][0] if used else datetime.now().strftime("%Y-%m-%d")
+        out = os.path.join(REPORTS_DIR, f"trade_report_{stamp}.json")
+        tmp = out + ".tmp"
+        with open(tmp, "w") as fh:
+            json.dump(payload, fh, indent=2, default=str)
+        os.replace(tmp, out)
+        print(f"\nwrote {out}")
+
+    print(f"\nSorted by NET. '<- thin' = fewer than {args.min_n} trades (noise, "
+          f"not signal).\nBest/worst above ignore buckets under that floor.")
     return 0
 
 
