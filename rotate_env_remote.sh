@@ -1,9 +1,15 @@
 #!/usr/bin/env bash
 # rotate_env_remote.sh — RUNS ON EACH TRADING BOX (pushed + executed by the
 # control-side rotate_tokens.py). LIVES IN ~/day_trader_pro on control; shipped
-# to a box over SSH, run once from a temp file, deleted. v1.2 — 2026-07-19.
+# to a box over SSH, run once from a temp file, deleted. v1.3 — 2026-07-19.
 #
 # CHANGELOG:
+#   v1.3 (2026-07-19) — --audit now reads the unit with `sudo grep` (was plain
+#                       grep). The unit is root-owned mode 600, so unprivileged
+#                       grep returned nothing and 2>/dev/null hid the permission
+#                       error — every var falsely reported MISSING even when
+#                       verify (which uses sudo) showed them all SET. Fixed all
+#                       three audit-branch greps (2× bot unit, 1× feed unit).
 #   v1.2 (2026-07-19) — replace_var now ADDS a var that is absent from the unit
 #                       (inserted after [Service]) instead of silently skipping
 #                       it. The v1.1 version only REPLACED an existing
@@ -56,7 +62,7 @@ ALL_VARS=(OT_INSTRUMENT TT_CLIENT_SECRET TT_REFRESH_TOKEN TT_ACCOUNT_NUMBER \
 if [ "${1:-}" = "--audit" ]; then
     [ -f "$BOT_UNIT" ] || { echo "AUDIT_ERR: $BOT_UNIT absent"; exit 1; }
     for var in "${ALL_VARS[@]}"; do
-        line="$(grep "^Environment=${var}=" "$BOT_UNIT" 2>/dev/null | head -1)"
+        line="$(sudo grep "^Environment=${var}=" "$BOT_UNIT" 2>/dev/null | head -1)"
         val="${line#Environment=${var}=}"
         case "$var" in
             OT_INSTRUMENT|TELEGRAM_CHAT_ID|GITHUB_REPO)
@@ -77,8 +83,8 @@ if [ "${1:-}" = "--audit" ]; then
     # bot authenticate differently. Compare fingerprints, not values.
     if [ -f "$FEED_UNIT" ]; then
         for var in TT_CLIENT_SECRET TT_REFRESH_TOKEN TT_ACCOUNT_NUMBER; do
-            b="$(grep "^Environment=${var}=" "$BOT_UNIT"  2>/dev/null | head -1)"; b="${b#Environment=${var}=}"
-            f="$(grep "^Environment=${var}=" "$FEED_UNIT" 2>/dev/null | head -1)"; f="${f#Environment=${var}=}"
+            b="$(sudo grep "^Environment=${var}=" "$BOT_UNIT"  2>/dev/null | head -1)"; b="${b#Environment=${var}=}"
+            f="$(sudo grep "^Environment=${var}=" "$FEED_UNIT" 2>/dev/null | head -1)"; f="${f#Environment=${var}=}"
             if [ "$b" != "$f" ]; then
                 echo "  DRIFT: ${var} differs between bot and feed units"
             fi

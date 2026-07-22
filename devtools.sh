@@ -1,5 +1,13 @@
 #!/usr/bin/env bash
-# day_trader_pro/devtools.sh — v1.18
+# day_trader_pro/devtools.sh — v1.19
+# v1.19 — 2026-07-22 — RESTORED two items clobbered by the v1.18 renumber (which
+#        was cut from a pre-HALT copy of the menu): (a) item 27 is the EMERGENCY
+#        STOP again — HALT-gated, no EOD, no pycache, RTH-exempt (the v1.18 label
+#        "Shutdown only (EOD + stop)" was a stale mislabel: the dispatched
+#        wake_and_bake --shutdown-only has been the emergency stop since
+#        2026-07-18 and the label said the opposite of what the button does);
+#        (b) item 54 Verify fleet credentials (rotate_tokens.py --verify) —
+#        menu line + case handler had been dropped entirely.
 # v1.18 — 2026-07-22 — RENUMBERED the whole menu into sequential order (items had
 #        drifted as features were appended: 45 sat above 40, 52 sat below 44).
 #        Section order is unchanged; only the numbers moved. NEW item 41: cross-day
@@ -215,7 +223,8 @@ menu() {
  MAINTENANCE (wake_and_bake):
    22) Dry-run                   23) FULL (wake->bake->restart->STOP)
    24) Wake (one/all/some)       25) Bake only (sync, no restart - RTH-safe)
-   26) Leave on (skip shutdown)  27) Shutdown only (EOD + stop)
+   26) Leave on (skip shutdown)
+   27) EMERGENCY STOP (no EOD, no pycache, RTH-exempt, HALT-gated)
 
  REPOINT (migrate fleet -> new repo):
    28) Check only                29) FULL
@@ -250,6 +259,7 @@ menu() {
    51) OHLC 21-day fetch from yfinance (prompts symbol, default ^VIX)
    52) Rotate fleet tokens/secrets (pushes to running boxes)
    53) Audit fleet credentials (read-only; shows which vars are set, no values)
+   54) Verify fleet credentials WORK (TT SDK, Telegram, GitHub)
 
     0) Exit
 ======================================================
@@ -315,6 +325,8 @@ EOF
         if [ -n "$SUBSET" ]; then $PY rotate_tokens.py --only $SUBSET; else $PY rotate_tokens.py; fi; pause ;;
     53) echo; read -rp "Audit a SUBSET of symbols? (ENTER=all running): " SUBSET; \
         if [ -n "$SUBSET" ]; then $PY rotate_tokens.py --audit --only $SUBSET; else $PY rotate_tokens.py --audit; fi; pause ;;
+    54) echo; read -rp "Verify a SUBSET of symbols? (ENTER=all running): " SUBSET; \
+        if [ -n "$SUBSET" ]; then $PY rotate_tokens.py --verify --only $SUBSET; else $PY rotate_tokens.py --verify; fi; pause ;;
     0)  exit 0 ;;
     *)  echo "Invalid selection."; sleep 1 ;;
   esac
