@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
 # day_trader_pro/devtools.sh — v1.17
-# v1.17 — 2026-07-18 — NEW item 52: functional credential VERIFY
-#        (rotate_tokens.py --verify). Proves the landed creds actually WORK on
-#        each running box — Tastytrade OAuth handshake + read-only balances +
-#        account-number match (mirrors the bot's auth path), Telegram getMe +
-#        sendMessage, GitHub repo API. Read-only, no trades. Also runs
-#        automatically after item 50 rotation (narrowed to the rotated groups;
-#        suppress with --no-verify). Each box echoes SUCCESS/FAIL.
+# v1.17 — 2026-07-22 — NEW item 52: A2 co-occurrence + HTF-conditioned drift
+#        (options-trader-v3 tests/a2_cooccurrence.py). Read-only, offline: reads the
+#        replay tick logs validate_regime.sh already writes under reports/ and reports
+#        (a) which label L2 committed when TRENDING and RANGING are both >0.5,
+#        (b) forward drift bucketed by HTF direction, (c) a RANGE_ONLY control.
+#        Runs in a subshell so the parent shell's cwd is untouched.
 # v1.16 — 2026-07-18 — NEW item 51: read-only fleet credential AUDIT
 #        (rotate_tokens.py --audit). Reports which of the 8 bootstrap vars are set
 #        per box — non-secrets in full, secrets as SET/MISSING + len/last-4
@@ -96,6 +95,8 @@ DEFAULT_V3="https://github.com/TX-9AI/options_trader_v3.git"
 INSTALL_DIR="~/options-trader"
 FEED_DB="~/options-trader/data/feed_store.db"
 VALIDATE_SH="$HOME/validate_regime.sh"
+OTV3_DIR="$HOME/options-trader-v3"          # control-box checkout (boxes use ~/options-trader)
+OTV3_PY="$OTV3_DIR/venv/bin/python"
 HARVEST_DIR="$HOME/day_trader_pro/data/harvest"
 
 # Open an interactive shell in a directory via tmux (a menu item can't cd the
@@ -205,8 +206,7 @@ menu() {
  MAINTENANCE (wake_and_bake):
    22) Dry-run                   23) FULL (wake->bake->restart->STOP)
    24) Wake (one/all/some)       25) Bake only (sync, no restart - RTH-safe)
-   26) Leave on (skip shutdown)
-   27) EMERGENCY STOP (no EOD, no pycache, RTH-exempt, HALT-gated)
+   26) Leave on (skip shutdown)  27) Shutdown only (EOD + stop)
 
  REPOINT (migrate fleet -> new repo):
    28) Check only                29) FULL
@@ -231,6 +231,7 @@ menu() {
    40) Run replay - today        41) Run replay - pick a date
    42) View a day's report       43) View the diary (all days)
    44) Backfill missing days      (fills diary gaps that have tape)
+   52) A2 co-occurrence + HTF drift  (read-only; auto-finds replay logs)
 
  EOD CONDUCTOR, BACKFILL & LIVE P&L:
    46) Live P&L standings (read-only)
@@ -241,7 +242,6 @@ menu() {
    49) OHLC 21-day fetch from yfinance (prompts symbol, default ^VIX)
    50) Rotate fleet tokens/secrets (prompts each; <ENTER>=no change; pushes to running boxes)
    51) Audit fleet credentials (read-only; shows which vars are set, no values)
-   52) Verify fleet credentials WORK (TT SDK, Telegram, GitHub)
 
     0) Exit
 ======================================================
@@ -292,6 +292,7 @@ EOF
     42) echo; D_DEF="$(date +%F)"; read -rp "Date to view (YYYY-MM-DD, ENTER=${D_DEF}): " D; D="${D:-$D_DEF}"; if [ -x "$VALIDATE_SH" ]; then "$VALIDATE_SH" --report "$D"; else echo "missing/non-exec $VALIDATE_SH"; fi; pause ;;
     43) echo; if [ -x "$VALIDATE_SH" ]; then "$VALIDATE_SH" --diary; else echo "missing/non-exec $VALIDATE_SH"; fi; pause ;;
     44) echo; read -rp "Rebuild ALL dated tapes (else only fill gaps)? [y/N]: " RB; if [ -x "$VALIDATE_SH" ]; then if [ "$RB" = "y" ]; then "$VALIDATE_SH" --backfill --rebuild; else "$VALIDATE_SH" --backfill; fi; else echo "missing/non-exec $VALIDATE_SH"; fi; pause ;;
+    52) echo; if [ -x "$OTV3_PY" ]; then (cd "$OTV3_DIR" && "$OTV3_PY" -m tests.a2_cooccurrence); else echo "missing $OTV3_PY (is ~/options-trader-v3 checked out with its venv?)"; fi; pause ;;
     45) echo; read -rp "Day (YYYY-MM-DD, ENTER=today): " D; D="${D:-$(date +%F)}"; \
         read -rp "Cumulative since (YYYY-MM-DD, ENTER=that day only): " S; \
         read -rp "Live rows? [y/N]: " LV; \
@@ -305,8 +306,6 @@ EOF
         if [ -n "$SUBSET" ]; then $PY rotate_tokens.py --only $SUBSET; else $PY rotate_tokens.py; fi; pause ;;
     51) echo; read -rp "Audit a SUBSET of symbols? (ENTER=all running): " SUBSET; \
         if [ -n "$SUBSET" ]; then $PY rotate_tokens.py --audit --only $SUBSET; else $PY rotate_tokens.py --audit; fi; pause ;;
-    52) echo; read -rp "Verify a SUBSET of symbols? (ENTER=all running): " SUBSET; \
-        if [ -n "$SUBSET" ]; then $PY rotate_tokens.py --verify --only $SUBSET; else $PY rotate_tokens.py --verify; fi; pause ;;
     0)  exit 0 ;;
     *)  echo "Invalid selection."; sleep 1 ;;
   esac
