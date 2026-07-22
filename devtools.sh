@@ -1,5 +1,14 @@
 #!/usr/bin/env bash
-# day_trader_pro/devtools.sh — v1.17
+# day_trader_pro/devtools.sh — v1.18
+# v1.18 — 2026-07-22 — RENUMBERED the whole menu into sequential order (items had
+#        drifted as features were appended: 45 sat above 40, 52 sat below 44).
+#        Section order is unchanged; only the numbers moved. NEW item 41: cross-day
+#        trade breakdown (trade_report.py) — ranks net/win%/avg/hold by regime,
+#        strategy, setup type, setup grade and exit reason, plus the regime x
+#        strategy cross-cut and winner-vs-loser hold/MFE/MAE. Shortened item 52
+#        (was 50) — dropped the inline prompt description from the label.
+#        Old -> new: 45->40, 40->42, 41->43, 42->44, 43->45, 44->46, 52->47,
+#        46->48, 47->49, 48->50, 49->51, 50->52, 51->53. 1-39 unchanged.
 # v1.17 — 2026-07-22 — NEW item 52: A2 co-occurrence + HTF-conditioned drift
 #        (options-trader-v3 tests/a2_cooccurrence.py). Read-only, offline: reads the
 #        replay tick logs validate_regime.sh already writes under reports/ and reports
@@ -223,25 +232,24 @@ menu() {
 
  TRADES DATA:
    39) Re-run consolidation -> fleet_trades_<date>.json (+ .csv)
-       (EOD chain does this automatically; manual re-run only)
-   45) Excursion report (MFE/MAE) -> reports/excursions_<date>.txt
-       (reads trades/<date>/*_trades.db — auto-collected, ready now)
+   40) Excursion report (MFE/MAE) -> reports/excursions_<date>.txt
+   41) Trade breakdown (cross-day: regime/strategy/grade + regime x strategy)
 
  REGIME VALIDATION (Layer-1 confluence; manual, tape-only):
-   40) Run replay - today        41) Run replay - pick a date
-   42) View a day's report       43) View the diary (all days)
-   44) Backfill missing days      (fills diary gaps that have tape)
-   52) A2 co-occurrence + HTF drift  (read-only; auto-finds replay logs)
+   42) Run replay - today        43) Run replay - pick a date
+   44) View a day's report       45) View the diary (all days)
+   46) Backfill missing days      (fills diary gaps that have tape)
+   47) A2 co-occurrence + HTF drift  (read-only; auto-finds replay logs)
 
  EOD CONDUCTOR, BACKFILL & LIVE P&L:
-   46) Live P&L standings (read-only)
-   47) Backfill missing OHLC (auto-batched)
-   48) EOD conductor - full gated EOD (dry-run preview -> confirm -> run)
+   48) Live P&L standings (read-only)
+   49) Backfill missing OHLC (auto-batched)
+   50) EOD conductor - full gated EOD (dry-run preview -> confirm -> run)
 
  UTILITIES:
-   49) OHLC 21-day fetch from yfinance (prompts symbol, default ^VIX)
-   50) Rotate fleet tokens/secrets (prompts each; <ENTER>=no change; pushes to running boxes)
-   51) Audit fleet credentials (read-only; shows which vars are set, no values)
+   51) OHLC 21-day fetch from yfinance (prompts symbol, default ^VIX)
+   52) Rotate fleet tokens/secrets (pushes to running boxes)
+   53) Audit fleet credentials (read-only; shows which vars are set, no values)
 
     0) Exit
 ======================================================
@@ -287,24 +295,25 @@ EOF
     37) echo; repo_push_force; pause ;;
     38) echo; repo_pull_force; pause ;;
     39) echo; read -rp "Day to consolidate (YYYY-MM-DD, ENTER=today): " D; D="${D:-$(date +%F)}"; $PY consolidate_trades.py --date "$D"; pause ;;
-    40) echo; if [ -x "$VALIDATE_SH" ]; then "$VALIDATE_SH"; else echo "missing/non-exec $VALIDATE_SH (chmod +x ~/validate_regime.sh?)"; fi; pause ;;
-    41) echo; read -rp "Date (YYYY-MM-DD, ENTER=today): " D; D="${D:-$(date +%F)}"; if [ -x "$VALIDATE_SH" ]; then "$VALIDATE_SH" "$D"; else echo "missing/non-exec $VALIDATE_SH"; fi; pause ;;
-    42) echo; D_DEF="$(date +%F)"; read -rp "Date to view (YYYY-MM-DD, ENTER=${D_DEF}): " D; D="${D:-$D_DEF}"; if [ -x "$VALIDATE_SH" ]; then "$VALIDATE_SH" --report "$D"; else echo "missing/non-exec $VALIDATE_SH"; fi; pause ;;
-    43) echo; if [ -x "$VALIDATE_SH" ]; then "$VALIDATE_SH" --diary; else echo "missing/non-exec $VALIDATE_SH"; fi; pause ;;
-    44) echo; read -rp "Rebuild ALL dated tapes (else only fill gaps)? [y/N]: " RB; if [ -x "$VALIDATE_SH" ]; then if [ "$RB" = "y" ]; then "$VALIDATE_SH" --backfill --rebuild; else "$VALIDATE_SH" --backfill; fi; else echo "missing/non-exec $VALIDATE_SH"; fi; pause ;;
-    52) echo; if [ -x "$OTV3_PY" ]; then (cd "$OTV3_DIR" && "$OTV3_PY" -m tests.a2_cooccurrence); else echo "missing $OTV3_PY (is ~/options-trader-v3 checked out with its venv?)"; fi; pause ;;
-    45) echo; read -rp "Day (YYYY-MM-DD, ENTER=today): " D; D="${D:-$(date +%F)}"; \
+    42) echo; if [ -x "$VALIDATE_SH" ]; then "$VALIDATE_SH"; else echo "missing/non-exec $VALIDATE_SH (chmod +x ~/validate_regime.sh?)"; fi; pause ;;
+    43) echo; read -rp "Date (YYYY-MM-DD, ENTER=today): " D; D="${D:-$(date +%F)}"; if [ -x "$VALIDATE_SH" ]; then "$VALIDATE_SH" "$D"; else echo "missing/non-exec $VALIDATE_SH"; fi; pause ;;
+    44) echo; D_DEF="$(date +%F)"; read -rp "Date to view (YYYY-MM-DD, ENTER=${D_DEF}): " D; D="${D:-$D_DEF}"; if [ -x "$VALIDATE_SH" ]; then "$VALIDATE_SH" --report "$D"; else echo "missing/non-exec $VALIDATE_SH"; fi; pause ;;
+    45) echo; if [ -x "$VALIDATE_SH" ]; then "$VALIDATE_SH" --diary; else echo "missing/non-exec $VALIDATE_SH"; fi; pause ;;
+    46) echo; read -rp "Rebuild ALL dated tapes (else only fill gaps)? [y/N]: " RB; if [ -x "$VALIDATE_SH" ]; then if [ "$RB" = "y" ]; then "$VALIDATE_SH" --backfill --rebuild; else "$VALIDATE_SH" --backfill; fi; else echo "missing/non-exec $VALIDATE_SH"; fi; pause ;;
+    47) echo; if [ -x "$OTV3_PY" ]; then (cd "$OTV3_DIR" && "$OTV3_PY" -m tests.a2_cooccurrence); else echo "missing $OTV3_PY (is ~/options-trader-v3 checked out with its venv?)"; fi; pause ;;
+    40) echo; read -rp "Day (YYYY-MM-DD, ENTER=today): " D; D="${D:-$(date +%F)}"; \
         read -rp "Cumulative since (YYYY-MM-DD, ENTER=that day only): " S; \
         read -rp "Live rows? [y/N]: " LV; \
         ARGS="--date $D"; [ -n "$S" ] && ARGS="$ARGS --since $S"; [ "$LV" = "y" ] && ARGS="$ARGS --live"; \
         $PY excursion_report.py $ARGS; pause ;;
-    46) echo; read -rp "Push to Telegram too? [y/N]: " S; if [ "$S" = "y" ]; then $PY standings.py --send; else $PY standings.py; fi; pause ;;
-    47) echo; read -rp "Backfill date (YYYY-MM-DD, ENTER=today): " D; D="${D:-$(date +%F)}"; read -rp "Batch size (ENTER=5): " B; B="${B:-5}"; echo; $PY eod_backfill.py --date "$D" --batch "$B" --dry-run; echo; read -rp "Proceed with LIVE backfill (wakes/stops boxes)? [y/N]: " GO; [ "$GO" = "y" ] && $PY eod_backfill.py --date "$D" --batch "$B"; pause ;;
-    48) echo; read -rp "Backfill batch size (ENTER=5): " B; B="${B:-5}"; echo; $PY eod_conductor.py --batch "$B" --dry-run; echo; read -rp "Run the LIVE EOD conductor now (gate->harvest->P&L+stop->backfill->consolidate->diary)? [y/N]: " GO; [ "$GO" = "y" ] && $PY eod_conductor.py --batch "$B"; pause ;;
-    49) echo; read -rp "Symbol [^VIX]: " SY; SY="${SY:-^VIX}"; $PY tests/ohlc_fetch.py --symbol "$SY"; pause ;;
-    50) echo; read -rp "Rotate against a SUBSET of symbols? (ENTER=all running): " SUBSET; \
+    41) echo; read -rp "Since date (YYYY-MM-DD, ENTER=all): " SD; if [ -n "$SD" ]; then $PY trade_report.py --since "$SD"; else $PY trade_report.py; fi; pause ;;
+    48) echo; read -rp "Push to Telegram too? [y/N]: " S; if [ "$S" = "y" ]; then $PY standings.py --send; else $PY standings.py; fi; pause ;;
+    49) echo; read -rp "Backfill date (YYYY-MM-DD, ENTER=today): " D; D="${D:-$(date +%F)}"; read -rp "Batch size (ENTER=5): " B; B="${B:-5}"; echo; $PY eod_backfill.py --date "$D" --batch "$B" --dry-run; echo; read -rp "Proceed with LIVE backfill (wakes/stops boxes)? [y/N]: " GO; [ "$GO" = "y" ] && $PY eod_backfill.py --date "$D" --batch "$B"; pause ;;
+    50) echo; read -rp "Backfill batch size (ENTER=5): " B; B="${B:-5}"; echo; $PY eod_conductor.py --batch "$B" --dry-run; echo; read -rp "Run the LIVE EOD conductor now (gate->harvest->P&L+stop->backfill->consolidate->diary)? [y/N]: " GO; [ "$GO" = "y" ] && $PY eod_conductor.py --batch "$B"; pause ;;
+    51) echo; read -rp "Symbol [^VIX]: " SY; SY="${SY:-^VIX}"; $PY tests/ohlc_fetch.py --symbol "$SY"; pause ;;
+    52) echo; read -rp "Rotate against a SUBSET of symbols? (ENTER=all running): " SUBSET; \
         if [ -n "$SUBSET" ]; then $PY rotate_tokens.py --only $SUBSET; else $PY rotate_tokens.py; fi; pause ;;
-    51) echo; read -rp "Audit a SUBSET of symbols? (ENTER=all running): " SUBSET; \
+    53) echo; read -rp "Audit a SUBSET of symbols? (ENTER=all running): " SUBSET; \
         if [ -n "$SUBSET" ]; then $PY rotate_tokens.py --audit --only $SUBSET; else $PY rotate_tokens.py --audit; fi; pause ;;
     0)  exit 0 ;;
     *)  echo "Invalid selection."; sleep 1 ;;
