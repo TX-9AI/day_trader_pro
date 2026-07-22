@@ -1,4 +1,13 @@
-# day_trader_pro/trade_report.py — v1.0
+# day_trader_pro/trade_report.py — v1.1
+# v1.1 — 2026-07-22 — CRITICAL FIX: de-duplicate by trade_id. harvest.py scp's
+#        each box's ENTIRE trades.db and consolidate_trades.py does a bare
+#        SELECT * with no date filter, so every fleet_trades_<date>.json holds
+#        that box's FULL history — pooling N bundles counted each trade up to N
+#        times (1195 rows for what was really ~200 trades). Now keyed on
+#        trade_id, preferring the most complete row. Session dates are derived
+#        from entry_time, not the bundle filename. Also normalises exit_reason
+#        (strips the ' pnl=...' suffix, matching excursion_report.norm_reason)
+#        which was exploding one reason into dozens of thin buckets.
 """
 Cross-day trade breakdown — what actually made and lost money, ranked.
 
@@ -55,7 +64,8 @@ BUNDLE_GLOB = os.path.join(REPORTS_DIR, "fleet_trades_*.json")
 # ── loading ──────────────────────────────────────────────────────────────────
 def load_trades(since: Optional[str], mode: Optional[str]) -> tuple:
     files = sorted(glob.glob(BUNDLE_GLOB))
-    trades, used = [], []
+    seen: Dict[str, dict] = {}          # trade_id -> best row (dedupe)
+    raw = 0
     for path in files:
         date = os.path.basename(path)[len("fleet_trades_"):-len(".json")]
         if since and date < since:
@@ -72,11 +82,38 @@ def load_trades(since: Optional[str], mode: Optional[str]) -> tuple:
             closed = [r for r in closed if not _truthy(r.get("paper_trade"))]
         elif mode == "paper":
             closed = [r for r in closed if _truthy(r.get("paper_trade"))]
+        raw += len(closed)
         for r in closed:
-            r["_date"] = date
-        trades.extend(closed)
-        used.append((date, len(closed)))
-    return trades, used
+            tid = str(r.get("trade_id") or "")
+            if not tid:                                  # no id -> synth a key
+                tid = f"{r.get('box')}|{r.get('entry_time')}|{r.get('strike')}"
+            # keep the row with the most populated fields (latest harvest wins)
+            prev = seen.get(tid)
+            if prev is None or sum(1 for v in r.values() if v not in (None, "")) > \
+                               sum(1 for v in prev.values() if v not in (None, "")):
+                seen[tid] = r
+
+    trades = list(seen.values())
+    # the trade's own session comes from entry_time, NOT the bundle filename
+    by_day: Dict[str, int] = defaultdict(int)
+    for r in trades:
+        d = str(r.get("entry_time") or "")[:10] or "(no date)"
+        r["_date"] = d
+        by_day[d] += 1
+    if since:
+        trades = [r for r in trades if r["_date"] >= since]
+        by_day = {d: n for d, n in by_day.items() if d >= since}
+    used = sorted(by_day.items())
+    return trades, used, raw
+
+
+def norm_reason(reason) -> str:
+    """Match excursion_report.norm_reason — exit_reason carries a ' pnl=...'
+    suffix, which would otherwise split one reason into dozens of buckets."""
+    r = (reason or "unknown").strip()
+    if r.startswith("hard_close"):
+        return "hard_close"
+    return r.split(" pnl=")[0].split(":")[0].strip() or "unknown"
 
 
 def _truthy(v) -> bool:
@@ -113,7 +150,7 @@ def bucket(trades: List[dict], key: str) -> Dict[str, dict]:
     agg: Dict[str, dict] = defaultdict(
         lambda: {"n": 0, "wins": 0, "net": 0.0, "pnls": [], "holds": []})
     for t in trades:
-        k = t.get(key) or "(none)"
+        k = norm_reason(t.get(key)) if key == "exit_reason" else (t.get(key) or "(none)")
         p = _f(t.get("pnl_usd"))
         if p is None:
             continue
@@ -224,13 +261,15 @@ def main(argv: List[str]) -> int:
     args = ap.parse_args(argv[1:])
     mode = "live" if args.live else ("paper" if args.paper else None)
 
-    trades, used = load_trades(args.since, mode)
+    trades, used, raw = load_trades(args.since, mode)
     if not trades:
         print(f"No closed trades found in {BUNDLE_GLOB}")
         print("Run the consolidation first (devtools: re-run consolidation).")
         return 2
 
-    print(f"loaded {len(used)} session(s):")
+    print(f"{raw} row(s) across the bundles -> {len(trades)} unique trade(s) "
+          f"after de-duplication by trade_id")
+    print(f"{len(used)} session(s), dated from entry_time:")
     for date, n in used:
         print(f"   {date}   {n:>5} closed trades")
 
