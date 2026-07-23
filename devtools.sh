@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# day_trader_pro/devtools.sh — v1.21
+# day_trader_pro/devtools.sh — v1.22
+# v1.22 — 2026-07-23 — FIX: v1.21 defined VALIDATE_SH from $OTV3_DIR one line
+#          BEFORE OTV3_DIR was set; with `set -uo pipefail` that is an unbound
+#          variable and the menu refused to launch. Assignment order corrected.
 # v1.21 — 2026-07-23 — repoint VALIDATE_SH at the repo copy (options 42-46);
 #          drop the dead HARVEST_DIR var (retired data/harvest layout).
 # v1.20 — 2026-07-23 — menu colour: border rules and section titles BLUE,
@@ -116,11 +119,12 @@ PY="${PYTHON:-python3}"
 DEFAULT_V3="https://github.com/TX-9AI/options_trader_v3.git"
 INSTALL_DIR="~/options-trader"
 FEED_DB="~/options-trader/data/feed_store.db"
-# 2026-07-23: canonical copy lives in the otv3 repo. Nothing operational
-# should sit loose in /home/ubuntu.
-VALIDATE_SH="$OTV3_DIR/validate_regime.sh"
 OTV3_DIR="$HOME/options-trader-v3"          # control-box checkout (boxes use ~/options-trader)
 OTV3_PY="$OTV3_DIR/venv/bin/python"
+# 2026-07-23: canonical copy lives in the otv3 repo. Nothing operational
+# should sit loose in /home/ubuntu. MUST be defined AFTER OTV3_DIR —
+# `set -uo pipefail` (line 112) makes a forward reference fatal at load.
+VALIDATE_SH="$OTV3_DIR/validate_regime.sh"
 
 # Open an interactive shell in a directory via tmux (a menu item can't cd the
 # parent shell). Inside tmux -> new window; otherwise attach-or-create a session.
@@ -224,7 +228,7 @@ menu() {
   clear
   cat <<'EOF' | _colorize
 ======================================================
-  Day Trader Pro — devtools  v1.21 Service Menu
+  Day Trader Pro — devtools  v1.22 Service Menu
 ======================================================
  ORCHESTRATION:
     1) Full spool-up (mock)       2) EOD aggregate (mock)
