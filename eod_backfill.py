@@ -1,4 +1,5 @@
-# day_trader_pro/eod_backfill.py — v1.1.0
+# day_trader_pro/eod_backfill.py — v1.1.1
+# v1.1.1 (2026-07-23) — correct stale data/harvest path references (layout retired; now reports/ + ohlc/ + trades/)
 # v1.1.0 (2026-07-11) — canonical layout: reads/writes ohlc/<date>/<SYM>_ohlc_<date>.csv
 #   (was data/harvest/). Detection accepts legacy _OHLC_ too.
 """
@@ -12,11 +13,11 @@ and brings them up in small capacity-safe batches to fetch the candles:
   detect missing  →  for each batch of --batch symbols:
       wake  →  produce (pull_today_ohlc.sh: candle_feed --once from 09:30)
             →  poll --check until bars land
-            →  pull the CSV to data/harvest/<date>/<SYM>_OHLC_<date>.csv
+            →  pull the CSV to ohlc/<date>/<SYM>_ohlc_<date>.csv
             →  stop the batch (wait 'stopped' so streams + vCPU are freed)
   →  next batch, until every symbol's candles are on the control server.
 
-Missing = symbol in config.UNIVERSE whose data/harvest/<date>/<SYM>_OHLC_<date>.csv
+Missing = symbol in config.UNIVERSE whose ohlc/<date>/<SYM>_ohlc_<date>.csv
 is absent or has 0 data rows. Each symbol is attempted once; anything still short
 or missing at the end is reported (e.g. DXFeed history gone if run next-day).
 

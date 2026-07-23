@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# day_trader_pro/devtools.sh — v1.19
+# day_trader_pro/devtools.sh — v1.21
+# v1.21 — 2026-07-23 — repoint VALIDATE_SH at the repo copy (options 42-46);
+#          drop the dead HARVEST_DIR var (retired data/harvest layout).
 # v1.20 — 2026-07-23 — menu colour: border rules and section titles BLUE,
 #          banner text WHITE. _colorize post-filter; heredoc stays quoted so
 #          nothing in the body expands; TTY-gated so pipes stay clean.
@@ -114,10 +116,11 @@ PY="${PYTHON:-python3}"
 DEFAULT_V3="https://github.com/TX-9AI/options_trader_v3.git"
 INSTALL_DIR="~/options-trader"
 FEED_DB="~/options-trader/data/feed_store.db"
-VALIDATE_SH="$HOME/validate_regime.sh"
+# 2026-07-23: canonical copy lives in the otv3 repo. Nothing operational
+# should sit loose in /home/ubuntu.
+VALIDATE_SH="$OTV3_DIR/validate_regime.sh"
 OTV3_DIR="$HOME/options-trader-v3"          # control-box checkout (boxes use ~/options-trader)
 OTV3_PY="$OTV3_DIR/venv/bin/python"
-HARVEST_DIR="$HOME/day_trader_pro/data/harvest"
 
 # Open an interactive shell in a directory via tmux (a menu item can't cd the
 # parent shell). Inside tmux -> new window; otherwise attach-or-create a session.
@@ -221,7 +224,7 @@ menu() {
   clear
   cat <<'EOF' | _colorize
 ======================================================
-  Day Trader Pro — devtools  v1.20 Service Menu
+  Day Trader Pro — devtools  v1.21 Service Menu
 ======================================================
  ORCHESTRATION:
     1) Full spool-up (mock)       2) EOD aggregate (mock)
@@ -330,7 +333,7 @@ EOF
     37) echo; repo_push_force; pause ;;
     38) echo; repo_pull_force; pause ;;
     39) echo; read -rp "Day to consolidate (YYYY-MM-DD, ENTER=today): " D; D="${D:-$(date +%F)}"; $PY consolidate_trades.py --date "$D"; pause ;;
-    42) echo; if [ -x "$VALIDATE_SH" ]; then "$VALIDATE_SH"; else echo "missing/non-exec $VALIDATE_SH (chmod +x ~/validate_regime.sh?)"; fi; pause ;;
+    42) echo; if [ -x "$VALIDATE_SH" ]; then "$VALIDATE_SH"; else echo "missing/non-exec $VALIDATE_SH (chmod +x $OTV3_DIR/validate_regime.sh?)"; fi; pause ;;
     43) echo; read -rp "Date (YYYY-MM-DD, ENTER=today): " D; D="${D:-$(date +%F)}"; if [ -x "$VALIDATE_SH" ]; then "$VALIDATE_SH" "$D"; else echo "missing/non-exec $VALIDATE_SH"; fi; pause ;;
     44) echo; D_DEF="$(date +%F)"; read -rp "Date to view (YYYY-MM-DD, ENTER=${D_DEF}): " D; D="${D:-$D_DEF}"; if [ -x "$VALIDATE_SH" ]; then "$VALIDATE_SH" --report "$D"; else echo "missing/non-exec $VALIDATE_SH"; fi; pause ;;
     45) echo; if [ -x "$VALIDATE_SH" ]; then "$VALIDATE_SH" --diary; else echo "missing/non-exec $VALIDATE_SH"; fi; pause ;;

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# day_trader_pro/install_regime_timer.sh — v1.1
+# day_trader_pro/install_regime_timer.sh — v1.2
+# v1.2 — 2026-07-23 — repoint validate_regime.sh at the repo copy for the chmod target.
 # v1.1 — 2026-07-14 — renamed units to the house dtp- convention and slotted
 #        into the existing control-server schedule (see below); v1.0's 16:40
 #        generic naming superseded before deployment.
@@ -16,7 +17,7 @@ set -euo pipefail
 DIR="$HOME/day_trader_pro"
 [ -f "$DIR/nightly_regime.sh" ] || { echo "put nightly_regime.sh in $DIR first"; exit 1; }
 chmod +x "$DIR/nightly_regime.sh" 2>/dev/null || true
-chmod +x "$HOME/validate_regime.sh" 2>/dev/null || true
+chmod +x "$HOME/options-trader-v3/validate_regime.sh" 2>/dev/null || true
 
 sudo tee /etc/systemd/system/dtp-regime.service >/dev/null <<UNIT
 [Unit]

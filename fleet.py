@@ -1,4 +1,5 @@
-# day_trader_pro/fleet.py — v0.6.0
+# day_trader_pro/fleet.py — v0.6.1
+# v0.6.1 (2026-07-23) — correct stale data/harvest path references (layout retired; now reports/ + ohlc/ + trades/)
 """
 Fleet SSH fan-out. Pulls every monitored box's private IP from its tag and
 reaches each one, one at a time, from the control server.
@@ -34,7 +35,8 @@ CLI:
     python fleet.py repoint <url> --no-restart     # sync but don't restart the service
     python fleet.py repoint <url> --only SPX,QQQ   # scope to specific symbols
 
-    # pull files back into the shared dated folder data/harvest/<date>/ (identical
+    # pull files back into the consolidated dated roots trades/<date>/ and
+    # ohlc/<date>/ (identical
     # layout + names to harvest, so hand-pulls and harvested files interleave):
     python fleet.py pull db                         # every box's trades.db -> today's folder
     python fleet.py pull db --only IWM,SPX          # scoped
@@ -65,7 +67,7 @@ repo — the reset pulls it in automatically and keeps future deploys correct.
 
 Changelog:
   v0.5.0 (2026-07-10)
-    * `pull db|ohlc` now lands IDENTICALLY to harvest: into data/harvest/<date>/
+    * `pull db|ohlc` lands IDENTICALLY to harvest: trades/<date>/ and ohlc/<date>/
       with names <SYM>_trades_<date>.db / <SYM>_OHLC_<date>.csv (was: flat
       ~/day_trader_pro/pulls/ with a dateless trades.db). A hand-pull and a
       harvested pull are now interchangeable and consolidate_trades.py picks up
@@ -102,7 +104,7 @@ INSTALL_DIR = "~/options-trader"
 SERVICE     = "optionsbot"
 # Ad-hoc pulls land in the SAME dated layout harvest uses, so a hand-pulled file
 # is indistinguishable from a harvested one:
-#   data/harvest/<date>/<SYM>_trades_<date>.db  and  <SYM>_OHLC_<date>.csv
+#   trades/<date>/<SYM>_<date>_trades.db  and  ohlc/<date>/<SYM>_ohlc_<date>.csv
 _ET         = ZoneInfo("US/Eastern")
 # Remote paths for scp are relative to the box's home dir (no leading ~/).
 REMOTE_HOME_REL = "options-trader"

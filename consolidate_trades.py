@@ -1,13 +1,14 @@
-# day_trader_pro/consolidate_trades.py — v1.1.0
+# day_trader_pro/consolidate_trades.py — v1.1.1
+# v1.1.1 (2026-07-23) — correct stale data/harvest path references (layout retired; now reports/ + ohlc/ + trades/)
 """
 Fleet trades consolidator. Merges the raw per-box trades.db files that harvest
-pulled into data/harvest/<date>/ into ONE full-fidelity deliverable for the
+pulled into trades/<date>/ into ONE full-fidelity deliverable for the
 trades-analysis thread — nothing curated away, because every column the bots
 log is a variable to study.
 
 Sources (all local — pure SQLite reads, no fleet round-trip):
-  data/harvest/<date>/<SYM>_trades_<date>.db   (one per running box)
-  data/harvest/<date>/<SYM>_OHLC_<date>.csv    (indexed, not embedded)
+  trades/<date>/<SYM>_<date>_trades.db        (one per running box)
+  ohlc/<date>/<SYM>_ohlc_<date>.csv           (indexed, not embedded)
   data/selection_log.jsonl                     (what Claude picked this morning)
 
 From each db it reads, VERBATIM (SELECT * — so any future ALTER TABLE ADD COLUMN

@@ -1,4 +1,5 @@
-# day_trader_pro/harvest.py — v0.4.0
+# day_trader_pro/harvest.py — v0.4.1
+# v0.4.1 — 2026-07-23 — correct stale data/harvest path references (layout retired; now reports/ + ohlc/ + trades/)
 # v0.4.0 (2026-07-11) — canonical layout: raw OHLC -> ohlc/<date>/<SYM>_ohlc_<date>.csv,
 #   raw trades.db -> trades/<date>/<SYM>_trades_<date>.db, aggregates (daily_trades,
 #   fleet_trades) -> reports/ (flat). Replaces the old data/harvest/<date>/ tree so the
@@ -18,7 +19,7 @@ It is the fleet's single forensic collector (pure read — it never stops a box)
      (options-trader/data/OHLC/<date>/<SYM>.csv).
   3. Raw trades.db — WAL-checkpoint then scp each box's SQLite ground-truth db.
 
-Everything for a day lands together in  data/harvest/<date>/ :
+Everything for a day lands in the consolidated roots (data/harvest RETIRED):
      daily_trades_<date>.json
      <SYM>_OHLC_<date>.csv
      <SYM>_trades_<date>.db
@@ -39,7 +40,7 @@ Changelog:
     — the single deliverable for the trades-analysis thread. Never fatal to harvest.
   v0.2.0 (2026-07-10) — added the raw sweep (OHLC CSV + trades.db) with a ping-first
     gate and symbol+date filenames; consolidated all of a day's artifacts (incl. the
-    daily_trades JSON, moved from data/harvest/ into data/harvest/<date>/). Paired
+    daily_trades JSON, now landing flat in reports/). Paired
     with dtp-harvest.timer moving 15:55 -> 16:10 so the 16:05 OHLC exists to collect.
   v0.1.0 — trade-anatomy JSON aggregation only.
 """
