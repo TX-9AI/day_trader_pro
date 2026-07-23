@@ -196,7 +196,7 @@ menu() {
   clear
   cat <<'EOF'
 ======================================================
-  day_trader_pro — devtools  v1.14
+  day_trader_pro — devtools  v1.19
 ======================================================
  ORCHESTRATION:
     1) Full spool-up (mock)       2) EOD aggregate (mock)

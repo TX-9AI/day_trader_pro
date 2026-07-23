@@ -139,7 +139,7 @@ concurs/swaps on the reporter's own ranking, and the count is deterministic.
 | `rotate_tokens.py` / `verify_creds_remote.py` | token rotation (comma/space subsets) + remote credential verification |
 | `migrate_data_layout.sh` | one-time migration to the canonical `data/harvest/<date>/` layout |
 | `install_morning_timer.sh` / `install_eod_timer.sh` / `install_eod_conductor.sh` / `install_regime_timer.sh` | systemd timer installers for the daily chain |
-| `devtools.sh` | **v1.19** — the operator menu: mock spool-up, EOD, fleet ops, option 23 FULL wake→bake→restart→STOP deploy, **27 EMERGENCY STOP**, 39 manual consolidation re-run, 45 excursion report, 49 OHLC 21-day fetch, 52 A2 co-occurrence audit, 54 Verify. (Menu items run as child processes — they cannot `cd` your shell; use `alias otv3='cd ~/options-trader-v3 && source venv/bin/activate'`.) |
+| `devtools.sh` | **v1.19** — the operator menu: mock spool-up, EOD, fleet ops, option 23 FULL wake→bake→restart→STOP deploy, 25 bake-only (RTH-safe sync, no restart), **27 EMERGENCY STOP**, 39 manual consolidation re-run, 40 excursion report, 47 A2 co-occurrence + HTF drift, 49 backfill missing OHLC, 51 OHLC 21-day fetch, 52 rotate fleet tokens, 54 Verify. (Numbering is post-v1.18, which renumbered the whole menu sequentially — items had drifted as features were appended. **Note: the printed banner still reads v1.14; the file header is v1.19.**) (Menu items run as child processes — they cannot `cd` your shell; use `alias otv3='cd ~/options-trader-v3 && source venv/bin/activate'`.) |
 | `tests/` | `backtest_harness.py` (21-day 1m tape harness), `ohlc_fetch.py` |
 
 Also control-side but living in the **options_trader_v3 repo**:
