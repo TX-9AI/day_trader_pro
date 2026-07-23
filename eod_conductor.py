@@ -1,4 +1,7 @@
-# day_trader_pro/eod_conductor.py — v1.3.0
+# day_trader_pro/eod_conductor.py — v1.4.0
+# v1.4.0 (2026-07-23) — NEW phase_label: runs auto_label.py after consolidate
+#   so Tier-B session labels (ROADMAP L1.6/L1.7) accumulate automatically
+#   instead of depending on a manual daily habit. Warn-never-stop.
 # v1.3.0 — 2026-07-16 — NEW final phase 7 EXCURSION: runs excursion_report.py
 #          over the day's harvested per-symbol DBs (MFE/MAE distributions →
 #          reports/excursions_<date>.txt) and Telegrams the headline. ALWAYS
@@ -219,6 +222,41 @@ def phase_regime(dry, warns):
         _log("REGIME", f"✅ diary upserted + gap sweep done (rc={rc})")
 
 
+AUTO_LABEL_PY = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                             "auto_label.py")
+
+
+def phase_label(date, dry, warns):
+    """v1.4.0 — Tier-B session labeling, automated (ROADMAP L1.8/L1.6/L1.7).
+
+    Was a manual 10-minute EOD habit via label_day.sh, which also could not
+    label the archived past. auto_label.py derives the labels from RAW PRICE
+    ACTION only — it imports nothing from the regime stack, so the labels stay
+    independent ground truth for validating regime_confluence rather than a
+    restatement of its output. Rows are tagged source="auto"; a human override
+    via label_day.sh writes the same date and wins downstream.
+
+    Warn-never-stop, like every other phase.
+    """
+    if dry:
+        _log("LABEL", f"[dry] would run {AUTO_LABEL_PY} --date {date}")
+        return
+    if not os.path.isfile(AUTO_LABEL_PY):
+        _warn(warns, "LABEL", f"{AUTO_LABEL_PY} not found — session NOT labeled")
+        return
+    _log("LABEL", f"auto_label.py --date {date} (Tier-B labels from price action)")
+    try:
+        rc = subprocess.run([sys.executable, AUTO_LABEL_PY, "--date", date],
+                            timeout=600).returncode
+    except Exception as exc:  # noqa: BLE001
+        _warn(warns, "LABEL", f"auto_label.py raised: {exc}")
+        return
+    if rc != 0:
+        _warn(warns, "LABEL", f"auto_label.py rc={rc}")
+    else:
+        _log("LABEL", "✅ session labeled")
+
+
 EXCURSION_PY = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                             "excursion_report.py")
 
@@ -282,6 +320,7 @@ def run(date=None, batch=5, dry=False, do_regime=True):
     phase_report(running, dry, warns)
     still = phase_backfill(date, batch, dry, warns)
     phase_consolidate(date, dry, warns)
+    phase_label(date, dry, warns)
     if do_regime:
         phase_regime(dry, warns)
     else:
