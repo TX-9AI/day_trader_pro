@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 # day_trader_pro/devtools.sh — v1.19
+# v1.20 — 2026-07-23 — menu colour: border rules and section titles BLUE,
+#          banner text WHITE. _colorize post-filter; heredoc stays quoted so
+#          nothing in the body expands; TTY-gated so pipes stay clean.
 # v1.19 — 2026-07-22 — RESTORED two items clobbered by the v1.18 renumber (which
 #        was cut from a pre-HALT copy of the menu): (a) item 27 is the EMERGENCY
 #        STOP again — HALT-gated, no EOD, no pycache, RTH-exempt (the v1.18 label
@@ -192,11 +195,33 @@ repo_pull_force() {
   fi
 }
 
+# ── v1.20 menu colour ─────────────────────────────────────────────────────
+# Border rules and every ALL-CAPS section header render in BLUE; the banner
+# title line renders in WHITE. The menu heredoc stays QUOTED (<<'EOF') so nothing in the body can
+# expand — colour is applied afterwards by a sed post-filter instead of by
+# embedding escapes in the text. Section headers are matched structurally
+# (one leading space, capital letter, trailing colon); menu items start with
+# four spaces and a digit, so they never match.
+# Colour is suppressed when stdout is not a TTY, so piping the menu to a file
+# or a grep stays clean.
+_BLUE=$'\033[1;34m'
+_WHITE=$'\033[1;37m'
+_RST=$'\033[0m'
+_colorize() {
+  if [ -t 1 ]; then
+    sed -E -e "s/^(=+)$/${_BLUE}\1${_RST}/" \
+           -e "s/^(  Day Trader Pro .*)$/${_WHITE}\1${_RST}/" \
+           -e "s/^( [A-Z][^:]*:)$/${_BLUE}\1${_RST}/"
+  else
+    cat
+  fi
+}
+
 menu() {
   clear
-  cat <<'EOF'
+  cat <<'EOF' | _colorize
 ======================================================
-  day_trader_pro — devtools  v1.19
+  Day Trader Pro — devtools  v1.20 Service Menu
 ======================================================
  ORCHESTRATION:
     1) Full spool-up (mock)       2) EOD aggregate (mock)
