@@ -1,4 +1,13 @@
-# day_trader_pro/eod_conductor.py — v1.5.0
+# day_trader_pro/eod_conductor.py — v1.5.1
+# v1.5.1 (2026-07-23) — BACKFILL now reads eod_backfill.run()'s RETURN CODE.
+#   It previously discarded it, so a cap-guard refusal (rc=2 — boxes still
+#   running, i.e. REPORT did not stop them all) fell through to the generic
+#   "still without candles — DXFeed history may be gone" warning. That
+#   MISATTRIBUTED the cause and would send the operator chasing a feed problem
+#   that did not exist. rc=2 now emits its own warning naming the real cause and
+#   the recovery command; rc=1 (some symbols unrecoverable) keeps the DXFeed
+#   wording, which is accurate for that case. Behaviour otherwise identical —
+#   diagnosis only, no control-flow change.
 # v1.5.0 (2026-07-23) — NEW final phase 8 TABLES: runs the options_trader_v3
 #   tool tests/conditional_tables.py (--quiet) over the accumulated per-symbol
 #   trade DBs, so the ROADMAP L3.4 conviction-bar substrate builds itself
@@ -196,11 +205,27 @@ def phase_backfill(date, batch, dry, warns):
         eod_backfill.run(date=date, batch=batch, dry=True)
         return []
     try:
-        eod_backfill.run(date=date, batch=batch)
+        rc = eod_backfill.run(date=date, batch=batch)
     except Exception as exc:  # noqa: BLE001
         _warn(warns, "BACKFILL", f"eod_backfill raised: {exc}")
         return []
+
     still = eod_backfill._missing(date)
+
+    # rc=2 is the pre-flight CAP GUARD, not a data problem: boxes were still
+    # running when backfill started, so it refused before touching anything.
+    # In the normal chain REPORT has already stopped them, so this means REPORT
+    # partially failed. Name that, or the generic warning below sends the
+    # operator after DXFeed for a fleet-state problem.
+    if rc == 2:
+        _warn(warns, "BACKFILL",
+              f"cap guard refused — boxes still running (REPORT did not stop "
+              f"them all), so NO candles were pulled and {len(still)} symbol(s) "
+              f"are short ({', '.join(still) or 'none'}). This is NOT a DXFeed "
+              f"issue: stop the fleet, then re-run "
+              f"`python3 eod_backfill.py --date {date}`")
+        return still
+
     if still:
         _warn(warns, "BACKFILL", f"{len(still)} symbol(s) still without candles "
                                  f"({', '.join(still)}) — DXFeed history may be gone")

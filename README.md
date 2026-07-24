@@ -123,7 +123,7 @@ concurs/swaps on the reporter's own ranking, and the count is deterministic.
 | `orchestrator.py` | v0.2.1 — morning wake flow (rank/score transparency in the wake message) |
 | `wake_and_bake.py` | v1.2 — staged small-group wake→git-bake→restart→STOP of non-trading boxes (the candle-warm pass; also the full-fleet deploy vehicle, devtools option 23) |
 | `eod_report.py` | EOD: SSH-pull all P&L, stop all, one unified message |
-| `eod_conductor.py` | **v1.5.0** — EOD chain conductor: backfill → harvest → consolidate → **auto_label (phase 6, v1.4.0)** → regime replay → excursion (phase 7) → **conditional tables (phase 8, v1.5.0)**. Always-run, warn-never-stop. `--no-regime` / `--no-tables` skip either analysis phase |
+| `eod_conductor.py` | **v1.5.1** — EOD chain conductor: backfill → harvest → consolidate → **auto_label (phase 6, v1.4.0)** → regime replay → excursion (phase 7) → **conditional tables (phase 8, v1.5.0)**. Always-run, warn-never-stop. `--no-regime` / `--no-tables` skip either analysis phase. v1.5.1: a backfill cap-guard refusal is reported as a fleet-state problem, not a DXFeed one |
 | `auto_label.py` | v1.0 — Tier-B session labels derived from RAW price action only (imports nothing from the regime stack, so labels stay independent ground truth); backfills the archive; rows tagged `source="auto"`, a `label_day.sh` human override wins |
 | `eod_backfill.py` | re-pulls any box's missing EOD artifacts |
 | `harvest.py` | v0.4.1 — harvest to the three consolidated roots: OHLC tape → `ohlc/<date>/`, per-symbol trade DBs → `trades/<date>/`, aggregates → `reports/` (`data/harvest/` is RETIRED) |
