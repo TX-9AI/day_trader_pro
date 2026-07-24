@@ -1,4 +1,15 @@
-# day_trader_pro/eod_conductor.py — v1.4.0
+# day_trader_pro/eod_conductor.py — v1.5.0
+# v1.5.0 (2026-07-23) — NEW final phase 8 TABLES: runs the options_trader_v3
+#   tool tests/conditional_tables.py (--quiet) over the accumulated per-symbol
+#   trade DBs, so the ROADMAP L3.4 conviction-bar substrate builds itself
+#   nightly instead of depending on a manual run. Cumulative BY DESIGN — it
+#   re-reads every session on disk each night, because a conditional cell only
+#   becomes decision-grade as sample accrues; the artifact is one rolling
+#   reports/conditional_tables_<first>_<last>.{txt,jsonl}. Lives in the otv3
+#   repo (same precedent as tests/a2_cooccurrence.py, devtools item 47) and is
+#   invoked from the checkout at ~/options-trader-v3; stdlib-only, so it falls
+#   back to this interpreter when that venv is absent. Read-only against the
+#   DBs. Warn-never-stop; a missing checkout is a warning, not a failure.
 # v1.4.0 (2026-07-23) — NEW phase_label: runs auto_label.py after consolidate
 #   so Tier-B session labels (ROADMAP L1.6/L1.7) accumulate automatically
 #   instead of depending on a manual daily habit. Warn-never-stop.
@@ -40,6 +51,12 @@ Order:
   7. EXCURSION   — ALWAYS: excursion_report.py over the harvested trade DBs
                    (MFE/MAE per exit reason + floor/leash verdicts) →
                    reports/excursions_<date>.txt, headline to Telegram.
+  8. TABLES      — ALWAYS: conditional_tables.py (otv3) over EVERY session on
+                   disk — P(win) + fee-adjusted expectancy per conditioning
+                   cell with Wilson 95% intervals → reports/
+                   conditional_tables_<first>_<last>.{txt,jsonl}, headline to
+                   Telegram. The L3.4 bar-placement substrate. Runs last
+                   because it wants the day's DBs already landed.
 
 CLI:
   python eod_conductor.py              # full chain for today
@@ -47,6 +64,13 @@ CLI:
   python eod_conductor.py --dry-run
   python eod_conductor.py --batch 5
   python eod_conductor.py --no-regime
+  python eod_conductor.py --no-tables   # skip the conditional-tables phase
+
+Env:
+  DTP_EXCURSION_LIVE=1        also produce the live excursion report
+  DTP_OTV3_DIR=<path>         override the options_trader_v3 checkout location
+  CT_FEES_RT_PER_CONTRACT=..  fee-adjust the conditional-table expectancy
+  DTP_CT_MIN_N=<int>          min sample before a cell is headline-eligible
 """
 
 import argparse
@@ -301,7 +325,61 @@ def phase_excursion(date, dry, warns):
             pass
 
 
-def run(date=None, batch=5, dry=False, do_regime=True):
+OTV3_DIR = os.environ.get("DTP_OTV3_DIR",
+                          os.path.expanduser("~/options-trader-v3"))
+
+
+def phase_tables(dry, warns):
+    """Phase 8 — conditional-probability tables (ROADMAP L3.4 substrate).
+
+    Deliberately CUMULATIVE: no --date is passed, so every session on disk is
+    re-binned each night. That is the point — a cell like
+    "ORB x TRENDING_BULL x grade A" is noise at n=6 and decision-grade at n=60,
+    and only calendar time moves it. The tool prints one honest headline in
+    --quiet mode: it names a cell ONLY when that cell's Wilson 95% interval has
+    cleared 50%, and otherwise says nothing has separated from chance — which
+    is the expected message for the first weeks.
+
+    The tool lives in the options_trader_v3 repo (analysis tooling belongs with
+    the engine it analyses — same rule as tests/a2_cooccurrence.py). It is
+    stdlib-only and read-only against the trade DBs, so it cannot disturb the
+    chain; per the recovery-path rule any failure here is a loud warning and
+    never a stop.
+    """
+    script = os.path.join(OTV3_DIR, "tests", "conditional_tables.py")
+    if dry:
+        _log("TABLES", f"[dry] would run {script} --quiet (all sessions on disk)")
+        return
+    if not os.path.isfile(script):
+        _warn(warns, "TABLES", f"{script} not found — is {OTV3_DIR} checked out? "
+                               f"conditional tables NOT updated")
+        return
+    venv_py = os.path.join(OTV3_DIR, "venv", "bin", "python")
+    py = venv_py if os.access(venv_py, os.X_OK) else sys.executable
+    cmd = [py, script, "--quiet",
+           "--trades-root",  config.TRADES_DIR,
+           "--reports-dir",  config.REPORTS_DIR,
+           "--journal-root", os.path.join(config.BASE_DIR, "signal_journal"),
+           "--min-n",        os.environ.get("DTP_CT_MIN_N", "5")]
+    _log("TABLES", "conditional_tables.py --quiet (cumulative, all sessions)")
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    except Exception as exc:  # noqa: BLE001
+        _warn(warns, "TABLES", f"conditional_tables.py raised: {exc}")
+        return
+    if proc.returncode != 0:
+        _warn(warns, "TABLES", f"conditional_tables.py rc={proc.returncode}: "
+                               f"{(proc.stderr or '').strip()[:200]}")
+        return
+    headline = next((ln for ln in proc.stdout.splitlines() if ln.strip()), "")
+    _log("TABLES", f"✅ {headline}")
+    try:
+        notify.send(f"🎲 {headline}")
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def run(date=None, batch=5, dry=False, do_regime=True, do_tables=True):
     date = date or _today_et()
     mapping, _ = instance_registry.discover(config.UNIVERSE)
     running = {s: r.get("private_ip", "") for s, r in mapping.items()
@@ -326,6 +404,10 @@ def run(date=None, batch=5, dry=False, do_regime=True):
     else:
         _log("REGIME", "skipped (--no-regime)")
     phase_excursion(date, dry, warns)
+    if do_tables:
+        phase_tables(dry, warns)
+    else:
+        _log("TABLES", "skipped (--no-tables)")
 
     if warns:
         _log("DONE", f"⚠️ EOD conductor finished {date} with {len(warns)} warning(s):")
@@ -349,8 +431,10 @@ def main(argv):
     p.add_argument("--batch", type=int, default=5)
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--no-regime", action="store_true")
+    p.add_argument("--no-tables", action="store_true")
     args = p.parse_args(argv[1:])
-    return run(date=args.date, batch=args.batch, dry=args.dry_run, do_regime=not args.no_regime)
+    return run(date=args.date, batch=args.batch, dry=args.dry_run,
+               do_regime=not args.no_regime, do_tables=not args.no_tables)
 
 
 if __name__ == "__main__":

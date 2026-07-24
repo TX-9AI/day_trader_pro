@@ -35,12 +35,14 @@ runs (**the parity invariant**).
  15:50 ET  each bot writes ~/eod/pnl_today.json (final P&L + orphan check)
  15:55 ET  eod_report: SSH-pull every running box's P&L -> aggregate -> stop
            them all -> ONE unified Telegram (per-symbol P&L + net + stopped)
- after     eod_conductor (v1.3.0, timer chain): backfill -> harvest OHLC to
+ after     eod_conductor (v1.5.0, timer chain): backfill -> harvest OHLC to
            ohlc/<date>/ + trades/<date>/<SYM>_<date>_trades.db -> consolidate
-           fleet_trades -> REGIME REPLAY (validate_regime.sh -> Layer-1 diary)
-           -> excursion report (phase 7, Telegrams the headline). Always-run,
-           warn-never-stop.
- manual    label_day.sh — the Tier-B labeling habit (see below)
+           fleet_trades -> auto_label (phase 6, Tier-B labels from price
+           action) -> REGIME REPLAY (validate_regime.sh -> Layer-1 diary)
+           -> excursion report (phase 7) -> CONDITIONAL TABLES (phase 8,
+           cumulative L3.4 substrate). Both report phases Telegram their
+           headline. Always-run, warn-never-stop.
+ manual    (none — labeling was the last daily habit and auto_label retired it)
 ```
 
 Boxes are **stopped, never terminated** — config, EBS, and paper/live settings
@@ -105,7 +107,7 @@ concurs/swaps on the reporter's own ranking, and the count is deterministic.
    trade entered, trade exited.
 3. **EOD unified** (control): one message with every symbol's P&L, the net,
    orphan/missing flags, "N/N stopped" — plus the conductor's excursion
-   headline.
+   headline and the conditional-tables headline.
 
 ---
 
@@ -121,10 +123,11 @@ concurs/swaps on the reporter's own ranking, and the count is deterministic.
 | `orchestrator.py` | v0.2.1 — morning wake flow (rank/score transparency in the wake message) |
 | `wake_and_bake.py` | v1.2 — staged small-group wake→git-bake→restart→STOP of non-trading boxes (the candle-warm pass; also the full-fleet deploy vehicle, devtools option 23) |
 | `eod_report.py` | EOD: SSH-pull all P&L, stop all, one unified message |
-| `eod_conductor.py` | v1.3.0 — EOD chain conductor: backfill → harvest → consolidate → regime replay → excursion (phase 7). Always-run, warn-never-stop |
+| `eod_conductor.py` | **v1.5.0** — EOD chain conductor: backfill → harvest → consolidate → **auto_label (phase 6, v1.4.0)** → regime replay → excursion (phase 7) → **conditional tables (phase 8, v1.5.0)**. Always-run, warn-never-stop. `--no-regime` / `--no-tables` skip either analysis phase |
+| `auto_label.py` | v1.0 — Tier-B session labels derived from RAW price action only (imports nothing from the regime stack, so labels stay independent ground truth); backfills the archive; rows tagged `source="auto"`, a `label_day.sh` human override wins |
 | `eod_backfill.py` | re-pulls any box's missing EOD artifacts |
-| `harvest.py` | v0.4.0 — canonical harvest to `data/harvest/<date>/`: OHLC tape → `ohlc/<date>/`, per-symbol trade DBs → `trades/<date>/` |
-| `consolidate_trades.py` | v1.1.0 — fleet_trades JSON/CSV rollup from the harvested DBs |
+| `harvest.py` | v0.4.1 — harvest to the three consolidated roots: OHLC tape → `ohlc/<date>/`, per-symbol trade DBs → `trades/<date>/`, aggregates → `reports/` (`data/harvest/` is RETIRED) |
+| `consolidate_trades.py` | v1.1.1 — fleet_trades JSON/CSV rollup from the harvested DBs |
 | `excursion_report.py` | v2.2 — MFE/MAE excursion report from the per-symbol DB snapshots; `--since` cumulative; live variant via `DTP_EXCURSION_LIVE=1` |
 | `trade_report.py` / `standings.py` | trade and standings views over the consolidated data |
 | `shutdown_manager.py` | manual/backstop stop sweep (no P&L) |
@@ -139,7 +142,7 @@ concurs/swaps on the reporter's own ranking, and the count is deterministic.
 | `rotate_tokens.py` / `verify_creds_remote.py` | token rotation (comma/space subsets) + remote credential verification |
 | `migrate_data_layout.sh` | one-time migration to the canonical `data/harvest/<date>/` layout |
 | `install_morning_timer.sh` / `install_eod_timer.sh` / `install_eod_conductor.sh` / `install_regime_timer.sh` | systemd timer installers for the daily chain |
-| `devtools.sh` | **v1.19** — the operator menu: mock spool-up, EOD, fleet ops, option 23 FULL wake→bake→restart→STOP deploy, 25 bake-only (RTH-safe sync, no restart), **27 EMERGENCY STOP**, 39 manual consolidation re-run, 40 excursion report, 47 A2 co-occurrence + HTF drift, 49 backfill missing OHLC, 51 OHLC 21-day fetch, 52 rotate fleet tokens, 54 Verify. (Numbering is post-v1.18, which renumbered the whole menu sequentially — items had drifted as features were appended. **Note: the printed banner still reads v1.14; the file header is v1.19.**) (Menu items run as child processes — they cannot `cd` your shell; use `alias otv3='cd ~/options-trader-v3 && source venv/bin/activate'`.) |
+| `devtools.sh` | **v1.22** — the operator menu: mock spool-up, EOD, fleet ops, option 23 FULL wake→bake→restart→STOP deploy, 25 bake-only (RTH-safe sync, no restart), **27 EMERGENCY STOP**, 39 manual consolidation re-run, 40 excursion report, 41 trade breakdown, 42–46 regime replay/diary/backfill, 47 A2 co-occurrence + HTF drift, 48 live P&L, 49 backfill missing OHLC, 50 EOD conductor, 51 OHLC 21-day fetch, 52 rotate fleet tokens, 53 audit creds, 54 Verify. (Numbering is post-v1.18, which renumbered the whole menu sequentially — items had drifted as features were appended. Banner/header drift fixed 2026-07-23; v1.21's unbound-variable regression fixed in v1.22.) (Menu items run as child processes — they cannot `cd` your shell; use `alias otv3='cd ~/options-trader-v3 && source venv/bin/activate'`.) |
 | `tests/` | `backtest_harness.py` (21-day 1m tape harness), `ohlc_fetch.py` |
 
 Also control-side but living in the **options_trader_v3 repo**:
@@ -175,6 +178,7 @@ python orchestrator.py --no-gate      # wake the exactly-15 fleet now
 python eod_report.py --dry-run        # pull + aggregate, stop nothing
 python eod_report.py                  # pull + aggregate + stop all + one msg
 python eod_conductor.py               # run the full EOD chain by hand
+python eod_conductor.py --no-tables   # ...without the conditional-tables phase
 
 # safety / verify
 python notify.py --test               # Telegram works?
@@ -206,6 +210,9 @@ DTP_TELEGRAM_CHAT_ID=...
 DTP_REPORT_JSON=/home/ubuntu/day_trader_pro/data/report.json
 ANTHROPIC_API_KEY=...         # enables the concur/swap selection call
 DTP_EXCURSION_LIVE=1          # optional: add the live excursion report
+DTP_OTV3_DIR=...              # optional: options_trader_v3 checkout (default ~/options-trader-v3)
+CT_FEES_RT_PER_CONTRACT=1.30  # optional: fee-adjust conditional-table expectancy
+DTP_CT_MIN_N=5                # optional: min sample before a cell is headline-eligible
 ```
 
 SSH pull settings (defaults usually fine): `DTP_SSH_KEY=~/.ssh/tx-9.pem`,
@@ -219,17 +226,22 @@ single-threaded (per-bar full-stack scoring is the bottleneck).
 
 ---
 
-## Current status (2026-07-22)
+## Current status (2026-07-23)
 
 - **The daily lifecycle runs unattended and clean** (since 2026-07-18):
   morning wake (exactly-15), staged candle wake, trading day, wind-down, EOD
   chain — attention has moved to strategy/regime work.
 - **Regime workstream live on control:** the conductor's nightly replay + the
-  A2/ramp-calibration tooling (devtools 52) drove the `regime_confluence` v1.2
+  A2/ramp-calibration tooling (devtools **47**) drove the `regime_confluence` v1.2
   ramp de-saturation now deployed to the fleet (2026-07-22). The frozen-baseline
   window gets one week added to its back end to preserve a clean stretch.
-- **The Monday habit:** after the conductor runs, `./label_day.sh` — this is
-  what fills the Layer-1 Tier-B tape gaps (options_trader_v3 `ROADMAP.md` L1.7).
+- **No daily habits left (2026-07-23):** the last two manual EOD jobs are now
+  conductor phases — `auto_label.py` (phase 6) fills the Layer-1 Tier-B tape
+  gaps that `label_day.sh` used to require a human for, and
+  `conditional_tables.py` (phase 8, from the otv3 checkout) accumulates the
+  L3.4 conviction-bar substrate. `label_day.sh` remains as the manual OVERRIDE
+  path, not a habit. Design rule held: both are read-only, warn-never-stop, and
+  run after the recovery phases, so neither can break the chain.
 - **Known limitation (defect S upstream):** the offline replay is HTF-starved
   (one day-folder at a time), so the diary under-reports TRENDING until the
   bookmark lands — build it on the tester first; do not disturb the conductor.
