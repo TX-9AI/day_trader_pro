@@ -1,3 +1,9 @@
+# day_trader_pro/eod_conductor.py — v1.6.0
+# v1.6.0 (2026-07-27) — PHASE 9 READINESS: nightly readiness digest from the
+#   harvested signal journal (otv3 tests/readiness_digest.py --quiet), warn-
+#   never-stop, Telegram headline (🧭), --no-readiness to skip. Pairs with
+#   harvest v0.5.0 (journal pull) — together they close the 07-18 journal-
+#   harvest deferral and make readiness dial-tuning fully unattended.
 # day_trader_pro/eod_conductor.py — v1.5.1
 # v1.5.1 (2026-07-23) — BACKFILL now reads eod_backfill.run()'s RETURN CODE.
 #   It previously discarded it, so a cap-guard refusal (rc=2 — boxes still
@@ -404,7 +410,52 @@ def phase_tables(dry, warns):
         pass
 
 
-def run(date=None, batch=5, dry=False, do_regime=True, do_tables=True):
+def phase_readiness(date, dry, warns):
+    """Phase 9 — readiness digest (trade_readiness v1.1 dial-tuning report).
+
+    Digests the harvested signal-journal readiness rows (machine states, R
+    distribution, would-fire counts, arm episodes, staged picks, anticipation
+    lead-times) into reports/readiness_digest_<date>.{txt,jsonl}. This is the
+    file the readiness bars (OT_TR_*) get tuned from — the whole point of the
+    log-only observer is that this report accumulates with no manual step.
+    Consumes what harvest v0.5.0 pulled; on a fleet that has not yet deployed
+    main v4.4 the tool prints an honest "no readiness rows" headline and
+    returns 0, so this phase is safe to ship AHEAD of the fleet deploy.
+    Warn-never-stop, same recovery rule as every phase.
+    """
+    script = os.path.join(OTV3_DIR, "tests", "readiness_digest.py")
+    if dry:
+        _log("READINESS", f"[dry] would run {script} --quiet --date {date}")
+        return
+    if not os.path.isfile(script):
+        _warn(warns, "READINESS", f"{script} not found — is {OTV3_DIR} checked out? "
+                                  f"readiness digest NOT written")
+        return
+    venv_py = os.path.join(OTV3_DIR, "venv", "bin", "python")
+    py = venv_py if os.access(venv_py, os.X_OK) else sys.executable
+    cmd = [py, script, "--quiet", "--date", date,
+           "--journal-root", os.path.join(config.BASE_DIR, "signal_journal"),
+           "--reports-dir",  config.REPORTS_DIR]
+    _log("READINESS", f"readiness_digest.py --quiet --date {date}")
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    except Exception as exc:  # noqa: BLE001
+        _warn(warns, "READINESS", f"readiness_digest.py raised: {exc}")
+        return
+    if proc.returncode != 0:
+        _warn(warns, "READINESS", f"readiness_digest.py rc={proc.returncode}: "
+                                  f"{(proc.stderr or '').strip()[:200]}")
+        return
+    headline = next((ln for ln in proc.stdout.splitlines() if ln.strip()), "")
+    _log("READINESS", f"✅ {headline}")
+    try:
+        notify.send(headline)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def run(date=None, batch=5, dry=False, do_regime=True, do_tables=True,
+        do_readiness=True):
     date = date or _today_et()
     mapping, _ = instance_registry.discover(config.UNIVERSE)
     running = {s: r.get("private_ip", "") for s, r in mapping.items()
@@ -433,6 +484,10 @@ def run(date=None, batch=5, dry=False, do_regime=True, do_tables=True):
         phase_tables(dry, warns)
     else:
         _log("TABLES", "skipped (--no-tables)")
+    if do_readiness:
+        phase_readiness(date, dry, warns)
+    else:
+        _log("READINESS", "skipped (--no-readiness)")
 
     if warns:
         _log("DONE", f"⚠️ EOD conductor finished {date} with {len(warns)} warning(s):")
@@ -457,9 +512,11 @@ def main(argv):
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--no-regime", action="store_true")
     p.add_argument("--no-tables", action="store_true")
+    p.add_argument("--no-readiness", action="store_true")
     args = p.parse_args(argv[1:])
     return run(date=args.date, batch=args.batch, dry=args.dry_run,
-               do_regime=not args.no_regime, do_tables=not args.no_tables)
+               do_regime=not args.no_regime, do_tables=not args.no_tables,
+               do_readiness=not args.no_readiness)
 
 
 if __name__ == "__main__":

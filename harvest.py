@@ -1,4 +1,8 @@
-# day_trader_pro/harvest.py — v0.4.1
+# day_trader_pro/harvest.py — v0.5.0
+# v0.5.0 — 2026-07-27 — also pull data/signal_journal/<date>/<SYM>.jsonl into
+#   BASE_DIR/signal_journal/<date>/ (closes the 07-18 journal-harvest deferral;
+#   conductor phases 8+9 consume it). Best-effort per box, absence is normal.
+# v0.4.1 — 2026-07-23 — correct stale data/harvest path references (layout retired; now reports/ + ohlc/ + trades/)
 # v0.4.1 — 2026-07-23 — correct stale data/harvest path references (layout retired; now reports/ + ohlc/ + trades/)
 # v0.4.0 (2026-07-11) — canonical layout: raw OHLC -> ohlc/<date>/<SYM>_ohlc_<date>.csv,
 #   raw trades.db -> trades/<date>/<SYM>_trades_<date>.db, aggregates (daily_trades,
@@ -104,6 +108,15 @@ def _pull_raw(ip, sym, today):
     local_db = os.path.join(config.TRADES_DIR, today, f"{sym}_trades_{today}.db")
     rc, _out, _err = ssh_util.scp_pull(ip, remote_db, local_db)
     db_ok = rc == 0 and os.path.exists(local_db) and os.path.getsize(local_db) > 0
+
+    # v0.5.0: signal journal (scored/disposition/readiness rows). Lands under
+    # BASE_DIR/signal_journal/<date>/<SYM>.jsonl — EXACTLY where conductor
+    # phase 8 (--journal-root) and phase 9 (readiness digest) already look, so
+    # pulling it here lights both up with no other change. Best-effort: many
+    # boxes have quiet days with no file; absence is normal, never a failure.
+    remote_j = f"{REMOTE_REPO}/data/signal_journal/{today}/{sym}.jsonl"
+    local_j = os.path.join(config.BASE_DIR, "signal_journal", today, f"{sym}.jsonl")
+    ssh_util.scp_pull(ip, remote_j, local_j)
 
     return ohlc_ok, db_ok
 
