@@ -1,4 +1,8 @@
-# day_trader_pro/harvest.py — v0.5.0
+# day_trader_pro/harvest.py — v0.5.1
+# v0.5.1 — 2026-07-27 — also pull data/chain_snapshots/<date>/<SYM>.jsonl.gz
+#   into BASE_DIR/chain_snapshots/<date>/ (P5 step 1: chains are unrecoverable
+#   after 16:00 and previously existed only box-local). Lands exactly where
+#   chain_reconstruction_check.py already looks (~/day_trader_pro/chain_snapshots).
 # v0.5.0 — 2026-07-27 — also pull data/signal_journal/<date>/<SYM>.jsonl into
 #   BASE_DIR/signal_journal/<date>/ (closes the 07-18 journal-harvest deferral;
 #   conductor phases 8+9 consume it). Best-effort per box, absence is normal.
@@ -117,6 +121,16 @@ def _pull_raw(ip, sym, today):
     remote_j = f"{REMOTE_REPO}/data/signal_journal/{today}/{sym}.jsonl"
     local_j = os.path.join(config.BASE_DIR, "signal_journal", today, f"{sym}.jsonl")
     ssh_util.scp_pull(ip, remote_j, local_j)
+
+    # v0.5.1: chain snapshots (P5 step 1 — the TIME-CRITICAL one). The full
+    # 0DTE chain archive (main v4.2) is the single dataset in the system that
+    # CANNOT be reconstructed after 16:00; until tonight it lived only on the
+    # box that wrote it, so any rebuilt box lost that symbol's history
+    # permanently. ~1.4MB/box/day gzipped. Best-effort like the journal.
+    remote_c = f"{REMOTE_REPO}/data/chain_snapshots/{today}/{sym}.jsonl.gz"
+    local_c = os.path.join(config.BASE_DIR, "chain_snapshots", today,
+                           f"{sym}.jsonl.gz")
+    ssh_util.scp_pull(ip, remote_c, local_c)
 
     return ohlc_ok, db_ok
 
