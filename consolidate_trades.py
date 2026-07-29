@@ -1,4 +1,13 @@
-# day_trader_pro/consolidate_trades.py — v1.1.1
+# day_trader_pro/consolidate_trades.py — v1.2
+# v1.2   (2026-07-28) — DATE FILTER (upstream defect Z). _read_table now filters
+#        by the day being consolidated when the table carries a date column.
+#        Harvest copies each box's ENTIRE trades.db into trades/<date>/, so the
+#        old unfiltered SELECT * rolled that box's whole history into every
+#        night's fleet_trades_<date> — the files were cumulative archives, not
+#        day slices (07-20: 137 rows, 07-28: 266). Every per-day metric computed
+#        off them blended weeks. Column-existence guarded, so an older schema
+#        without the column still reads in full rather than returning nothing.
+# v1.1.1
 # v1.1.1 (2026-07-23) — correct stale data/harvest path references (layout retired; now reports/ + ohlc/ + trades/)
 """
 Fleet trades consolidator. Merges the raw per-box trades.db files that harvest
@@ -60,12 +69,32 @@ def _today_et():
     return datetime.now(_ET).strftime("%Y-%m-%d")
 
 
-def _read_table(conn, table):
-    """(columns, [rowdict,...]) for `table`; ([],[]) if the table is absent."""
+def _read_table(conn, table, date=None, date_col=None):
+    """(columns, [rowdict,...]) for `table`; ([],[]) if the table is absent.
+
+    v1.2 (2026-07-28) — DATE FILTER. Harvest copies each box's WHOLE trades.db
+    into trades/<date>/, so an unfiltered SELECT * pulled that box's entire
+    history into every night's fleet_trades_<date> file. The files were
+    cumulative archives, not day slices: 2026-07-20 held 137 rows and 07-28 held
+    266, and any per-day metric computed off them (win rate, P&L, conviction
+    distribution) silently blended weeks. This is upstream defect Z.
+
+    Filtering is applied ONLY when `date` and `date_col` are given AND the column
+    actually exists on this schema — an older DB without the column reads in full
+    rather than silently returning nothing. RTH is 13:30-20:00 UTC, so a UTC date
+    prefix matches the ET session date; entry_time is stored ISO-8601 UTC.
+    """
     try:
-        cur = conn.execute(f"SELECT * FROM {table}")
+        cur = conn.execute(f"SELECT * FROM {table} LIMIT 0")
     except sqlite3.OperationalError:
         return [], []            # older schema without this table — not an error
+    have = {d[0] for d in cur.description}
+
+    if date and date_col and date_col in have:
+        cur = conn.execute(
+            f"SELECT * FROM {table} WHERE {date_col} LIKE ?", (f"{date}%",))
+    else:
+        cur = conn.execute(f"SELECT * FROM {table}")
     cols = [d[0] for d in cur.description]
     rows = [OrderedDict(zip(cols, r)) for r in cur.fetchall()]
     return cols, rows
@@ -172,17 +201,17 @@ def consolidate(date=None, write_csv=True):
             skipped.append(f"{sym} ({exc})")
             continue
         try:
-            _tc, trows = _read_table(conn, "trades")
+            _tc, trows = _read_table(conn, "trades", date, "entry_time")
             for r in trows:
                 r["box"] = sym                 # authoritative fleet tag (from filename)
                 for c in r:
                     col_union.setdefault(c, None)
                 trades.append(r)
-            _rc, rrows = _read_table(conn, "regime_log")
+            _rc, rrows = _read_table(conn, "regime_log", date, "logged_at")
             for r in rrows:
                 r["box"] = sym
                 regime.append(r)
-            _bc, brows = _read_table(conn, "circuit_breaker_events")
+            _bc, brows = _read_table(conn, "circuit_breaker_events", date, "event_time")
             for r in brows:
                 r["box"] = sym
                 breaker.append(r)
