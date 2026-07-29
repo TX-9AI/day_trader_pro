@@ -1,4 +1,6 @@
-# day_trader_pro/.gitignore — 2026-07-14 — layout consolidation:
+# day_trader_pro/.gitignore — 2026-07-29 — + the two harvested-artifact roots
+# (signal_journal/, chain_snapshots/) and delivered archives.
+# 2026-07-14 — layout consolidation:
 # every data-collection root stays LOCAL ONLY; the repo carries code, not tape.
 __pycache__/
 *.pyc
@@ -8,6 +10,16 @@ __pycache__/
 ohlc/
 trades/
 reports/
+
+# harvested per-box artifacts (harvest v0.5.0 / v0.5.1 / v0.6.0) — LOCAL ONLY.
+# Excluded BY FOLDER, deliberately, rather than by extension: a blanket *.json
+# or *.db rule would also silently swallow a legitimate file added later, and a
+# rule that hides things without saying so is the exact failure mode that cost
+# three sessions of chains. Anything genuinely meant for the repo stays visible.
+#   signal_journal/<date>/<SYM>.jsonl      — scored/disposition/readiness rows
+#   chain_snapshots/<date>/<SYM>.jsonl.gz  — ~1.4MB/box/day, unreconstructable
+signal_journal/
+chain_snapshots/
 
 # legacy locations (pre-consolidation stragglers; migrate_data_layout.sh empties them)
 pulls/
@@ -20,3 +32,8 @@ data/report.json
 data/selection_log.jsonl
 *.patch
 *.csv
+
+# delivered archives land in ~ but are sometimes unpacked in place
+*.tar
+*.tar.gz
+*.zip

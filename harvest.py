@@ -1,4 +1,23 @@
-# day_trader_pro/harvest.py — v0.5.1
+# day_trader_pro/harvest.py — v0.6.0
+# v0.6.0 — 2026-07-29 — THE MISSING mkdir (root cause), honest pull states, and
+#   --date back-harvest.
+#   ROOT CAUSE FIXED: scp does not create its destination directory, and run()
+#   only ever mkdir'd ohlc_dir/trades_dir/REPORTS_DIR. v0.5.0 added
+#   BASE_DIR/signal_journal/<date>/ and v0.5.1 added
+#   BASE_DIR/chain_snapshots/<date>/ as destinations WITHOUT adding the matching
+#   os.makedirs, so every journal and chain pull failed with "No such file or
+#   directory" from 2026-07-27 onward while harvest reported a clean run. Both
+#   roots are now created before the pull.
+#   WHY IT WENT UNSEEN FOR THREE SESSIONS: both pulls discarded their return
+#   value ("absence is normal"), making a FAILED pull and a genuinely absent file
+#   indistinguishable. Now classified three ways -- ok / absent / failed -- and
+#   reported per box in a `manifest` block on daily_trades, so the conductor can
+#   page on `failed` alone without crying wolf over quiet days.
+#   NEW --date YYYY-MM-DD: recovers a PAST session's date-addressed artifacts
+#   (OHLC, journal, chains) and deliberately nothing else -- trades_today.json is
+#   always the current day and trades.db is cumulative, so re-pulling either for
+#   a past date would corrupt a correct snapshot. Writes
+#   reports/backharvest_<date>.json.
 # v0.5.1 — 2026-07-27 — also pull data/chain_snapshots/<date>/<SYM>.jsonl.gz
 #   into BASE_DIR/chain_snapshots/<date>/ (P5 step 1: chains are unrecoverable
 #   after 16:00 and previously existed only box-local). Lands exactly where
@@ -94,6 +113,31 @@ def _ping(ip):
     return rc == 0
 
 
+def _classify_pull(result, local_path):
+    """v0.6.0 — turn an scp result into one of three HONEST states.
+
+    v0.5.0/v0.5.1 discarded the return value of the journal and chain pulls
+    entirely, on the reasoning that "many boxes have quiet days; absence is
+    normal". True — but it made a FAILED pull and a NONEXISTENT file
+    indistinguishable, and that is exactly how a missing os.makedirs went
+    unnoticed for three sessions: every one of those pulls was failing with
+    "No such file or directory" (the LOCAL directory, which nothing created)
+    while harvest reported a clean run.
+
+      "ok"      — file landed, non-empty
+      "absent"  — box answered, file genuinely not there (a quiet day: NORMAL)
+      "failed"  — anything else: permissions, timeout, missing local dir,
+                  truncated transfer. This is the state that must be LOUD.
+    """
+    rc, _out, err = result
+    if rc == 0 and os.path.exists(local_path) and os.path.getsize(local_path) > 0:
+        return "ok"
+    blob = (err or "").lower()
+    if "no such file or directory" in blob or "not found" in blob:
+        return "absent"
+    return "failed"
+
+
 def _pull_raw(ip, sym, today):
     """Pull this box's OHLC CSV -> ohlc/<date>/ and (WAL-checkpointed) trades.db ->
     trades/<date>/, with symbol+date names. Returns (ohlc_ok, db_ok)."""
@@ -120,7 +164,8 @@ def _pull_raw(ip, sym, today):
     # boxes have quiet days with no file; absence is normal, never a failure.
     remote_j = f"{REMOTE_REPO}/data/signal_journal/{today}/{sym}.jsonl"
     local_j = os.path.join(config.BASE_DIR, "signal_journal", today, f"{sym}.jsonl")
-    ssh_util.scp_pull(ip, remote_j, local_j)
+    os.makedirs(os.path.dirname(local_j), exist_ok=True)     # v0.6.0 — scp does NOT mkdir
+    j_state = _classify_pull(ssh_util.scp_pull(ip, remote_j, local_j), local_j)
 
     # v0.5.1: chain snapshots (P5 step 1 — the TIME-CRITICAL one). The full
     # 0DTE chain archive (main v4.2) is the single dataset in the system that
@@ -130,9 +175,10 @@ def _pull_raw(ip, sym, today):
     remote_c = f"{REMOTE_REPO}/data/chain_snapshots/{today}/{sym}.jsonl.gz"
     local_c = os.path.join(config.BASE_DIR, "chain_snapshots", today,
                            f"{sym}.jsonl.gz")
-    ssh_util.scp_pull(ip, remote_c, local_c)
+    os.makedirs(os.path.dirname(local_c), exist_ok=True)     # v0.6.0 — scp does NOT mkdir
+    c_state = _classify_pull(ssh_util.scp_pull(ip, remote_c, local_c), local_c)
 
-    return ohlc_ok, db_ok
+    return ohlc_ok, db_ok, j_state, c_state
 
 
 def _mock_pull(sym):
@@ -215,6 +261,9 @@ def run(quiet=False):
     unreachable = []          # failed the ping — skipped entirely
     n_ohlc = 0
     n_db = 0
+    journal_states = {}       # v0.6.0 — per-box ok/absent/failed, no longer discarded
+    chain_states = {}
+    pull_failures = []        # only the FAILED state; "absent" is a quiet day
     raw_gaps = []             # per-box notes on which raw artifact didn't come back
 
     for sym in sorted(running):
@@ -238,9 +287,15 @@ def run(quiet=False):
             data, err = _pull(ip)
             if data is None:
                 missing.append(f"{sym} ({err})")
-            ohlc_ok, db_ok = _pull_raw(ip, sym, today)
+            ohlc_ok, db_ok, j_state, c_state = _pull_raw(ip, sym, today)
             n_ohlc += 1 if ohlc_ok else 0
             n_db += 1 if db_ok else 0
+            journal_states[sym] = j_state
+            chain_states[sym] = c_state
+            if j_state == "failed":
+                pull_failures.append(f"{sym} journal")
+            if c_state == "failed":
+                pull_failures.append(f"{sym} chains")
             if not ohlc_ok or not db_ok:
                 gap = []
                 if not ohlc_ok:
@@ -276,6 +331,16 @@ def run(quiet=False):
             "missing": missing,
             "unreachable": unreachable,
             "raw_pulled": {"ohlc": n_ohlc, "trades_db": n_db, "gaps": raw_gaps},
+            # v0.6.0 — completeness manifest. Counts are per STATE so a quiet
+            # day (absent) never masquerades as a broken pull (failed), and the
+            # conductor can page on `pull_failures` alone.
+            "manifest": {
+                "journal": {st: sorted(k for k, v in journal_states.items() if v == st)
+                            for st in ("ok", "absent", "failed")},
+                "chains": {st: sorted(k for k, v in chain_states.items() if v == st)
+                           for st in ("ok", "absent", "failed")},
+                "pull_failures": sorted(pull_failures),
+            },
         },
         "selection": _load_selection(),   # what Claude picked this morning
         "fleet_stats": _stats(all_trades),
@@ -333,13 +398,146 @@ def run(quiet=False):
     return 0
 
 
+def backharvest(date, quiet=False):
+    """v0.6.0 — recover DATE-ADDRESSED artifacts for a PAST session.
+
+    WHY THIS IS A SEPARATE FUNCTION AND NOT `run(date=...)`:
+    only three artifacts are addressed by date on the box, and only those can be
+    re-pulled safely --
+
+        data/OHLC/<date>/<SYM>.csv                 <- date-addressed  OK
+        data/signal_journal/<date>/<SYM>.jsonl     <- date-addressed  OK
+        data/chain_snapshots/<date>/<SYM>.jsonl.gz <- date-addressed  OK
+
+        ~/eod/trades_today.json    <- ALWAYS the CURRENT day. Re-pulling it for a
+                                      past date would fold today's trades into
+                                      that date's daily_trades JSON.
+        ~/options-trader/trades.db <- cumulative, not date-addressed. Re-pulling
+                                      would overwrite a correct past snapshot
+                                      with a later state of the same database.
+
+    So a back-harvest NEVER touches trade anatomy, trades.db, the daily_trades
+    report, or consolidation. It fills the gap and nothing else.
+
+    Which boxes hold a given date's journal/chains is NOT knowable from the box
+    list: the trading cohort is scored and assigned each morning, so it differs
+    day to day and is nobody's choice. We therefore ask EVERY running box and let
+    the three-state classifier sort it out -- "absent" is the expected answer
+    from the majority that did not trade that date. Where that date's
+    daily_trades report survives, its by_symbol keys give the set that DID trade,
+    which is the only honest yardstick for what we should have got.
+    """
+    mapping, _ = instance_registry.discover(config.UNIVERSE)
+    running = {s: r for s, r in mapping.items() if r.get("state") == "running"}
+    if not running:
+        print("no boxes are running — wake them first (a stopped box's disk is "
+              "intact, but it cannot be read)")
+        return None
+
+    expected = None
+    rep = os.path.join(config.REPORTS_DIR, f"daily_trades_{date}.json")
+    if os.path.exists(rep):
+        try:
+            with open(rep) as fh:
+                expected = sorted(json.load(fh).get("by_symbol", {}).keys())
+        except Exception:  # noqa: BLE001
+            expected = None
+
+    print(f"back-harvest {date} — asking {len(running)} running box(es) for "
+          f"OHLC + journal + chains")
+    if expected:
+        print(f"  that session's trading cohort ({len(expected)}): {' '.join(expected)}")
+    else:
+        print("  no daily_trades report for that date — cannot state the expected "
+              "cohort, so treat 'absent' as unproven rather than normal")
+
+    for d in ("signal_journal", "chain_snapshots"):
+        os.makedirs(os.path.join(config.BASE_DIR, d, date), exist_ok=True)
+    os.makedirs(os.path.join(config.OHLC_DIR, date), exist_ok=True)
+
+    j_states, c_states, o_states = {}, {}, {}
+    for sym in sorted(running):
+        ip = running[sym].get("private_ip", "")
+        if not ip or not _ping(ip):
+            j_states[sym] = c_states[sym] = o_states[sym] = "failed"
+            continue
+
+        lo = os.path.join(config.OHLC_DIR, date, f"{sym}_ohlc_{date}.csv")
+        o_states[sym] = _classify_pull(
+            ssh_util.scp_pull(ip, f"{REMOTE_REPO}/data/OHLC/{date}/{sym}.csv", lo), lo)
+
+        lj = os.path.join(config.BASE_DIR, "signal_journal", date, f"{sym}.jsonl")
+        j_states[sym] = _classify_pull(
+            ssh_util.scp_pull(ip, f"{REMOTE_REPO}/data/signal_journal/{date}/{sym}.jsonl", lj), lj)
+
+        lc = os.path.join(config.BASE_DIR, "chain_snapshots", date, f"{sym}.jsonl.gz")
+        c_states[sym] = _classify_pull(
+            ssh_util.scp_pull(ip, f"{REMOTE_REPO}/data/chain_snapshots/{date}/{sym}.jsonl.gz", lc), lc)
+
+    def _grp(d, st):
+        return sorted(k for k, v in d.items() if v == st)
+
+    manifest = {
+        "date_et": date,
+        "mode": "backharvest (date-addressed artifacts only)",
+        "generated_utc": datetime.now(ZoneInfo("UTC")).isoformat(),
+        "boxes_asked": sorted(running),
+        "expected_cohort": expected,
+        "ohlc": {st: _grp(o_states, st) for st in ("ok", "absent", "failed")},
+        "journal": {st: _grp(j_states, st) for st in ("ok", "absent", "failed")},
+        "chains": {st: _grp(c_states, st) for st in ("ok", "absent", "failed")},
+    }
+
+    print("")
+    for label, d in (("ohlc", o_states), ("journal", j_states), ("chains", c_states)):
+        got, absent, failed = _grp(d, "ok"), _grp(d, "absent"), _grp(d, "failed")
+        print(f"  {label:<9} recovered {len(got):>2}   absent {len(absent):>2}   FAILED {len(failed):>2}")
+        if failed:
+            print(f"            failed: {' '.join(failed)}")
+        if expected:
+            gap = [x for x in expected if x not in got]
+            if gap:
+                print(f"            traded that day but nothing recovered: {' '.join(gap)}")
+
+    out = os.path.join(config.REPORTS_DIR, f"backharvest_{date}.json")
+    os.makedirs(config.REPORTS_DIR, exist_ok=True)
+    with open(out, "w") as fh:
+        json.dump(manifest, fh, indent=2, default=str)
+    print(f"\n  manifest -> {out}")
+
+    if not quiet:
+        try:
+            notify.send(f"\U0001F4E6 back-harvest {date} | "
+                        f"journal {len(_grp(j_states, 'ok'))} | "
+                        f"chains {len(_grp(c_states, 'ok'))} | "
+                        f"failed {len(_grp(j_states, 'failed')) + len(_grp(c_states, 'failed'))}")
+        except Exception:  # noqa: BLE001
+            pass
+    return manifest
+
+
 def main(argv):
     p = argparse.ArgumentParser(description="day_trader_pro trade + raw-artifact harvester")
     p.add_argument("--mock", action="store_true", help="offline demo")
     p.add_argument("--quiet", action="store_true", help="no Telegram note")
+    p.add_argument("--date", metavar="YYYY-MM-DD",
+                   help="BACK-HARVEST a past session: pulls only the "
+                        "date-addressed artifacts (OHLC, signal_journal, "
+                        "chain_snapshots). Never touches trade anatomy, "
+                        "trades.db, daily_trades or consolidation.")
     args = p.parse_args(argv[1:])
     if args.mock:
         config.set_mock(True)
+    if args.date:
+        try:
+            datetime.strptime(args.date, "%Y-%m-%d")
+        except ValueError:
+            print(f"--date must be YYYY-MM-DD, got {args.date!r}")
+            return 2
+        if args.date == _today_et():
+            print("--date is today; run harvest with no --date for a live session")
+            return 2
+        return 0 if backharvest(args.date, quiet=args.quiet) is not None else 1
     return run(quiet=args.quiet)
 
 

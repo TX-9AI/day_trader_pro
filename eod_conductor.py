@@ -1,4 +1,11 @@
-# day_trader_pro/eod_conductor.py — v1.6.0
+# day_trader_pro/eod_conductor.py — v1.7.0
+# v1.7.0 (2026-07-29) — HARVEST COMPLETENESS: this phase asserted only that
+#   ohlc/<date> was non-empty and logged ✅ on that alone. It did so on
+#   2026-07-29 with signal_journal and chain_snapshots both empty — and empty for
+#   three sessions running. Every artifact class is now checked while the fleet
+#   is STILL UP (this chain stops the boxes, so the next morning is too late),
+#   each miss naming its recovery command, and harvest v0.6.0's per-box manifest
+#   is read so a genuinely quiet box never pages while a FAILED pull always does.
 # v1.6.0 (2026-07-27) — PHASE 9 READINESS: nightly readiness digest from the
 #   harvested signal journal (otv3 tests/readiness_digest.py --quiet), warn-
 #   never-stop, Telegram headline (🧭), --no-readiness to skip. Pairs with
@@ -89,6 +96,7 @@ Env:
 """
 
 import argparse
+import json
 import os
 import subprocess
 import sys
@@ -182,6 +190,41 @@ def phase_harvest(date, running, dry, warns):
         _warn(warns, "HARVEST", "boxes were up but no OHLC came back — backfill will retry")
     else:
         _log("HARVEST", "✅ raw trades/ + ohlc/ populated")
+
+    # v1.7.0 COMPLETENESS — this phase used to assert ONLY that ohlc/<date> was
+    # non-empty and logged ✅ on that basis. On 2026-07-29 it did exactly that
+    # while signal_journal and chain_snapshots were both EMPTY, and had been for
+    # three sessions (harvest was pulling into directories nothing had created).
+    # The boxes shut themselves down at the end of this chain, so a gap noticed
+    # the next morning is a gap noticed too late: every artifact class is checked
+    # HERE, while the fleet is still up.
+    for _cls, _root, _why in (
+            ("signal_journal", os.path.join(config.BASE_DIR, "signal_journal"),
+             "L3 rejection ledger + readiness digest read this"),
+            ("chain_snapshots", os.path.join(config.BASE_DIR, "chain_snapshots"),
+             "CANNOT be reconstructed after 16:00")):
+        _dir = os.path.join(_root, date)
+        _n = len(os.listdir(_dir)) if os.path.isdir(_dir) else 0
+        if _n == 0:
+            _warn(warns, "HARVEST",
+                  f"{_cls}/{date} is EMPTY — {_why}. Boxes are still up NOW; the "
+                  f"files live on the box at ~/options-trader/data/{_cls}/{date}/ "
+                  f"and can be recovered later with: python harvest.py --date {date}")
+        else:
+            _log("HARVEST", f"✅ {_cls}: {_n} file(s)")
+
+    # harvest v0.6.0's manifest distinguishes a quiet box (absent) from a broken
+    # pull (failed). Only `failed` is a defect; page on it alone.
+    try:
+        _rep = os.path.join(config.REPORTS_DIR, f"daily_trades_{date}.json")
+        with open(_rep) as _fh:
+            _pf = json.load(_fh).get("fleet", {}).get("manifest", {}).get("pull_failures", [])
+        if _pf:
+            _warn(warns, "HARVEST",
+                  f"{len(_pf)} artifact pull(s) FAILED (not merely absent): "
+                  f"{', '.join(_pf[:8])}{' …' if len(_pf) > 8 else ''}")
+    except Exception:  # noqa: BLE001
+        pass          # pre-v0.6.0 report, or no report — nothing to assert
 
 
 # ── 3. REPORT ─────────────────────────────────────────────────────────────────
