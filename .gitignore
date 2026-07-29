@@ -37,3 +37,7 @@ data/selection_log.jsonl
 *.tar
 *.tar.gz
 *.zip
+
+# control-local, never fleet-synced
+trades.db
+MANIFEST.txt
