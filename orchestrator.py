@@ -1,4 +1,8 @@
-# day_trader_pro/orchestrator.py — v0.3.1
+# day_trader_pro/orchestrator.py — v0.3.2
+# v0.3.2 (2026-07-30) — mock guard on _push_brief_flags. It was the one call in
+#   the spool-up path without one, so a MOCK run SSH'd for real to mock instance
+#   addresses and stalled ~6 minutes (15 boxes x 25s subprocess timeout) looking
+#   like a hang. Mock now prints the strengths it would have delivered.
 # v0.3.1 (2026-07-30) — the fallback alert told the truth about the wrong thing.
 #   It announced "Waking SPX+QQQ; no discretionary names" on ANY selection
 #   fallback, including the common case where the EXACTLY-N backfill had already
@@ -253,6 +257,18 @@ def _push_brief_flags(resolved, reached, brief_strength):
     setup_scorer treats a missing/blank flag as strength 0 = no nudge).
     IPs come from fleet.get_fleet() — the same (symbol, ip, state) source the
     fleet uses for all its SSH."""
+    # v0.3.2 — MOCK GUARD. This function had none, so `orchestrator.py --mock`
+    # (devtools item 1) resolved MOCK instance ids and then really SSH'd to their
+    # addresses: 15 boxes x a 25s subprocess timeout ~= 6 minutes of what looks
+    # exactly like a hang. Every other infrastructure call in the spool-up path
+    # short-circuits on MOCK_AWS; this one was missed. In mock we print what
+    # WOULD be delivered, which makes the mock run more useful than the silence
+    # it produced before.
+    if getattr(config, "MOCK_AWS", False):
+        print("  [mock] brief_flags NOT pushed (no SSH). Would deliver:")
+        for sym in sorted(resolved):
+            print(f"    {sym:<8} strength={float(brief_strength.get(sym, 0.0)):+.3f}")
+        return
     import ssh_util, base64, datetime as _dt
     try:
         import fleet
