@@ -1,4 +1,14 @@
-# day_trader_pro/harvest.py — v0.6.0
+# day_trader_pro/harvest.py — v0.6.2
+# v0.6.2 — 2026-07-30 — TWO CHANGES.
+#   (a) backharvest() takes `artifacts=(...)` so a caller can pull ONLY what is
+#       missing. The conductor's gap recovery passes ("journal","chains"): OHLC
+#       has never had a gap, and re-pulling 29 candle files per date rewrites
+#       mtimes on correct data for nothing — which is what the 07-29 recovery
+#       did, and the user rightly objected.
+#   (b) --date now ACCEPTS today (this was v0.6.1, built 07-29 and never landed).
+#       v0.6.0 rejected it as "use run() for a live session", which was wrong on
+#       the first real use: the day's EOD had already collected no journal and no
+#       chains, so today WAS the date needing recovery.
 # v0.6.0 — 2026-07-29 — THE MISSING mkdir (root cause), honest pull states, and
 #   --date back-harvest.
 #   ROOT CAUSE FIXED: scp does not create its destination directory, and run()
@@ -398,7 +408,7 @@ def run(quiet=False):
     return 0
 
 
-def backharvest(date, quiet=False):
+def backharvest(date, quiet=False, artifacts=("ohlc", "journal", "chains")):
     """v0.6.0 — recover DATE-ADDRESSED artifacts for a PAST session.
 
     WHY THIS IS A SEPARATE FUNCTION AND NOT `run(date=...)`:
@@ -451,10 +461,17 @@ def backharvest(date, quiet=False):
         print("  no daily_trades report for that date — cannot state the expected "
               "cohort, so treat 'absent' as unproven rather than normal")
 
-    for d in ("signal_journal", "chain_snapshots"):
-        os.makedirs(os.path.join(config.BASE_DIR, d, date), exist_ok=True)
-    os.makedirs(os.path.join(config.OHLC_DIR, date), exist_ok=True)
+    if "journal" in artifacts:
+        os.makedirs(os.path.join(config.BASE_DIR, "signal_journal", date), exist_ok=True)
+    if "chains" in artifacts:
+        os.makedirs(os.path.join(config.BASE_DIR, "chain_snapshots", date), exist_ok=True)
+    if "ohlc" in artifacts:
+        os.makedirs(os.path.join(config.OHLC_DIR, date), exist_ok=True)
 
+    # v0.6.2 — `artifacts` lets a caller pull ONLY what is missing. The gap
+    # recovery in eod_conductor passes ("journal","chains") because OHLC has
+    # never had a gap; re-pulling 29 candle files per date rewrites mtimes on
+    # correct data for nothing, which is exactly what happened on 2026-07-29.
     j_states, c_states, o_states = {}, {}, {}
     for sym in sorted(running):
         ip = running[sym].get("private_ip", "")
@@ -462,17 +479,20 @@ def backharvest(date, quiet=False):
             j_states[sym] = c_states[sym] = o_states[sym] = "failed"
             continue
 
-        lo = os.path.join(config.OHLC_DIR, date, f"{sym}_ohlc_{date}.csv")
-        o_states[sym] = _classify_pull(
-            ssh_util.scp_pull(ip, f"{REMOTE_REPO}/data/OHLC/{date}/{sym}.csv", lo), lo)
+        if "ohlc" in artifacts:
+            lo = os.path.join(config.OHLC_DIR, date, f"{sym}_ohlc_{date}.csv")
+            o_states[sym] = _classify_pull(
+                ssh_util.scp_pull(ip, f"{REMOTE_REPO}/data/OHLC/{date}/{sym}.csv", lo), lo)
 
-        lj = os.path.join(config.BASE_DIR, "signal_journal", date, f"{sym}.jsonl")
-        j_states[sym] = _classify_pull(
-            ssh_util.scp_pull(ip, f"{REMOTE_REPO}/data/signal_journal/{date}/{sym}.jsonl", lj), lj)
+        if "journal" in artifacts:
+            lj = os.path.join(config.BASE_DIR, "signal_journal", date, f"{sym}.jsonl")
+            j_states[sym] = _classify_pull(
+                ssh_util.scp_pull(ip, f"{REMOTE_REPO}/data/signal_journal/{date}/{sym}.jsonl", lj), lj)
 
-        lc = os.path.join(config.BASE_DIR, "chain_snapshots", date, f"{sym}.jsonl.gz")
-        c_states[sym] = _classify_pull(
-            ssh_util.scp_pull(ip, f"{REMOTE_REPO}/data/chain_snapshots/{date}/{sym}.jsonl.gz", lc), lc)
+        if "chains" in artifacts:
+            lc = os.path.join(config.BASE_DIR, "chain_snapshots", date, f"{sym}.jsonl.gz")
+            c_states[sym] = _classify_pull(
+                ssh_util.scp_pull(ip, f"{REMOTE_REPO}/data/chain_snapshots/{date}/{sym}.jsonl.gz", lc), lc)
 
     def _grp(d, st):
         return sorted(k for k, v in d.items() if v == st)
@@ -535,8 +555,18 @@ def main(argv):
             print(f"--date must be YYYY-MM-DD, got {args.date!r}")
             return 2
         if args.date == _today_et():
-            print("--date is today; run harvest with no --date for a live session")
-            return 2
+            # v0.6.2 — TODAY IS A LEGITIMATE TARGET. v0.6.0 refused it on the
+            # assumption that a live session is always run()'s job. Wrong on the
+            # very first real use: the day's EOD had already run and collected NO
+            # journal and NO chains, so today was exactly the date needing
+            # recovery. Re-running full run() then is the DANGEROUS option — it
+            # re-pulls ~/eod/trades_today.json from bots that may have restarted
+            # and can overwrite a good daily_trades with an empty one. The
+            # artifacts-only path structurally cannot.
+            print(f"--date {args.date} is TODAY — artifacts-only path "
+                  f"(OHLC + journal + chains). Trade anatomy, trades.db, "
+                  f"daily_trades and consolidation are NOT touched; use plain "
+                  f"`harvest.py` for a full live-session harvest.")
         return 0 if backharvest(args.date, quiet=args.quiet) is not None else 1
     return run(quiet=args.quiet)
 

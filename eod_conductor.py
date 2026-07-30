@@ -1,4 +1,19 @@
-# day_trader_pro/eod_conductor.py — v1.9.0
+# day_trader_pro/eod_conductor.py — v1.10.0
+# v1.10.0 (2026-07-30) — +PHASE 2b/4b ARCHIVE GAP RECOVERY, run TWICE per night at
+#   the two moments boxes are actually up. 2b: the traders, after phase_harvest
+#   and BEFORE phase_report stops them — logs first, then the lights go out.
+#   4b: the sat-out boxes, right after phase_backfill wakes them five at a time
+#   for candles; while they are up they hand over anything control never pulled.
+#   WHY: the makedirs defect meant nothing reached signal_journal/ or
+#   chain_snapshots/ before 07-27, while the boxes wrote from 07-18 and 07-23 and
+#   NEITHER WRITER PRUNES — five sessions of journal and two of chains were
+#   sitting on the fleet, invisible to every tool needing them. Item E's Aug 1
+#   retro ledger assumes journal "since 07-18" and would have queried a third of
+#   its sample without a word. Recovering by hand fixes today; a gap SCAN fixes
+#   it whenever it recurs. Uses ohlc/ as the reference set (the one root that has
+#   never had a gap), skips dates before each writer existed, pulls journal+chains
+#   ONLY (never re-touches correct OHLC), caps at DTP_MAX_RECOVERY_DATES=4 per
+#   night so a backlog drains over several runs, and warns-never-stops.
 # v1.9.0 (2026-07-30) — +PHASE 12 EVM. Earned value against docs/BACKLOG.md every
 #   night, so a schedule slip is visible while it is still small. Reports TWO
 #   indices on purpose: SPI(all) is calendar truth, SPI(desk) is accountability —
@@ -257,6 +272,100 @@ def phase_harvest(date, running, dry, warns):
                   f"{', '.join(_pf[:8])}{' …' if len(_pf) > 8 else ''}")
     except Exception:  # noqa: BLE001
         pass          # pre-v0.6.0 report, or no report — nothing to assert
+
+
+# Writers' first-release dates. A date before these CANNOT have the artifact, so
+# the gap scan must not chase it forever. signal_journal v1.0 = 2026-07-18,
+# chain_snapshot v1.0 = 2026-07-23 (both verified in their module headers).
+ARTIFACT_EPOCH = {"signal_journal": "2026-07-18", "chain_snapshots": "2026-07-23"}
+MAX_RECOVERY_DATES = int(os.environ.get("DTP_MAX_RECOVERY_DATES", "4"))
+
+
+def _archive_gaps():
+    """Dates present in ohlc/ but MISSING (or empty) in an artifact root.
+
+    ohlc/ is the reference because it is the one root that has never had a gap —
+    every trading day since 2026-07-13 is there. Anything in it that is absent
+    from signal_journal/ or chain_snapshots/ is a genuine hole.
+    """
+    ohlc_root = config.OHLC_DIR
+    if not os.path.isdir(ohlc_root):
+        return {}
+    sessions = sorted(d for d in os.listdir(ohlc_root)
+                      if re.match(r"^\d{4}-\d{2}-\d{2}$", d)
+                      and os.path.isdir(os.path.join(ohlc_root, d)))
+    gaps = {}
+    for root, epoch in ARTIFACT_EPOCH.items():
+        missing = []
+        for d in sessions:
+            if d < epoch:
+                continue                       # writer did not exist yet
+            p = os.path.join(config.BASE_DIR, root, d)
+            if not os.path.isdir(p) or not os.listdir(p):
+                missing.append(d)
+        if missing:
+            gaps[root] = missing
+    return gaps
+
+
+def phase_archive_recovery(dry, warns, scope):
+    """Phase 2b / 4b — SELF-HEALING ARCHIVE GAP RECOVERY, run while boxes are up.
+
+    scope = "traders"  -> the 15 that traded today, still up after phase_harvest
+                          and BEFORE phase_report stops them.
+    scope = "satouts"  -> the sat-out boxes woken five at a time by phase_backfill
+                          to fetch candles; while they are up they also hand over
+                          any journal/chain dates control never pulled.
+
+    WHY THIS EXISTS: the makedirs defect meant NOTHING was pulled into
+    signal_journal/ or chain_snapshots/ before 2026-07-27, while the boxes wrote
+    continuously from 07-18 and 07-23. Neither writer prunes, so five sessions of
+    journal and two of chains were sitting on the fleet, unreachable to every
+    tool that needs them — item E's Aug 1 retro ledger assumes journal "since
+    07-18" and would have run against a third of its sample without saying so.
+    Recovering that by hand once fixes today; a gap SCAN fixes it whenever it
+    happens again, which is the difference between a chore and a guard.
+
+    Pulls ONLY journal + chains. OHLC is the reference set and is never touched.
+    Capped at MAX_RECOVERY_DATES per run so a long backlog drains over several
+    nights instead of hammering the fleet in one. Warn-never-stop.
+    """
+    gaps = _archive_gaps()
+    if not gaps:
+        _log("RECOVER", f"[{scope}] no archive gaps — journal + chains complete")
+        return
+    todo = sorted({d for ds in gaps.values() for d in ds})[:MAX_RECOVERY_DATES]
+    for root, ds in gaps.items():
+        _log("RECOVER", f"[{scope}] {root}: {len(ds)} session(s) missing "
+                        f"({ds[0]} … {ds[-1]})")
+    if dry:
+        _log("RECOVER", f"[dry] would back-harvest {todo} (journal+chains only)")
+        return
+    ok = 0
+    for d in todo:
+        try:
+            res = harvest.backharvest(d, quiet=True,
+                                      artifacts=("journal", "chains"))
+        except Exception as exc:  # noqa: BLE001
+            _warn(warns, "RECOVER", f"[{scope}] {d} raised: {exc}")
+            continue
+        if res is None:
+            _log("RECOVER", f"[{scope}] {d}: no boxes running — deferred")
+            continue
+        got = len(res.get("journal", {}).get("ok", [])) + \
+              len(res.get("chains", {}).get("ok", []))
+        failed = len(res.get("journal", {}).get("failed", [])) + \
+                 len(res.get("chains", {}).get("failed", []))
+        ok += 1
+        _log("RECOVER", f"[{scope}] {d}: recovered {got} file(s)"
+                        + (f", {failed} FAILED" if failed else ""))
+        if failed:
+            _warn(warns, "RECOVER", f"[{scope}] {d}: {failed} pull(s) FAILED "
+                                    f"(not merely absent)")
+    remaining = sum(len(v) for v in gaps.values()) - ok
+    if remaining > 0:
+        _log("RECOVER", f"[{scope}] {remaining} session(s) still to recover — "
+                        f"next run continues (cap {MAX_RECOVERY_DATES}/night)")
 
 
 # ── 3. REPORT ─────────────────────────────────────────────────────────────────
@@ -701,7 +810,7 @@ def phase_readiness(date, dry, warns):
 
 
 def run(date=None, batch=5, dry=False, do_regime=True, do_tables=True,
-        do_swallow=True, do_vwap=True, do_evm=True,
+        do_swallow=True, do_vwap=True, do_evm=True, do_recover=True,
         do_readiness=True):
     date = date or _today_et()
     mapping, _ = instance_registry.discover(config.UNIVERSE)
@@ -718,8 +827,16 @@ def run(date=None, batch=5, dry=False, do_regime=True, do_tables=True,
 
     phase_gate(running, date, dry, warns)
     phase_harvest(date, running, dry, warns)
+    # 2b. Traders are STILL UP here; phase_report stops them. Take their backlog
+    #     first, exactly as instructed — logs before the lights go out.
+    if do_recover:
+        phase_archive_recovery(dry, warns, "traders")
     phase_report(running, dry, warns)
     still = phase_backfill(date, batch, dry, warns)
+    # 4b. The sat-out boxes were just woken five at a time to fetch candles.
+    #     While they are up, collect any journal/chain dates control never pulled.
+    if do_recover:
+        phase_archive_recovery(dry, warns, "satouts")
     phase_consolidate(date, dry, warns)
     phase_label(date, dry, warns)
     if do_regime:
@@ -768,12 +885,13 @@ def main(argv):
     p.add_argument("--no-swallow", action="store_true")
     p.add_argument("--no-vwap", action="store_true")
     p.add_argument("--no-evm", action="store_true")
+    p.add_argument("--no-recover", action="store_true")
     p.add_argument("--no-readiness", action="store_true")
     args = p.parse_args(argv[1:])
     return run(date=args.date, batch=args.batch, dry=args.dry_run,
                do_regime=not args.no_regime, do_tables=not args.no_tables,
                do_swallow=not args.no_swallow, do_vwap=not args.no_vwap,
-               do_evm=not args.no_evm,
+               do_evm=not args.no_evm, do_recover=not args.no_recover,
                do_readiness=not args.no_readiness)
 
 
