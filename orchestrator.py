@@ -1,4 +1,18 @@
-# day_trader_pro/orchestrator.py — v0.2.1
+# day_trader_pro/orchestrator.py — v0.3.0
+# v0.3.0 (2026-07-29) — MORNING REPORT FRESHNESS GUARD + fallback path repaired.
+#   Found this reading a report frozen at 2026-07-06 for 23 consecutive mornings
+#   in total silence: $DTP_REPORT_JSON was never set, emit.py took its
+#   os.getcwd() fallback, and the two projects had been pointing at different
+#   files since the variable was invented. Now audits the report's `date` and
+#   its `move_ranked` sidecar, Telegrams on either problem, and stamps
+#   report_path/report_date/report_stale/report_move_ranked onto the selection so
+#   provenance is visible instead of inferred. Proceeds by default (a stale
+#   cohort beats not waking 13 boxes); DTP_REPORT_STALE_STRICT=1 fails closed to
+#   ALWAYS_ON. Fallback repointed from ~/market_brief/out/report.json — which was
+#   misspelled AND pointed at a non-existent out/ subdir, so it never once
+#   resolved — to the reporter's real default drop, ~/market-brief/report.json.
+#   This is the DURABLE half of the fix: committed code, survives a rebuild,
+#   unlike an env var in a gitignored .env that install.sh overwrites.
 # v0.2.1 (2026-07-21) — wake message now shows each discretionary box's reporter rank
 #   and signal strength/score, plus a 'just missed' near-miss list below the
 #   cutoff, to support tuning MAX_DISCRETIONARY from observed signal spread.
@@ -109,20 +123,97 @@ def run(dry_run=False, gate=True):
     return 0
 
 
+# v0.3.0 — the reporter's REAL default output. emit.py resolves its path as
+# explicit arg -> $DTP_REPORT_JSON -> os.getcwd()/report.json, and the service
+# runs with WorkingDirectory=<install dir>, so with the env var unset the brief
+# lands HERE. The previous fallback pointed at ~/market_brief/out/report.json:
+# wrong twice over (underscore for the real hyphenated dir, and an out/ subdir
+# that has never existed), so it could never resolve and a missing primary file
+# degraded silently to no discretionary selection at all.
+_REPORTER_FALLBACKS = (
+    "~/market-brief/report.json",
+    "~/market_brief/report.json",     # tolerate an underscored checkout
+)
+
+
+def _report_date_et():
+    """Today's date in ET as the reporter stamps it (YYYY-MM-DD)."""
+    import datetime as _dt
+    from zoneinfo import ZoneInfo as _Z
+    return _dt.datetime.now(_Z("America/New_York")).strftime("%Y-%m-%d")
+
+
 def _load_selection():
     """Load report.json and run selector.select(). Never raises — returns a
-    baseline-only fallback dict on any failure."""
+    baseline-only fallback dict on any failure.
+
+    v0.3.0 STALENESS GUARD. On 2026-07-29 this function was found to have been
+    reading a report frozen at 2026-07-06 — 23 days stale — every single morning
+    without one word of complaint. $DTP_REPORT_JSON was never set, so emit took
+    its cwd fallback and wrote the brief somewhere nothing read, while this
+    function kept consuming a static file. Consequences: the same 13 names woke
+    daily (the frozen composite scores never changed), and because a report that
+    old predates emit v1.3.0's `move_ranked` sidecar, selector's strength lookup
+    missed for every symbol and defaulted to 0.3 — so the brief's signed
+    sentiment reached the bot's Stage-3 nudge as a CONSTANT, forever.
+
+    The path was the symptom; the silence was the defect. This now ALERTS and
+    stamps the result, and by default still proceeds — a stale cohort of liquid
+    names is a lesser harm than refusing to wake 13 boxes. Set
+    DTP_REPORT_STALE_STRICT=1 to fail closed to ALWAYS_ON instead.
+    """
     try:
         import selector
         path = _os.environ.get("DTP_REPORT_JSON") or _os.path.join(
             config.DATA_DIR if hasattr(config, "DATA_DIR") else ".", "report.json")
+        used_fallback = None
         if not _os.path.isfile(path):
-            # try the reporter's default drop next to this project
-            alt = _os.path.expanduser("~/market_brief/out/report.json")
-            path = alt if _os.path.isfile(alt) else path
+            for cand in _REPORTER_FALLBACKS:
+                cand = _os.path.expanduser(cand)
+                if _os.path.isfile(cand):
+                    path, used_fallback = cand, cand
+                    break
         with open(path) as fh:
             report = _json.load(fh)
-        return selector.select(report)
+
+        # ── freshness + shape audit (never fatal by default) ────────────────
+        today = _report_date_et()
+        rdate = str(report.get("date") or "")
+        stale = rdate != today
+        n_mr = len(report.get("move_ranked") or [])
+        problems = []
+        if stale:
+            problems.append(f"report date {rdate or '(missing)'} != today {today}")
+        if n_mr == 0:
+            problems.append("no move_ranked sidecar (pre-emit-v1.3.0 or broken) "
+                            "-> every brief_strength defaults to 0.3, so the "
+                            "Stage-3 sentiment nudge is a constant")
+        if used_fallback:
+            problems.append(f"primary report path missing; read fallback {used_fallback}")
+
+        if problems:
+            msg = ("\u26A0\uFE0F MORNING REPORT PROBLEM | " + " | ".join(problems)
+                   + f" | path={path}")
+            try:
+                notify.send(msg)
+            except Exception:  # noqa: BLE001
+                pass
+            print(f"[selection] {msg}")
+
+        if stale and _os.environ.get("DTP_REPORT_STALE_STRICT", "0") == "1":
+            return {"final": list(config.ALWAYS_ON), "discretionary": [],
+                    "always_on": list(config.ALWAYS_ON), "brief_strength": {},
+                    "ranked": [], "rationale": {}, "confidence": {},
+                    "fallback": True, "error": f"stale report ({rdate}); STRICT",
+                    "report_path": path, "report_date": rdate,
+                    "report_stale": True, "report_move_ranked": n_mr}
+
+        sel = selector.select(report)
+        # stamp the audit onto the result so the wake message and the ack can
+        # show provenance instead of anyone having to infer it later
+        sel.update({"report_path": path, "report_date": rdate,
+                    "report_stale": stale, "report_move_ranked": n_mr})
+        return sel
     except Exception as exc:  # noqa: BLE001
         return {"final": list(config.ALWAYS_ON), "discretionary": [],
                 "always_on": list(config.ALWAYS_ON), "brief_strength": {},
