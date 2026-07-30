@@ -1,4 +1,12 @@
-# day_trader_pro/eod_conductor.py — v1.8.0
+# day_trader_pro/eod_conductor.py — v1.9.0
+# v1.9.0 (2026-07-30) — +PHASE 12 EVM. Earned value against docs/BACKLOG.md every
+#   night, so a schedule slip is visible while it is still small. Reports TWO
+#   indices on purpose: SPI(all) is calendar truth, SPI(desk) is accountability —
+#   of the work that was ours to move, how much moved. A late [DESK·DATA] item is
+#   a DC&A dependency, not an execution failure, and averaging them yields a
+#   number nobody can act on. Only a DESK slip WARNS, because it is the only
+#   variance effort can fix; data waits get re-dated, never compressed.
+# v1.8.0 (2026-07-30) —
 # v1.8.0 (2026-07-30) — +PHASE 10 SWALLOW and +PHASE 11 VWAP, both control-side,
 #   both added under a standing rule: ANYTHING that has to happen around the EOD
 #   chain belongs IN the conductor, never in a command someone has to remember —
@@ -121,6 +129,7 @@ Env:
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -600,6 +609,53 @@ def phase_vwap(date, dry, warns):
         _log("VWAP", f"    {v}")
 
 
+def phase_evm(date, dry, warns):
+    """Phase 12 — EARNED VALUE against docs/BACKLOG.md.
+
+    Reports schedule performance nightly so a slip is visible while it is still
+    small. Two indices, deliberately: SPI(all) is calendar truth, SPI(desk) is
+    accountability — of the work that was OURS to move, how much moved. A late
+    [DESK·DATA] item is a DC&A dependency and must not be averaged into the
+    number that measures execution, or the metric stops being actionable.
+
+    Here because of the standing rule: a check that depends on someone
+    remembering to run it is a check that will not run. Read-only.
+    """
+    script = os.path.join(OTV3_DIR, "tests", "evm_status.py")
+    if dry:
+        _log("EVM", f"[dry] would run {script} --quiet")
+        return
+    if not os.path.isfile(script):
+        _warn(warns, "EVM", f"{script} not found — no earned-value reading")
+        return
+    venv_py = os.path.join(OTV3_DIR, "venv", "bin", "python")
+    py = venv_py if os.access(venv_py, os.X_OK) else sys.executable
+    try:
+        proc = subprocess.run([py, script, "--quiet", "--asof", date],
+                              capture_output=True, text=True, timeout=120)
+    except Exception as exc:  # noqa: BLE001
+        _warn(warns, "EVM", f"evm_status.py raised: {exc}")
+        return
+    if proc.returncode != 0:
+        _warn(warns, "EVM", f"evm_status.py rc={proc.returncode}: "
+                            f"{(proc.stderr or '').strip()[:200]}")
+        return
+    line = next((l for l in proc.stdout.splitlines() if l.strip()), "")
+    _log("EVM", f"\U0001F4CA {line}")
+    # A DESK slip is the only variance effort can fix, so it is the only one
+    # that pages. Data waits are re-dated, not compressed.
+    m = re.search(r"SPI\(desk\)\s+([0-9.]+)", line)
+    if m and float(m.group(1)) < 1.0:
+        _warn(warns, "EVM", f"SPI(desk) {m.group(1)} — DESK work is behind and "
+                            f"nothing is blocking it. See the get-well plan: "
+                            f"python3 tests/evm_status.py")
+    else:
+        try:
+            notify.send(f"\U0001F4CA {line}")
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def phase_readiness(date, dry, warns):
     """Phase 9 — readiness digest (trade_readiness v1.1 dial-tuning report).
 
@@ -645,7 +701,7 @@ def phase_readiness(date, dry, warns):
 
 
 def run(date=None, batch=5, dry=False, do_regime=True, do_tables=True,
-        do_swallow=True, do_vwap=True,
+        do_swallow=True, do_vwap=True, do_evm=True,
         do_readiness=True):
     date = date or _today_et()
     mapping, _ = instance_registry.discover(config.UNIVERSE)
@@ -677,6 +733,8 @@ def run(date=None, batch=5, dry=False, do_regime=True, do_tables=True,
         phase_swallow(date, dry, warns)
     if do_vwap:
         phase_vwap(date, dry, warns)
+    if do_evm:
+        phase_evm(date, dry, warns)
     else:
         _log("TABLES", "skipped (--no-tables)")
     if do_readiness:
@@ -709,11 +767,13 @@ def main(argv):
     p.add_argument("--no-tables", action="store_true")
     p.add_argument("--no-swallow", action="store_true")
     p.add_argument("--no-vwap", action="store_true")
+    p.add_argument("--no-evm", action="store_true")
     p.add_argument("--no-readiness", action="store_true")
     args = p.parse_args(argv[1:])
     return run(date=args.date, batch=args.batch, dry=args.dry_run,
                do_regime=not args.no_regime, do_tables=not args.no_tables,
                do_swallow=not args.no_swallow, do_vwap=not args.no_vwap,
+               do_evm=not args.no_evm,
                do_readiness=not args.no_readiness)
 
 
