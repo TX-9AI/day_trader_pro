@@ -1,4 +1,25 @@
-# day_trader_pro/eod_conductor.py — v1.7.0
+# day_trader_pro/eod_conductor.py — v1.8.0
+# v1.8.0 (2026-07-30) — +PHASE 10 SWALLOW and +PHASE 11 VWAP, both control-side,
+#   both added under a standing rule: ANYTHING that has to happen around the EOD
+#   chain belongs IN the conductor, never in a command someone has to remember —
+#   INCLUDING a one-time check, and it gets recorded here for posterity so there
+#   is a record that it ran and why it was added.
+#   PHASE 10 SWALLOW — nightly silent-failure census (backlog W.2) via
+#     options_trader_v3 tests/swallow_audit.py. Writes
+#     reports/swallow_audit_<date>.json and WARNS when the silent-handler count
+#     rises against the newest earlier snapshot, i.e. when someone adds a new
+#     exception handler that swallows without logging. The week of 2026-07-27
+#     produced eight defects of exactly that shape; a census nobody runs would
+#     have caught none of them.
+#   PHASE 11 VWAP — nightly VWAP orientation ledger (evidence for backlog item
+#     E) via tests/vwap_orientation_ledger.py. Writes
+#     reports/vwap_orientation_<date>.txt and echoes the per-strategy verdicts.
+#     E must not be BUILT until the evidence says which direction the gate
+#     belongs in — VWAP alignment is a trend filter and Sweep Reversal enters
+#     counter to extension by design — and evidence that accrues only when
+#     someone remembers to run a script will not exist on decision day.
+#   Both are read-only, stdlib-only, warn-never-stop, and skippable via
+#   --no-swallow / --no-vwap.
 # v1.7.0 (2026-07-29) — HARVEST COMPLETENESS: this phase asserted only that
 #   ohlc/<date> was non-empty and logged ✅ on that alone. It did so on
 #   2026-07-29 with signal_journal and chain_snapshots both empty — and empty for
@@ -87,6 +108,8 @@ CLI:
   python eod_conductor.py --batch 5
   python eod_conductor.py --no-regime
   python eod_conductor.py --no-tables   # skip the conditional-tables phase
+  python eod_conductor.py --no-swallow  # skip the silent-failure census
+  python eod_conductor.py --no-vwap     # skip the VWAP orientation ledger
 
 Env:
   DTP_EXCURSION_LIVE=1        also produce the live excursion report
@@ -453,6 +476,130 @@ def phase_tables(dry, warns):
         pass
 
 
+def phase_swallow(date, dry, warns):
+    """Phase 10 — nightly SILENT-FAILURE CENSUS (backlog W.2).
+
+    Runs options_trader_v3's tests/swallow_audit.py, writes a dated JSON
+    snapshot, and compares the silent-handler count against the most recent
+    prior snapshot. A rise means a new exception handler that swallows without
+    logging was added since last night.
+
+    WHY THIS IS A CONDUCTOR PHASE AND NOT A COMMAND SOMEONE RUNS: the week of
+    2026-07-27 produced eight defects that all shared one shape — code that
+    failed without saying so. The census that finds them is worthless if it
+    depends on anyone remembering to run it, which is the same reasoning that
+    put the completeness check in phase_harvest. A one-off check that matters
+    is a phase; a check nobody runs is a comment.
+
+    Control-side, read-only, static analysis — it never imports the code it
+    audits and never touches a box. Warn-never-stop per the recovery-path rule.
+    """
+    script = os.path.join(OTV3_DIR, "tests", "swallow_audit.py")
+    out = os.path.join(config.REPORTS_DIR, f"swallow_audit_{date}.json")
+    if dry:
+        _log("SWALLOW", f"[dry] would run {script} --json -> {out}")
+        return
+    if not os.path.isfile(script):
+        _warn(warns, "SWALLOW", f"{script} not found — census NOT run")
+        return
+    venv_py = os.path.join(OTV3_DIR, "venv", "bin", "python")
+    py = venv_py if os.access(venv_py, os.X_OK) else sys.executable
+    try:
+        proc = subprocess.run([py, script, "--json", "--root", OTV3_DIR],
+                              capture_output=True, text=True, timeout=180)
+    except Exception as exc:  # noqa: BLE001
+        _warn(warns, "SWALLOW", f"swallow_audit.py raised: {exc}")
+        return
+    if proc.returncode != 0:
+        _warn(warns, "SWALLOW", f"swallow_audit.py rc={proc.returncode}: "
+                                f"{(proc.stderr or '').strip()[:200]}")
+        return
+    try:
+        rows = json.loads(proc.stdout)
+    except Exception as exc:  # noqa: BLE001
+        _warn(warns, "SWALLOW", f"unparseable census output: {exc}")
+        return
+    os.makedirs(config.REPORTS_DIR, exist_ok=True)
+    with open(out, "w") as fh:
+        json.dump(rows, fh, indent=1, sort_keys=True)
+
+    silent = sum(1 for r in rows if str(r.get("loudness", "")).startswith("SILENT"))
+    t1 = sum(1 for r in rows
+             if r.get("tier") == 0 and str(r.get("loudness", "")).startswith("SILENT"))
+    # compare against the newest EARLIER snapshot, whatever date it carries
+    prior, prior_silent = None, None
+    try:
+        snaps = sorted(f for f in os.listdir(config.REPORTS_DIR)
+                       if f.startswith("swallow_audit_") and f.endswith(".json")
+                       and f < os.path.basename(out))
+        if snaps:
+            prior = snaps[-1]
+            pr = json.load(open(os.path.join(config.REPORTS_DIR, prior)))
+            prior_silent = sum(1 for r in pr
+                               if str(r.get("loudness", "")).startswith("SILENT"))
+    except Exception:  # noqa: BLE001
+        pass
+
+    if prior_silent is not None and silent > prior_silent:
+        _warn(warns, "SWALLOW",
+              f"silent handlers ROSE {prior_silent} -> {silent} since {prior} — "
+              f"a new swallow was added. Run: python3 tests/swallow_audit.py --critical")
+    else:
+        delta = ("" if prior_silent is None
+                 else f" ({silent - prior_silent:+d} vs {prior})")
+        _log("SWALLOW", f"\u2705 {len(rows)} handlers, {silent} silent "
+                        f"({t1} in tier-1 risk/orders/record){delta}")
+
+
+def phase_vwap(date, dry, warns):
+    """Phase 11 — VWAP orientation ledger (backlog item E evidence).
+
+    Per strategy x direction x VWAP alignment, with realized P&L: would the
+    proposed VWAP_FILTER_ACTIVE hard gate have blocked winners or losers? Writes
+    reports/vwap_orientation_<date>.txt.
+
+    WHY NIGHTLY AND AUTOMATIC: item E must not be BUILT until the evidence says
+    which direction the gate belongs in, or whether it belongs on a given
+    strategy at all — VWAP alignment is a trend-following filter, and Sweep
+    Reversal enters counter to extension by design. Evidence that accrues only
+    when someone remembers to run a script is evidence that will not be there on
+    decision day.
+
+    FALSIFICATION ONLY. The tool emits no weights and no thresholds, and nothing
+    in the live path reads its output. A verdict licenses a design review whose
+    conclusion must stand on mechanism, not on the P&L that flagged it.
+    """
+    script = os.path.join(OTV3_DIR, "tests", "vwap_orientation_ledger.py")
+    out = os.path.join(config.REPORTS_DIR, f"vwap_orientation_{date}.txt")
+    if dry:
+        _log("VWAP", f"[dry] would run {script} {date} -> {out}")
+        return
+    if not os.path.isfile(script):
+        _warn(warns, "VWAP", f"{script} not found — orientation ledger NOT run")
+        return
+    venv_py = os.path.join(OTV3_DIR, "venv", "bin", "python")
+    py = venv_py if os.access(venv_py, os.X_OK) else sys.executable
+    try:
+        proc = subprocess.run([py, script, date], capture_output=True,
+                              text=True, timeout=300)
+    except Exception as exc:  # noqa: BLE001
+        _warn(warns, "VWAP", f"vwap_orientation_ledger.py raised: {exc}")
+        return
+    os.makedirs(config.REPORTS_DIR, exist_ok=True)
+    with open(out, "w") as fh:
+        fh.write(proc.stdout or "")
+        if proc.stderr:
+            fh.write("\n--- stderr ---\n" + proc.stderr)
+    if proc.returncode != 0:
+        _warn(warns, "VWAP", f"ledger rc={proc.returncode} — see {out}")
+        return
+    verdicts = [ln.strip() for ln in (proc.stdout or "").splitlines()
+                if "orientation looks" in ln or "INSUFFICIENT" in ln]
+    _log("VWAP", f"\u2705 orientation ledger -> {os.path.basename(out)}")
+    for v in verdicts[:6]:
+        _log("VWAP", f"    {v}")
+
+
 def phase_readiness(date, dry, warns):
     """Phase 9 — readiness digest (trade_readiness v1.1 dial-tuning report).
 
@@ -498,6 +645,7 @@ def phase_readiness(date, dry, warns):
 
 
 def run(date=None, batch=5, dry=False, do_regime=True, do_tables=True,
+        do_swallow=True, do_vwap=True,
         do_readiness=True):
     date = date or _today_et()
     mapping, _ = instance_registry.discover(config.UNIVERSE)
@@ -525,6 +673,10 @@ def run(date=None, batch=5, dry=False, do_regime=True, do_tables=True,
     phase_excursion(date, dry, warns)
     if do_tables:
         phase_tables(dry, warns)
+    if do_swallow:
+        phase_swallow(date, dry, warns)
+    if do_vwap:
+        phase_vwap(date, dry, warns)
     else:
         _log("TABLES", "skipped (--no-tables)")
     if do_readiness:
@@ -555,10 +707,13 @@ def main(argv):
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--no-regime", action="store_true")
     p.add_argument("--no-tables", action="store_true")
+    p.add_argument("--no-swallow", action="store_true")
+    p.add_argument("--no-vwap", action="store_true")
     p.add_argument("--no-readiness", action="store_true")
     args = p.parse_args(argv[1:])
     return run(date=args.date, batch=args.batch, dry=args.dry_run,
                do_regime=not args.no_regime, do_tables=not args.no_tables,
+               do_swallow=not args.no_swallow, do_vwap=not args.no_vwap,
                do_readiness=not args.no_readiness)
 
 
