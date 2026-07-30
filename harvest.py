@@ -453,8 +453,9 @@ def backharvest(date, quiet=False, artifacts=("ohlc", "journal", "chains")):
         except Exception:  # noqa: BLE001
             expected = None
 
+    _names = {"ohlc": "OHLC", "journal": "journal", "chains": "chains"}
     print(f"back-harvest {date} — asking {len(running)} running box(es) for "
-          f"OHLC + journal + chains")
+          f"{' + '.join(_names[a] for a in artifacts)}")
     if expected:
         print(f"  that session's trading cohort ({len(expected)}): {' '.join(expected)}")
     else:
@@ -503,13 +504,19 @@ def backharvest(date, quiet=False, artifacts=("ohlc", "journal", "chains")):
         "generated_utc": datetime.now(ZoneInfo("UTC")).isoformat(),
         "boxes_asked": sorted(running),
         "expected_cohort": expected,
+        "artifacts_requested": list(artifacts),
         "ohlc": {st: _grp(o_states, st) for st in ("ok", "absent", "failed")},
         "journal": {st: _grp(j_states, st) for st in ("ok", "absent", "failed")},
         "chains": {st: _grp(c_states, st) for st in ("ok", "absent", "failed")},
     }
 
     print("")
-    for label, d in (("ohlc", o_states), ("journal", j_states), ("chains", c_states)):
+    # v0.6.2 — report ONLY what was requested. Printing "ohlc 0/0/0" when OHLC
+    # was deliberately not asked for reads as a failed pull; a line that claims
+    # work it never attempted is the same class of lie as a green canary on a
+    # stale file.
+    _panes = [("ohlc", o_states), ("journal", j_states), ("chains", c_states)]
+    for label, d in [(l, d) for l, d in _panes if l in artifacts]:
         got, absent, failed = _grp(d, "ok"), _grp(d, "absent"), _grp(d, "failed")
         print(f"  {label:<9} recovered {len(got):>2}   absent {len(absent):>2}   FAILED {len(failed):>2}")
         if failed:
