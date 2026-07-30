@@ -1,5 +1,13 @@
 #!/usr/bin/env bash
-# day_trader_pro/devtools.sh — v1.22
+# day_trader_pro/devtools.sh — v1.23
+# v1.23 — 2026-07-29 — +55 "Verify control IAM role sees the fleet". check_iam.py
+#         was sitting UNTRACKED in ~/market-brief despite its own header reading
+#         `day_trader_pro/check_iam.py` — wrong repo, in no repo, and reachable
+#         only by remembering it existed. It is the control-plane counterpart of
+#         54 (which verifies the BOXES' credentials): STS identity check, then
+#         describe_instances on tag:Project=day_trader in us-east-2, and it
+#         distinguishes "no role attached" from "role attached but missing
+#         ec2:DescribeInstances". Read-only — never starts or stops anything.
 # v1.22 — 2026-07-23 — FIX: v1.21 defined VALIDATE_SH from $OTV3_DIR one line
 #          BEFORE OTV3_DIR was set; with `set -uo pipefail` that is an unbound
 #          variable and the menu refused to launch. Assignment order corrected.
@@ -292,6 +300,7 @@ menu() {
    52) Rotate fleet tokens/secrets (pushes to running boxes)
    53) Audit fleet credentials (read-only; shows which vars are set, no values)
    54) Verify fleet credentials WORK (TT SDK, Telegram, GitHub)
+   55) Verify control IAM role sees the fleet (read-only; no start/stop)
 
     0) Exit
 ======================================================
@@ -359,6 +368,7 @@ EOF
         if [ -n "$SUBSET" ]; then $PY rotate_tokens.py --audit --only $SUBSET; else $PY rotate_tokens.py --audit; fi; pause ;;
     54) echo; read -rp "Verify a SUBSET of symbols? (ENTER=all running): " SUBSET; \
         if [ -n "$SUBSET" ]; then $PY rotate_tokens.py --verify --only $SUBSET; else $PY rotate_tokens.py --verify; fi; pause ;;
+    55) echo; $PY check_iam.py; pause ;;
     0)  exit 0 ;;
     *)  echo "Invalid selection."; sleep 1 ;;
   esac
