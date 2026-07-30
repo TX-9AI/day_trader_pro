@@ -1,4 +1,12 @@
-# day_trader_pro/orchestrator.py — v0.3.0
+# day_trader_pro/orchestrator.py — v0.3.1
+# v0.3.1 (2026-07-30) — the fallback alert told the truth about the wrong thing.
+#   It announced "Waking SPX+QQQ; no discretionary names" on ANY selection
+#   fallback, including the common case where the EXACTLY-N backfill had already
+#   refilled the full cohort from the brief's move_ranked order. On 2026-07-30 the
+#   model returned truncated JSON, 13 healthy brief-driven names woke, and the
+#   alert still reported a baseline-only wake. Now distinguishes the two: model
+#   failed but cohort intact (amber, names listed, backfill count) vs genuinely
+#   baseline-only (red).
 # v0.3.0 (2026-07-29) — MORNING REPORT FRESHNESS GUARD + fallback path repaired.
 #   Found this reading a report frozen at 2026-07-06 for 23 consecutive mornings
 #   in total silence: $DTP_REPORT_JSON was never set, emit.py took its
@@ -88,8 +96,26 @@ def run(dry_run=False, gate=True):
     wake_list = sel["final"]         # baseline + exactly-N discretionary
     brief_strength = sel.get("brief_strength", {})
     if sel.get("fallback"):
-        notify.send("⚠️ *day_trader_pro* selection fell back to baseline-only "
-                    f"({sel.get('error')}). Waking SPX+QQQ; no discretionary names.")
+        # v0.3.1 — this message used to claim "Waking SPX+QQQ; no discretionary
+        # names", which was WRONG whenever the EXACTLY-N backfill did its job:
+        # on 2026-07-30 the model call returned truncated JSON, the backfill
+        # refilled all 13 from the brief's move_ranked order, and the alert still
+        # announced a baseline-only wake. That inaccuracy cost real alarm on a
+        # morning when the wake was in fact healthy. Report what ACTUALLY woke.
+        _disc = sel.get("discretionary", [])
+        _n_bf = sum(1 for v in (sel.get("rationale") or {}).values()
+                    if isinstance(v, str) and v.startswith("backfill"))
+        if _disc:
+            notify.send(
+                "\u26A0\uFE0F *day_trader_pro* model selection FAILED — cohort "
+                f"came from reporter rank instead.\n({sel.get('error')})\n"
+                f"Woke {len(_disc)} discretionary ({_n_bf} by backfill): "
+                f"{', '.join(_disc)}\nTrading is unaffected; the brief's ranking "
+                "drove the picks, the model's judgement did not.")
+        else:
+            notify.send("\U0001F534 *day_trader_pro* selection fell back to "
+                        f"BASELINE-ONLY ({sel.get('error')}). Waking "
+                        f"{'+'.join(baseline)} — no discretionary names.")
     print(f"Wake list ({len(wake_list)}): {wake_list}")
 
     # 3. Resolve to instance IDs

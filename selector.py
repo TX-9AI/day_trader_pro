@@ -65,6 +65,9 @@ def _strip_fences(text):
     return t.strip()
 
 
+_os_path_join = os.path.join
+
+
 def _call_anthropic(report):
     """Real API call. Returns parsed dict or raises."""
     import anthropic
@@ -94,7 +97,29 @@ def _call_anthropic(report):
         messages=[{"role": "user", "content": user_msg}],
     )
     text = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text")
-    return json.loads(_strip_fences(text))
+    stop = getattr(resp, "stop_reason", "?")
+    try:
+        return json.loads(_strip_fences(text))
+    except Exception as exc:                      # noqa: BLE001
+        # 2026-07-30 — the parse failed with "Unterminated string ... (char 417)"
+        # and ALL we had was that offset, so the cause had to be inferred from a
+        # character position. The response itself is the evidence; keep it.
+        # stop_reason is the single most diagnostic field: "max_tokens" means the
+        # cap truncated us, "end_turn" means the model genuinely emitted bad JSON.
+        try:
+            import config as _c
+            dump = _os_path_join(getattr(_c, "DATA_DIR", "."),
+                                 "last_model_response.txt")
+            with open(dump, "w") as fh:
+                fh.write(f"# stop_reason={stop} chars={len(text)} "
+                         f"max_tokens={config.MODEL_MAX_TOKENS} "
+                         f"model={config.MODEL}\n{text}")
+        except Exception:                         # noqa: BLE001
+            dump = "(dump failed)"
+        raise ValueError(
+            f"{type(exc).__name__}: {exc} | stop_reason={stop} "
+            f"chars={len(text)} max_tokens={config.MODEL_MAX_TOKENS} "
+            f"| raw saved to {dump}") from exc
 
 
 def _mock_select(report):

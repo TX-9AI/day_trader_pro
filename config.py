@@ -56,7 +56,13 @@ MAX_DISCRETIONARY = 13
 # claude-haiku-4-5-20251001. Sonnet-5 is a good balance for reasoning over the
 # brief; bump to opus-4-8 if you want maximum reasoning at higher cost.
 MODEL = os.environ.get("DTP_MODEL", "claude-sonnet-5")
-MODEL_MAX_TOKENS = int(os.environ.get("DTP_MODEL_MAX_TOKENS", "1500"))
+# 2026-07-30 — raised 1500 -> 4000. The model is asked for MAX_DISCRETIONARY (13)
+# symbols EACH with a rationale string and a confidence, and 1500 truncated the
+# reply mid-string ("Unterminated string ... char 417"), which dropped selection
+# into the backfill path. Scales with the cohort so this cannot silently re-tighten
+# if MAX_DISCRETIONARY grows again; still env-overridable.
+MODEL_MAX_TOKENS = int(os.environ.get(
+    "DTP_MODEL_MAX_TOKENS", str(max(1500, 300 * MAX_DISCRETIONARY))))
 
 # --------------------------------------------------------------------------
 # Paths

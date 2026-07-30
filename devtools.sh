@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
-# day_trader_pro/devtools.sh — v1.23
+# day_trader_pro/devtools.sh — v1.24
+# v1.24 — 2026-07-30 — the MENU HEADER still printed v1.22 after v1.23 added
+#         item 55: the file-header version and the displayed banner are two
+#         separate strings and only one was bumped. Synced, and noted here so
+#         the next bump changes BOTH. A version you read off the screen that
+#         disagrees with the file is worse than no version at all.
 # v1.23 — 2026-07-29 — +55 "Verify control IAM role sees the fleet". check_iam.py
 #         was sitting UNTRACKED in ~/market-brief despite its own header reading
 #         `day_trader_pro/check_iam.py` — wrong repo, in no repo, and reachable
@@ -236,7 +241,7 @@ menu() {
   clear
   cat <<'EOF' | _colorize
 ======================================================
-  Day Trader Pro — devtools  v1.22 Service Menu
+  Day Trader Pro — devtools  v1.24 Service Menu
 ======================================================
  ORCHESTRATION:
     1) Full spool-up (mock)       2) EOD aggregate (mock)
