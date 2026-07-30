@@ -1,4 +1,14 @@
-# day_trader_pro/orchestrator.py — v0.3.2
+# day_trader_pro/orchestrator.py — v0.4.0
+# v0.4.0 (2026-07-30) — FLEET PARITY AT WAKE. One line in the morning ack saying
+#   whether the boxes that will trade today are on the code you think they are:
+#   "parity: 15/15 on ba2761d" or "⚠ BEHIND/AHEAD: AAPL(9912c90)". Rides the SSH
+#   pass _push_brief_flags already makes, so it costs one extra command per box.
+#   Compares to ORIGIN via the control twin when present, else to fleet
+#   CONSENSUS — which still catches an odd box out with no control repo at all.
+#   Deliberately REPORTS drift rather than pulling: an auto-pull at 09:15 deploys
+#   whatever sits on origin, unverified, fifteen minutes before the open, which
+#   is exactly how the 07-28 continuation rewire took out the 07-29 open. Scope
+#   is the WOKEN boxes; a sleeping box's HEAD is meaningless until it is baked.
 # v0.3.2 (2026-07-30) — mock guard on _push_brief_flags. It was the one call in
 #   the spool-up path without one, so a MOCK run SSH'd for real to mock instance
 #   addresses and stalled ~6 minutes (15 boxes x 25s subprocess timeout) looking
@@ -143,8 +153,21 @@ def run(dry_run=False, gate=True):
     if not dry_run:
         _push_brief_flags(resolved, reached, brief_strength)
 
-    # 5. Morning ack (always sends)
-    notify.send(_format_ack(wake_list, baseline, resolved, missing, reached, dry_run, sel))
+    # 4c. v0.4.0 — fleet/origin parity, reported not enforced (see _fleet_parity)
+    _parity = ""
+    try:
+        _parity = _fleet_parity(resolved, reached)
+    except Exception as _pe:                       # noqa: BLE001
+        _parity = f"  parity: check failed ({type(_pe).__name__})"
+    print(_parity)
+
+    # 5. Morning ack (always sends). The parity line rides ALONG WITH IT rather
+    #    than only to stdout — under systemd stdout is journald, i.e. invisible
+    #    unless someone goes looking, which defeats the point of the check.
+    _ack = _format_ack(wake_list, baseline, resolved, missing, reached, dry_run, sel)
+    if _parity:
+        _ack = f"{_ack}\n{_parity.strip()}"
+    notify.send(_ack)
 
     if not_running:
         notify.send("🚨 *day_trader_pro* these instances did NOT reach running "
@@ -249,6 +272,89 @@ def _load_selection():
                 "always_on": list(config.ALWAYS_ON), "brief_strength": {},
                 "ranked": [], "rationale": {}, "confidence": {}, "fallback": True,
                 "error": f"{type(exc).__name__}: {exc}"}
+
+
+BOX_REPO = _os.environ.get("DTP_BOX_REPO", "options-trader")   # box-side checkout
+CONTROL_REPO = _os.environ.get("DTP_CONTROL_REPO",
+                               "~/options-trader-v3")            # control-side twin
+
+
+def _fleet_parity(resolved, reached):
+    """v0.4.0 — one line telling you whether the boxes that will trade today are
+    on the code you think they are.
+
+    WHY: nothing surfaced fleet/origin drift at wake time. `check_versions.sh`
+    v4.3 compares a checkout to origin, but only when someone runs it. A box
+    quietly left behind a deploy would trade all session on old code and say
+    nothing — the same silent-divergence shape as the rest of this week.
+
+    WHY NOT AUTO-PULL AT WAKE: a pull at 09:15 deploys whatever happens to sit
+    on origin, unverified, fifteen minutes before the open. That is exactly how
+    the 07-28 continuation rewire took out the 07-29 open. Report drift; let the
+    deploy stay deliberate.
+
+    Scope is the WOKEN boxes only. A sleeping box's HEAD is irrelevant until it
+    wakes and gets baked. Never raises, never blocks the wake — informational.
+    """
+    if getattr(config, "MOCK_AWS", False):
+        return "  [mock] parity check skipped (no SSH)"
+    try:
+        import ssh_util
+        import fleet
+        ip_by_sym = {s: ip for s, ip, st in fleet.get_fleet()
+                     if st == "running" and ip}
+    except Exception as exc:                       # noqa: BLE001
+        return f"  parity: UNAVAILABLE ({type(exc).__name__})"
+
+    heads, unreachable = {}, []
+    for sym, iid in sorted(resolved.items()):
+        if not reached.get(iid):
+            continue
+        ip = ip_by_sym.get(sym)
+        if not ip:
+            unreachable.append(sym)
+            continue
+        try:
+            rc, out, _ = ssh_util.ssh_run(
+                ip, f"git -C ~/{BOX_REPO} rev-parse HEAD", timeout=10)
+            h = (out or "").strip()
+            if rc == 0 and len(h) >= 7:
+                heads[sym] = h[:7]
+            else:
+                unreachable.append(sym)
+        except Exception:                          # noqa: BLE001
+            unreachable.append(sym)
+
+    if not heads:
+        return "  parity: no boxes answered" + (
+            f" ({len(unreachable)} unreachable)" if unreachable else "")
+
+    # Expected = origin, when the control twin can tell us. Falls back to fleet
+    # CONSENSUS, which still catches an odd box out even with no control repo.
+    expected, basis = None, "consensus"
+    ctl = _os.path.expanduser(CONTROL_REPO)
+    if _os.path.isdir(_os.path.join(ctl, ".git")):
+        try:
+            import subprocess
+            r = subprocess.run(["git", "-C", ctl, "ls-remote", "origin", "HEAD"],
+                               capture_output=True, text=True, timeout=15)
+            if r.returncode == 0 and r.stdout.strip():
+                expected, basis = r.stdout.split()[0][:7], "origin"
+        except Exception:                          # noqa: BLE001
+            pass                                   # offline: consensus still works
+    if expected is None:
+        from collections import Counter
+        expected = Counter(heads.values()).most_common(1)[0][0]
+
+    agree = [s for s, h in heads.items() if h == expected]
+    drift = {s: h for s, h in heads.items() if h != expected}
+    line = f"  parity: {len(agree)}/{len(heads)} on {expected} (vs {basis})"
+    if drift:
+        line += ("\n  \u26a0 BEHIND/AHEAD: "
+                 + ", ".join(f"{s}({h})" for s, h in sorted(drift.items())))
+    if unreachable:
+        line += f"\n  \u26a0 no HEAD from: {', '.join(sorted(unreachable))}"
+    return line
 
 
 def _push_brief_flags(resolved, reached, brief_strength):
