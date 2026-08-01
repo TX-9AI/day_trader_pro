@@ -1,5 +1,14 @@
 #!/usr/bin/env bash
-# day_trader_pro/devtools.sh — v1.24
+# day_trader_pro/devtools.sh — v1.25
+# v1.25 — 2026-08-01 — +56 "Blind-alert DRILL (fleet)". Fires the real
+#         blind-alert path on the boxes — recorder -> latch -> AlertManager ->
+#         Telegram — so the alarm that pages when the bot can still run but can
+#         no longer SEE is exercised on purpose rather than discovered broken
+#         during an outage. Runs tests/blind_alert_selftest.py on each box via
+#         the option-14 fan-out; every message it sends is prefixed DRILL - NOT
+#         REAL, because Telegram is an emergency-services channel and a test
+#         that looks real is itself a false alarm.
+#         Both version strings bumped together, per v1.24's own lesson.
 # v1.24 — 2026-07-30 — the MENU HEADER still printed v1.22 after v1.23 added
 #         item 55: the file-header version and the displayed banner are two
 #         separate strings and only one was bumped. Synced, and noted here so
@@ -241,7 +250,7 @@ menu() {
   clear
   cat <<'EOF' | _colorize
 ======================================================
-  Day Trader Pro — devtools  v1.24 Service Menu
+  Day Trader Pro — devtools  v1.25 Service Menu
 ======================================================
  ORCHESTRATION:
     1) Full spool-up (mock)       2) EOD aggregate (mock)
@@ -306,6 +315,7 @@ menu() {
    53) Audit fleet credentials (read-only; shows which vars are set, no values)
    54) Verify fleet credentials WORK (TT SDK, Telegram, GitHub)
    55) Verify control IAM role sees the fleet (read-only; no start/stop)
+   56) Blind-alert DRILL on the fleet (sends REAL Telegram, marked DRILL)
 
     0) Exit
 ======================================================
@@ -374,6 +384,14 @@ EOF
     54) echo; read -rp "Verify a SUBSET of symbols? (ENTER=all running): " SUBSET; \
         if [ -n "$SUBSET" ]; then $PY rotate_tokens.py --verify --only $SUBSET; else $PY rotate_tokens.py --verify; fi; pause ;;
     55) echo; $PY check_iam.py; pause ;;
+    56) echo; echo "Fires the REAL blind-alert path on every RUNNING box."; \
+        echo "Each box sends TWO Telegram messages, both prefixed DRILL - NOT REAL."; \
+        read -rp "Send for real? (n = dry-run, no Telegram) [y/N]: " GO; \
+        if [ "$GO" = "y" ]; then \
+          $PY fleet.py run "cd ~/options-trader && python3 tests/blind_alert_selftest.py; true"; \
+        else \
+          $PY fleet.py run "cd ~/options-trader && python3 tests/blind_alert_selftest.py --no-send; true"; \
+        fi; pause ;;
     0)  exit 0 ;;
     *)  echo "Invalid selection."; sleep 1 ;;
   esac
