@@ -1,5 +1,22 @@
 #!/usr/bin/env bash
-# day_trader_pro/devtools.sh — v1.25
+# day_trader_pro/devtools.sh — v1.26
+# v1.26 — 2026-08-01 — 56 REPORTED 29/29 SUCCESS WHILE DOING NOTHING AT ALL.
+#         Two defects, and the second is the dangerous one.
+#         (1) INTERPRETER. The fan-out ran bare `python3`, which on the boxes is
+#         system python — no pandas, no tastytrade. blind_alert_selftest imports
+#         data.market_data, so it died at IMPORT on all 29 boxes. Third
+#         interpreter mismatch of the day. Now uses venv/bin/python explicitly.
+#         (2) THE GREEN WAS LAUNDERED. The command ended in `; true` to satisfy
+#         the exit-0 fan-out convention, so the drill's real return code was
+#         discarded and the menu printed "29/29 succeeded". stderr was not
+#         captured either, so the traceback vanished and every box showed
+#         "(no output)" — a perfect health report from a tool that never ran.
+#         That is precisely the silent-failure class the blind alert exists to
+#         catch, committed inside the drill built to test it.
+#         Now: stderr captured with 2>&1, and the tail shows the script's OWN
+#         "DRILL PASSED" / "DRILL FAILED" line. `; true` still keeps the
+#         fan-out from discarding output, but it is no longer the thing
+#         reporting success. Read the per-box verdict, not the 29/29.
 # v1.25 — 2026-08-01 — +56 "Blind-alert DRILL (fleet)". Fires the real
 #         blind-alert path on the boxes — recorder -> latch -> AlertManager ->
 #         Telegram — so the alarm that pages when the bot can still run but can
@@ -250,7 +267,7 @@ menu() {
   clear
   cat <<'EOF' | _colorize
 ======================================================
-  Day Trader Pro — devtools  v1.25 Service Menu
+  Day Trader Pro — devtools  v1.26 Service Menu
 ======================================================
  ORCHESTRATION:
     1) Full spool-up (mock)       2) EOD aggregate (mock)
@@ -386,11 +403,13 @@ EOF
     55) echo; $PY check_iam.py; pause ;;
     56) echo; echo "Fires the REAL blind-alert path on every RUNNING box."; \
         echo "Each box sends TWO Telegram messages, both prefixed DRILL - NOT REAL."; \
+        echo "READ THE PER-BOX 'DRILL PASSED/FAILED' LINE, NOT the 29/29 tally —"; \
+        echo "the tally cannot see the drill's exit code (v1.26)."; \
         read -rp "Send for real? (n = dry-run, no Telegram) [y/N]: " GO; \
         if [ "$GO" = "y" ]; then \
-          $PY fleet.py run "cd ~/options-trader && python3 tests/blind_alert_selftest.py; true"; \
+          $PY fleet.py run "cd ~/options-trader && venv/bin/python tests/blind_alert_selftest.py 2>&1 | tail -4; true"; \
         else \
-          $PY fleet.py run "cd ~/options-trader && python3 tests/blind_alert_selftest.py --no-send; true"; \
+          $PY fleet.py run "cd ~/options-trader && venv/bin/python tests/blind_alert_selftest.py --no-send 2>&1 | tail -4; true"; \
         fi; pause ;;
     0)  exit 0 ;;
     *)  echo "Invalid selection."; sleep 1 ;;
