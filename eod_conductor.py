@@ -1,4 +1,25 @@
-# day_trader_pro/eod_conductor.py — v1.10.0
+# day_trader_pro/eod_conductor.py — v1.11.0
+# v1.11.0 (2026-08-01) — +PHASE 5b DAILY BARS. Rebuilds a daily OHLC series per
+#   symbol from the 1-minute tape phase_harvest just landed (daily_bars.py v1.0),
+#   into daily/<SYM>.csv. Closes item AP: the pitchfork's DAILY fork had no data
+#   source — TIMEFRAMES["1d"] serves 10 bars and §4.2 needs k=2 with R=40 — which
+#   also blocked §6's daily/hourly confluence, the highest-value signal the
+#   overlay was to produce.
+#   NOT a yfinance pull, deliberately. yfinance was purged for a large disparity
+#   against TastyTrade on low timeframes; a fractal pivot anchors on HIGHS AND
+#   LOWS, and its "30 day" 1m pull caps at 21 sessions. The decisive objection is
+#   invalidation: re-anchoring a dead fork selects a NEW triple and needs bars
+#   CURRENT AT THAT MOMENT, so a manual pull is stale the next day and a
+#   recurring one re-introduces the dependency the purge removed. Aggregating our
+#   own tape extends itself and keeps the fork reconstructible from tape.
+#   REBUILDS rather than appends — idempotent, and self-heals when a session is
+#   backfilled late, which an append would silently get wrong forever.
+#   Placed AFTER phase_backfill, not after phase_harvest: backfill fetches
+#   candles for days the boxes never handed over, so aggregating earlier would
+#   build daily bars from tape that is about to get more complete. Control-side,
+#   so it does NOT need the boxes-still-up window. It is a PHASE and not a manual
+#   command for the standing reason: a step someone has to remember is a step
+#   that stops happening.
 # v1.10.0 (2026-07-30) — +PHASE 2b/4b ARCHIVE GAP RECOVERY, run TWICE per night at
 #   the two moments boxes are actually up. 2b: the traders, after phase_harvest
 #   and BEFORE phase_report stops them — logs first, then the lights go out.
@@ -153,6 +174,7 @@ from zoneinfo import ZoneInfo
 
 import config
 import consolidate_trades
+import daily_bars
 import eod_backfill
 import eod_report
 import harvest
@@ -439,6 +461,38 @@ def phase_consolidate(date, dry, warns):
         _log("CONSOLIDATE", f"✅ {os.path.basename(out_json)}")
     else:
         _log("CONSOLIDATE", "no trades to bundle (tape-only day)")
+
+
+# ── 5b. DAILY BARS (always; control-side, AFTER backfill) ────────────────────
+def phase_daily_bars(dry, warns):
+    """Rebuild daily/<SYM>.csv from the 1-minute tape. Item AP.
+
+    Cheap and idempotent: it recomputes the whole series every night rather than
+    appending, so a late backfill or re-harvest heals itself instead of leaving a
+    bar computed from partial tape sitting in the series with nothing to flag it.
+    Sessions built from short tape are marked in a `partial` column rather than
+    dropped, so the gap stays visible to whoever anchors on them.
+    """
+    if dry:
+        _log("DAILY", "[dry] would rebuild daily/<SYM>.csv from ohlc/ tape")
+        return
+    _log("DAILY", "daily_bars.py — rebuild daily series from 1m tape")
+    try:
+        written = daily_bars.rebuild()
+    except Exception as exc:  # noqa: BLE001
+        _warn(warns, "DAILY", f"daily_bars.rebuild raised: {exc}")
+        return
+    if not written:
+        _warn(warns, "DAILY", "no tape found — daily series NOT updated")
+        return
+    bars = max(written.values())
+    _log("DAILY", f"✅ {len(written)} symbols, {bars} sessions")
+    # Stated every night until it clears, so the pitchfork's blocker cannot be
+    # quietly forgotten and then rediscovered when a fork fails to build.
+    if bars < 15:
+        _warn(warns, "DAILY",
+              f"only {bars} sessions — a k=2 daily fork needs ~15 (P2 confirmed "
+              f"at index 14). Fills at one bar per session; not actionable.")
 
 
 # ── 6. REGIME (always) ────────────────────────────────────────────────────────
@@ -837,6 +891,10 @@ def run(date=None, batch=5, dry=False, do_regime=True, do_tables=True,
     #     While they are up, collect any journal/chain dates control never pulled.
     if do_recover:
         phase_archive_recovery(dry, warns, "satouts")
+    # After BACKFILL on purpose: backfill fetches candles for days the boxes
+    # never handed over, so aggregating earlier would build daily bars from
+    # tape that is about to get more complete.
+    phase_daily_bars(dry, warns)
     phase_consolidate(date, dry, warns)
     phase_label(date, dry, warns)
     if do_regime:
