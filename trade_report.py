@@ -1,4 +1,26 @@
-# day_trader_pro/trade_report.py — v1.2
+# day_trader_pro/trade_report.py — v1.3
+# v1.3 — 2026-08-03 — +SENTIMENT dimension, and the cross that actually answers
+#        the operator's question. Idea: "I didn't think it would be wise to short
+#        into positive tailwinds or fire longs into headwinds." That is a claim
+#        about sentiment x DIRECTION, so `sentiment_x_direction` is the cross that
+#        matters — sentiment x strategy would not test it.
+#        SOURCE: reports/morning_report_<date>.json, archived nightly by
+#        eod_conductor v1.12.0 phase 5c. data/report.json is overwritten every
+#        09:15, so before that phase the day's scores were destroyed before they
+#        could be joined to that day's outcomes. Joined by (session date, symbol),
+#        the same shape gap_pct uses — the score is per SYMBOL PER DAY, so every
+#        trade on a symbol-day inherits one value.
+#        READ THE COVERAGE LINE FIRST. `brief_strength` was a hardcoded 0.30 for
+#        EVERY name every day until the DTP_REPORT_JSON fix landed after the close
+#        on 2026-07-30, and archiving only began 2026-08-03 — so there is almost
+#        no data yet and this dimension will be empty or trivial for weeks. It
+#        prints how many trades actually carried a score rather than silently
+#        ranking a handful. Expect it to become readable around 2026-09-05.
+#        SELECTION TRUNCATES THE RANGE, which is worth remembering when reading
+#        any result: sentiment already chooses which 13 discretionary boxes wake,
+#        so only high-scoring symbols trade at all. The bands below therefore see
+#        the TOP of the distribution, not its spread, and a null here is weaker
+#        evidence than a null on an untruncated variable would be.
 # v1.2 — 2026-07-22 — Machine-readable artifact + new dimensions. Writes
 #        reports/trade_report_<last-session>.json containing every bucket with
 #        full stats plus a FINDINGS block (best/worst regime, strategy, setup,
@@ -39,6 +61,7 @@ import argparse
 import glob
 import json
 import os
+import re
 import statistics
 import sys
 from collections import defaultdict
@@ -65,6 +88,48 @@ _DOW = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday",
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
+# Fixed bands rather than per-run terciles, so a bucket means the same thing
+# across runs and two reports can be compared. Chosen against the 2026-08-03
+# wake spread (MSFT 1.00 .. XOM 0.30): HIGH ~7 names, MID ~5, LOW ~1.
+SENTIMENT_BANDS = ((0.70, "HIGH >=0.70"), (0.40, "MID 0.40-0.70"))
+SENTIMENT_LOW = "LOW <0.40"
+
+
+def sentiment_band(score) -> str:
+    if score is None:
+        return "no score"
+    for lo, label in SENTIMENT_BANDS:
+        if score >= lo:
+            return label
+    return SENTIMENT_LOW
+
+
+def load_sentiment(reports_dir) -> Dict[str, Dict[str, float]]:
+    """{date: {SYMBOL: strength}} from the archived morning reports.
+
+    Returns {} when nothing has been archived yet, which is the normal state
+    until eod_conductor v1.12.0 phase 5c has run a few times. Callers must treat
+    an empty result as "not measured yet", never as "no relationship".
+    """
+    out: Dict[str, Dict[str, float]] = {}
+    for path in glob.glob(os.path.join(reports_dir, "morning_report_*.json")):
+        m = re.search(r"(20\d\d-\d\d-\d\d)", os.path.basename(path))
+        if not m:
+            continue
+        try:
+            payload = json.load(open(path))
+        except Exception:                                         # noqa: BLE001
+            continue
+        # the brief exposes per-symbol strength under a couple of shapes; take
+        # whichever is present rather than assuming one and silently finding none
+        src = (payload.get("strength_by_sym") or payload.get("strength")
+               or payload.get("scores") or {})
+        if isinstance(src, dict):
+            out[m.group(1)] = {str(k).upper(): _f(v) for k, v in src.items()
+                               if _f(v) is not None}
+    return out
+
+
 def norm_reason(reason) -> str:
     """exit_reason carries a ' pnl=...' suffix — strip it, or one reason
     shatters into dozens of thin buckets. Matches excursion_report."""
@@ -316,6 +381,16 @@ def main(argv: List[str]) -> int:
     for d, n in used:
         print(f"   {d}   {n:>5} closed trades")
 
+    # ── sentiment stamp (v1.3) ──────────────────────────────────────────────
+    sentiment = load_sentiment(config.REPORTS_DIR)
+    n_scored = 0
+    for t in trades:
+        sc = sentiment.get(t.get("_date") or "", {}).get(str(t.get("_sym", "")).upper())
+        t["_sentiment"] = sentiment_band(sc)
+        t["_sentiment_raw"] = sc
+        if sc is not None:
+            n_scored += 1
+
     dims = {
         "by_regime":        bucket(trades, "regime"),
         "by_strategy":      bucket(trades, "strategy"),
@@ -327,13 +402,35 @@ def main(argv: List[str]) -> int:
         "by_day_of_week":   bucket(trades, "_dow"),
         "by_session_phase": bucket(trades, "_phase"),
         "by_session_date":  bucket(trades, "_date"),
+        "by_sentiment":     bucket(trades, "_sentiment"),
     }
     crosses = {
         "regime_x_strategy": cross(trades, "regime", "strategy"),
         "symbol_x_strategy": cross(trades, "_sym", "strategy"),
         "phase_x_strategy":  cross(trades, "_phase", "strategy"),
+        # THE cross for the operator's question: does a bullish morning help
+        # longs and hurt shorts? sentiment x strategy would not test that.
+        "sentiment_x_direction": cross(trades, "_sentiment", "direction"),
     }
     overall = stats_of(trades)
+
+    # v1.3 — say how much sentiment data actually exists BEFORE any bucket is
+    # ranked. Archiving began 2026-08-03 and brief_strength was a constant 0.30
+    # before 2026-07-30, so for weeks the honest answer is "not measured yet" and
+    # a ranked table over a handful of trades would read as a finding.
+    if not sentiment:
+        print("\nSENTIMENT: no morning_report_*.json archived yet "
+              "(eod_conductor v1.12.0 phase 5c).\n  Nothing to compare — this is "
+              "NOT a null result, it is an absent measurement.")
+    else:
+        pct = 100.0 * n_scored / max(len(trades), 1)
+        print(f"\nSENTIMENT: {len(sentiment)} archived report(s); "
+              f"{n_scored}/{len(trades)} trades carry a score ({pct:.0f}%).")
+        if n_scored < 200:
+            print("  THIN — brief_strength was a constant 0.30 for every name "
+                  "until 2026-07-30 and\n  archiving began 2026-08-03. Expect this "
+                  "to become readable around 2026-09-05.\n  Read sentiment_x_direction "
+                  "as provisional until then.")
     best_t, worst_t = trade_extremes(trades)
 
     findings = {"min_n_applied": args.min_n}
