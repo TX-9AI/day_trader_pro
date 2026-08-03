@@ -1,4 +1,19 @@
-# day_trader_pro/eod_conductor.py — v1.11.0
+# day_trader_pro/eod_conductor.py — v1.12.0
+# v1.12.0 (2026-08-02) — +PHASE 5c ARCHIVE THE MORNING REPORT. data/report.json is
+#   OVERWRITTEN every morning at 09:15, so the day's per-symbol sentiment score is
+#   destroyed before anyone can join it to that day's outcomes. Copies it to
+#   reports/morning_report_<date>.json so the score becomes joinable the same way
+#   gap_pct is — by (date, symbol).
+#   WHY THIS AND NOT A TRADE-ROW COLUMN: the score is per SYMBOL PER DAY, not per
+#   trade, so every trade on a symbol-day inherits one value — identical structure
+#   to gap class. Archiving the file needs no sqlite migration, nothing box-side,
+#   and no exposure to the Aug 21 behavioural freeze. It is pure recording.
+#   WHY IT IS URGENT EVEN THOUGH THE ANALYSIS IS NOT: `brief_strength` was a
+#   hardcoded 0.30 for every name every day until the DTP_REPORT_JSON fix landed
+#   after the close on 2026-07-30, so real per-symbol sentiment has existed for
+#   only a couple of sessions. The correlation study is a nice-to-have; the
+#   RECORDING is time-sensitive, because a month of accumulation cannot start
+#   until the file stops being thrown away.
 # v1.11.0 (2026-08-01) — +PHASE 5b DAILY BARS. Rebuilds a daily OHLC series per
 #   symbol from the 1-minute tape phase_harvest just landed (daily_bars.py v1.0),
 #   into daily/<SYM>.csv. Closes item AP: the pitchfork's DAILY fork had no data
@@ -463,6 +478,52 @@ def phase_consolidate(date, dry, warns):
         _log("CONSOLIDATE", "no trades to bundle (tape-only day)")
 
 
+# ── 5c. ARCHIVE THE MORNING REPORT (always; control-side) ────────────────────
+def phase_archive_report(date, dry, warns):
+    """Preserve the day's per-symbol sentiment score before it is overwritten.
+
+    data/report.json is rewritten every morning by market_brief_v1, so today's
+    scores vanish at tomorrow's 09:15. Copying it under a dated name makes the
+    score joinable to that day's trades by (date, symbol) — the same shape
+    gap_pct.json already has, so tests/gap_outcome_join.py's machinery applies
+    with only the conditioning column swapped.
+
+    Recording only. Reads nothing live, changes no behaviour, gates nothing.
+    """
+    src = os.path.join(config.DATA_DIR, "report.json")
+    dest = os.path.join(config.REPORTS_DIR, f"morning_report_{date}.json")
+    if dry:
+        _log("REPORT", f"[dry] would archive {src} -> {dest}")
+        return
+    if not os.path.isfile(src):
+        _warn(warns, "REPORT", f"no {src} to archive — sentiment for {date} is lost")
+        return
+    try:
+        with open(src) as fh:
+            payload = json.load(fh)
+    except Exception as exc:  # noqa: BLE001
+        _warn(warns, "REPORT", f"report.json unreadable ({exc}) — not archived")
+        return
+    # A stale report is worse than none: it would silently attribute an old day's
+    # sentiment to today's trades. The 07-29 defect was exactly this failure mode
+    # (a frozen file read for 23 days), so the freshness stamp is checked here.
+    stamp = str(payload.get("date") or payload.get("generated_at") or "")
+    if stamp and date not in stamp:
+        _warn(warns, "REPORT",
+              f"report.json is stamped {stamp!r}, not {date} — archiving anyway "
+              f"but DO NOT join it to {date} trades")
+    try:
+        os.makedirs(config.REPORTS_DIR, exist_ok=True)
+        with open(dest, "w") as fh:
+            json.dump(payload, fh, indent=1, sort_keys=True)
+    except Exception as exc:  # noqa: BLE001
+        _warn(warns, "REPORT", f"archive write failed: {exc}")
+        return
+    n = len(payload.get("scores") or payload.get("move_ranked") or [])
+    _log("REPORT", f"✅ archived morning report ({n} symbols) -> "
+                   f"morning_report_{date}.json")
+
+
 # ── 5b. DAILY BARS (always; control-side, AFTER backfill) ────────────────────
 def phase_daily_bars(dry, warns):
     """Rebuild daily/<SYM>.csv from the 1-minute tape. Item AP.
@@ -895,6 +956,7 @@ def run(date=None, batch=5, dry=False, do_regime=True, do_tables=True,
     # never handed over, so aggregating earlier would build daily bars from
     # tape that is about to get more complete.
     phase_daily_bars(dry, warns)
+    phase_archive_report(date, dry, warns)
     phase_consolidate(date, dry, warns)
     phase_label(date, dry, warns)
     if do_regime:
