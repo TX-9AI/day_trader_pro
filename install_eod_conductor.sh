@@ -27,6 +27,14 @@ Wants=network-online.target
 Type=oneshot
 User=${U}
 WorkingDirectory=${DIR}
+# AX (2026-08-03) — WITHOUT THIS THE CONDUCTOR CANNOT NOTIFY. notify.py reads
+# DTP_TELEGRAM_TOKEN / DTP_TELEGRAM_CHAT_ID from the environment, systemd handed
+# this unit NOTHING, and every warning it has ever raised went to a journal
+# nobody reads — including the 2026-08-03 run's "7 symbol(s) still without
+# candles". Same box-vs-control credential split as the blind-alert drill, one
+# layer up. dtp-eod-timer and dtp-morning-timer already load this exact file;
+# the conductor was the only unit that did not.
+EnvironmentFile=${DIR}/.env
 ExecStart=${PY} ${DIR}/eod_conductor.py
 TimeoutStartSec=3600
 UNIT
@@ -49,4 +57,15 @@ sudo chmod 644 /etc/systemd/system/dtp-eod-conductor.timer
 sudo systemctl daemon-reload
 sudo systemctl enable --now dtp-eod-conductor.timer >/dev/null 2>&1
 echo "✅ dtp-eod-conductor.timer installed (16:05 ET)"
+
+# AX — say plainly whether the notify path can work, rather than discovering it
+# in a journal weeks later. Presence only; no values printed.
+if [ -f "$DIR/.env" ]; then
+  for V in DTP_TELEGRAM_TOKEN DTP_TELEGRAM_CHAT_ID; do
+    if grep -q "^$V=" "$DIR/.env"; then echo "   ✅ $V present in .env"
+    else echo "   ⚠️  $V MISSING from $DIR/.env — the conductor still cannot notify"; fi
+  done
+else
+  echo "   ⚠️  $DIR/.env does not exist — the unit will fail to start"
+fi
 systemctl list-timers dtp-eod-conductor.timer --no-pager 2>/dev/null | sed -n '1,2p'
