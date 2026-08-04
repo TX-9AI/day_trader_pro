@@ -235,6 +235,19 @@ def run(date=None, batch=5, stream_cap=10, only=None, dry=False):
     if phantoms:
         print(f"  ({len(phantoms)} of those have a PHANTOM file — content but "
               f"< {MIN_REAL_BARS} bars: {', '.join(phantoms)})")
+        # 2026-08-04 — name the CAUSE, not just the symptom. A header-only csv
+        # from the RTH guard and one from a dead DXFeed fetch look identical
+        # here, and they have opposite responses: re-run after the close vs
+        # investigate entitlement. pull_today_ohlc v1.3 makes the first case
+        # rebuild instead of writing a phantom, so a phantom on a POST-CLOSE run
+        # now means something genuinely failed.
+        print("   cause: a phantom written DURING RTH is the pull script's "
+              "guard (pre-v1.3 it\n"
+              "   refused the rebuild on any live feed, cold store or not) — "
+              "re-run after 16:00 ET.\n"
+              "   A phantom from a POST-CLOSE run is a real fetch failure: "
+              "check the box's\n"
+              "   pull_today_ohlc.log for entitlement or DXFeed reach.")
     print(f"plan: batches of {batch}, stream cap {stream_cap}, "
           f"{baseline} bot box(es) currently running")
     if baseline + batch > stream_cap:
