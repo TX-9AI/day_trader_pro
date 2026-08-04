@@ -1,4 +1,14 @@
-# day_trader_pro/eod_conductor.py — v1.12.0
+# day_trader_pro/eod_conductor.py — v1.13.0
+# v1.13.0 (2026-08-04) — PHASE 10 NAMES THE NEW SWALLOWS. The 08-03 warning read
+#   "silent handlers ROSE 83 -> 87 — a new swallow was added" and stopped there,
+#   so every firing cost a manual census to find out WHICH. Both snapshots are
+#   already loaded here, so the diff is free: the warning now names up to five
+#   additions as file:line func, tier-1 first. Identity is (file, func, guards),
+#   NOT the line number — a line moves whenever anything above it changes, and a
+#   line-keyed diff would report a whole file as new after a one-line edit. An
+#   alarm that cannot point at what it detected gets read more slowly each time
+#   it fires (WORKING_AGREEMENT 17). Matches options_trader_v3
+#   tests/swallow_audit.py v1.1 --since, which does the same diff by hand.
 # v1.12.0 (2026-08-02) — +PHASE 5c ARCHIVE THE MORNING REPORT. data/report.json is
 #   OVERWRITTEN every morning at 09:15, so the day's per-symbol sentiment score is
 #   destroyed before anyone can join it to that day's outcomes. Copies it to
@@ -774,9 +784,27 @@ def phase_swallow(date, dry, warns):
         pass
 
     if prior_silent is not None and silent > prior_silent:
+        # v1.13.0 — name them. Identity deliberately excludes the line number.
+        def _ident(r):
+            return (r.get("file"), r.get("func"), r.get("guards"))
+        try:
+            was = {_ident(r) for r in pr
+                   if str(r.get("loudness", "")).startswith("SILENT")}
+            added = [r for r in rows
+                     if str(r.get("loudness", "")).startswith("SILENT")
+                     and _ident(r) not in was]
+            added.sort(key=lambda r: (r.get("tier", 9), r.get("file", ""),
+                                      r.get("line", 0)))
+            names = "; ".join(
+                f"T{int(r.get('tier', 8)) + 1} {r.get('file')}:{r.get('line')} "
+                f"{r.get('func')}" for r in added[:5])
+            more = f" (+{len(added) - 5} more)" if len(added) > 5 else ""
+        except Exception as exc:  # noqa: BLE001
+            names, more = f"could not diff snapshots: {exc}", ""
         _warn(warns, "SWALLOW",
               f"silent handlers ROSE {prior_silent} -> {silent} since {prior} — "
-              f"a new swallow was added. Run: python3 tests/swallow_audit.py --critical")
+              f"NEW: {names}{more}. Classify each: "
+              f"python3 tests/swallow_audit.py --since reports/{prior}")
     else:
         delta = ("" if prior_silent is None
                  else f" ({silent - prior_silent:+d} vs {prior})")
