@@ -1,7 +1,43 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/excursion_report.py — MFE/MAE distributions from the fleet's
-auto-collected per-symbol trade DBs.
+day_trader_pro/excursion_report.py — v2.3 — MFE/MAE distributions from the
+fleet's auto-collected per-symbol trade DBs.
+v2.3 — 2026-08-03 — FOUR defects, all of the same class: the report rendered
+        cleanly while meaning something other than it appeared.
+        (1) THE DB SOURCE HAS NEVER LOADED. _rows_from_dbs globbed the
+        UNDATED filename form, but harvest.py:166 writes
+        trades/<date>/<SYM>_trades_<date>.db — the glob requires the name to
+        END in _trades.db, so it has matched ZERO files since v2.0 and every
+        run has silently fallen through to the fleet_trades_<date>.json
+        fallback. consolidate_trades.py:178 and tests/gate_ledger.py:139 both
+        glob "*_trades_<date>.db" correctly; this file was the outlier.
+        CONSEQUENCE: --since has been a guaranteed no-op on every run ever
+        made, because the fallback file holds ONE day (consolidate_trades v1.2
+        filters rows to the day being consolidated) and --since is a filter
+        over already-loaded rows, not a loader. Single-day reports were
+        unaffected — the fallback is consolidated from the same DBs — so no
+        past single-day number is wrong; only cumulative was impossible.
+        Found 2026-08-03 when a "since 2026-07-23" run returned exactly that
+        day's 88 rows.
+        (2) THE FALLBACK ONLY ANNOUNCED ITSELF WHEN THE REPORT WAS EMPTY —
+        the '(' not in src hint sat inside `if not rows:`. With rows present
+        the degradation was invisible. Now a SOURCE line is emitted whenever
+        the primary DB source is missing, populated or not, and --since over
+        the fallback REFUSES (rc=2) instead of labelling one day cumulative.
+        (3) LEASH VERDICT hardcoded four flavors, two of which the engine no
+        longer emits, and `if not rs: continue` dropped the rest in silence —
+        so a block headed "per trail flavor" printed bos_exit alone while
+        continuation_trail, orb_trail_stop and condor_stop sat in the table
+        above it. Flavor set now covers the real exit_engine vocabulary and
+        any unlisted reason containing "trail" is caught and named.
+        (4) FLOOR VERDICT counted the wrong stop: startswith("hard_stop")
+        matched ORB's hard_stop_<pct> but NOT max_loss_floor_<pct>pct, the
+        actual floor exit — on 2026-08-03 it reported 1 floor stop and missed
+        5. Also relabelled: the line narrated one threshold in prose while
+        testing against another, and the params were named after a floor move
+        that has since reversed (the continuation backstop went 40%→25% on
+        2026-07-22). Now tight_floor/wide_floor, with the thresholds
+        interpolated instead of written into the prose.
 v2.2 — 2026-07-16 — --live writes excursions_<date>_live.txt (own file, so
         the nightly paper report is never clobbered); ran automatically as
         EOD conductor phase 7 (v1.3.0) — devtools 45 remains the manual path.
@@ -57,6 +93,24 @@ REPORTS_DIR  = os.path.join(SCRIPT_DIR, "reports")
 TRADES_DIR   = os.path.join(SCRIPT_DIR, "trades")
 CONTRACT_MULTIPLIER = 100
 
+# Exit vocabulary, read from options_trader_v3's exit_engine rather than
+# remembered. Anything the engine emits with "trail" in the name is caught by
+# substring below even if it is missing here, so a new flavor cannot vanish.
+TRAIL_FLAVORS = (
+    "continuation_trail",       # ContinuationStrategy runner leash
+    "orb_trail_stop",           # ORB
+    "orb_fvg_trail_stop",       # ORB, FVG-anchored
+    "post_target_trail",
+    "trail_stop_hit",
+    "adopted_trail",            # positions adopted at restart
+    "bos_exit",                 # structure break — leash-adjacent, kept
+    "theta_bleed",
+)
+
+# The floor exits. max_loss_floor_<pct>pct is the blanket/continuation floor;
+# hard_stop_<pct> is ORB's. Matching only "hard_stop" missed the former.
+FLOOR_REASON_PREFIXES = ("hard_stop", "max_loss_floor")
+
 
 # ── input: per-symbol DB snapshots (primary), consolidated file (fallback) ──
 
@@ -66,7 +120,10 @@ def _rows_from_dbs(day: str):
     import glob
     import sqlite3
     folder = os.path.join(TRADES_DIR, day)
-    paths = sorted(glob.glob(os.path.join(folder, "*_trades.db")))
+    # harvest.py:166 writes <SYM>_trades_<date>.db — the same pattern
+    # consolidate_trades.py:178 and tests/gate_ledger.py:139 use. A bare
+    # The undated form requires the name to END there and matches nothing.
+    paths = sorted(glob.glob(os.path.join(folder, f"*_trades_{day}.db")))
     if not paths:
         return None, None
     rows = []
@@ -184,7 +241,7 @@ def pct(x):
 # ── the report ───────────────────────────────────────────────────────────────
 
 def build_report(rows, day, src, skipped, mode, hints=None,
-                 old_floor=0.25, new_floor=0.40) -> str:
+                 tight_floor=0.25, wide_floor=0.40) -> str:
     out = []
     w = out.append
     w(f"EXCURSION REPORT — {day} [{mode}] — {len(rows)} trade(s) with telemetry")
@@ -192,6 +249,10 @@ def build_report(rows, day, src, skipped, mode, hints=None,
     w(f"source: {src if '(' in src else os.path.basename(src)}"
       + (f"   ({skipped} closed row(s) skipped: no telemetry — pre-v3.8)"
          if skipped else ""))
+    if "(" not in src:
+        w("SOURCE DEGRADED: per-box DBs absent — this is the single-day "
+          "consolidated fallback, so cumulative (--since) is not available "
+          "from it. Numbers below cover ONE session.")
     if not rows:
         w("")
         w("Nothing to report for this selection. Likely reasons:")
@@ -220,16 +281,18 @@ def build_report(rows, day, src, skipped, mode, hints=None,
     directional = [r for r in rows
                    if not credit_signed(r) and not flag(r, "is_butterfly")]
     winners = [r for r in directional if (fnum(r, "pnl_usd") or 0) > 0]
-    saved   = [r for r in winners if excursions(r)[1] <= -old_floor]
-    doomed  = [r for r in winners if excursions(r)[1] <= -new_floor]
+    cut     = [r for r in winners if excursions(r)[1] <= -tight_floor]
+    doomed  = [r for r in winners if excursions(r)[1] <= -wide_floor]
     w("")
     w("FLOOR VERDICT (directional winners only):")
     w(f"  winners total ............................ {len(winners)}")
-    w(f"  MAE breached -{old_floor:.0%} then WON (saved by 40%) . {len(saved)}"
-      + (f"  avg final {pct(mean(excursions(r)[2] for r in saved))}" if saved else ""))
-    w(f"  MAE also breached -{new_floor:.0%} (argues even wider)  {len(doomed)}")
+    w(f"  MAE breached -{tight_floor:.0%} then WON "
+      f"(a {tight_floor:.0%} floor would have cut them) {len(cut)}"
+      + (f"  avg final {pct(mean(excursions(r)[2] for r in cut))}" if cut else ""))
+    w(f"  MAE also breached -{wide_floor:.0%} "
+      f"(would have died at {wide_floor:.0%} too)         {len(doomed)}")
     stops = [r for r in directional
-             if norm_reason(r.get("exit_reason")).startswith("hard_stop")]
+             if norm_reason(r.get("exit_reason")).startswith(FLOOR_REASON_PREFIXES)]
     if stops:
         w(f"  floor stops taken ........................ {len(stops)}"
           f"  avg realized {pct(mean(excursions(r)[2] for r in stops))}"
@@ -237,7 +300,13 @@ def build_report(rows, day, src, skipped, mode, hints=None,
 
     w("")
     w("LEASH VERDICT (giveback = MFE - realized, per trail flavor):")
-    for flavor in ("trail_stop_hit", "post_target_trail", "bos_exit", "theta_bleed"):
+    present = sorted({norm_reason(r.get("exit_reason")) for r in rows})
+    flavors = [f for f in TRAIL_FLAVORS if f in present]
+    unlisted = [p for p in present if p not in TRAIL_FLAVORS and "trail" in p]
+    if not flavors and not unlisted:
+        w("  no trail-flavor exits in this window "
+          f"(reasons present: {', '.join(present) or 'none'})")
+    for flavor in flavors + unlisted:
         rs = [r for r in rows if norm_reason(r.get("exit_reason")) == flavor]
         if not rs:
             continue
@@ -247,6 +316,9 @@ def build_report(rows, day, src, skipped, mode, hints=None,
           f"  MFE {pct(mean(e[0] for e in ex))}"
           f"  giveback {pct(mean(e[0] - e[2] for e in ex))}"
           f"  (median real {pct(median(e[2] for e in ex))})")
+    if unlisted:
+        w(f"  ! not in TRAIL_FLAVORS, included on the \"trail\" substring: "
+          f"{', '.join(unlisted)} — add them to the list or rename the exit")
     w("")
     return "\n".join(out) + "\n"
 
@@ -270,6 +342,17 @@ def main():
               f"fleet_trades_{args.date}.json/.csv — nothing collected for "
               f"that day yet.", file=sys.stderr)
         sys.exit(1)
+
+    if args.since and "(" not in src:
+        print(f"REFUSED: --since {args.since} needs the per-box DBs in "
+              f"trades/{args.date}/ — each snapshot carries that box's FULL "
+              f"history, which is the only thing --since can widen. Only the "
+              f"single-day fallback {os.path.basename(src)} was found, and "
+              f"--since over it filters one session's rows while still "
+              f"labelling the report cumulative. Re-run without --since, or "
+              f"after harvest lands trades/{args.date}/*_trades_{args.date}.db.",
+              file=sys.stderr)
+        sys.exit(2)
 
     closed  = [r for r in all_rows if (r.get("status") or "") == "closed"]
     if args.since:
