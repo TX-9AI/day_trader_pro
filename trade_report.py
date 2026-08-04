@@ -1,4 +1,12 @@
-# day_trader_pro/trade_report.py — v1.4
+# day_trader_pro/trade_report.py — v1.5
+# v1.5 (2026-08-04) — HEADLINE stops printing false sentences. rank() now
+#   returns how many buckets cleared the sample floor, and the printer refuses
+#   the word "worst" when there is only one (it was naming the SAME bucket as
+#   best and worst — day_of_week: Tuesday twice, on a single-session report) and
+#   flags it as LOWEST-not-a-loss when every eligible bucket is positive
+#   (2026-08-04 announced "worst regime BREAKOUT_VOLATILE net +1041.50", the
+#   second-best bucket, on a profit). Arithmetically right, semantically false —
+#   and it is the section people skim.
 # v1.4 — 2026-08-03 — EXIT SPREAD + a contaminated verdict fenced off.
 #        (a) by_exit_reason and by_session_date existed as separate marginals,
 #        which cannot answer the question they get asked: is an exit reason a
@@ -311,12 +319,22 @@ def cross(trades: List[dict], k1: str, k2: str) -> Dict[str, dict]:
 
 
 def rank(d: Dict[str, dict], min_n: int, worst: bool = False):
-    """Best/worst by NET among buckets meeting the sample floor."""
+    """Best/worst by NET among buckets meeting the sample floor.
+
+    v1.5 — returns `n_elig` so the caller can refuse to say "worst" when the
+    word would be a lie. On 2026-08-04 only TWO regime buckets cleared the floor
+    and BOTH were positive, so the report announced
+    `worst regime BREAKOUT_VOLATILE net +1041.50` — the second-BEST bucket, on a
+    positive number, labelled worst. With one eligible bucket it printed the
+    SAME bucket as both best and worst (day_of_week: Tuesday twice). The ranking
+    was arithmetically correct and the sentence was false, which is the class of
+    output this repo keeps paying for.
+    """
     elig = {k: v for k, v in d.items() if v["n"] >= min_n}
     if not elig:
         return None
     k = (min if worst else max)(elig, key=lambda x: elig[x]["net"])
-    return {"key": k, **elig[k]}
+    return {"key": k, "n_elig": len(elig), **elig[k]}
 
 
 def trade_extremes(trades: List[dict]) -> Tuple[Optional[dict], Optional[dict]]:
@@ -564,8 +582,20 @@ def main(argv: List[str]) -> int:
         b, w = findings.get(f"best_{lab}"), findings.get(f"worst_{lab}")
         if b:
             print(f"  best {lab:<14} {b['key'][:30]:<30} net {b['net']:>+10.2f} (n={b['n']})")
+        # v1.5 — "worst" is only a word worth printing when there is something
+        # to be worst THAN, and when it is not simply the lowest of several
+        # winners. One eligible bucket prints itself as both; all-positive
+        # eligibles make "worst" read as a loss that did not happen.
         if w:
-            print(f"  worst {lab:<13} {w['key'][:30]:<30} net {w['net']:>+10.2f} (n={w['n']})")
+            n_elig = w.get("n_elig", 2)
+            if n_elig < 2:
+                print(f"  worst {lab:<13} — only 1 bucket cleared the n>={args.min_n} "
+                      f"floor, so best and worst are the same one")
+            else:
+                lowest = w["net"] < 0
+                tag = "" if lowest else f"  <- LOWEST of {n_elig}, not a loss"
+                print(f"  worst {lab:<13} {w['key'][:30]:<30} "
+                      f"net {w['net']:>+10.2f} (n={w['n']}){tag}")
 
     if not args.no_json:
         payload = {

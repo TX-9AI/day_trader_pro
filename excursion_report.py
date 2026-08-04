@@ -1,7 +1,19 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/excursion_report.py — v2.5 — MFE/MAE distributions from the
+day_trader_pro/excursion_report.py — v2.6 — MFE/MAE distributions from the
 fleet's auto-collected per-symbol trade DBs.
+
+v2.6 — 2026-08-04 — (a) PEAK TIMING from trade_logger v3.9's
+       max_premium_seen_at: the winner-giveback block had been printing an
+       instruction to add those timestamps, which shipped 2026-08-03 — so the
+       report was asking for a column it already had and declining to answer a
+       question it could. Early-peak vs late-peak separates a loose trail from a
+       move that simply turned, and those need opposite fixes.
+       (b) EXIT-REASON FAMILIES POOLED. `regime_flip (LABEL)` and
+       `max_loss_floor_NNpct` fragmented every cell and each fragment then
+       correctly reported itself UNDERPOWERED — output that looks right and can
+       never conclude. On 2026-08-04 that was 12 regime_flips split 6/4/1/1.
+       The detail is preserved by reason_detail(), not discarded.
 v2.5 — 2026-08-03 — THE TWO-POPULATION SPLIT, per the operator's framing:
         separate the trades that were NEVER winners — not favorable for one
         tick, so there was never anything to manage — from the ones that DID
@@ -133,9 +145,11 @@ import argparse
 import csv
 import json
 import os
+import re
 import sys
-from datetime import date
+from datetime import date, datetime
 from statistics import mean, median
+from typing import Optional
 
 SCRIPT_DIR   = os.path.dirname(os.path.abspath(__file__))
 REPORTS_DIR  = os.path.join(SCRIPT_DIR, "reports")
@@ -282,11 +296,71 @@ def credit_signed(row) -> bool:
         or flag(row, "is_short_position")
 
 
+def peak_fraction(row) -> Optional[float]:
+    """Where in the hold the MFE landed, as a fraction of entry->exit.
+
+    None when the v3.9 timestamps are absent (every row entered before
+    2026-08-03) or unparseable. NEVER imputed: a missing peak time is not a
+    peak at time zero, and treating it as one would manufacture the exact
+    "peaked early" signal this measure exists to detect.
+    All three stamps are UTC ISO from ts_for_db — the same base, deliberately,
+    because comparing a UTC field against an ET-offset one has already inverted
+    one verdict in this repo.
+    """
+    t0, tp, t1 = (row.get("entry_time"), row.get("max_premium_seen_at"),
+                  row.get("exit_time"))
+    if not (t0 and tp and t1):
+        return None
+    try:
+        a = datetime.fromisoformat(str(t0))
+        b = datetime.fromisoformat(str(tp))
+        c = datetime.fromisoformat(str(t1))
+    except Exception:                                            # noqa: BLE001
+        return None
+    span = (c - a).total_seconds()
+    if span <= 0:
+        return None
+    return max(0.0, min(1.0, (b - a).total_seconds() / span))
+
+
 def norm_reason(reason) -> str:
+    """Collapse an exit reason to its FAMILY.
+
+    v2.6 — two families were fragmenting the sample and every fragment then
+    honestly reported itself UNDERPOWERED, which is the worst possible failure
+    mode: correct-looking output that can never reach a verdict.
+      `regime_flip (BREAKOUT_VOLATILE)` — the label rides in PARENTHESES, which
+        survived the old strip. 2026-08-04: twelve regime_flip trades became
+        four cells of 6/4/1/1, all REFUSED. Pooled they are one cell of 12 and
+        reach n=40 in about four sessions.
+      `max_loss_floor_25pct` / `..._24pct` — the percentage varies with config,
+        so the same exit splits by its own setting. 2 and 1 instead of 3.
+    The detail is NOT discarded — `reason_detail()` returns it, so a pooled cell
+    can still be split when it has the n to support one. Same principle as
+    gap_outcome_join's `--pool`: collapse for power, keep the split available.
+    """
     r = (reason or "unknown").strip()
     if r.startswith("hard_close"):
         return "hard_close"
-    return r.split(" pnl=")[0].split(":")[0].strip() or "unknown"
+    r = r.split(" pnl=")[0].split(":")[0].strip() or "unknown"
+    if r.startswith("regime_flip"):
+        return "regime_flip"
+    if r.startswith("max_loss_floor"):
+        return "max_loss_floor"
+    return r
+
+
+def reason_detail(reason) -> str:
+    """The part norm_reason() pools away: the regime label, or the floor pct.
+
+    Kept so pooling never destroys information — only defers it.
+    """
+    r = (reason or "").split(" pnl=")[0].strip()
+    m = re.search(r"\(([^)]+)\)", r)
+    if m:
+        return m.group(1)
+    m = re.search(r"max_loss_floor_(\d+pct)", r)
+    return m.group(1) if m else ""
 
 
 def usable(row, paper: bool) -> bool:
@@ -476,17 +550,38 @@ def build_report(rows, day, src, skipped, mode, hints=None,
                 w(f"    {v[:24]:<24}{len(cs):>5}  capture {median(cs):>5.0%}{mark}")
     else:
         w("  no winners in this window")
-    w("  CANNOT CONCLUDE FROM THIS ALONE: trade_logger v3.8 stores "
-      "max_premium_seen")
-    w("  as a VALUE with NO TIMESTAMP, so this cannot tell a trade that peaked "
-      "early")
-    w("  and bled for twenty minutes from one that reversed on the last tick — "
-      "the")
-    w("  exact difference between a loose trail and a move that simply turned. "
-      "Add")
-    w("  the extreme timestamps to telemetry before the freeze or this question "
-      "stays")
-    w("  unanswerable no matter how many sessions accrue.")
+    # v2.6 — the question the block above used to declare unanswerable. It is
+    # answerable now: trade_logger v3.9 (2026-08-03) added max_premium_seen_at /
+    # min_premium_seen_at, so a winner's PEAK has a time and the fraction of the
+    # hold it took to get there separates the two cases that call for OPPOSITE
+    # fixes — peaked early and bled (the trail is too loose) from ran to the
+    # exit and turned (the move simply ended).
+    # NULL ON EVERY PRE-DEPLOY ROW, and that is reported rather than imputed:
+    # v3.9 columns exist only for trades entered after it shipped, so a window
+    # spanning the deploy will show partial coverage.
+    peak_fracs, n_no_ts = [], 0
+    for r, e in winners:
+        f = peak_fraction(r)
+        if f is None:
+            n_no_ts += 1
+        else:
+            peak_fracs.append(f)
+    w("")
+    w("  PEAK TIMING (v3.9 timestamps) — when in the hold did MFE happen?")
+    if len(peak_fracs) < MIN_GROUP_N:
+        w(f"    n={len(peak_fracs)} REFUSED (under n={MIN_GROUP_N})"
+          f"   [{n_no_ts} winner(s) predate the v3.9 columns]")
+    else:
+        pf = sorted(peak_fracs)
+        early = sum(1 for x in pf if x <= 0.33) / len(pf)
+        late = sum(1 for x in pf if x >= 0.67) / len(pf)
+        w(f"    n={len(pf)}   median {median(pf):.0%} of the hold"
+          f"   early(<=33%) {early:.0%}   late(>=67%) {late:.0%}"
+          + (f"   [{n_no_ts} pre-v3.9]" if n_no_ts else ""))
+        w("    A high EARLY share is a LOOSE TRAIL — the peak was available and")
+        w("    the exit gave it back. A high LATE share is a move that ran to the")
+        w("    exit and turned, which no trail setting recovers. They call for")
+        w("    opposite fixes, and giveback alone cannot tell them apart.")
 
     # ── FLOOR SWEEP ─────────────────────────────────────────────────────────
     w("")
