@@ -57,6 +57,19 @@ PRODUCE_TIMEOUT   = 210      # s to wait for a box to write its CSV
 POLL_EVERY        = 15       # s between --check polls
 FULL_SESSION_BARS = 380      # soft "complete" threshold (RTH ≈ 390)
 
+# 2026-08-03 — the "is it missing?" test was `bars <= 0`, i.e. ANY content counted
+# as present. A failed DXFeed fetch writes a HEADER-ONLY csv, so a symbol whose
+# backfill returned nothing looked harvested. Found because LLY sat at 2 lines
+# (header + one bar) and was never in the missing list, while seven header-only
+# files from the same night were.
+# WHY NOT REUSE FULL_SESSION_BARS (380) HERE: that is the COMPLETE threshold. Using
+# it in _missing would flag every partial session as missing and re-fetch the fleet
+# nightly. This floor only has to separate a PHANTOM from a short-but-real session.
+# Measured over the banked tape: real sessions run min 48 / p10 241 / p50 391 bars.
+# Nothing genuine has ever landed under 48; every phantom is 0-1. Ten is clear of
+# both edges by a wide margin, so it cannot reclassify a session we have seen.
+MIN_REAL_BARS = 10
+
 _BARS_RE = re.compile(r"(\d+)\s+bars")
 
 
@@ -82,7 +95,7 @@ def _missing(date, only=None):
         lo = _csv_bars(os.path.join(day_dir, f"{s}_ohlc_{date}.csv"))
         up = _csv_bars(os.path.join(day_dir, f"{s}_OHLC_{date}.csv"))
         return max(lo, up)
-    return [s for s in uni if _bars(s) <= 0]
+    return [s for s in uni if _bars(s) < MIN_REAL_BARS]
 
 
 def _chunks(seq, n):
@@ -211,7 +224,17 @@ def run(date=None, batch=5, stream_cap=10, only=None, dry=False):
 
     # Pre-flight capacity check: bot boxes already running must leave room for a batch.
     baseline = sum(1 for r in mapping.values() if r.get("state") == "running")
-    print(f"{date}: {len(missing)}/{total} symbols missing candles: {', '.join(missing)}")
+    print(f"{date}: {len(missing)}/{total} symbols missing candles: "
+          f"{', '.join(missing)}")
+    # name the phantoms explicitly — a header-only file is not the same problem as
+    # a symbol that never wrote anything, and the distinction is invisible from
+    # the count alone
+    phantoms = [s for s in missing
+                if 0 < _csv_bars(os.path.join(config.OHLC_DIR, date,
+                                              f"{s}_ohlc_{date}.csv")) < MIN_REAL_BARS]
+    if phantoms:
+        print(f"  ({len(phantoms)} of those have a PHANTOM file — content but "
+              f"< {MIN_REAL_BARS} bars: {', '.join(phantoms)})")
     print(f"plan: batches of {batch}, stream cap {stream_cap}, "
           f"{baseline} bot box(es) currently running")
     if baseline + batch > stream_cap:
