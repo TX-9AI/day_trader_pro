@@ -192,3 +192,135 @@ def test_no_since_over_fallback_still_reports():
 
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-q"]))
+
+
+# ── v2.4: regime dimension, session power, floor sweep ─────────────────────
+
+def _r(strat, regime, mae, mfe, real, date):
+    return {"status": "closed", "paper_trade": 1, "entry_premium": 1.0,
+            "pnl_usd": real * 100, "max_premium_seen": 1 + mfe,
+            "min_premium_seen": 1 + mae, "contracts": 1, "strategy": strat,
+            "regime": regime, "exit_reason": "continuation_trail",
+            "entry_time": f"{date}T14:31:00+00:00"}
+
+
+_D = ["2026-07-24", "2026-07-28", "2026-07-29", "2026-07-31", "2026-08-03"]
+
+
+def test_group_by_strategy_x_regime_separates_cells():
+    rows = [_r("Cont", "TRENDING_BEAR", -0.30, 0.0, -0.27, _D[i % 5])
+            for i in range(45)]
+    rows += [_r("Cont", "TRENDING_BULL", -0.08, 0.32, 0.14, _D[i % 5])
+             for i in range(45)]
+    text = er.build_report(rows, "d", "trades/d (29 DBs)", 0, "PAPER",
+                           group_by="strategy_x_regime")
+    assert "TRENDING_BEAR"[:11] in text and "TRENDING_BULL"[:11] in text
+    assert "STRATEGY" in text and "REGIME" in text
+
+
+def test_thin_cell_is_refused_not_reported_as_a_null():
+    rows = [_r("Cont", "RANGING", -0.30, 0.0, -0.27, _D[i % 5])
+            for i in range(10)]
+    text = er.build_report(rows, "d", "trades/d (29 DBs)", 0, "PAPER",
+                           group_by="strategy_x_regime")
+    assert "UNDERPOWERED" in text
+    assert "REFUSED" in text
+    assert "not a null" in text
+
+
+def test_cell_from_too_few_sessions_is_flagged_even_when_n_is_large():
+    """The 2026-08-03 lesson: 67% of a 'cumulative' was two sessions."""
+    rows = [_r("Cont", "TRENDING_BULL", -0.08, 0.32, 0.14, _D[i % 2])
+            for i in range(60)]
+    text = er.build_report(rows, "d", "trades/d (29 DBs)", 0, "PAPER",
+                           group_by="strategy_x_regime")
+    assert "2 SESSION(S)" in text
+    assert "REFUSED" in text, "a 2-session cell must not get a floor sweep"
+
+
+def test_floor_sweep_counts_stops_and_cut_winners():
+    rows = [_r("Cont", "TRENDING_BULL", -0.30, 0.05, -0.45, _D[i % 5])
+            for i in range(40)]
+    rows += [_r("Cont", "TRENDING_BULL", -0.30, 0.60, 0.50, _D[i % 5])
+             for i in range(10)]
+    text = er.build_report(rows, "d", "trades/d (29 DBs)", 0, "PAPER",
+                           group_by="strategy_x_regime")
+    sweep = text.split("FLOOR SWEEP")[1]
+    line = [l for l in sweep.splitlines() if l.strip().startswith("25%")][0]
+    assert " 50 " in line, "all 50 rows breach -25% and must count as stopped"
+    assert " 10 " in line, "the 10 winners must be counted as cut"
+
+
+def test_floor_sweep_never_names_a_best_floor():
+    rows = [_r("Cont", "TRENDING_BULL", -0.30, 0.05, -0.45, _D[i % 5])
+            for i in range(45)]
+    text = er.build_report(rows, "d", "trades/d (29 DBs)", 0, "PAPER",
+                           group_by="strategy_x_regime")
+    assert "NO BEST FLOOR IS NAMED" in text
+    assert "overfit" in text
+
+
+def test_default_grouping_is_unchanged_from_v23():
+    rows = [_r("Cont", "TRENDING_BULL", -0.08, 0.32, 0.14, _D[0])]
+    text = er.build_report(rows, "d", "trades/d (29 DBs)", 0, "PAPER")
+    assert "EXIT REASON" in text
+
+
+# ── v2.5: the two-population split ─────────────────────────────────────────
+
+def _n(mfe, real, regime="TRENDING_BULL", strat="Cont", date="2026-07-24"):
+    return {"status": "closed", "paper_trade": 1, "entry_premium": 1.0,
+            "pnl_usd": real * 100, "max_premium_seen": 1 + mfe,
+            "min_premium_seen": 0.75, "contracts": 1, "strategy": strat,
+            "regime": regime, "setup_type": "s", "setup_grade": "B",
+            "symbol": "X", "exit_reason": "continuation_trail",
+            "entry_time": f"{date}T14:31:00+00:00"}
+
+
+def test_never_favorable_counted_at_every_cut():
+    rows = [_n(0.00, -0.27) for _ in range(20)]
+    rows += [_n(0.03, -0.20) for _ in range(10)]
+    rows += [_n(0.40, 0.20) for _ in range(20)]
+    text = er.build_report(rows, "d", "trades/d (29 DBs)", 0, "PAPER")
+    blk = text.split("NEVER FAVORABLE")[1].split("COMPOSITION")[0]
+    zero = [l for l in blk.splitlines() if l.strip().startswith("0%")][0]
+    five = [l for l in blk.splitlines() if l.strip().startswith("5%")][0]
+    assert " 20 " in zero, "only the 20 flat trades are never-favorable at 0%"
+    assert " 30 " in five, "the 3% trades join at the 5% cut"
+
+
+def test_composition_is_a_rate_within_the_group_not_a_share_of_the_pile():
+    """A group can hold most of the bad trades purely by being most of the
+    sample. The rate is what distinguishes; the share is the trap."""
+    rows = [_n(0.00, -0.27, regime="TRENDING_BULL") for _ in range(60)]
+    rows += [_n(0.40, 0.20, regime="TRENDING_BULL") for _ in range(60)]
+    rows += [_n(0.00, -0.27, regime="TRENDING_BEAR") for _ in range(20)]
+    text = er.build_report(rows, "d", "trades/d (29 DBs)", 0, "PAPER")
+    bull = [l for l in text.splitlines() if "TRENDING_BULL" in l
+            and "%" in l][0]
+    bear = [l for l in text.splitlines() if "TRENDING_BEAR" in l
+            and "%" in l][0]
+    assert "50%" in bull, "bull holds 60 of 80 bad trades but its RATE is 50%"
+    assert "100%" in bear, "bear holds fewer but every one of them is bad"
+
+
+def test_small_group_is_not_given_a_lift_number():
+    rows = [_n(0.00, -0.27, strat="Cont") for _ in range(40)]
+    rows += [_n(0.00, -0.27, strat="Rare") for _ in range(3)]
+    text = er.build_report(rows, "d", "trades/d (29 DBs)", 0, "PAPER")
+    rare = [l for l in text.splitlines() if l.strip().startswith("Rare")][0]
+    assert "n<" in rare and "1.00" not in rare
+
+
+def test_winner_giveback_states_the_timestamp_limitation():
+    rows = [_n(0.40, 0.20) for _ in range(20)]
+    text = er.build_report(rows, "d", "trades/d (29 DBs)", 0, "PAPER")
+    assert "CANNOT CONCLUDE FROM THIS ALONE" in text
+    assert "NO TIMESTAMP" in text
+
+
+def test_capture_ratio_is_realized_over_mfe():
+    rows = [_n(0.40, 0.20) for _ in range(20)]
+    text = er.build_report(rows, "d", "trades/d (29 DBs)", 0, "PAPER")
+    cap = [l for l in text.splitlines() if "median capture" in l][0]
+    assert "50%" in cap, "0.20 realized on a 0.40 peak is 50% capture"

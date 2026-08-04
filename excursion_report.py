@@ -1,7 +1,56 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/excursion_report.py — v2.3 — MFE/MAE distributions from the
+day_trader_pro/excursion_report.py — v2.5 — MFE/MAE distributions from the
 fleet's auto-collected per-symbol trade DBs.
+v2.5 — 2026-08-03 — THE TWO-POPULATION SPLIT, per the operator's framing:
+        separate the trades that were NEVER winners — not favorable for one
+        tick, so there was never anything to manage — from the ones that DID
+        work and gave some of it back. The first population is a selection
+        problem, the second an extension problem, and pooling them is why
+        "which exit is losing money" kept returning the wrong answer.
+        NEVER FAVORABLE reports the population at three MFE thresholds rather
+        than one, because the right cut is an empirical question and a single
+        hardcoded epsilon would be a parameter smuggled in as a definition.
+        Composition is reported as a RATE WITHIN each group, never as a share
+        OF the never-favorable population. A group holding 30% of the bad
+        trades means nothing if it is 30% of all trades — that is the same
+        error as the birth rate presented as coverage. Lift is the group's
+        rate over the overall rate.
+        WINNER GIVEBACK reports capture = realized / MFE on winners only.
+        LIMITATION, stated in the output because it decides what the block can
+        conclude: trade_logger v3.8 records max_premium_seen and
+        min_premium_seen as VALUES ONLY, with no timestamp. So giveback cannot
+        distinguish "peaked early, then bled for twenty minutes" from "ran to
+        the exit and reversed on the last tick" — which is exactly the
+        difference between a trail that is too loose and a trail that is fine.
+        Extending the winners needs that timestamp; the block says so instead
+        of implying an answer it cannot reach.
+v2.4 — 2026-08-03 — REGIME DIMENSION + FLOOR SWEEP. The pre-go-live question is
+        which strategies are configured for which regimes and where the stop
+        belongs for each — and NOTHING could answer it: this report crossed
+        exit x strategy with excursion but had no regime dimension, while
+        trade_report crossed regime x strategy but carried only P&L, no
+        excursion. Neither could say whether a losing cell's trades ever went
+        favorable at all. --by now groups the table by regime, strategy,
+        strategy_x_regime, setup_type, setup_grade or regime_x_setup, so MFE
+        and MAE can be read per cell.
+        SESSIONS column added to every table, because on 2026-08-03 the
+        07-23..08-03 "cumulative" turned out to be 67% two sessions (07-31 n=116
+        and 08-03 n=88 of 303). A cell drawn from one or two dates is a day, not
+        a regime finding, and nothing in the old output said so.
+        FLOOR SWEEP answers the stop half WITHOUT needing exit-reason cells,
+        which is what makes it reachable before the freeze: every trade
+        contributes its MAE to the counterfactual regardless of which exit
+        actually fired, so the sample cost is one cell instead of one cell per
+        exit. Assumptions are printed with the block, not buried: fill AT the
+        floor, no slippage, MAE sampled at the ~15s tick so an intra-tick spike
+        through the level is invisible, and a terminal stop has no path after
+        it (true for a floor, NOT true for trails or targets — this method
+        cannot answer the trail question).
+        It deliberately names NO best floor. Picking the in-sample argmax is
+        overfitting, and this file exists because numbers that read cleanly
+        while meaning something else have cost real time here.
+v2.3 — 2026-08-03 — FOUR defects, all of the same class: the report rendered
 v2.3 — 2026-08-03 — FOUR defects, all of the same class: the report rendered
         cleanly while meaning something other than it appeared.
         (1) THE DB SOURCE HAS NEVER LOADED. _rows_from_dbs globbed the
@@ -110,6 +159,36 @@ TRAIL_FLAVORS = (
 # The floor exits. max_loss_floor_<pct>pct is the blanket/continuation floor;
 # hard_stop_<pct> is ORB's. Matching only "hard_stop" missed the former.
 FLOOR_REASON_PREFIXES = ("hard_stop", "max_loss_floor")
+
+# Grouping keys for --by. "exit" is the pre-v2.4 behaviour and stays default.
+GROUP_KEYS = {
+    "exit":              ("exit_reason", "strategy"),
+    "strategy":          ("strategy",),
+    "regime":            ("regime",),
+    "strategy_x_regime": ("strategy", "regime"),
+    "setup_type":        ("setup_type",),
+    "setup_grade":       ("setup_grade",),
+    "regime_x_setup":    ("regime", "setup_type"),
+}
+
+# Pre-registered refusal floors. A cell under either is reported as
+# UNDERPOWERED, which is not a null — the distinction the operator insists on.
+MIN_CELL_N = 40          # reads roughly a 0.20 R effect at this sample
+MIN_SESSIONS = 3         # 1-2 dates is a day, not a regime
+
+FLOOR_CANDIDATES = (0.15, 0.20, 0.25, 0.30, 0.40, 0.50)
+
+# "Never favorable" is not one number. Reported at three cuts so the choice of
+# epsilon is visible rather than baked in. 0% = never traded above entry at all.
+NEVER_FAVORABLE_CUTS = (0.00, 0.02, 0.05)
+
+# Dimensions the split is broken out by. entry_time is UTC and the tape is
+# ET-offset, so hour-of-day is deliberately ABSENT here — trade_report already
+# does that conversion with ZoneInfo and duplicating it half-done is how the
+# 2026-07 verdict got inverted.
+SPLIT_DIMS = ("regime", "strategy", "setup_type", "setup_grade", "symbol")
+
+MIN_GROUP_N = 15         # a group under this is not rated, only counted
 
 
 # ── input: per-symbol DB snapshots (primary), consolidated file (fallback) ──
@@ -241,7 +320,8 @@ def pct(x):
 # ── the report ───────────────────────────────────────────────────────────────
 
 def build_report(rows, day, src, skipped, mode, hints=None,
-                 tight_floor=0.25, wide_floor=0.40) -> str:
+                 tight_floor=0.25, wide_floor=0.40,
+                 group_by="exit") -> str:
     out = []
     w = out.append
     w(f"EXCURSION REPORT — {day} [{mode}] — {len(rows)} trade(s) with telemetry")
@@ -260,23 +340,42 @@ def build_report(rows, day, src, skipped, mode, hints=None,
             w(f"  • {h}")
         return "\n".join(out) + "\n"
 
+    keys = GROUP_KEYS.get(group_by, GROUP_KEYS["exit"])
     buckets = {}
     for r in rows:
-        buckets.setdefault((norm_reason(r.get("exit_reason")),
-                            r.get("strategy") or "?"), []).append(r)
+        k = tuple(norm_reason(r.get(f)) if f == "exit_reason"
+                  else (r.get(f) or "?") for f in keys)
+        buckets.setdefault(k, []).append(r)
 
+    names = [k.replace("_", " ").upper() for k in keys]
+    wide  = 30 if len(keys) == 1 else 22
     w("")
-    w(f"{'EXIT REASON':<22}{'STRAT':<8}{'N':>4}{'WIN%':>6}"
-      f"{'REAL':>7}{'MFE':>7}{'MAE':>7}{'GIVE':>7}")
-    w("-" * 68)
-    for (reason, strat), rs in sorted(buckets.items(), key=lambda kv: -len(kv[1])):
+    if len(keys) > 1:
+        w(f"{names[0][:wide]:<{wide}}{names[1][:11]:<12}{'N':>4}{'SESS':>5}"
+          f"{'WIN%':>6}{'REAL':>7}{'MFE':>7}{'MAE':>7}{'GIVE':>7}")
+        w("-" * (wide + 12 + 43))
+    else:
+        w(f"{names[0][:wide]:<{wide}}{'N':>4}{'SESS':>5}"
+          f"{'WIN%':>6}{'REAL':>7}{'MFE':>7}{'MAE':>7}{'GIVE':>7}")
+        w("-" * (wide + 43))
+    for k, rs in sorted(buckets.items(), key=lambda kv: -len(kv[1])):
         ex    = [excursions(r) for r in rs]
-        reals = [e[2] for e in ex]
         wins  = sum(1 for r in rs if (fnum(r, "pnl_usd") or 0) > 0)
-        give  = mean(e[0] - e[2] for e in ex)
-        w(f"{reason:<22}{strat[:7]:<8}{len(rs):>4}{wins/len(rs):>6.0%}"
-          f"{mean(reals):>7.0%}{mean(e[0] for e in ex):>7.0%}"
-          f"{mean(e[1] for e in ex):>7.0%}{give:>7.0%}")
+        sess  = len({_entry_date(r) for r in rs})
+        pflag = ""
+        if len(rs) < MIN_CELL_N:
+            pflag = "  <- UNDERPOWERED"
+        elif sess < MIN_SESSIONS:
+            pflag = f"  <- {sess} SESSION(S)"
+        head = (f"{str(k[0])[:wide]:<{wide}}{str(k[1])[:11]:<12}" if len(keys) > 1
+                else f"{str(k[0])[:wide]:<{wide}}")
+        w(f"{head}{len(rs):>4}{sess:>5}{wins/len(rs):>6.0%}"
+          f"{mean(e[2] for e in ex):>7.0%}{mean(e[0] for e in ex):>7.0%}"
+          f"{mean(e[1] for e in ex):>7.0%}{mean(e[0] - e[2] for e in ex):>7.0%}{pflag}")
+    w(f"UNDERPOWERED = n < {MIN_CELL_N}; SESSION(S) = drawn from fewer than "
+      f"{MIN_SESSIONS} dates.")
+    w("Neither is a null result — it is an absent measurement. Do not read a "
+      "direction off one.")
 
     directional = [r for r in rows
                    if not credit_signed(r) and not flag(r, "is_butterfly")]
@@ -319,6 +418,108 @@ def build_report(rows, day, src, skipped, mode, hints=None,
     if unlisted:
         w(f"  ! not in TRAIL_FLAVORS, included on the \"trail\" substring: "
           f"{', '.join(unlisted)} — add them to the list or rename the exit")
+
+    # ── NEVER FAVORABLE / WINNER GIVEBACK ───────────────────────────────────
+    ex_all = [(r, excursions(r)) for r in rows]
+    w("")
+    w("NEVER FAVORABLE (trades that never went in your favor)")
+    w("  There was no moment to manage these. They are a SELECTION problem;")
+    w("  no exit, stop or trail can reach a trade that never traded up.")
+    w(f"  {'MFE CUT':>9}{'N':>6}{'SHARE':>7}{'NET $':>12}")
+    for cut in NEVER_FAVORABLE_CUTS:
+        nf = [(r, e) for r, e in ex_all if e[0] <= cut]
+        net = sum(fnum(r, "pnl_usd") or 0 for r, _ in nf)
+        w(f"  {cut:>8.0%}{len(nf):>6}{len(nf)/len(rows):>7.0%}{net:>12.2f}")
+
+    base_cut = NEVER_FAVORABLE_CUTS[1]
+    nf_rows = {id(r) for r, e in ex_all if e[0] <= base_cut}
+    overall = len(nf_rows) / len(rows)
+    w("")
+    w(f"  COMPOSITION at the {base_cut:.0%} cut — overall rate {overall:.0%}.")
+    w("  Read the RATE WITHIN each group, not its share of the bad pile: a")
+    w("  group holding 30% of them means nothing if it is 30% of everything.")
+    for dim in SPLIT_DIMS:
+        groups = {}
+        for r in rows:
+            groups.setdefault(str(r.get(dim) or "?"), []).append(r)
+        scored = []
+        for v, rs in groups.items():
+            n_nf = sum(1 for r in rs if id(r) in nf_rows)
+            rated = len(rs) >= MIN_GROUP_N
+            scored.append((v, len(rs), n_nf, n_nf / len(rs), rated))
+        scored.sort(key=lambda t: (-t[4], -t[3]))
+        w("")
+        w(f"  by {dim}")
+        w(f"    {'':<24}{'N':>5}{'NEVER':>7}{'RATE':>7}{'LIFT':>7}")
+        for v, n, n_nf, rate, rated in scored:
+            lift = (rate / overall) if overall else 0
+            tail = f"{lift:>7.2f}" if rated else "      -  <- n<%d" % MIN_GROUP_N
+            w(f"    {v[:24]:<24}{n:>5}{n_nf:>7}{rate:>7.0%}{tail}")
+
+    winners = [(r, e) for r, e in ex_all if (fnum(r, "pnl_usd") or 0) > 0]
+    w("")
+    w("WINNER GIVEBACK (capture = realized / MFE, winners only)")
+    if winners:
+        caps = [e[2] / e[0] for _, e in winners if e[0] > 0]
+        if caps:
+            w(f"  n={len(caps)}  median capture {median(caps):.0%}  "
+              f"mean {mean(caps):.0%}  median MFE "
+              f"{median(e[0] for _, e in winners):.0%}")
+        for dim in ("strategy", "regime"):
+            groups = {}
+            for r, e in winners:
+                if e[0] > 0:
+                    groups.setdefault(str(r.get(dim) or "?"), []).append(e[2] / e[0])
+            w(f"  by {dim}")
+            for v, cs in sorted(groups.items(), key=lambda kv: -len(kv[1])):
+                mark = "" if len(cs) >= MIN_GROUP_N else f"  <- n<{MIN_GROUP_N}"
+                w(f"    {v[:24]:<24}{len(cs):>5}  capture {median(cs):>5.0%}{mark}")
+    else:
+        w("  no winners in this window")
+    w("  CANNOT CONCLUDE FROM THIS ALONE: trade_logger v3.8 stores "
+      "max_premium_seen")
+    w("  as a VALUE with NO TIMESTAMP, so this cannot tell a trade that peaked "
+      "early")
+    w("  and bled for twenty minutes from one that reversed on the last tick — "
+      "the")
+    w("  exact difference between a loose trail and a move that simply turned. "
+      "Add")
+    w("  the extreme timestamps to telemetry before the freeze or this question "
+      "stays")
+    w("  unanswerable no matter how many sessions accrue.")
+
+    # ── FLOOR SWEEP ─────────────────────────────────────────────────────────
+    w("")
+    w("FLOOR SWEEP (counterfactual: where should the stop sit, per cell?)")
+    w("  Every trade contributes its MAE whether or not a floor exit fired, so")
+    w("  this costs ONE cell of sample, not one per exit reason.")
+    w("  ASSUMES: fill AT the floor, no slippage; MAE sampled at the ~15s tick")
+    w("  so an intra-tick spike through the level is invisible; a terminal stop")
+    w("  has no path after it. That last one holds for a FLOOR and NOT for a")
+    w("  trail or a target — this method cannot answer the trail question.")
+    for k, rs in sorted(buckets.items(), key=lambda kv: -len(kv[1])):
+        cell = " / ".join(str(x) for x in k)
+        ex = [excursions(r) for r in rs]
+        sess = len({_entry_date(r) for r in rs})
+        w("")
+        w(f"  {cell}   n={len(rs)}  sessions={sess}")
+        if len(rs) < MIN_CELL_N or sess < MIN_SESSIONS:
+            w(f"    REFUSED — n<{MIN_CELL_N} or sessions<{MIN_SESSIONS}. "
+              f"Underpowered, not a null.")
+            continue
+        w(f"    {'FLOOR':>7}{'STOPPED':>9}{'WINNERS CUT':>13}{'NET DELTA':>11}")
+        for f in FLOOR_CANDIDATES:
+            stopped = [e for e in ex if e[1] <= -f]
+            cut = [e for e in stopped if e[2] > 0]
+            delta = sum((-f) - e[2] for e in stopped)
+            w(f"    {f:>6.0%}{len(stopped):>9}{len(cut):>13}{delta:>+11.2f}")
+        w("    NET DELTA is in units of entry premium, summed over the cell: "
+          "positive")
+        w("    means the floor would have kept money. NO BEST FLOOR IS NAMED — "
+          "the")
+        w("    in-sample argmax is overfit by construction. Pre-register a rule "
+          "or")
+        w("    hold out sessions before choosing.")
     w("")
     return "\n".join(out) + "\n"
 
@@ -332,6 +533,9 @@ def main():
                     help="cumulative: include trades entered ON/AFTER this "
                          "date (default: the snapshot day only)")
     ap.add_argument("--strategy", help="strategy substring filter")
+    ap.add_argument("--by", default="exit", choices=sorted(GROUP_KEYS),
+                    help="group the table and floor sweep by this dimension "
+                         "(default exit = the pre-v2.4 exit x strategy view)")
     ap.add_argument("--live", action="store_true",
                     help="live rows (default: paper)")
     args = ap.parse_args()
@@ -387,7 +591,8 @@ def main():
             hints.append("no trades closed in this window yet")
     window = (f"since {args.since}" if args.since else "that day only")
     text = build_report(rows, f"{args.date} ({window})", src, skipped,
-                        "LIVE" if args.live else "PAPER", hints=hints)
+                        "LIVE" if args.live else "PAPER", hints=hints,
+                        group_by=args.by)
     print(text)
 
     os.makedirs(REPORTS_DIR, exist_ok=True)
