@@ -1,4 +1,16 @@
-# day_trader_pro/consolidate_trades.py — v1.2
+# day_trader_pro/consolidate_trades.py — v1.3
+# v1.3   (2026-08-03) — DOC ONLY, no behaviour change. Two stale claims in the
+#        docstring, both of the kind that cost real time on 2026-08-03: the
+#        source line put the date BEFORE the _trades token in the raw DB
+#        name — a THIRD field ordering, disagreeing with this file's own _DB_RE and with the actual
+#        <SYM>_trades_<date>.db harvest.py:166 writes. A neighbouring tool had
+#        just spent three weeks silently reading nothing because it trusted a
+#        remembered filename shape instead of the one on disk, so a docstring
+#        that states a third variant is not a typo, it is a trap. Also: the
+#        outputs were described as landing "into the same day folder"; they go
+#        to reports/ FLAT (see the writes at the bottom of consolidate() and
+#        config.py:75). v1.1.1 corrected the other path references and missed
+#        these two.
 # v1.2   (2026-07-28) — DATE FILTER (upstream defect Z). _read_table now filters
 #        by the day being consolidated when the table carries a date column.
 #        Harvest copies each box's ENTIRE trades.db into trades/<date>/, so the
@@ -16,7 +28,7 @@ trades-analysis thread — nothing curated away, because every column the bots
 log is a variable to study.
 
 Sources (all local — pure SQLite reads, no fleet round-trip):
-  trades/<date>/<SYM>_<date>_trades.db        (one per running box)
+  trades/<date>/<SYM>_trades_<date>.db        (one per running box)
   ohlc/<date>/<SYM>_ohlc_<date>.csv           (indexed, not embedded)
   data/selection_log.jsonl                     (what Claude picked this morning)
 
@@ -29,7 +41,7 @@ Each row is tagged with `box` (the SYMBOL from the FILENAME — authoritative fl
 tag), and the row's own `symbol` column is left untouched, so a mislabeled db can
 never confuse the merge and both values survive for audit.
 
-Outputs into the same day folder:
+Outputs (FLAT, into reports/ — not the day folder):
   fleet_trades_<date>.json   ← THE deliverable for the analysis thread (bundle:
                                meta + selection + fleet_stats + regime_timeline +
                                breaker_events + ohlc_index + every trade, full schema)

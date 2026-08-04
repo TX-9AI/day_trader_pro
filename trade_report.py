@@ -1,4 +1,24 @@
-# day_trader_pro/trade_report.py — v1.3
+# day_trader_pro/trade_report.py — v1.4
+# v1.4 — 2026-08-03 — EXIT SPREAD + a contaminated verdict fenced off.
+#        (a) by_exit_reason and by_session_date existed as separate marginals,
+#        which cannot answer the question they get asked: is an exit reason a
+#        STANDING pattern or ONE session? The 2026-08-03 cumulative showed
+#        bos_exit/Continuation at n=21 over nine sessions — the same 21 the
+#        single-day run showed, i.e. possibly every one of them on one day,
+#        while every other exit grew 3-6x. Marginals hide that; a cross shows
+#        it. New EXIT REASON x SESSION SPREAD block reports, per exit reason,
+#        how many distinct sessions it fired on and what share landed on its
+#        heaviest one, flagging >=80% as SINGLE-SESSION. exit_x_date is also
+#        written to the JSON in full.
+#        (b) flag_runners_cut_early was computed over EVERY row including the
+#        regime-flip flicker (main.py pre-v5.0: median hold 0.8 min, p25 12
+#        SECONDS — 44 of 88 rows on 2026-08-03 alone). Those exits were a
+#        DEFECT, not exit behaviour, and they drag both medians toward zero, so
+#        a ratio built on them is evidence about a bug rather than about
+#        leashes. Nothing is silently dropped — the ratio is now reported both
+#        ways with the sub-minute count stated, and the "runners cut early"
+#        NOTE is withheld when sub-minute rows exceed 10% of the sample, since
+#        at that point the ratio is measuring the flicker.
 # v1.3 — 2026-08-03 — +SENTIMENT dimension, and the cross that actually answers
 #        the operator's question. Idea: "I didn't think it would be wise to short
 #        into positive tailwinds or fire longs into headwinds." That is a claim
@@ -342,6 +362,41 @@ def exit_behaviour(trades: List[dict]) -> dict:
         r = statistics.median(wh) / statistics.median(lh)
         out["winner_loser_hold_ratio"] = round(r, 2)
         out["flag_runners_cut_early"] = r < 1.2
+    # Sub-minute holds are not exit behaviour. The pre-v5.0 regime-flip flicker
+    # closed positions in a median 0.8 min (p25 12 seconds); pooling those with
+    # real exits pulls both medians toward zero and makes the ratio a statement
+    # about a defect. Reported alongside, never substituted, never dropped.
+    sub = sum(1 for t in trades
+              if (t.get("_hold") is not None and t["_hold"] < 1.0))
+    n_held = len(wh) + len(lh)
+    out["sub_minute_rows"] = sub
+    out["sub_minute_share"] = round(sub / n_held, 3) if n_held else None
+    wh2 = [h for h in wh if h >= 1.0]
+    lh2 = [h for h in lh if h >= 1.0]
+    if wh2 and lh2 and statistics.median(lh2) > 0:
+        r2 = statistics.median(wh2) / statistics.median(lh2)
+        out["winner_loser_hold_ratio_ex_submin"] = round(r2, 2)
+        out["n_winners_ex_submin"] = len(wh2)
+        out["n_losers_ex_submin"] = len(lh2)
+    return out
+
+
+def exit_concentration(trades: List[dict], min_n: int) -> Dict[str, dict]:
+    """Per exit reason: how many sessions did it fire on, and how much of it
+    landed on its heaviest one? A reason that is 100% one date is a single-day
+    event wearing a cumulative label."""
+    by_reason: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    for t in trades:
+        by_reason[norm_reason(t.get("exit_reason"))][t.get("_date") or "(none)"] += 1
+    out = {}
+    for reason, dates in by_reason.items():
+        total = sum(dates.values())
+        top_date, top_n = max(dates.items(), key=lambda kv: kv[1])
+        out[reason] = {
+            "n": total, "sessions": len(dates), "top_date": top_date,
+            "top_n": top_n, "top_share": round(top_n / total, 3),
+            "single_session": (top_n / total) >= 0.80 and total >= min_n,
+        }
     return out
 
 
@@ -411,6 +466,8 @@ def main(argv: List[str]) -> int:
         # THE cross for the operator's question: does a bullish morning help
         # longs and hurt shorts? sentiment x strategy would not test that.
         "sentiment_x_direction": cross(trades, "_sentiment", "direction"),
+        # Is an exit reason a standing pattern or one session? Marginals cannot say.
+        "exit_x_date": cross(trades, "exit_reason", "_date"),
     }
     overall = stats_of(trades)
 
@@ -469,15 +526,38 @@ def main(argv: List[str]) -> int:
     show("BY DAY OF WEEK", dims["by_day_of_week"], args.min_n)
     show("REGIME x STRATEGY", crosses["regime_x_strategy"], args.min_n)
 
+    conc = exit_concentration(trades, args.min_n)
+    print("\nEXIT REASON x SESSION SPREAD")
+    print(f"  {'':<26}{'N':>5}{'SESS':>6}{'TOP DATE':>13}{'SHARE':>7}")
+    for reason, c in sorted(conc.items(), key=lambda kv: -kv[1]["n"]):
+        flag = "  <- SINGLE-SESSION" if c["single_session"] else (
+            "  <- thin" if c["n"] < args.min_n else "")
+        print(f"  {reason[:26]:<26}{c['n']:>5}{c['sessions']:>6}"
+              f"{c['top_date']:>13}{c['top_share']:>7.0%}{flag}")
+    print(f"  SINGLE-SESSION = >=80% of that exit's trades on one date "
+          f"(and n >= {args.min_n}).\n  Such a reason is a one-day event, not a "
+          f"standing pattern — do not read it as a rate.")
+
     eb = exit_behaviour(trades)
     print("\nEXIT BEHAVIOUR")
     print(f"  winners n={eb['n_winners']:<5} median hold "
           f"{eb['winner_median_hold_min']} min   MFE {eb['winner_median_mfe_pct']}")
     print(f"  losers  n={eb['n_losers']:<5} median hold "
           f"{eb['loser_median_hold_min']} min   MAE {eb['loser_median_mae_pct']}")
+    sub_share = eb.get("sub_minute_share")
+    if sub_share is not None:
+        print(f"  sub-minute holds {eb['sub_minute_rows']} ({sub_share:.0%}) — "
+              f"ratio {eb.get('winner_loser_hold_ratio')} all rows, "
+              f"{eb.get('winner_loser_hold_ratio_ex_submin')} excluding them")
     if eb.get("flag_runners_cut_early"):
-        print("  NOTE winners are not held meaningfully longer than losers —")
-        print("       exits may be cutting runners as fast as mistakes.")
+        if sub_share is not None and sub_share > 0.10:
+            print("  NOTE hold ratio is under 1.2, but sub-minute rows are "
+                  f"{sub_share:.0%} of the sample —")
+            print("       that ratio is measuring those exits, not the leashes. "
+                  "Verdict WITHHELD.")
+        else:
+            print("  NOTE winners are not held meaningfully longer than losers —")
+            print("       exits may be cutting runners as fast as mistakes.")
 
     print("\nHEADLINE")
     for lab in ("regime", "strategy", "symbol", "session_phase", "day_of_week"):
@@ -500,6 +580,7 @@ def main(argv: List[str]) -> int:
             "dimensions": dims,
             "crosses": crosses,
             "exit_behaviour": eb,
+            "exit_concentration": conc,
         }
         os.makedirs(REPORTS_DIR, exist_ok=True)
         stamp = used[-1][0] if used else datetime.now().strftime("%Y-%m-%d")
