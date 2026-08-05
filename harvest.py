@@ -1,4 +1,12 @@
-# day_trader_pro/harvest.py — v0.6.2
+# day_trader_pro/harvest.py — v0.6.3
+# v0.6.3 — 2026-08-05 — TRIM THE PULLED trades.db TO ONE TRADING DAY.
+#   The box DB is cumulative by design; the fault was copying the whole file
+#   into a DATED folder, so every dated artifact contained all history. Reading
+#   22 dated folders read the same trades 22 times. 2026-08-05: 76% of all rows
+#   read by conditional_tables were duplicates, and the inflated n made every
+#   Wilson interval ~1.7x too narrow. Trim runs on OUR COPY only — the box's
+#   own record, which position reconciliation and the daily-loss halt depend
+#   on, is never touched.
 # v0.6.2 — 2026-07-30 — TWO CHANGES.
 #   (a) backharvest() takes `artifacts=(...)` so a caller can pull ONLY what is
 #       missing. The conductor's gap recovery passes ("journal","chains"): OHLC
@@ -85,6 +93,7 @@ Changelog:
 import argparse
 import json
 import os
+import sqlite3
 import sys
 from collections import defaultdict
 from datetime import datetime
@@ -166,6 +175,36 @@ def _pull_raw(ip, sym, today):
     local_db = os.path.join(config.TRADES_DIR, today, f"{sym}_trades_{today}.db")
     rc, _out, _err = ssh_util.scp_pull(ip, remote_db, local_db)
     db_ok = rc == 0 and os.path.exists(local_db) and os.path.getsize(local_db) > 0
+
+    # v0.6.3 — TRIM THE COPY TO ONE TRADING DAY.
+    # The box's trades.db is CUMULATIVE and correctly so: it is the bot's own
+    # working record (position reconciliation across restarts, the daily-loss
+    # halt, the circuit breaker). Nothing on the box appends old sessions.
+    # What was wrong is HERE: this copied the whole growing file into a DATED
+    # folder, so the date in the path meant "when it was pulled", not "what is
+    # inside". Reading 22 folders read the same trades 22 times.
+    # Measured 2026-08-05: 2,502 of 3,298 rows (76%) were duplicates, and the
+    # inflated n made every Wilson interval ~1.7x too narrow — the ORB grade
+    # A/B split read as decisive and dissolved once de-duplicated.
+    # The trim runs on OUR COPY, never on the box, so the bot's record is
+    # untouched. Best-effort: a failure leaves the full copy, which is the old
+    # behaviour and still readable.
+    if db_ok:
+        try:
+            _con = sqlite3.connect(local_db)
+            _before = _con.execute("SELECT COUNT(*) FROM trades").fetchone()[0]
+            _con.execute("DELETE FROM trades WHERE entry_time IS NULL "
+                         "OR substr(entry_time,1,10) <> ?", (today,))
+            _con.commit()
+            _after = _con.execute("SELECT COUNT(*) FROM trades").fetchone()[0]
+            _con.execute("VACUUM")
+            _con.close()
+            if _before != _after:
+                print(f"    {sym}: trimmed trades.db copy {_before} -> {_after} "
+                    f"row(s) for {today}")
+        except Exception as exc:                                 # noqa: BLE001
+            print(f"    {sym}: trades.db trim skipped ({type(exc).__name__}: "
+                f"{exc}) — full copy kept")
 
     # v0.5.0: signal journal (scored/disposition/readiness rows). Lands under
     # BASE_DIR/signal_journal/<date>/<SYM>.jsonl — EXACTLY where conductor
