@@ -1,7 +1,26 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/excursion_report.py — v2.6 — MFE/MAE distributions from the
+day_trader_pro/excursion_report.py — v2.8 — MFE/MAE distributions from the
 fleet's auto-collected per-symbol trade DBs.
+
+v2.8 — 2026-08-05 — TWO SCORE COLUMNS on the never-favorable composition table,
+       each split nf vs the rest. Both have been on every trade row for weeks
+       and neither surfaced here.
+       SETUP = `setup_score`, the composite that AUTHORISED the trade (the A/B
+       grade is its bucketing). This is the cutoff question.
+       RGCV = `regime_conviction`, L2's confidence in the LABEL — a different
+       question entirely: a tick can be 1.00-conviction TRENDING_BULL and still
+       be a poor continuation entry.
+       Carrying BOTH is the point: where setup_score separates and conviction
+       does not, the grading works and the label does not, and vice versa. That
+       says which layer to fix.
+       MEDIAN not mean — conviction pegs at 1.00 often enough (measured on the
+       A2 co-occurrence ticks) that a mean would be dragged by the peg.
+       NOT the readiness track's `r`: that is log-only and gates nothing, so a
+       threshold on it would change nothing that fires.
+v2.7 — 2026-08-05 — cumulative reads EVERY dated folder in the range. The
+       2026-08-05 trim gave each folder one trading day, so --since silently
+       became single-day while the header still claimed the range.
 
 v2.6 — 2026-08-04 — (a) PEAK TIMING from trade_logger v3.9's
        max_premium_seen_at: the winner-giveback block had been printing an
@@ -220,8 +239,6 @@ def _rows_from_dbs(day: str, since: str = ""):
     Fixing the duplication broke the feature that had been living on it.
     Nothing announced the change: the header still said "since 2026-07-23".
     """
-    import glob
-    import sqlite3
     if since and since < day:
         folders = sorted(d for d in os.listdir(TRADES_DIR)
                          if len(d) == 10 and since <= d <= day
@@ -549,19 +566,66 @@ def build_report(rows, day, src, skipped, mode, hints=None,
         groups = {}
         for r in rows:
             groups.setdefault(str(r.get(dim) or "?"), []).append(r)
+        # v2.8 — MEDIAN CONVICTION, SPLIT NEVER vs REST. `regime_conviction`
+        # has been on every trade row since 2026-07-24 and never appeared in
+        # this table. The question it answers is the one the rate cannot: not
+        # WHICH cells go wrong, but whether the engine was CONFIDENT when they
+        # did. A never-favorable cell whose conviction sits BELOW the rest has a
+        # threshold in the wrong place — a cutoff to find. One where the two are
+        # equal says conviction does not separate outcomes in that cell at all,
+        # which is a much larger finding and cannot be fixed by moving a bar.
+        # MEDIAN, not mean: conviction pegs at 1.00 often enough (measured on
+        # the A2 co-occurrence ticks) that a mean would be dragged by the peg.
+        def _med(rs, field):
+            v = [c for c in (fnum(r, field) for r in rs)
+                 if c is not None and c > 0]
+            return median(v) if v else None
+
         scored = []
         for v, rs in groups.items():
-            n_nf = sum(1 for r in rs if id(r) in nf_rows)
+            nf = [r for r in rs if id(r) in nf_rows]
+            ok = [r for r in rs if id(r) not in nf_rows]
             rated = len(rs) >= MIN_GROUP_N
-            scored.append((v, len(rs), n_nf, n_nf / len(rs), rated))
+            scored.append((v, len(rs), len(nf), len(nf) / len(rs), rated,
+                           _med(nf, "setup_score"), _med(ok, "setup_score"),
+                           _med(nf, "regime_conviction"),
+                           _med(ok, "regime_conviction")))
         scored.sort(key=lambda t: (-t[4], -t[3]))
         w("")
         w(f"  by {dim}")
-        w(f"    {'':<24}{'N':>5}{'NEVER':>7}{'RATE':>7}{'LIFT':>7}")
-        for v, n, n_nf, rate, rated in scored:
+        w(f"    {'':<24}{'N':>5}{'NEVER':>7}{'RATE':>7}{'LIFT':>7}"
+          f"{'SETUP.nf':>10}{'SETUP.ok':>10}"
+          f"{'RGCV.nf':>9}{'RGCV.ok':>9}")
+        for v, n, n_nf, rate, rated, s_nf, s_ok, c_nf, c_ok in scored:
             lift = (rate / overall) if overall else 0
-            tail = f"{lift:>7.2f}" if rated else "      -  <- n<%d" % MIN_GROUP_N
-            w(f"    {v[:24]:<24}{n:>5}{n_nf:>7}{rate:>7.0%}{tail}")
+            tail = f"{lift:>7.2f}" if rated else "      -"
+            sn = f"{s_nf:>10.2f}" if s_nf is not None else f"{'—':>10}"
+            so = f"{s_ok:>10.2f}" if s_ok is not None else f"{'—':>10}"
+            cn = f"{c_nf:>9.2f}" if c_nf is not None else f"{'—':>9}"
+            co = f"{c_ok:>9.2f}" if c_ok is not None else f"{'—':>9}"
+            # NOT named `flag` — that is a module-level function used earlier
+            # in this same scope, and binding the name locally makes Python
+            # treat EVERY reference in build_report as local. The first crash
+            # was at line ~500, hundreds of lines above this edit and in
+            # unrelated code, before any of it ran.
+            thin = "" if rated else "  <- n<%d" % MIN_GROUP_N
+            w(f"    {v[:24]:<24}{n:>5}{n_nf:>7}{rate:>7.0%}{tail}"
+              f"{sn}{so}{cn}{co}{thin}")
+        w("    SETUP = median setup_score (THE NUMBER THAT AUTHORISED THE "
+          "TRADE); RGCV = median")
+        w("    regime_conviction (L2's confidence in the LABEL — a different "
+          "question: a tick can")
+        w("    be 1.00-conviction TRENDING_BULL and still be a poor entry). "
+          "`.nf` is the")
+        w("    never-favorable trades, `.ok` the rest.")
+        w("    nf BELOW ok  -> a cutoff exists to find in that column.")
+        w("    nf EQUAL ok  -> that score does not separate outcomes here and "
+          "no threshold")
+        w("                    will fix it — the same verdict a control arm "
+          "gives.")
+        w("    Split across the two columns tells you WHICH layer is at fault: "
+          "setup grading")
+        w("    or the label.")
 
     winners = [(r, e) for r, e in ex_all if (fnum(r, "pnl_usd") or 0) > 0]
     w("")
