@@ -1,8 +1,15 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/excursion_report.py — v2.8 — MFE/MAE distributions from the
+day_trader_pro/excursion_report.py — v2.9 — MFE/MAE distributions from the
 fleet's auto-collected per-symbol trade DBs.
 
+v2.9 — 2026-08-06 — SCORE DISPERSION. The v2.8 columns showed SETUP.nf ==
+       SETUP.ok at 0.96 on grade A (n=277) and 1.50 on ORB (n=97), and RGCV
+       pegged 1.00/1.00 on TRENDING_BULL (n=206). Identical MEDIANS cannot
+       distinguish "varies, same centre" from "constant" — and only the second
+       makes a cutoff impossible. Percentiles settle it: p10 == p90 means the
+       score is a constant wearing a continuous type, the same failure
+       readiness_digest reports one layer down, surfacing at the trade level.
 v2.8 — 2026-08-05 — TWO SCORE COLUMNS on the never-favorable composition table,
        each split nf vs the rest. Both have been on every trade row for weeks
        and neither surfaced here.
@@ -626,6 +633,54 @@ def build_report(rows, day, src, skipped, mode, hints=None,
         w("    Split across the two columns tells you WHICH layer is at fault: "
           "setup grading")
         w("    or the label.")
+
+    # ── v2.9 — IS THE SCORE A DIAL OR A SWITCH? ─────────────────────────────
+    # The composition table showed SETUP.nf == SETUP.ok at 0.96 on grade A
+    # (n=277) and 1.50 on ORB (n=97), with RGCV pegged at 1.00/1.00 on
+    # TRENDING_BULL. Identical MEDIANS can mean two very different things: a
+    # score that varies but happens to centre in the same place, or a score
+    # that is CONSTANT for that population. Only the second makes a threshold
+    # impossible, and the median cannot tell them apart.
+    # So: percentiles. If p10 == p90, the score is a constant wearing a
+    # continuous type — the same "pegged corroborator is a constant in new
+    # clothes" failure readiness_digest reports one layer down, surfacing here
+    # at the trade level. A score that cannot vary cannot discriminate, and no
+    # cutoff exists to find no matter how much sample accrues.
+    def _pcts(vals):
+        v = sorted(x for x in vals if x is not None and x > 0)
+        if len(v) < 8:
+            return None
+        def q(f):
+            return v[min(int(f * len(v)), len(v) - 1)]
+        return q(.10), q(.50), q(.90), v[-1]
+
+    w("")
+    w("SCORE DISPERSION (is the score a DIAL or a SWITCH?)")
+    w("  Identical medians can mean 'varies, same centre' or 'constant'. Only")
+    w("  the second makes a cutoff impossible — and the median cannot tell them")
+    w("  apart. p10 == p90 means the score does not vary in that population.")
+    for field, label in (("setup_score", "SETUP"), ("regime_conviction", "RGCV")):
+        w("")
+        w(f"  {label} by strategy")
+        w(f"    {'':<26}{'N':>5}{'p10':>8}{'p50':>8}{'p90':>8}{'max':>8}"
+          f"{'SPREAD':>9}")
+        gs = {}
+        for r in rows:
+            gs.setdefault(str(r.get("strategy") or "?"), []).append(fnum(r, field))
+        for v, vals in sorted(gs.items(), key=lambda kv: -len(kv[1])):
+            p = _pcts(vals)
+            if p is None:
+                w(f"    {v[:26]:<26}{len(vals):>5}     — too few scored")
+                continue
+            p10, p50, p90, mx = p
+            spread = p90 - p10
+            note = "  <- CONSTANT" if spread < 0.01 else ""
+            w(f"    {v[:26]:<26}{len(vals):>5}{p10:>8.2f}{p50:>8.2f}"
+              f"{p90:>8.2f}{mx:>8.2f}{spread:>9.2f}{note}")
+    w("")
+    w("  A CONSTANT row is not a tuning problem. No threshold on that score can")
+    w("  separate its outcomes, because the score has no variation to threshold.")
+    w("  Fixing it means changing what the score MEASURES, not where the bar sits.")
 
     winners = [(r, e) for r, e in ex_all if (fnum(r, "pnl_usd") or 0) > 0]
     w("")
