@@ -207,9 +207,42 @@ MIN_GROUP_N = 15         # a group under this is not rated, only counted
 
 # ── input: per-symbol DB snapshots (primary), consolidated file (fallback) ──
 
-def _rows_from_dbs(day: str):
-    """trades/<date>/*_trades.db — SELECT every closed row from each box's
-    snapshot. Snapshots hold full history; date filtering happens later."""
+def _rows_from_dbs(day: str, since: str = ""):
+    """trades/<date>/<SYM>_trades_<date>.db — every closed row in the range.
+
+    v2.7 — READS EVERY DATED FOLDER FROM `since` TO `day`, not just `day`.
+    The old docstring said "snapshots hold full history; date filtering happens
+    later", and that WAS true: each folder held a copy of the box's cumulative
+    DB, so reading the last folder happened to yield every session. The
+    2026-08-05 trim gave each folder exactly one trading day — which is correct
+    and was the point — and cumulative mode silently became single-day. A
+    "since 2026-07-23" run over ten sessions returned 96 trades from one.
+    Fixing the duplication broke the feature that had been living on it.
+    Nothing announced the change: the header still said "since 2026-07-23".
+    """
+    import glob
+    import sqlite3
+    if since and since < day:
+        folders = sorted(d for d in os.listdir(TRADES_DIR)
+                         if len(d) == 10 and since <= d <= day
+                         and os.path.isdir(os.path.join(TRADES_DIR, d)))
+    else:
+        folders = [day]
+    rows, n_paths, n_folders = [], 0, 0
+    for f_day in folders:
+        _r, _n = _rows_one_folder(f_day)
+        if _r is None:
+            continue
+        rows.extend(_r)
+        n_paths += _n
+        n_folders += 1
+    if not n_folders:
+        return None, None
+    span = folders[0] if n_folders == 1 else f"{folders[0]}..{folders[-1]}"
+    return rows, f"trades/{span} ({n_paths} DBs across {n_folders} session(s))"
+
+
+def _rows_one_folder(day: str):
     import glob
     import sqlite3
     folder = os.path.join(TRADES_DIR, day)
@@ -232,7 +265,7 @@ def _rows_from_dbs(day: str):
             conn.close()
         except Exception as e:
             print(f"  ! {os.path.basename(p)}: {e}", file=sys.stderr)
-    return rows, f"trades/{day} ({len(paths)} DBs)"
+    return rows, len(paths)
 
 
 def _rows_from_json(path):
@@ -256,8 +289,8 @@ def _rows_from_csv(path):
         return list(csv.DictReader(f))
 
 
-def load_day(day: str):
-    rows, src = _rows_from_dbs(day)
+def load_day(day: str, since: str = ""):
+    rows, src = _rows_from_dbs(day, since)
     if rows is not None:
         return rows, src
     j = os.path.join(REPORTS_DIR, f"fleet_trades_{day}.json")
@@ -635,13 +668,24 @@ def main():
                     help="live rows (default: paper)")
     args = ap.parse_args()
 
-    all_rows, src = load_day(args.date)
+    all_rows, src = load_day(args.date, args.since or "")
     if all_rows is None:
         print(f"No trades/{args.date}/*_trades.db and no "
               f"fleet_trades_{args.date}.json/.csv — nothing collected for "
               f"that day yet.", file=sys.stderr)
         sys.exit(1)
 
+    # v2.7 — the refusal now also fires when the RANGE collapsed to one
+    # session. Post-trim each folder holds one day, so a --since that reads a
+    # single folder is not cumulative no matter what the header claims — and
+    # that is exactly how "since 2026-07-23" reported 96 trades from one
+    # session on 2026-08-05 while looking entirely normal.
+    if args.since and "(" in src and "1 session(s)" in src:
+        print(f"REFUSED: --since {args.since} resolved to ONE session "
+              f"({src}). Since the 2026-08-05 trim each dated folder holds a "
+              f"single trading day, so a cumulative read needs the folders in "
+              f"between to exist. Check trades/ for the range.", file=sys.stderr)
+        sys.exit(2)
     if args.since and "(" not in src:
         print(f"REFUSED: --since {args.since} needs the per-box DBs in "
               f"trades/{args.date}/ — each snapshot carries that box's FULL "
