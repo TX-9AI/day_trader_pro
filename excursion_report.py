@@ -1,7 +1,23 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/excursion_report.py — v2.9 — MFE/MAE distributions from the
+day_trader_pro/excursion_report.py — v3.0 — MFE/MAE distributions from the
 fleet's auto-collected per-symbol trade DBs.
+
+v3.0 — 2026-08-07 — THE ONE-SESSION GUARD REFUSED AN ELEVEN-SESSION READ.
+       The v2.7 guard tested `"1 session(s)" in src`, and
+       "165 DBs across 11 session(s)" CONTAINS "1 session(s)" — so every
+       cumulative run whose session count ENDS IN 1 (11, 21, 31, 41 ...) was
+       refused as though the range had collapsed to a single folder. Found
+       2026-08-07 when `--date 2026-08-06 --since 2026-07-23` was rejected
+       while option 41 read the same span fine and returned 579 trades.
+       The guard's INTENT stands — v2.7 added it after a --since silently read
+       one folder and reported 96 trades as though cumulative, which is exactly
+       the kind of clean-looking wrong answer this repo exists to prevent. Only
+       the TEST was wrong. Now anchored on "across 1 session(s)" so the match
+       cannot slide into a longer number.
+       LESSON, and it is the same one as the changelog-matching canary caught
+       the same day: a SUBSTRING test standing in for an EQUALITY test fails
+       silently and in the direction that looks like correct caution.
 
 v2.9 — 2026-08-06 — SCORE DISPERSION. The v2.8 columns showed SETUP.nf ==
        SETUP.ok at 0.96 on grade A (n=277) and 1.50 on ORB (n=97), and RGCV
@@ -799,7 +815,14 @@ def main():
     # single folder is not cumulative no matter what the header claims — and
     # that is exactly how "since 2026-07-23" reported 96 trades from one
     # session on 2026-08-05 while looking entirely normal.
-    if args.since and "(" in src and "1 session(s)" in src:
+    # v3.0 — SUBSTRING BUG. This read `"1 session(s)" in src`, and
+    # "165 DBs across 11 session(s)" CONTAINS "1 session(s)" — so an 11-session
+    # cumulative read was refused as if it had collapsed to one, and so would
+    # 21, 31, 41 or any count ending in 1. The guard's INTENT is right (v2.7
+    # added it after a --since silently read a single folder and reported 96
+    # trades as though cumulative); the TEST was wrong. Anchor on the word
+    # "across" so the match cannot slide into a longer number.
+    if args.since and "(" in src and "across 1 session(s)" in src:
         print(f"REFUSED: --since {args.since} resolved to ONE session "
               f"({src}). Since the 2026-08-05 trim each dated folder holds a "
               f"single trading day, so a cumulative read needs the folders in "
