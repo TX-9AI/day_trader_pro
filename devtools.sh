@@ -1,5 +1,17 @@
 #!/usr/bin/env bash
-# day_trader_pro/devtools.sh — v1.26
+# day_trader_pro/devtools.sh — v1.27
+# v1.27 — 2026-08-10 — OPTION 57: THE FIT REPORT. Fitting a ramp, a stop or an
+#         entry gate needs the trade breakdown, the excursion read, the regime
+#         diary and the calibration telemetry TOGETHER — four menu options, four
+#         screenfuls, and on mobile that meant screenshotting each one. Worse
+#         than slow: it made it easy to fit against numbers drawn from different
+#         windows without noticing. 57 runs all six as subprocesses and writes
+#         ONE text file to reports/. It re-implements nothing, so there is still
+#         exactly one source of truth per number.
+#         The file leads with PROVENANCE (both repos' git HEAD + dirty flag, the
+#         resolved interpreters, the range) and, when the range spans a dated
+#         fleet bake, a warning ABOVE every number that per-regime statistics
+#         either side of it are not the same measurement.
 # v1.26 — 2026-08-01 — 56 REPORTED 29/29 SUCCESS WHILE DOING NOTHING AT ALL.
 #         Two defects, and the second is the dangerous one.
 #         (1) INTERPRETER. The fan-out ran bare `python3`, which on the boxes is
@@ -314,6 +326,7 @@ menu() {
    39) Re-run consolidation -> fleet_trades_<date>.json (+ .csv)
    40) Excursion report (MFE/MAE) -> reports/excursions_<date>.txt
    41) Trade breakdown (cross-day: regime/strategy/grade + regime x strategy)
+   57) FIT REPORT — everything for fitting in ONE text file (1 day or a range)
 
  REGIME VALIDATION (Layer-1 confluence; manual, tape-only):
    42) Run replay - today        43) Run replay - pick a date
@@ -390,6 +403,12 @@ EOF
         ARGS="--date $D"; [ -n "$S" ] && ARGS="$ARGS --since $S"; [ "$LV" = "y" ] && ARGS="$ARGS --live"; \
         $PY excursion_report.py $ARGS; pause ;;
     41) echo; read -rp "Since date (YYYY-MM-DD, ENTER=all): " SD; if [ -n "$SD" ]; then $PY trade_report.py --since "$SD"; else $PY trade_report.py; fi; pause ;;
+    57) echo; read -rp "Day, or END of range (YYYY-MM-DD, ENTER=today): " D; D="${D:-$(date +%F)}"; \
+        read -rp "Cumulative since (YYYY-MM-DD, ENTER=that day only): " S; \
+        read -rp "Skip the slow replay-corpus sections (ramps, A2 drift)? [y/N]: " NS; \
+        ARGS="--date $D"; [ -n "$S" ] && ARGS="$ARGS --since $S"; [ "$NS" = "y" ] && ARGS="$ARGS --no-slow"; \
+        echo "Running — the replay-corpus sections take minutes; output is a FILE, not this screen."; \
+        $PY fit_report.py $ARGS; pause ;;
     48) echo; read -rp "Push to Telegram too? [y/N]: " S; if [ "$S" = "y" ]; then $PY standings.py --send; else $PY standings.py; fi; pause ;;
     49) echo; read -rp "Backfill date (YYYY-MM-DD, ENTER=today): " D; D="${D:-$(date +%F)}"; read -rp "Batch size (ENTER=5): " B; B="${B:-5}"; echo; $PY eod_backfill.py --date "$D" --batch "$B" --dry-run; echo; read -rp "Proceed with LIVE backfill (wakes/stops boxes)? [y/N]: " GO; [ "$GO" = "y" ] && $PY eod_backfill.py --date "$D" --batch "$B"; pause ;;
     50) echo; read -rp "Backfill batch size (ENTER=5): " B; B="${B:-5}"; echo; $PY eod_conductor.py --batch "$B" --dry-run; echo; read -rp "Run the LIVE EOD conductor now (gate->harvest->P&L+stop->backfill->consolidate->diary)? [y/N]: " GO; [ "$GO" = "y" ] && $PY eod_conductor.py --batch "$B"; pause ;;
