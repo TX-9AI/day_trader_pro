@@ -1,6 +1,15 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/fit_report.py — v1.0 — 2026-08-10
+day_trader_pro/fit_report.py — v1.1 — 2026-08-10
+
+v1.1 — sections 5 and 6 now receive THE RANGE. v1.0 let ramp_calibration and
+       a2_cooccurrence auto-discover the corpus, so on the first real run they
+       read 21 files back to 2026-07-13 inside a report headed "2026-08-10" —
+       four sections answering one window and two answering another, in a
+       document whose entire purpose is to stop exactly that. The header said
+       so, but a caveat is not a control. Both tools take an explicit file list;
+       the range is passed through, and when no replay exists in range the
+       sections are SKIPPED rather than silently widened.
 
 ONE FILE CONTAINING EVERY REPORT NEEDED TO FIT SOMETHING.
 
@@ -49,6 +58,7 @@ OUTPUT
 """
 
 import argparse
+import glob
 import os
 import shutil
 import subprocess
@@ -120,6 +130,24 @@ def git_head(path):
     rc2, out2 = sh(["git", "status", "--porcelain"], cwd=path, timeout=30)
     dirty = " +DIRTY" if (rc2 == 0 and out2.strip()) else ""
     return (out.strip() or "?") + dirty
+
+
+def replay_files(since, date):
+    """The replay jsonl files INSIDE the requested range.
+
+    v1.1 — sections 5 and 6 auto-discovered the whole corpus and therefore
+    answered a DIFFERENT WINDOW than sections 1-4, inside a file headed with one
+    date. Both tools accept an explicit file list, so the range is now passed
+    through. A report that says 2026-08-10 must mean 2026-08-10 throughout, or
+    it invites exactly the cross-window fit the bake warning exists to prevent.
+    """
+    lo = since or date
+    out = []
+    for p in sorted(glob.glob(os.path.join(REPORTS_DIR, "regime_replay_*.jsonl"))):
+        d = os.path.basename(p)[len("regime_replay_"):-len(".jsonl")]
+        if lo <= d <= date:
+            out.append(p)
+    return out
 
 
 def spanned_bakes(since, date):
@@ -230,18 +258,27 @@ def main(argv):
             head(fh, "5-6. RAMP CALIBRATION + A2/HTF DRIFT")
             fh.write("  SKIPPED — --no-slow\n")
         elif otv3_py:
-            results["ramps"] = section(
-                fh, "5. RAMP CALIBRATION (per-term saturation)",
-                [otv3_py, "-m", "tests.ramp_calibration"], cwd=OTV3_DIR,
-                note="RAMP fitting: which terms are pegged (a term pegged >60% is a "
-                     "SWITCH, not a dial) + input percentiles for re-bounding. "
-                     "Auto-discovers the replay corpus — spans ALL dates on disk, "
-                     "not just this range")
-            results["a2drift"] = section(
-                fh, "6. A2 CO-OCCURRENCE + HTF FORWARD DRIFT",
-                [otv3_py, "-m", "tests.a2_cooccurrence"], cwd=OTV3_DIR,
-                note="forward drift by label with a RANGE_ONLY null control. "
-                     "Auto-discovers the replay corpus — spans ALL dates on disk")
+            rf = replay_files(a.since, a.date)
+            if not rf:
+                head(fh, "5-6. RAMP CALIBRATION + A2/HTF DRIFT")
+                fh.write(f"  NO REPLAY FILES IN RANGE ({a.since or a.date} .. {a.date}).\n")
+                fh.write("  Sections 5-6 SKIPPED rather than silently widened to the\n")
+                fh.write("  whole corpus — they would have answered a different window\n")
+                fh.write("  than sections 1-4 inside a file headed with one date.\n")
+                fh.write("  Run devtools 42/43 to build the replay for these dates.\n")
+                results["ramps"] = results["a2drift"] = 3
+            else:
+                _span = f"{len(rf)} replay file(s) IN RANGE"
+                results["ramps"] = section(
+                    fh, "5. RAMP CALIBRATION (per-term saturation)",
+                    [otv3_py, "-m", "tests.ramp_calibration"] + rf, cwd=OTV3_DIR,
+                    note="RAMP fitting: which terms are pegged (a term pegged >60% is "
+                         "a SWITCH, not a dial) + input percentiles. " + _span)
+                results["a2drift"] = section(
+                    fh, "6. A2 CO-OCCURRENCE + HTF FORWARD DRIFT",
+                    [otv3_py, "-m", "tests.a2_cooccurrence"] + rf, cwd=OTV3_DIR,
+                    note="forward drift by label with a RANGE_ONLY null control. "
+                         + _span)
         else:
             head(fh, "5-6. RAMP CALIBRATION + A2/HTF DRIFT")
             fh.write(f"  SKIPPED — {OTV3_PY} missing\n")

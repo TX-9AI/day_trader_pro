@@ -54,6 +54,31 @@ def test_a_failing_section_does_not_abort_the_run():
         "both and continues, because a missing section is worse than a failed one"
 
 
+def test_replay_files_respect_the_range():
+    """v1.1 — sections 5-6 must answer the SAME window as sections 1-4.
+
+    v1.0 auto-discovered the corpus and read 21 files back to 07-13 inside a
+    report headed 2026-08-10. A report that says one date must mean it
+    throughout, or it invites the cross-window fit the bake warning exists to
+    prevent.
+    """
+    import os
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        for d in ("2026-07-13", "2026-08-07", "2026-08-10"):
+            open(os.path.join(td, f"regime_replay_{d}.jsonl"), "w").close()
+        old, FR.REPORTS_DIR = FR.REPORTS_DIR, td
+        try:
+            one = FR.replay_files(None, "2026-08-10")
+            rng = FR.replay_files("2026-08-07", "2026-08-10")
+            allf = FR.replay_files("2026-07-13", "2026-08-10")
+        finally:
+            FR.REPORTS_DIR = old
+    assert len(one) == 1, "a single-day report must read ONE replay file"
+    assert len(rng) == 2
+    assert len(allf) == 3
+
+
 def test_a_missing_tool_is_reported_not_raised():
     rc, out = FR.sh(["/definitely/not/a/binary"])
     assert rc != 0 and "NOT FOUND" in out
