@@ -1,5 +1,16 @@
 #!/usr/bin/env bash
-# day_trader_pro/devtools.sh — v1.27
+# day_trader_pro/devtools.sh — v1.28
+# v1.28 — 2026-08-11 — ask_scope tolerates "SPX, PLTR, GLD" (spaces after the
+#         commas). It did not merely reject that input — the helper's output is
+#         consumed UNQUOTED, so a space SPLIT the argument and fleet.py silently
+#         ran on a TRUNCATED symbol list. A wrong scope with no error and a
+#         normal-looking run, which is the failure class this project keeps
+#         paying for. Whitespace is stripped, repeated commas squeezed, leading
+#         and trailing commas trimmed. Covers every one/all/some prompt (15, 16,
+#         17, the DEBUG block, 24/25) since they all route through this helper.
+#         NOT changed: option 32's repoint prompt has its own inline `read` with
+#         the same weakness — named rather than folded in.
+# v1.27
 # v1.27 — 2026-08-10 — OPTION 57: THE FIT REPORT. Fitting a ramp, a stop or an
 #         entry gate needs the trade breakdown, the excursion read, the regime
 #         diary and the calibration telemetry TOGETHER — four menu options, four
@@ -184,7 +195,17 @@ pause() { read -rp $'\nPress Enter to continue...' _; }
 # Symbol scope: ENTER = all running boxes; else `--only SYM,SYM`.
 ask_scope() {
   local sc
-  read -rp "Symbols (ENTER = ALL, or comma-sep e.g. IWM,SPX): " sc
+  read -rp "Symbols (ENTER = ALL, or comma-sep e.g. IWM,SPX or IWM, SPX): " sc
+  # v1.28 — TOLERATE SPACES AFTER COMMAS. "SPX, PLTR, GLD" is the natural way to
+  # type a list and it used to break badly rather than obviously: the result is
+  # echoed and consumed UNQUOTED by the caller, so a space split "--only SPX,"
+  # from "PLTR," and fleet.py saw a truncated list — a WRONG scope, silently,
+  # with no error and a perfectly normal-looking run on the wrong boxes.
+  # Also squeeze repeated commas and strip leading/trailing ones, because a
+  # trailing comma is the same typo class and yields an empty symbol.
+  sc="${sc//[[:space:]]/}"          # "SPX, PLTR" -> "SPX,PLTR"
+  while [[ "$sc" == *,,* ]]; do sc="${sc//,,/,}"; done
+  sc="${sc#,}"; sc="${sc%,}"
   [ -n "$sc" ] && echo "--only $sc" || echo ""
 }
 
