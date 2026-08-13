@@ -128,7 +128,7 @@ concurs/swaps on the reporter's own ranking, and the count is deterministic.
 | `eod_backfill.py` | re-pulls any box's missing EOD artifacts |
 | `harvest.py` | v0.4.1 — harvest to the three consolidated roots: OHLC tape → `ohlc/<date>/`, per-symbol trade DBs → `trades/<date>/`, aggregates → `reports/` (`data/harvest/` is RETIRED) |
 | `consolidate_trades.py` | v1.1.1 — fleet_trades JSON/CSV rollup from the harvested DBs |
-| `excursion_report.py` | v2.2 — MFE/MAE excursion report from the per-symbol DB snapshots; `--since` cumulative; live variant via `DTP_EXCURSION_LIVE=1` |
+| `excursion_report.py` | v3.1 — MFE/MAE excursion report from the per-symbol DB snapshots; `--since` cumulative; live variant via `DTP_EXCURSION_LIVE=1`; two-population never-favorable split, floor sweep, leash verdict (incl. `insurance_stop`), and an unreported-reasons audit |
 | `trade_report.py` / `standings.py` | trade and standings views over the consolidated data |
 | `shutdown_manager.py` | manual/backstop stop sweep (no P&L) |
 | `ssh_util.py` | shared SSH helper |

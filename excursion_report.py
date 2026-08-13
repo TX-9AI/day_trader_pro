@@ -1,8 +1,26 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/excursion_report.py — v3.0 — MFE/MAE distributions from the
+day_trader_pro/excursion_report.py — v3.1 — MFE/MAE distributions from the
 fleet's auto-collected per-symbol trade DBs.
 
+v3.1 — 2026-08-13 — `insurance_stop` WAS REPORTED NOWHERE. It is the MIDDLE
+       tier of continuation's three-stop precedence — BOS protected_level owns
+       the trade, `insurance_stop` fires on a 1m close beyond the structural
+       level while BOS has no level, and the 25%% premium floor is the disaster
+       backstop. Tier 1 reached the LEASH VERDICT via `bos_exit`; tier 3
+       reached the FLOOR VERDICT via FLOOR_REASON_PREFIXES; **tier 2 fell
+       through all three lists and appeared only in the raw --by exit table,
+       stripped of the giveback and MFE framing that make those sections mean
+       anything.** The `unlisted` fallback did not catch it either, because it
+       matches on the substring "trail" and a structural stop is not a trail.
+       (a) `insurance_stop` added to TRAIL_FLAVORS, alongside `bos_exit` which
+           was already carried as "leash-adjacent".
+       (b) NEW: an UNREPORTED-REASONS audit. Any exit reason present in the
+           window that reaches neither the leash block nor the floor block is
+           now named explicitly. The failure class this fixes is the one this
+           repo exists to prevent — output that renders cleanly while omitting
+           the thing you would have looked for. A silent omission is worse
+           than a missing section, because the report still looks complete.
 v3.0 — 2026-08-07 — THE ONE-SESSION GUARD REFUSED AN ELEVEN-SESSION READ.
        The v2.7 guard tested `"1 session(s)" in src`, and
        "165 DBs across 11 session(s)" CONTAINS "1 session(s)" — so every
@@ -209,6 +227,10 @@ TRAIL_FLAVORS = (
     "trail_stop_hit",
     "adopted_trail",            # positions adopted at restart
     "bos_exit",                 # structure break — leash-adjacent, kept
+    "insurance_stop",           # v3.1 — continuation's STRUCTURAL stop (tier 2
+                                # of three). Reported nowhere before: not a
+                                # trail by name, not a floor by prefix, and the
+                                # "trail"-substring fallback could not see it.
     "theta_bleed",
 )
 
@@ -565,6 +587,23 @@ def build_report(rows, day, src, skipped, mode, hints=None,
     if unlisted:
         w(f"  ! not in TRAIL_FLAVORS, included on the \"trail\" substring: "
           f"{', '.join(unlisted)} — add them to the list or rename the exit")
+
+    # v3.1 — UNREPORTED REASONS. An exit family that reaches neither block above
+    # is invisible in every framed section of this report while still looking
+    # present in the --by exit table. `insurance_stop` sat there for weeks.
+    _covered = set(flavors) | set(unlisted) | {
+        p for p in present if p.startswith(FLOOR_REASON_PREFIXES)}
+    _orphans = [p for p in present if p not in _covered]
+    if _orphans:
+        w("")
+        w("  ⚠️ EXIT REASONS REPORTED IN NO VERDICT BLOCK (neither leash nor floor):")
+        for p in _orphans:
+            _n = sum(1 for r in rows if norm_reason(r.get("exit_reason")) == p)
+            w(f"       {p:<26} n={_n}")
+        w("     These appear in the --by exit table above and NOWHERE else. If one")
+        w("     is a stop or a trail, add it to TRAIL_FLAVORS or FLOOR_REASON_PREFIXES")
+        w("     — an omission that renders cleanly is the failure class this repo")
+        w("     exists to prevent.")
 
     # ── NEVER FAVORABLE / WINNER GIVEBACK ───────────────────────────────────
     ex_all = [(r, excursions(r)) for r in rows]
