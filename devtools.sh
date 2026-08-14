@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
-# day_trader_pro/devtools.sh — v1.28
+# day_trader_pro/devtools.sh — v1.29
+# v1.29 — 2026-08-14 — 58) REPLAY SIM. Runs the REAL otv3 engines over a saved
+#         tape for one symbol + date (injectable clock, hot book, archived VIX).
+#         ⚠️ A session is replayable ONLY after the EOD conductor has harvested
+#         its OHLC to control — same-day replay is not possible before EOD.
 # v1.28 — 2026-08-11 — ask_scope tolerates "SPX, PLTR, GLD" (spaces after the
 #         commas). It did not merely reject that input — the helper's output is
 #         consumed UNQUOTED, so a space SPLIT the argument and fleet.py silently
@@ -348,6 +352,7 @@ menu() {
    40) Excursion report (MFE/MAE) -> reports/excursions_<date>.txt
    41) Trade breakdown (cross-day: regime/strategy/grade + regime x strategy)
    57) FIT REPORT — everything for fitting in ONE text file (1 day or a range)
+   58) REPLAY SIM — run the REAL engines over a saved tape (symbol + date)
 
  REGIME VALIDATION (Layer-1 confluence; manual, tape-only):
    42) Run replay - today        43) Run replay - pick a date
@@ -433,6 +438,7 @@ EOF
     48) echo; read -rp "Push to Telegram too? [y/N]: " S; if [ "$S" = "y" ]; then $PY standings.py --send; else $PY standings.py; fi; pause ;;
     49) echo; read -rp "Backfill date (YYYY-MM-DD, ENTER=today): " D; D="${D:-$(date +%F)}"; read -rp "Batch size (ENTER=5): " B; B="${B:-5}"; echo; $PY eod_backfill.py --date "$D" --batch "$B" --dry-run; echo; read -rp "Proceed with LIVE backfill (wakes/stops boxes)? [y/N]: " GO; [ "$GO" = "y" ] && $PY eod_backfill.py --date "$D" --batch "$B"; pause ;;
     50) echo; read -rp "Backfill batch size (ENTER=5): " B; B="${B:-5}"; echo; $PY eod_conductor.py --batch "$B" --dry-run; echo; read -rp "Run the LIVE EOD conductor now (gate->harvest->P&L+stop->backfill->consolidate->diary)? [y/N]: " GO; [ "$GO" = "y" ] && $PY eod_conductor.py --batch "$B"; pause ;;
+    58) echo; read -rp "Symbol: " RS; read -rp "Date (YYYY-MM-DD, ENTER=yesterday): " RD; RD="${RD:-$(date -d yesterday +%F)}"; read -rp "From [09:30]: " RF; RF="${RF:-09:30}"; read -rp "To [15:45]: " RT; RT="${RT:-15:45}"; read -rp "Step minutes [5]: " RP; RP="${RP:-5}"; read -rp "Warmup sessions [10]: " RW; RW="${RW:-10}"; echo; echo "NOTE: the tape must already be HARVESTED — a session is only replayable after the EOD conductor has pulled its OHLC to control. Same-day replay is not possible before EOD."; echo; (cd "$OTV3_DIR" 2>/dev/null || cd ~/options-trader-v3; PYTHONPATH=. venv/bin/python tests/replay_sim.py --date "$RD" --symbol "$RS" --from "$RF" --to "$RT" --step "$RP" --warmup "$RW"); pause ;;
     51) echo; read -rp "Symbol [^VIX]: " SY; SY="${SY:-^VIX}"; $PY tests/ohlc_fetch.py --symbol "$SY"; pause ;;
     52) echo; read -rp "Rotate against a SUBSET of symbols? (ENTER=all running): " SUBSET; \
         if [ -n "$SUBSET" ]; then $PY rotate_tokens.py --only $SUBSET; else $PY rotate_tokens.py; fi; pause ;;
