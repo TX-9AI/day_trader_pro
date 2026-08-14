@@ -1,5 +1,15 @@
-# day_trader_pro/eod_report.py — v0.1.1
+# day_trader_pro/eod_report.py — v0.2
 """
+v0.2 — 2026-08-13 — WH.4: THE TRADED BOXES ARE VERIFIED BEFORE THEY GO DARK.
+       These are the boxes holding chains, the signal journal, shadow and
+       trades — far more, and far less recoverable, than the sat-out boxes'
+       candles. Each is asked to prove it filled the warehouse (box-side
+       `s3_push.py --verify`, one line) immediately before the stop. The stop
+       is NOT blocked on it: a stopped box's data is stranded until its next
+       wake, not lost, whereas a box left running past EOD is its own problem.
+       Any box that cannot confirm is named in the Telegram warnings, so a
+       silent gap becomes a visible one.
+
 End-of-day aggregator, run on the control server (~15:55 ET) on a systemd
 timer, AFTER every bot has flattened (15:45) and written its P&L (15:50).
 
@@ -122,6 +132,29 @@ def run(dry_run=False):
         rows.append((sym, net, n, "ok"))
         if int(data.get("orphans", 0)) > 0:
             warnings.append(f"⚠️ {sym}: {data['orphans']} orphan(s) flagged — check box.")
+
+    # --- Prove the warehouse is filled BEFORE the lights go out ----------
+    # Chains are not reconstructible after the session; a box stopped with an
+    # undrained archive keeps it until its next wake, which may be weeks.
+    if not dry_run:
+        for sym, rec in sorted(running.items()):
+            ip = rec.get("private_ip", "")
+            if not ip:
+                continue
+            cmd = ("/usr/bin/python3 ~/options-trader/warehouse/s3_push.py "
+                   "--verify 2>&1 | tail -3")
+            try:
+                _, so, se = ssh_util.ssh_run(ip, cmd, timeout=300)
+                line = ((so or se or "").strip().splitlines() or [""])[0]
+            except Exception as exc:
+                line = f"(verify raised: {exc})"
+            if " OK" in line:
+                print(f"[DRAIN] {sym} OK")
+            else:
+                print(f"[DRAIN] {sym} SHORT: {line}")
+                warnings.append(
+                    f"⚠️ {sym}: warehouse NOT confirmed before stop — "
+                    f"data stranded on box until its next wake.")
 
     # --- Stop every running box (unless dry run) -------------------------
     ids = [r["instance_id"] for r in running.values()]

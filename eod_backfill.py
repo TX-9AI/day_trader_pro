@@ -1,8 +1,16 @@
-# day_trader_pro/eod_backfill.py — v1.1.1
+# day_trader_pro/eod_backfill.py — v1.2
 # v1.1.1 (2026-07-23) — correct stale data/harvest path references (layout retired; now reports/ + ohlc/ + trades/)
 # v1.1.0 (2026-07-11) — canonical layout: reads/writes ohlc/<date>/<SYM>_ohlc_<date>.csv
 #   (was data/harvest/). Detection accepts legacy _OHLC_ too.
 """
+v1.2 — 2026-08-13 — WH.4: each batch must PROVE it filled the warehouse before
+       it is stopped. `_drain_verify()` runs the box-side pusher in --verify
+       mode over SSH between _pull and _stop and logs OK/SHORT per symbol. It
+       does NOT block the stop: a stopped box's data is stranded until its next
+       wake (the pusher's OnBootSec catch-up), whereas a box left up blocks the
+       batch loop against the stream cap. Warn-never-stop, matching the
+       conductor's existing discipline.
+
 EOD candle backfill for sat-out symbols.
 
 Stream capacity caps live trading at ~N boxes/day, so the symbols that sat out
@@ -198,6 +206,50 @@ def _pull(recs, date, day_dir, dry):
     return out
 
 
+
+DRAIN_TIMEOUT = 300          # s — a first drain on a long-idle box is not fast
+
+
+def _drain_verify(recs, dry):
+    """Make each box PROVE its data reached the warehouse before it is stopped.
+
+    Replaces nothing yet — it runs alongside the scp pull during the dual-write
+    window. The verification happens ON THE BOX, deliberately: control would
+    otherwise need a model of that box's local state to know what "complete"
+    means, which is exactly the coupling the warehouse removes. The box holds
+    its own ledger and answers for itself in one line.
+
+    Failure policy: retry once, warn, then let the caller stop the box anyway.
+    A stopped box's data is STRANDED, not lost — the pusher's OnBootSec
+    catch-up drains it on the next wake — whereas a box left running blocks the
+    batch loop against the stream cap and can strand the whole backfill.
+    """
+    out = {}
+    for s_, rec in recs.items():
+        if dry:
+            _log("DRAIN", f"[dry] would verify {s_} filled the bucket")
+            out[s_] = "OK"
+            continue
+        ip = rec.get("private_ip", "")
+        if not ip:
+            out[s_] = "NO_IP"
+            continue
+        cmd = ("/usr/bin/python3 " + REMOTE_REPO +
+               "/warehouse/s3_push.py --verify 2>&1 | tail -3")
+        line = ""
+        for attempt in (1, 2):
+            rc, so, se = ssh_util.ssh_run(ip, cmd, timeout=DRAIN_TIMEOUT)
+            line = (so or se or "").strip()
+            if "DRAIN" in line and " OK" in line:
+                break
+            if attempt == 1:
+                _log("DRAIN", f"{s_} not clear yet — one retry")
+        state = "OK" if (" OK" in line) else "SHORT"
+        out[s_] = state
+        _log("DRAIN", f"{s_} {state}: {line.splitlines()[0] if line else '(no output)'}")
+    return out
+
+
 def _stop(recs, dry):
     ids = [rec.get("instance_id") for rec in recs.values() if rec.get("instance_id")]
     if dry:
@@ -270,6 +322,11 @@ def run(date=None, batch=5, stream_cap=10, only=None, dry=False):
         _produce(recs, dry)
         _poll_bars(recs, dry)
         local = _pull(recs, date, day_dir, dry)
+        drained = _drain_verify(recs, dry)
+        not_clear = [k for k, v in drained.items() if v != "OK"]
+        if not_clear:
+            _log("DRAIN", "⚠️ NOT CLEAR (data stranded on box until its next "
+                          "wake, not lost): " + ", ".join(not_clear))
         _stop(recs, dry)
         for s in group:
             b = local.get(s, -1)
