@@ -1,5 +1,19 @@
 #!/usr/bin/env bash
-# day_trader_pro/devtools.sh — v1.30
+# day_trader_pro/devtools.sh — v1.31
+# v1.31  2026-08-15  58) FEED MAINTENANCE TOGGLE, and the menu line goes RED
+#        while it is active. Operator needs a window where all 29 can be up for
+#        fleet work with nothing on the wire; FEED.1 put the gate in
+#        candle_feed (v3.12) and this is the switch.
+#        THE FLAG LIVES ON THE BOXES (data/FEED_MAINTENANCE, checked live by the
+#        feed gate - no restart, and it SURVIVES A BAKE). Control keeps its own
+#        marker ONLY so the menu can be drawn instantly and while the fleet is
+#        STOPPED; polling 29 boxes per menu draw would be slow and would fail
+#        exactly when they are down.
+#        THE MARKER IS A HINT, NOT THE TRUTH - the toggle runs against every box
+#        with --all and prints a per-box MAINT= line. Read those, not the tally:
+#        a box that missed the write is STILL FEEDING during maintenance, and a
+#        box that missed the removal TRADES BLIND at 09:15.
+#        No expiry, by operator's call - the red line is the reminder.
 # v1.30 — 2026-08-14 — 58) REPLAY SIM REMOVED. It drove tests/replay_sim.py,
 #         which duplicated tests/replay_confluence.py (as-of replay over
 #         deterministic tape, --warm-sessions since v1.2 2026-07-21) and lacked
@@ -291,7 +305,18 @@ repo_pull_force() {
 # or a grep stays clean.
 _BLUE=$'\033[1;34m'
 _WHITE=$'\033[1;37m'
+_RED=$'\033[1;31m'
 _RST=$'\033[0m'
+
+# ── FEED.1 (2026-08-15) — MAINTENANCE WINDOW INDICATOR ───────────────────────
+# The flag lives on each BOX (data/FEED_MAINTENANCE, checked live by
+# candle_feed's gate). Control keeps its own marker purely so the menu can be
+# drawn INSTANTLY and while boxes are STOPPED — polling 29 boxes on every menu
+# draw would be slow and would fail exactly when the fleet is down.
+# ⚠️ THE MARKER IS A HINT, NOT THE TRUTH. Option 58 verifies against the boxes
+# and prints the real count; if they disagree, believe the boxes.
+_MAINT_MARK="$DIR/data/FLEET_MAINTENANCE"
+_maint_on() { [ -f "$_MAINT_MARK" ]; }
 _colorize() {
   if [ -t 1 ]; then
     sed -E -e "s/^(=+)$/${_BLUE}\1${_RST}/" \
@@ -304,6 +329,11 @@ _colorize() {
 
 menu() {
   clear
+  if _maint_on; then
+    _MAINT_LINE="   58) ${_RED}*** FEED MAINTENANCE IS ACTIVE - no tape is being collected ***${_RST}"
+  else
+    _MAINT_LINE="   58) Feed maintenance window (fleet up, nothing on the wire) - currently OFF"
+  fi
   cat <<'EOF' | _colorize
 ======================================================
   Day Trader Pro — devtools  v1.26 Service Menu
@@ -373,6 +403,7 @@ menu() {
    54) Verify fleet credentials WORK (TT SDK, Telegram, GitHub)
    55) Verify control IAM role sees the fleet (read-only; no start/stop)
    56) Blind-alert DRILL on the fleet (sends REAL Telegram, marked DRILL)
+${_MAINT_LINE}
 
     0) Exit
 ======================================================
@@ -447,6 +478,33 @@ EOF
     54) echo; read -rp "Verify a SUBSET of symbols? (ENTER=all running): " SUBSET; \
         if [ -n "$SUBSET" ]; then $PY rotate_tokens.py --verify --only $SUBSET; else $PY rotate_tokens.py --verify; fi; pause ;;
     55) echo; $PY check_iam.py; pause ;;
+    58) echo; \
+        if _maint_on; then \
+          echo "Feed maintenance is currently ACTIVE."; \
+          echo "Turning it OFF lets every box feed again on its next gate check."; \
+          read -rp "Turn maintenance OFF? [y/N]: " GO; \
+          if [ "$GO" = "y" ]; then \
+            $PY fleet.py run "rm -f ~/options-trader/data/FEED_MAINTENANCE; echo MAINT=\$([ -f ~/options-trader/data/FEED_MAINTENANCE ] && echo ON || echo OFF)" --all; \
+            rm -f "$_MAINT_MARK"; \
+            echo; echo "Read the per-box MAINT= lines above - every one must say OFF."; \
+            echo "A box still reading ON is still feed-silent and will trade blind."; \
+          fi; \
+        else \
+          echo "Brings the fleet into a MAINTENANCE window: boxes can be up and"; \
+          echo "worked on (option 14, bakes, pushes) with NOTHING on the wire."; \
+          echo; \
+          echo "The flag is checked live by candle_feed - no restart needed, and"; \
+          echo "it SURVIVES a bake. Nothing removes it but you."; \
+          echo "!! A box left flagged at 09:15 trades blind. The menu line stays RED."; \
+          read -rp "Turn maintenance ON? [y/N]: " GO; \
+          if [ "$GO" = "y" ]; then \
+            $PY fleet.py run "mkdir -p ~/options-trader/data && touch ~/options-trader/data/FEED_MAINTENANCE; echo MAINT=\$([ -f ~/options-trader/data/FEED_MAINTENANCE ] && echo ON || echo OFF)" --all; \
+            mkdir -p "$DIR/data" && touch "$_MAINT_MARK"; \
+            echo; echo "Read the per-box MAINT= lines above - every one must say ON."; \
+            echo "A box that missed it is STILL FEEDING during your maintenance."; \
+          fi; \
+        fi; \
+        read -rp "Enter to continue..." _ ;;
     56) echo; echo "Fires the REAL blind-alert path on every RUNNING box."; \
         echo "Each box sends TWO Telegram messages, both prefixed DRILL - NOT REAL."; \
         echo "READ THE PER-BOX 'DRILL PASSED/FAILED' LINE, NOT the 29/29 tally —"; \
