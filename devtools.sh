@@ -14,6 +14,14 @@
 #        a box that missed the write is STILL FEEDING during maintenance, and a
 #        box that missed the removal TRADES BLIND at 09:15.
 #        No expiry, by operator's call - the red line is the reminder.
+#        TWO BUGS CAUGHT ON FIRST LOAD, both this file's own documented classes:
+#        (1) `$DIR` does not exist - it is SCRIPT_DIR. A forward/undefined
+#        reference is FATAL AT LOAD under `set -uo pipefail` and takes the WHOLE
+#        MENU down, not one option; the v1.2x header records the identical
+#        failure with OTV3_DIR. (2) The menu heredoc is <<'EOF' - QUOTED, so
+#        `${_MAINT_LINE}` printed LITERALLY. The line is now echoed between two
+#        heredocs rather than interpolated inside one; the quoting stays as-is
+#        because the menu text carries $ that must remain literal.
 # v1.30 — 2026-08-14 — 58) REPLAY SIM REMOVED. It drove tests/replay_sim.py,
 #         which duplicated tests/replay_confluence.py (as-of replay over
 #         deterministic tape, --warm-sessions since v1.2 2026-07-21) and lacked
@@ -315,7 +323,11 @@ _RST=$'\033[0m'
 # draw would be slow and would fail exactly when the fleet is down.
 # ⚠️ THE MARKER IS A HINT, NOT THE TRUTH. Option 58 verifies against the boxes
 # and prints the real count; if they disagree, believe the boxes.
-_MAINT_MARK="$DIR/data/FLEET_MAINTENANCE"
+# ⚠️ SCRIPT_DIR (line ~198), NOT $DIR - which does not exist. This file's own
+# header records the same failure at v1.2x: a forward reference before the dir
+# var is set is FATAL AT LOAD under `set -uo pipefail`, and it takes the whole
+# menu down rather than one option.
+_MAINT_MARK="$SCRIPT_DIR/data/FLEET_MAINTENANCE"
 _maint_on() { [ -f "$_MAINT_MARK" ]; }
 _colorize() {
   if [ -t 1 ]; then
@@ -403,7 +415,13 @@ menu() {
    54) Verify fleet credentials WORK (TT SDK, Telegram, GitHub)
    55) Verify control IAM role sees the fleet (read-only; no start/stop)
    56) Blind-alert DRILL on the fleet (sends REAL Telegram, marked DRILL)
-${_MAINT_LINE}
+EOF
+  # ⚠️ THE MENU HEREDOC IS <<'EOF' - QUOTED, so it does NOT expand variables
+  # (deliberate: the menu text carries $ that must stay literal). The
+  # maintenance line is therefore echoed BETWEEN two heredocs rather than
+  # interpolated inside one, which is why this is not simply another menu row.
+  printf '%s\n' "$_MAINT_LINE"
+  cat <<'EOF' | _colorize
 
     0) Exit
 ======================================================
@@ -499,7 +517,7 @@ EOF
           read -rp "Turn maintenance ON? [y/N]: " GO; \
           if [ "$GO" = "y" ]; then \
             $PY fleet.py run "mkdir -p ~/options-trader/data && touch ~/options-trader/data/FEED_MAINTENANCE; echo MAINT=\$([ -f ~/options-trader/data/FEED_MAINTENANCE ] && echo ON || echo OFF)" --all; \
-            mkdir -p "$DIR/data" && touch "$_MAINT_MARK"; \
+            mkdir -p "$SCRIPT_DIR/data" && touch "$_MAINT_MARK"; \
             echo; echo "Read the per-box MAINT= lines above - every one must say ON."; \
             echo "A box that missed it is STILL FEEDING during your maintenance."; \
           fi; \
