@@ -1,4 +1,15 @@
-# day_trader_pro/wake_and_bake.py — v1.2
+# day_trader_pro/wake_and_bake.py — v1.3
+# v1.3 (2026-08-16) — WH.7: THE EMERGENCY STOP NO LONGER HANGS.
+#   Option 27 pinged all 29 boxes over SSH before stopping anything. Discovery
+#   returns STOPPED instances with a stale private_ip, so the ping SSHed
+#   machines that cannot answer at SSH_CONNECT_TIMEOUT=12s each, sequentially:
+#   ~27 down = ~5.4 min for ONE pass, longer than SSH_READY_TIMEOUT=180s (only
+#   checked BETWEEN passes), and the first "…waiting for SSH" line prints only
+#   AFTER a full pass. ~5 silent minutes before the stop was attempted — worst
+#   precisely when the fleet is partially up. Shutdown now skips the ping
+#   entirely: stopping needs an instance ID, not an IP or a reachable host.
+#   ⚠️ UNCHANGED BY DESIGN, verified BY NAME (July 22 rule): the HALT gate, the
+#   position-abandonment warning, the RTH exemption, and "no EOD, no pycache".
 """
 One-touch fleet maintenance. Wake the whole universe, resolve every box to the
 GitHub repo (the single source of truth), restart the service, verify, and shut
@@ -295,8 +306,10 @@ def stage_shutdown(mapping, dry):
     if dry:
         _log("SHUTDOWN", f"[dry-run] would stop {len(ids)} instance(s)")
         return True
-    _log("SHUTDOWN", f"stopping {len(ids)} instance(s)…")
+    _log("SHUTDOWN", f"stopping {len(ids)} instance(s)… (stop request sent "
+                     f"before any wait; nothing here needs SSH)")
     ec2ops.stop(ids)
+    _log("SHUTDOWN", "stop requested — polling for 'stopped'…")
     reached = ec2ops.wait_state(ids, "stopped")
     down = sum(1 for v in reached.values() if v)
     _log("SHUTDOWN", f"{down}/{len(ids)} reached 'stopped'")
@@ -396,14 +409,34 @@ def run(only=None, assume_yes=False, dry=False, leave_running=False,
             if live:
                 mapping = _discover(only)  # refresh state + IPs after boot
 
-        # 2 PING — every mode
-        _ok, reachable, missing = stage_ping(only, expected, dry)
-        targets = sorted(mapping) if dry else (reachable or [])
-        if missing:
-            summary.append(f"missing: {', '.join(missing)}")
-            rc_final = 1
-            if strict:
-                raise _Abort(f"unreachable: {', '.join(missing)}")
+        # 2 PING — every mode EXCEPT shutdown.
+        #
+        # 🔴 THE EMERGENCY STOP USED TO PING ALL 29 BOXES FIRST, AND THAT IS
+        # WHY IT APPEARED TO HANG WITH NO WARNING. Discovery returns STOPPED
+        # instances too, and a stopped box keeps a stale private_ip, so the
+        # ping SSHed machines that cannot answer and paid SSH_CONNECT_TIMEOUT
+        # (12s) for each. The loop is sequential, so ~27 down = ~5.4 min for a
+        # single pass — LONGER than SSH_READY_TIMEOUT (180s), which is only
+        # checked BETWEEN passes — and the first "…waiting for SSH" line only
+        # prints AFTER a full pass. Five silent minutes before the stop was
+        # even attempted, worst exactly when the fleet is partially up, which
+        # is when you reach for a kill switch.
+        #
+        # STOPPING NEEDS NO SSH AND NO IP. `_ids()` reads instance_id;
+        # ec2ops.stop() takes ids; wait_state("stopped") already returns True
+        # for a box that is stopped. Reachability is irrelevant to the one job
+        # this mode has.
+        if mode == "shutdown":
+            _log("SHUTDOWN", "skipping SSH reachability — stopping by instance "
+                             "ID; a box that cannot answer still stops")
+        else:
+            _ok, reachable, missing = stage_ping(only, expected, dry)
+            targets = sorted(mapping) if dry else (reachable or [])
+            if missing:
+                summary.append(f"missing: {', '.join(missing)}")
+                rc_final = 1
+                if strict:
+                    raise _Abort(f"unreachable: {', '.join(missing)}")
 
         if mode == "wake":
             summary.append(f"{len(targets) if not dry else expected} box(es) "
