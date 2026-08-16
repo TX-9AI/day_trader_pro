@@ -1,5 +1,16 @@
 #!/usr/bin/env python3
-# day_trader_pro/warehouse_reader.py — v1.5
+# day_trader_pro/warehouse_reader.py — v1.6
+# v1.6 (2026-08-16) — 🔴 SORT ORDER. The parity run showed report 40 differing
+#      at one figure out of 421 — but the located lines revealed the reports
+#      hold the SAME rows in a DIFFERENT ORDER, not different values
+#      (`max_loss_floor/Continuation` vs `orb_structure_stop/ORBStrategy` at the
+#      same position). consolidate_trades sorts trades by (box, entry_time);
+#      this reader sorted by (entry_time, box). Trade-level equality was never
+#      affected — which is why `--compare` said 153/153 — but any downstream
+#      grouping that breaks ties by input order lands differently. Now matches
+#      consolidate_trades exactly. **A "value" difference that is really an
+#      ordering difference is the kind of finding that gets misdiagnosed as
+#      data corruption.**
 # v1.5 (2026-08-16) — an AWS failure printed a RAW TRACEBACK. Found by driving
 #      the new menu items instead of the shell: item 65 dumped 11 lines of
 #      botocore stack for what is really "no credentials". On control it has
@@ -176,7 +187,10 @@ def latest_per_trade(objects):
         row = dict(rec)
         row["box"] = sym            # partition == authoritative fleet tag
         rows.append(row)
-    rows.sort(key=lambda r: (str(r.get("entry_time") or ""), str(r.get("box") or "")))
+    # MUST match consolidate_trades.py:239 — (box, entry_time), in that order.
+    # Downstream reports break grouping ties by input order, so a different
+    # sort produces a different-looking report from identical data.
+    rows.sort(key=lambda r: (str(r.get("box") or ""), str(r.get("entry_time") or "")))
     return rows
 
 

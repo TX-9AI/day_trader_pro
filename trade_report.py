@@ -1,4 +1,10 @@
-# day_trader_pro/trade_report.py — v1.7
+# day_trader_pro/trade_report.py — v1.8
+# v1.8 (2026-08-16) — --out, so a caller can name the JSON exactly. The parity
+#   tool had been picking the newest trade_report_<stamp>.json by MTIME, which
+#   is a guess: it read a stale full-fleet run instead of the restricted one it
+#   had just produced, and reported 25 sessions against 1 as a warehouse
+#   divergence. Identifying a file by "probably the newest" is not identifying
+#   it.
 # v1.7 (2026-08-16) — a warehouse-sourced run writes trade_report_warehouse_*
 #   and records its source in the payload. v1.6 wrote the same stamped filename
 #   for both sources, so the two were distinguishable only by mtime — and a
@@ -457,6 +463,8 @@ def main(argv: List[str]) -> int:
     ap.add_argument("--min-n", type=int, default=8,
                     help="thin-bucket flag AND best/worst sample floor (default 8)")
     ap.add_argument("--no-json", action="store_true", help="display only")
+    ap.add_argument("--out", default=None,
+                    help="write the JSON here instead of the stamped default")
     ap.add_argument("--bundles-dir", default=None,
                     help="read bundles from here instead of reports/ "
                          "(e.g. reports/warehouse for the S3-sourced copies)")
@@ -641,7 +649,9 @@ def main(argv: List[str]) -> int:
         tag = "warehouse_" if args.bundles_dir else ""
         payload["source"] = ("warehouse:" + args.bundles_dir
                              if args.bundles_dir else "local")
-        out = os.path.join(REPORTS_DIR, f"trade_report_{tag}{stamp}.json")
+        out = (args.out if args.out
+               else os.path.join(REPORTS_DIR, f"trade_report_{tag}{stamp}.json"))
+        os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
         tmp = out + ".tmp"
         with open(tmp, "w") as fh:
             json.dump(payload, fh, indent=2, default=str)

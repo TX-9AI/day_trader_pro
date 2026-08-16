@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-# day_trader_pro/tools/report_parity.py — v1.2
+# day_trader_pro/tools/report_parity.py — v1.3
+# v1.3 (2026-08-16) — 🔴 IT WAS READING THE WRONG FILE. `newest()` picked the
+#      most recently modified trade_report_<stamp>.json, which is a GUESS — it
+#      returned a stale full-fleet run (25 sessions, 1,742 rows) instead of the
+#      restricted run it had just produced, then reported that against the
+#      warehouse's single session as a divergence. v1.1 equalised the date set
+#      correctly and v1.2 printed the values that exposed the lie. Now both
+#      sides are written to explicit paths via trade_report --out. **Identifying
+#      a file by "probably the newest" is not identifying it.**
 # v1.2 (2026-08-16) — DIAGNOSE, don't just DETECT. v1.1 correctly isolated the
 #      warehouse question but then reported "section differs: dedup" and left
 #      the operator to go find out why. A difference you cannot act on is only
@@ -218,26 +226,21 @@ def compare_breakdown(keep):
     if missing:
         print(f"      ⚠️ no LOCAL bundle for {', '.join(missing)} — "
               f"those dates are in the warehouse only")
-    ok_l = run([PY, "trade_report.py", "--bundles-dir", fair_dir], "41 local")
-    ok_w = run([PY, "trade_report.py", "--bundles-dir", WAREHOUSE_DIR],
-               "41 warehouse")
+    import tempfile as _tf
+    outdir = _tf.mkdtemp(prefix="parity_out_")
+    pl = os.path.join(outdir, "local.json")
+    pw = os.path.join(outdir, "warehouse.json")
+    ok_l = run([PY, "trade_report.py", "--bundles-dir", fair_dir,
+                "--out", pl], "41 local")
+    ok_w = run([PY, "trade_report.py", "--bundles-dir", WAREHOUSE_DIR,
+                "--out", pw], "41 warehouse")
     if not (ok_l and ok_w):
         return None
 
     del fair_dir
-
-    def newest(tag):
-        pat = re.compile(r"^trade_report_%s\d{4}-\d\d-\d\d\.json$" % tag)
-        hits = [f for f in os.listdir(config.REPORTS_DIR) if pat.match(f)]
-        if not hits:
-            return None
-        hits.sort(key=lambda f: os.path.getmtime(
-            os.path.join(config.REPORTS_DIR, f)))
-        return os.path.join(config.REPORTS_DIR, hits[-1])
-
-    pl, pw = newest(""), newest("warehouse_")
-    if not pl or not pw:
-        print(f"  41: missing an output (local={bool(pl)}, warehouse={bool(pw)})")
+    if not (os.path.exists(pl) and os.path.exists(pw)):
+        print(f"  41: missing an output (local={os.path.exists(pl)}, "
+              f"warehouse={os.path.exists(pw)})")
         return False
     a = json.load(open(pl))
     b = json.load(open(pw))
