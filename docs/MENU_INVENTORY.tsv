@@ -1,0 +1,58 @@
+ORCHESTRATION	Full spool-up (mock)	DTP_MOCK=1 $PY orchestrator.py --mock --no-gate
+ORCHESTRATION	EOD aggregate (mock)	DTP_MOCK=1 $PY eod_report.py --mock
+ORCHESTRATION	Reset mock state	reset_mock_state
+ORCHESTRATION	Dry-run spool-up (real reads)	$PY orchestrator.py --dry-run --no-gate
+ORCHESTRATION	Dry-run EOD aggregate (real reads)	$PY eod_report.py --dry-run
+REGISTRY & MASTER SWITCH	Instance map	$PY instance_registry.py show
+REGISTRY & MASTER SWITCH	Reconcile map	$PY instance_registry.py reconcile
+REGISTRY & MASTER SWITCH	Swap / pin instance ID	$PY instance_registry.py swap
+REGISTRY & MASTER SWITCH	Control status	$PY control_state.py status
+REGISTRY & MASTER SWITCH	ENABLE control	$PY control_state.py enable
+REGISTRY & MASTER SWITCH	DISABLE control	$PY control_state.py disable
+FLEET (inspect & fan-out)	Fleet list	$PY fleet.py list
+FLEET (inspect & fan-out)	Fleet ping	$PY fleet.py ping
+FLEET (inspect & fan-out)	Run command (all running)	read -rp "Command to run on all running boxes: " fc; $PY fleet.py run "$fc"
+FLEET (inspect & fan-out)	status.py + query.py      (one/all/some)	SC=$(ask_scope); $PY fleet.py run "cd $INSTALL_DIR; python status.py; echo; python query.py" $SC
+FLEET (inspect & fan-out)	Pull trades.db            (one/all/some)	SC=$(ask_scope); $PY fleet.py pull db $SC
+FLEET (inspect & fan-out)	Pull OHLC for a day       (one/all/some)	SC=$(ask_scope); read -rp "Day (YYYY-MM-DD, ENTER=today): " D; D="${D:-$(date +%F)}"; $PY fleet.py pull ohlc --day "$D" $SC
+DEBUG / LOGS (remote; one/all/some)	Service status (bot + candle-feed)	SC=$(ask_scope); $PY fleet.py run 'echo "optionsbot=$(systemctl is-active optionsbot) candle-feed=$(systemctl is-active candle-feed)"' $SC
+DEBUG / LOGS (remote; one/all/some)	Journal tail (last N)	SC=$(ask_scope); read -rp "How many journal lines [20]: " N; N="${N:-20}"; $PY fleet.py run "journalctl -u optionsbot -n ${N} --no-pager" $SC
+DEBUG / LOGS (remote; one/all/some)	Feed health (store freshness)	SC=$(ask_scope); $PY fleet.py run "echo "candle-feed= $(systemctl is-active candle-feed) store_write_age_s= $(( $(date +%s) - $(stat -c %Y ${FEED_DB}-wal 2>/dev/null || stat -c %Y ${FEED_DB} 2>/dev/null || echo 0) )) "" $SC
+DEBUG / LOGS (remote; one/all/some)	Bot log tail (last 20)	SC=$(ask_scope); $PY fleet.py run "tail -20 ${INSTALL_DIR}/bot.log" $SC
+MAINTENANCE (wake_and_bake)	Dry-run	$PY wake_and_bake.py --dry-run
+MAINTENANCE (wake_and_bake)	FULL (wake->bake->restart->STOP)	$PY wake_and_bake.py
+MAINTENANCE (wake_and_bake)	Wake (one/all/some)	SC=$(ask_scope); $PY wake_and_bake.py --wake-only $SC
+MAINTENANCE (wake_and_bake)	Bake only (sync, no restart - RTH-safe)	$PY wake_and_bake.py --bake-only
+MAINTENANCE (wake_and_bake)	Leave on (skip shutdown)	$PY wake_and_bake.py --leave-running
+MAINTENANCE (wake_and_bake)	EMERGENCY STOP (no EOD, no pycache, RTH-exempt, HALT-gated)	$PY wake_and_bake.py --shutdown-only
+REPOINT (migrate fleet -> new repo)	Check only	U=$(ask_url); $PY fleet.py repoint "$U" --check-only
+REPOINT (migrate fleet -> new repo)	FULL	U=$(ask_url); $PY fleet.py repoint "$U"
+REPOINT (migrate fleet -> new repo)	Full + wake	U=$(ask_url); $PY fleet.py repoint "$U" --wake
+REPOINT (migrate fleet -> new repo)	No restart	U=$(ask_url); $PY fleet.py repoint "$U" --no-restart
+REPOINT (migrate fleet -> new repo)	Scoped	U=$(ask_url); read -rp "Symbols (comma-sep, e.g. SPX,QQQ): " SY; $PY fleet.py repoint "$U" --only "$SY"
+REPOINT (migrate fleet -> new repo)	Mock preview	U=$(ask_url); $PY fleet.py repoint "$U" --mock --yes
+SNAPSHOT & TESTS	Snapshot dir -> repo-ready tarball	snapshot_dir
+SNAPSHOT & TESTS	Test selection (mock)	$PY selector.py --test
+SNAPSHOT & TESTS	Test Telegram (real)	$PY notify.py --test
+CONTROL REPO (this checkout <-> GitHub, force sync)	PUSH -> GitHub  (FORCE; this server is source of truth)	repo_push_force
+CONTROL REPO (this checkout <-> GitHub, force sync)	PULL <- GitHub  (FORCE; GitHub is source of truth)	repo_pull_force
+TRADES DATA	Re-run consolidation -> fleet_trades_<date>.json (+ .csv)	read -rp "Day to consolidate (YYYY-MM-DD, ENTER=today): " D; D="${D:-$(date +%F)}"; $PY consolidate_trades.py --date "$D"
+TRADES DATA	Excursion report (MFE/MAE) -> reports/excursions_<date>.txt	read -rp "Day (YYYY-MM-DD, ENTER=today): " D; D="${D:-$(date +%F)}"; read -rp "Cumulative since (YYYY-MM-DD, ENTER=that day only): " S; read -rp "Live rows? [y/N]: " LV; ARGS="--date $D"; [ -n "$S" ] && ARGS="$ARGS --since $S"; [ "$LV" = "y" ] && ARGS="$ARGS --live"; $PY excursion_report.py $ARGS
+TRADES DATA	Trade breakdown (cross-day: regime/strategy/grade + regime x strategy)	read -rp "Since date (YYYY-MM-DD, ENTER=all): " SD; if [ -n "$SD" ]; then $PY trade_report.py --since "$SD"; else $PY trade_report.py; fi
+TRADES DATA	FIT REPORT — everything for fitting in ONE text file (1 day or a range)	read -rp "Day, or END of range (YYYY-MM-DD, ENTER=today): " D; D="${D:-$(date +%F)}"; read -rp "Cumulative since (YYYY-MM-DD, ENTER=that day only): " S; read -rp "Skip the slow replay-corpus sections (ramps, A2 drift)? [y/N]: " NS; ARGS="--date $D"; [ -n "$S" ] && ARGS="$ARGS --since $S"; [ "$NS" = "y" ] && ARGS="$ARGS --no-slow"; echo "Running — the replay-corpus sections take minutes; output is a FILE, not this screen."; $PY fit_report.py $ARGS
+REGIME VALIDATION (Layer-1 confluence; manual, tape-only)	Run replay - today	if [ -x "$VALIDATE_SH" ]; then "$VALIDATE_SH"; else echo "missing/non-exec $VALIDATE_SH (chmod +x $OTV3_DIR/validate_regime.sh?)"; fi
+REGIME VALIDATION (Layer-1 confluence; manual, tape-only)	Run replay - pick a date	read -rp "Date (YYYY-MM-DD, ENTER=today): " D; D="${D:-$(date +%F)}"; if [ -x "$VALIDATE_SH" ]; then "$VALIDATE_SH" "$D"; else echo "missing/non-exec $VALIDATE_SH"; fi
+REGIME VALIDATION (Layer-1 confluence; manual, tape-only)	View a day's report	D_DEF="$(date +%F)"; read -rp "Date to view (YYYY-MM-DD, ENTER=${D_DEF}): " D; D="${D:-$D_DEF}"; if [ -x "$VALIDATE_SH" ]; then "$VALIDATE_SH" --report "$D"; else echo "missing/non-exec $VALIDATE_SH"; fi
+REGIME VALIDATION (Layer-1 confluence; manual, tape-only)	View the diary (all days)	if [ -x "$VALIDATE_SH" ]; then "$VALIDATE_SH" --diary; else echo "missing/non-exec $VALIDATE_SH"; fi
+REGIME VALIDATION (Layer-1 confluence; manual, tape-only)	Backfill missing days      (fills diary gaps that have tape)	read -rp "Rebuild ALL dated tapes (else only fill gaps)? [y/N]: " RB; if [ -x "$VALIDATE_SH" ]; then if [ "$RB" = "y" ]; then "$VALIDATE_SH" --backfill --rebuild; else "$VALIDATE_SH" --backfill; fi; else echo "missing/non-exec $VALIDATE_SH"; fi
+REGIME VALIDATION (Layer-1 confluence; manual, tape-only)	A2 co-occurrence + HTF drift  (read-only; auto-finds replay logs)	if [ -x "$OTV3_PY" ]; then (cd "$OTV3_DIR" && "$OTV3_PY" -m tests.a2_cooccurrence); else echo "missing $OTV3_PY (is ~/options-trader-v3 checked out with its venv?)"; fi
+EOD CONDUCTOR, BACKFILL & LIVE P&L	Live P&L standings (read-only)	read -rp "Push to Telegram too? [y/N]: " S; if [ "$S" = "y" ]; then $PY standings.py --send; else $PY standings.py; fi
+EOD CONDUCTOR, BACKFILL & LIVE P&L	Backfill missing OHLC (auto-batched)	read -rp "Backfill date (YYYY-MM-DD, ENTER=today): " D; D="${D:-$(date +%F)}"; read -rp "Batch size (ENTER=5): " B; B="${B:-5}"; echo; $PY eod_backfill.py --date "$D" --batch "$B" --dry-run; echo; read -rp "Proceed with LIVE backfill (wakes/stops boxes)? [y/N]: " GO; [ "$GO" = "y" ] && $PY eod_backfill.py --date "$D" --batch "$B"
+EOD CONDUCTOR, BACKFILL & LIVE P&L	EOD conductor - full gated EOD (dry-run preview -> confirm -> run)	read -rp "Backfill batch size (ENTER=5): " B; B="${B:-5}"; echo; $PY eod_conductor.py --batch "$B" --dry-run; echo; read -rp "Run the LIVE EOD conductor now (gate->harvest->P&L+stop->backfill->consolidate->diary)? [y/N]: " GO; [ "$GO" = "y" ] && $PY eod_conductor.py --batch "$B"
+UTILITIES	OHLC 21-day fetch from yfinance (prompts symbol, default ^VIX)	read -rp "Symbol [^VIX]: " SY; SY="${SY:-^VIX}"; $PY tests/ohlc_fetch.py --symbol "$SY"
+UTILITIES	Rotate fleet tokens/secrets (pushes to running boxes)	read -rp "Rotate against a SUBSET of symbols? (ENTER=all running): " SUBSET; if [ -n "$SUBSET" ]; then $PY rotate_tokens.py --only $SUBSET; else $PY rotate_tokens.py; fi
+UTILITIES	Audit fleet credentials (read-only; shows which vars are set, no values)	read -rp "Audit a SUBSET of symbols? (ENTER=all running): " SUBSET; if [ -n "$SUBSET" ]; then $PY rotate_tokens.py --audit --only $SUBSET; else $PY rotate_tokens.py --audit; fi
+UTILITIES	Verify fleet credentials WORK (TT SDK, Telegram, GitHub)	read -rp "Verify a SUBSET of symbols? (ENTER=all running): " SUBSET; if [ -n "$SUBSET" ]; then $PY rotate_tokens.py --verify --only $SUBSET; else $PY rotate_tokens.py --verify; fi
+UTILITIES	Verify control IAM role sees the fleet (read-only; no start/stop)	$PY check_iam.py
+UTILITIES	Blind-alert DRILL on the fleet (sends REAL Telegram, marked DRILL)	echo "Fires the REAL blind-alert path on every RUNNING box."; echo "Each box sends TWO Telegram messages, both prefixed DRILL - NOT REAL."; echo "READ THE PER-BOX 'DRILL PASSED/FAILED' LINE, NOT the 29/29 tally —"; echo "the tally cannot see the drill's exit code (v1.26)."; read -rp "Send for real? (n = dry-run, no Telegram) [y/N]: " GO; if [ "$GO" = "y" ]; then $PY fleet.py run "cd ~/options-trader && venv/bin/python tests/blind_alert_selftest.py 2>&1 | tail -4; true"; else $PY fleet.py run "cd ~/options-trader && venv/bin/python tests/blind_alert_selftest.py --no-send 2>&1 | tail -4; true"; fi
+UTILITIES	Feed maintenance window (fleet up, nothing on the wire) - currently OFF	if _maint_on; then echo "Feed maintenance is currently ACTIVE."; echo "Turning it OFF lets every box feed again on its next gate check."; read -rp "Turn maintenance OFF? [y/N]: " GO; if [ "$GO" = "y" ]; then $PY fleet.py run "rm -f ~/options-trader/data/FEED_MAINTENANCE; echo MAINT= $([ -f ~/options-trader/data/FEED_MAINTENANCE ] && echo ON || echo OFF)" --all; rm -f "$_MAINT_MARK"; echo; echo "Read the per-box MAINT= lines above - every one must say OFF."; echo "A box still reading ON is still feed-silent and will trade blind."; fi; else echo "Brings the fleet into a MAINTENANCE window: boxes can be up and"; echo "worked on (option 14, bakes, pushes) with NOTHING on the wire."; echo; echo "The flag is checked live by candle_feed - no restart needed, and"; echo "it SURVIVES a bake. Nothing removes it but you."; echo "!! A box left flagged at 09:15 trades blind. The menu line stays RED."; read -rp "Turn maintenance ON? [y/N]: " GO; if [ "$GO" = "y" ]; then $PY fleet.py run "mkdir -p ~/options-trader/data && touch ~/options-trader/data/FEED_MAINTENANCE; echo MAINT= $([ -f ~/options-trader/data/FEED_MAINTENANCE ] && echo ON || echo OFF)" --all; mkdir -p "$SCRIPT_DIR/data" && touch "$_MAINT_MARK"; echo; echo "Read the per-box MAINT= lines above - every one must say ON."; echo "A box that missed it is STILL FEEDING during your maintenance."; fi; fi; read -rp "Enter to continue..." _
