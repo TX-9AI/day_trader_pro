@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-# day_trader_pro/tools/backfill_survey.py — v1.0
+# day_trader_pro/tools/backfill_survey.py — v1.1
+# v1.1 (2026-08-16) — `--streams`: the same question for the OTHER streams.
+#      The trades survey found the warehouse is the sole copy of 33 closed
+#      trades on 2026-07-15. Trades are the one stream that is at least PARTLY
+#      reconstructible from bundles — chain snapshots are explicitly NOT
+#      reconstructible after the session, so if the same exposure exists there
+#      it is worse, not better. This counts local artifacts against warehouse
+#      objects per stream per date and says which side is ahead.
 # v1.0 (2026-08-16) — READ-ONLY. Counts what a control-side backfill would add
 #      to the warehouse, per ET trading day, before anyone grants write access.
 """
@@ -62,6 +69,7 @@ BUCKET = os.environ.get("OT_S3_BUCKET", "vertigo-warehouse-tx9ai")
 REGION = os.environ.get("OT_S3_REGION", "us-east-2")
 _ET = ZoneInfo("US/Eastern")
 _UTC = ZoneInfo("UTC")
+_DATE_DIR = __import__("re").compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 def et_day(ts):
@@ -144,11 +152,59 @@ def from_s3():
     return out
 
 
+# Local artifact trees, by warehouse prefix. Control only ever held what
+# harvest pulled back, so absence here is the interesting direction.
+LOCAL_TREES = {
+    "chain_snapshots": ("chain_snapshots", "*.jsonl.gz"),
+    "signal_journal":  ("signal_journal", "*.jsonl"),
+    "shadow":          ("shadow", "*.jsonl"),
+    "ohlc":            ("ohlc", "*.csv"),
+}
+
+
+def stream_census():
+    """Per stream per date: local files vs warehouse objects. Read-only."""
+    import boto3
+    s3 = boto3.client("s3", region_name=REGION)
+    pg = s3.get_paginator("list_objects_v2")
+
+    print(f"\n  {'stream':<18}{'dates local':>12}{'dates S3':>10}"
+          f"{'S3-only dates':>15}")
+    for prefix, (subdir, pat) in sorted(LOCAL_TREES.items()):
+        local_dates = set()
+        base = os.path.join(ROOT, subdir)
+        if os.path.isdir(base):
+            for d in os.listdir(base):
+                if _DATE_DIR.match(d) and glob.glob(os.path.join(base, d, pat)):
+                    local_dates.add(d)
+        s3_dates = set()
+        for page in pg.paginate(Bucket=BUCKET, Prefix=f"raw/{prefix}/",
+                                Delimiter="/"):
+            for cp in page.get("CommonPrefixes", []) or []:
+                part = cp["Prefix"].rstrip("/").split("/")[-1]
+                if part.startswith("dt="):
+                    s3_dates.add(part[3:])
+        only_s3 = sorted(s3_dates - local_dates)
+        print(f"  {prefix:<18}{len(local_dates):>12}{len(s3_dates):>10}"
+              f"{len(only_s3):>15}"
+              + ("   " + ", ".join(only_s3[:4]) + ("…" if len(only_s3) > 4 else "")
+                 if only_s3 else ""))
+    print("\n  ⚠️ For chain_snapshots an S3-only date is UNRECOVERABLE elsewhere —")
+    print("     they are not reconstructible after the session. For the others")
+    print("     the box may still hold the file until it is trimmed.\n")
+
+
 def main(argv):
     p = argparse.ArgumentParser(description="what would a backfill recover?")
     p.add_argument("--no-s3", action="store_true")
     p.add_argument("--explain", metavar="DATE")
+    p.add_argument("--streams", action="store_true",
+                   help="census the non-trade streams instead")
     a = p.parse_args(argv)
+
+    if a.streams:
+        stream_census()
+        return 0
 
     dbs, n_db = from_dbs()
     bun, n_bun = from_bundles()

@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-# day_trader_pro/tools/reports_organize.py — v1.0
+# day_trader_pro/tools/reports_organize.py — v1.1
+# v1.1 (2026-08-16) — `fleet_trades/` is REBUILT FROM S3, not copied. The
+#      backfill survey proved the warehouse is equal to control on 27 dates and
+#      strictly BETTER on two: 2026-07-15 holds 45 closed trades in S3 while
+#      control's own bundle for that day holds ZERO (the 12 it can produce were
+#      scavenged from other cumulative bundles), and 07-21 is 12 vs 10. There is
+#      no date where local wins. Copying the root bundles into the folder would
+#      enshrine a partly-lossy set as the tidy one.
 # v1.0 (2026-08-16) — give each recurring report type its own flat folder under
 #      reports/. COPIES, never moves: the originals stay put so report 41's
 #      glob, report 47's replay discovery and the diary keep working untouched.
@@ -39,6 +46,7 @@ import argparse
 import os
 import re
 import shutil
+import subprocess
 import sys
 from collections import defaultdict
 
@@ -51,6 +59,10 @@ import config  # noqa: E402
 REPORTS = config.REPORTS_DIR
 MIN_RECURRING = 3          # fewer than this = a one-shot, stays at root
 SKIP_DIRS = {"warehouse", "backtests"}
+
+# Types with a WAREHOUSE source. These are rebuilt, not copied — the bucket is
+# the better copy, so tidying must not freeze the worse one in place.
+REBUILD_FROM_S3 = {"fleet_trades"}
 
 # Types other reports READ. Copying is fine; deleting the originals is not.
 CONSUMED_BY_OTHERS = {
@@ -108,13 +120,24 @@ def main(argv):
 
     mode = "APPLY — copying" if a.apply else "DRY RUN — nothing will change"
     print(f"\n  {REPORTS}\n  {mode}\n")
-    print(f"  {'type':<26}{'files':>6}   destination")
-    total = 0
+    print(f"  {'type':<22}{'files':>6}{'dates':>7}   action")
+    total = rebuild_dates = 0
     for stem in sorted(recurring, key=lambda k: -len(recurring[k])):
         files = recurring[stem]
-        total += len(files)
-        print(f"  {stem:<26}{len(files):>6}   reports/{stem}/")
-    print(f"\n  {len(recurring)} type folder(s), {total} file(s) copied")
+        if stem in REBUILD_FROM_S3:
+            dates = sorted({d for f in files for d in _DATE.findall(f)})
+            rebuild_dates += len(dates)
+            print(f"  {stem:<22}{len(files):>6}{len(dates):>7}   "
+                  f"REBUILD from S3 -> reports/{stem}/")
+        else:
+            total += len(files)
+            print(f"  {stem:<22}{len(files):>6}{'':>7}   "
+                  f"copy -> reports/{stem}/")
+    print(f"\n  {len(recurring)} type folder(s): {total} file(s) COPIED, "
+          f"{rebuild_dates} date(s) REBUILT from the warehouse")
+    if rebuild_dates:
+        print("  (rebuilt types are not copied at all — the bucket is the")
+        print("   better copy, and a failed rebuild does NOT fall back to local)")
     print(f"  {sum(len(v) for v in oneoff.values())} one-off file(s) STAY at root:")
     names = sorted(n for v in oneoff.values() for n in v)
     for i in range(0, len(names), 3):
@@ -131,10 +154,32 @@ def main(argv):
         print("\n  dry run — rerun with --apply to copy\n")
         return 0
 
-    copied = skipped = 0
+    copied = skipped = rebuilt = 0
     for stem, files in recurring.items():
         dest = os.path.join(REPORTS, stem)
         os.makedirs(dest, exist_ok=True)
+
+        if stem in REBUILD_FROM_S3:
+            dates = sorted({d for f in files for d in _DATE.findall(f)})
+            print(f"\n  {stem}: rebuilding {len(dates)} date(s) from S3 "
+                  f"(the bucket is the better copy — see v1.1)")
+            for d in dates:
+                out = os.path.join(dest, f"fleet_trades_{d}.json")
+                r = subprocess.run(
+                    [sys.executable, "warehouse_reader.py", "--date", d,
+                     "--out", out],
+                    cwd=ROOT, capture_output=True, text=True)
+                if r.returncode == 0:
+                    rebuilt += 1
+                else:
+                    # Loud, and it does NOT fall back to the local copy: a
+                    # silent substitution is how you end up not knowing which
+                    # source a file came from.
+                    tail = (r.stderr or r.stdout).strip().splitlines()[-1:]
+                    print(f"    ! {d} FAILED — not copied from local either. "
+                          f"{tail[0][:100] if tail else ''}")
+            continue
+
         for name in files:
             src = os.path.join(REPORTS, name)
             dst = os.path.join(dest, name)
@@ -144,7 +189,8 @@ def main(argv):
                 continue
             shutil.copy2(src, dst)
             copied += 1
-    print(f"\n  copied {copied}, already present {skipped}")
+    print(f"\n  copied {copied}, already present {skipped}, "
+          f"rebuilt from S3 {rebuilt}")
     print("  ⚠️  ORIGINALS ARE STILL AT ROOT and every report still reads them.")
     print("      Nothing has changed behaviourally. Removing the root copies is")
     print("      a separate step, after the readers are repointed.\n")
