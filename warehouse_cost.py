@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-# day_trader_pro/warehouse_cost.py — v1.0
+# day_trader_pro/warehouse_cost.py — v1.1
+# v1.1 (2026-08-16) — IT PRINTED NOTHING FOR TWO MINUTES. A full LIST of ~130k
+#      objects is 130+ paginated API calls, and --versions does a SECOND full
+#      pass, so it was working the whole time — but it said so nowhere. That is
+#      the SAME silent-long-operation failure as the emergency stop, committed
+#      one day after fixing it. Now prints a running count per page to stderr,
+#      says up front what it is about to do, and handles Ctrl-C cleanly.
+#      --quiet restores the silent behaviour for scripted use.
 # v1.0 (2026-08-16) — WH.9a. Measures what the warehouse ACTUALLY holds and what
 #      it actually costs, so the compaction/Athena decision rests on numbers off
 #      the bucket rather than on my estimates. Read-only: LIST only, no GET, no
@@ -62,12 +69,24 @@ def _client():
     return boto3.client("s3", region_name=REGION)
 
 
-def scan_current(s3, bucket=BUCKET):
+def _tick(msg, quiet):
+    """Progress to STDERR so --json stays machine-readable."""
+    if not quiet:
+        sys.stderr.write("\r  " + msg + " " * 12)
+        sys.stderr.flush()
+
+
+def scan_current(s3, bucket=BUCKET, quiet=False):
     """Per-prefix object counts, bytes, and the distinct dt= days seen."""
     per = defaultdict(lambda: {"objects": 0, "bytes": 0, "days": set()})
     total = {"objects": 0, "bytes": 0}
     pg = s3.get_paginator("list_objects_v2")
+    pages = 0
     for page in pg.paginate(Bucket=bucket):
+        pages += 1
+        if pages % 5 == 0:
+            _tick(f"listing… {total['objects']:,} objects "
+                  f"({total['bytes'] / GB:.2f} GB) across {pages} page(s)", quiet)
         for o in page.get("Contents", []) or []:
             key, size = o["Key"], int(o.get("Size", 0) or 0)
             parts = key.split("/")
@@ -82,27 +101,49 @@ def scan_current(s3, bucket=BUCKET):
                     break
             total["objects"] += 1
             total["bytes"] += size
+    _tick(f"listed {total['objects']:,} objects in {pages} page(s)", quiet)
+    if not quiet:
+        sys.stderr.write("\n")
     return per, total
 
 
-def scan_versions(s3, bucket=BUCKET):
-    """Noncurrent versions and delete markers — the silent-growth line item."""
+def scan_versions(s3, bucket=BUCKET, quiet=False):
+    """Noncurrent versions and delete markers — the silent-growth line item.
+
+    A SECOND full pass over the bucket, and on a versioned bucket it returns
+    every version rather than just the current ones — so it is the slower of
+    the two. Skip it with plain `warehouse_cost.py` if you only want sizes.
+    """
     cur = {"n": 0, "bytes": 0}
     old = {"n": 0, "bytes": 0}
     marks = 0
+    pages = 0
     pg = s3.get_paginator("list_object_versions")
     for page in pg.paginate(Bucket=bucket):
+        pages += 1
+        if pages % 5 == 0:
+            _tick(f"versions… {cur['n'] + old['n']:,} seen across "
+                  f"{pages} page(s)", quiet)
         for v in page.get("Versions", []) or []:
             tgt = cur if v.get("IsLatest") else old
             tgt["n"] += 1
             tgt["bytes"] += int(v.get("Size", 0) or 0)
         marks += len(page.get("DeleteMarkers", []) or [])
+    _tick(f"versions: {cur['n'] + old['n']:,} in {pages} page(s)", quiet)
+    if not quiet:
+        sys.stderr.write("\n")
     return cur, old, marks
 
 
-def report(s3=None, do_versions=False, as_json=False):
+def report(s3=None, do_versions=False, as_json=False, quiet=False):
     s3 = s3 or _client()
-    per, total = scan_current(s3)
+    if not quiet:
+        sys.stderr.write(
+            f"  scanning s3://{BUCKET} — one LIST pass per 1,000 objects; on a\n"
+            f"  ~130k-object bucket expect ~1 min"
+            + (", and --versions is a SECOND full pass\n" if do_versions else "\n"))
+        sys.stderr.flush()
+    per, total = scan_current(s3, quiet=quiet)
 
     all_days = set()
     for r in per.values():
@@ -144,7 +185,7 @@ def report(s3=None, do_versions=False, as_json=False):
         }
 
     if do_versions:
-        cur, old, marks = scan_versions(s3)
+        cur, old, marks = scan_versions(s3, quiet=quiet)
         out["versions"] = {
             "current": {"n": cur["n"], "gb": round(cur["bytes"] / GB, 4)},
             "noncurrent": {"n": old["n"], "gb": round(old["bytes"] / GB, 4),
@@ -203,10 +244,15 @@ def main(argv):
     p.add_argument("--versions", action="store_true",
                    help="also account noncurrent versions (slower, one extra pass)")
     p.add_argument("--json", action="store_true", help="machine-readable output")
+    p.add_argument("--quiet", action="store_true", help="no progress output")
     a = p.parse_args(argv[1:])
     try:
-        report(do_versions=a.versions, as_json=a.json)
+        report(do_versions=a.versions, as_json=a.json, quiet=a.quiet or a.json)
         return 0
+    except KeyboardInterrupt:
+        print("\nwarehouse_cost: interrupted — nothing was written, "
+              "the scan is read-only")
+        return 130
     except Exception as exc:
         print(f"warehouse_cost: {exc}")
         return 1

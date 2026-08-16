@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/test_warehouse_cost.py — v1.0
+# day_trader_pro/tests/test_warehouse_cost.py — v1.1
 """
 Pins warehouse_cost v1.0 (WH.9a).
 
 CHANGELOG
+    v1.1 — 2026-08-16 — alongside warehouse_cost v1.1. Adds the check that
+           would have caught the two-minute silence: progress must reach
+           STDERR, and must NOT contaminate stdout, or --json stops being
+           machine-readable.
     v1.0 — 2026-08-16 — alongside warehouse_cost v1.0.
 
 WHY BOTHER TESTING A REPORT SCRIPT
@@ -14,6 +18,7 @@ WHY BOTHER TESTING A REPORT SCRIPT
     stub whose totals are known by construction.
 """
 
+import json
 import os
 import sys
 
@@ -125,6 +130,27 @@ check("noncurrent carries its own monthly cost, at the printed precision",
 out3 = WC.report(Stub(()), do_versions=False, as_json=False)
 check("an empty bucket reports zero, not a ZeroDivisionError",
       out3["objects"] == 0 and out3["per_day"]["objects"] == 0, out3["per_day"])
+
+
+# progress: visible on stderr, absent from stdout
+import io
+import contextlib
+
+buf_out, buf_err = io.StringIO(), io.StringIO()
+with contextlib.redirect_stdout(buf_out), contextlib.redirect_stderr(buf_err):
+    WC.report(Stub(OBJS), do_versions=False, as_json=False, quiet=False)
+check("progress goes to STDERR", "scanning s3://" in buf_err.getvalue(),
+      buf_err.getvalue()[:80])
+check("progress does NOT contaminate stdout",
+      "scanning s3://" not in buf_out.getvalue())
+
+buf_out2, buf_err2 = io.StringIO(), io.StringIO()
+with contextlib.redirect_stdout(buf_out2), contextlib.redirect_stderr(buf_err2):
+    WC.report(Stub(OBJS), do_versions=False, as_json=True, quiet=True)
+check("--json emits parseable JSON and nothing else",
+      json.loads(buf_out2.getvalue())["objects"] == 105)
+check("--quiet silences progress entirely", buf_err2.getvalue() == "",
+      buf_err2.getvalue()[:60])
 
 print("\n" + ("ALL CHECKS PASSED" if not FAILS else "FAILURES: " + ", ".join(FAILS)))
 sys.exit(1 if FAILS else 0)
