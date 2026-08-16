@@ -396,3 +396,15 @@ mi_warehouse_trade_report() {
     echo; echo "Reads reports/warehouse/ — run the rebuild for the dates you want first."
     $PY trade_report.py --bundles-dir reports/warehouse; pause
 }
+
+# Report PARITY - run 40 & 41 from BOTH sources and diff the OUTPUTS
+mi_warehouse_report_parity() {
+    echo; read -rp "Date (YYYY-MM-DD, blank = --since range): " WD
+    if [ -n "$WD" ]; then
+      $PY tools/report_parity.py --date "$WD"
+    else
+      read -rp "Since (YYYY-MM-DD): " WS
+      if [ -n "$WS" ]; then $PY tools/report_parity.py --since "$WS"; fi
+    fi
+    pause
+}

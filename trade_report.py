@@ -1,4 +1,9 @@
-# day_trader_pro/trade_report.py — v1.6
+# day_trader_pro/trade_report.py — v1.7
+# v1.7 (2026-08-16) — a warehouse-sourced run writes trade_report_warehouse_*
+#   and records its source in the payload. v1.6 wrote the same stamped filename
+#   for both sources, so the two were distinguishable only by mtime — and a
+#   comparison you can only make by checking timestamps is one you will get
+#   wrong once.
 # v1.6 (2026-08-16) — --bundles-dir, for WH.11. Lets this report run against
 #   warehouse-sourced bundles in reports/warehouse/ so the OUTPUTS of both
 #   sources can be diffed — bundle-level equivalence does not establish that
@@ -633,7 +638,10 @@ def main(argv: List[str]) -> int:
         }
         os.makedirs(REPORTS_DIR, exist_ok=True)
         stamp = used[-1][0] if used else datetime.now().strftime("%Y-%m-%d")
-        out = os.path.join(REPORTS_DIR, f"trade_report_{stamp}.json")
+        tag = "warehouse_" if args.bundles_dir else ""
+        payload["source"] = ("warehouse:" + args.bundles_dir
+                             if args.bundles_dir else "local")
+        out = os.path.join(REPORTS_DIR, f"trade_report_{tag}{stamp}.json")
         tmp = out + ".tmp"
         with open(tmp, "w") as fh:
             json.dump(payload, fh, indent=2, default=str)

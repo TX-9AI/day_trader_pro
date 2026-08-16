@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
-# day_trader_pro/devtools.sh — v1.33
+# day_trader_pro/devtools.sh — v1.34
+# v1.34  2026-08-16  REPORT PARITY item added (67). Runs reports 40 and 41 from
+#        BOTH sources and diffs their OUTPUTS — WH.11's real gate, since bundle
+#        equivalence is necessary and not sufficient. Still additive: 0 labels
+#        removed, 0 commands changed.
 # v1.33  2026-08-16  S3 WAREHOUSE section added (8 items, 59-66). ADDITIVE:
 #        nothing is replaced and no existing report changes its source. The
 #        warehouse variants of the excursion report and the trade breakdown run

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/excursion_report.py — v3.2 — MFE/MAE distributions from the
+day_trader_pro/excursion_report.py — v3.3 — MFE/MAE distributions from the
 fleet's auto-collected per-symbol trade DBs.
 
 v3.1 — 2026-08-13 — `insurance_stop` WAS REPORTED NOWHERE. It is the MIDDLE
@@ -173,6 +173,14 @@ v2.0 — 2026-07-15 — READS trades/<date>/*_trades.db DIRECTLY (the raw per-bo
         no DB folder. Each snapshot contains the box's FULL history, so
         --since turns a single day's snapshot into a cumulative report.
         Output unchanged: reports/excursions_<date>.txt.
+v3.3 — 2026-08-16 — 🔴 A WAREHOUSE RUN WAS OVERWRITING THE LOCAL REPORT.
+        v3.2 added --bundles-dir but left the output path alone, so a
+        warehouse-sourced run wrote reports/excursions_<date>.txt — THE SAME
+        FILE the local run produces. Menu item 65 would have destroyed the
+        artifact it exists to be compared against, and a subsequent "diff"
+        would have compared a file with itself. Warehouse runs now write
+        `_warehouse` and the header names the source.
+
 v3.2 — 2026-08-16 — --bundles-dir, for WH.11. This report normally reads the
         per-box DBs DIRECTLY and only falls back to a bundle, so it was the one
         report the warehouse comparison could not exercise at all. Passing a
@@ -928,6 +936,8 @@ def main():
         if not hints:
             hints.append("no trades closed in this window yet")
     window = (f"since {args.since}" if args.since else "that day only")
+    if args.bundles_dir:
+        src = f"{src}  [SOURCE: WAREHOUSE via {args.bundles_dir}]"
     text = build_report(rows, f"{args.date} ({window})", src, skipped,
                         "LIVE" if args.live else "PAPER", hints=hints,
                         group_by=args.by)
@@ -935,6 +945,10 @@ def main():
 
     os.makedirs(REPORTS_DIR, exist_ok=True)
     suffix = "_live" if args.live else ""
+    # A warehouse-sourced run MUST NOT land on the local run's path. Comparing
+    # two sources requires two files.
+    if args.bundles_dir:
+        suffix += "_warehouse"
     out_path = os.path.join(REPORTS_DIR, f"excursions_{args.date}{suffix}.txt")
     with open(out_path, "w") as f:
         f.write(text)

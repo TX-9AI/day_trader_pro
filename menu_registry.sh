@@ -89,6 +89,7 @@ MENU=(
   "ITEM|Explain a date's divergence (lists trade_ids)|mi_warehouse_explain_date"
   "ITEM|Excursion report FROM THE WAREHOUSE|mi_warehouse_excursion_report"
   "ITEM|Trade breakdown FROM THE WAREHOUSE (cross-day)|mi_warehouse_trade_report"
+  "ITEM|REPORT PARITY - run 40 & 41 both sources, diff OUTPUTS|mi_warehouse_report_parity"
 )
 
 # ── render + dispatch, the whole of it ──────────────────────────────
@@ -112,7 +113,7 @@ _menu_label() {
 
 menu_render() {
   printf '======================================================\n'
-  printf '  Day Trader Pro — devtools  v1.33 Service Menu\n'
+  printf '  Day Trader Pro — devtools  v1.34 Service Menu\n'
   printf '======================================================\n'
   local i=0 kind rest label
   for entry in "${MENU[@]}"; do
