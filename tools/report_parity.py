@@ -1,5 +1,23 @@
 #!/usr/bin/env python3
-# day_trader_pro/tools/report_parity.py — v1.0
+# day_trader_pro/tools/report_parity.py — v1.1
+# v1.1 (2026-08-16) — 🔴 v1.0's FIRST REAL RUN REPORTED A DIVERGENCE IT HAD
+#      MANUFACTURED ITSELF. Three defects, all mine:
+#      (1) REPORT 41 IS CROSS-DAY. The local run globs every bundle in reports/
+#          (~25 sessions); the warehouse run globbed reports/warehouse/, which
+#          held ONE date because only one had been rebuilt. It compared 25 days
+#          against 1 and called the difference a warehouse problem. Now the
+#          local side is restricted to EXACTLY the dates present on the
+#          warehouse side, so the comparison is apples to apples.
+#      (2) REPORT 40 CHANGED TWO VARIABLES AT ONCE. Without --bundles-dir it
+#          reads the per-box DBs; with it, a bundle. So "local vs warehouse"
+#          was really "DBs vs bundle" AND "local vs warehouse" together, and a
+#          difference could not be attributed. Now three-way: DB-direct,
+#          local-bundle, warehouse-bundle — which separates a pre-existing
+#          local property from the actual warehouse question.
+#      (3) The noise filter popped "generated", but the key is "generated_utc",
+#          so a wall-clock timestamp counted as a real difference.
+#      A test that manufactures its own failure is worse than no test: it burns
+#      the operator's attention and makes a real divergence indistinguishable.
 # v1.0 (2026-08-16) — WH.11's actual gate. Runs reports 40 and 41 from BOTH
 #      sources and diffs their OUTPUTS. Bundle equivalence was necessary and
 #      never sufficient: two identical inputs can still produce different
@@ -77,46 +95,109 @@ def numbers_of(path):
     return out
 
 
-def compare_excursions(day, keep):
-    """Report 40 from both sources, compared on the numbers it prints."""
-    local = os.path.join(config.REPORTS_DIR, f"excursions_{day}.txt")
-    ware = os.path.join(config.REPORTS_DIR, f"excursions_{day}_warehouse.txt")
+def _first_diff(a, b):
+    for i, (x, y) in enumerate(zip(a, b)):
+        if x != y:
+            return f"figure {i}: {x} vs {y}"
+    if len(a) != len(b):
+        return f"length {len(a)} vs {len(b)}"
+    return None
 
-    ok_l = run([PY, "excursion_report.py", "--date", day], "40 local")
-    ok_w = run([PY, "excursion_report.py", "--date", day,
-                "--bundles-dir", WAREHOUSE_DIR], "40 warehouse")
-    if not (ok_l and ok_w):
+
+def compare_excursions(day, keep):
+    """Report 40 THREE ways, so a difference can be attributed.
+
+    Without --bundles-dir this report reads the per-box DBs; with it, a bundle.
+    Running it once each way changes TWO variables at the same time and the
+    result cannot be interpreted. The three runs separate them:
+
+      DB-direct  vs local-bundle      -> a property of the LOCAL pipeline
+      local-bundle vs warehouse-bundle -> the warehouse question, the only one
+                                          that gates severing
+    """
+    p_db = os.path.join(config.REPORTS_DIR, f"excursions_{day}.txt")
+    _lb_tag = os.path.basename(os.path.normpath(config.REPORTS_DIR))
+    _wb_tag = os.path.basename(os.path.normpath(WAREHOUSE_DIR))
+    p_lb = os.path.join(config.REPORTS_DIR, f"excursions_{day}_bundle_{_lb_tag}.txt")
+    p_wb = os.path.join(config.REPORTS_DIR, f"excursions_{day}_bundle_{_wb_tag}.txt")
+
+    import shutil
+    ok = run([PY, "excursion_report.py", "--date", day], "40 DB-direct")
+    if ok and os.path.exists(p_db):
+        shutil.copy(p_db, p_db + ".dbrun")
+    ok_lb = run([PY, "excursion_report.py", "--date", day,
+                 "--bundles-dir", config.REPORTS_DIR], "40 local-bundle")
+    ok_wb = run([PY, "excursion_report.py", "--date", day,
+                 "--bundles-dir", WAREHOUSE_DIR], "40 warehouse-bundle")
+    if not (ok and ok_lb and ok_wb):
         return None
 
-    a, b = numbers_of(local), numbers_of(ware)
-    if a is None or b is None:
-        print(f"  40 {day}: one side produced no file "
-              f"(local={a is not None}, warehouse={b is not None})")
+    n_db = numbers_of(p_db + ".dbrun")
+    n_lb = numbers_of(p_lb)
+    n_wb = numbers_of(p_wb)
+    if n_lb is None or n_wb is None:
+        print(f"  40 {day}: a run produced no file")
         return False
-    same = a == b
-    print(f"  40 {day}: {'MATCH' if same else 'DIFF '} "
-          f"({len(a)} vs {len(b)} figures)")
-    if not same:
-        for i, (x, y) in enumerate(zip(a, b)):
-            if x != y:
-                print(f"      first divergence at figure {i}: "
-                      f"local {x} vs warehouse {y}")
-                break
-        if len(a) != len(b):
-            print(f"      and the reports differ in LENGTH — "
-                  f"{len(a)} vs {len(b)} figures, so the shapes differ too")
-    if not keep and os.path.exists(ware):
-        os.remove(ware)
-    return same
+
+    d_local = _first_diff(n_db, n_lb) if n_db is not None else "n/a"
+    d_ware = _first_diff(n_lb, n_wb)
+    print(f"  40 {day}: DB-vs-localbundle {'same' if d_local is None else d_local}"
+          f"   |   localbundle-vs-WAREHOUSE "
+          f"{'MATCH' if d_ware is None else 'DIFF ' + d_ware}")
+    if d_local is not None and d_local != "n/a" and d_ware is None:
+        print("      → the warehouse reproduces the local BUNDLE exactly; the "
+              "difference is DB-vs-bundle and predates the warehouse")
+    if not keep:
+        for f_ in (p_lb, p_wb, p_db + ".dbrun"):
+            if os.path.exists(f_):
+                os.remove(f_)
+    return d_ware is None
+
+
+def _fair_local_dir(warehouse_dir):
+    """A local-bundle directory holding EXACTLY the dates the warehouse has.
+
+    Report 41 pools every bundle it can glob, so its answer is a function of
+    the date SET, not just the contents. Comparing a 25-session local run with
+    a 1-session warehouse run is not a comparison; it is two different
+    questions.
+    """
+    import shutil
+    import tempfile
+    dates = []
+    for f in os.listdir(warehouse_dir):
+        m = re.match(r"fleet_trades_(\d{4}-\d\d-\d\d)\.json$", f)
+        if m:
+            dates.append(m.group(1))
+    tmp = tempfile.mkdtemp(prefix="parity_local_")
+    missing = []
+    for d in sorted(dates):
+        src = os.path.join(config.REPORTS_DIR, f"fleet_trades_{d}.json")
+        if os.path.exists(src):
+            shutil.copy(src, os.path.join(tmp, f"fleet_trades_{d}.json"))
+        else:
+            missing.append(d)
+    return tmp, sorted(dates), missing
 
 
 def compare_breakdown(keep):
-    """Report 41 from both sources. Cross-day, so it runs once, not per date."""
-    ok_l = run([PY, "trade_report.py"], "41 local")
+    """Report 41 from both sources, over the SAME date set."""
+    fair_dir, dates, missing = _fair_local_dir(WAREHOUSE_DIR)
+    if not dates:
+        print("  41: reports/warehouse/ is empty — rebuild some dates first")
+        return None
+    print(f"  41: comparing over {len(dates)} shared date(s): "
+          f"{dates[0]} .. {dates[-1]}")
+    if missing:
+        print(f"      ⚠️ no LOCAL bundle for {', '.join(missing)} — "
+              f"those dates are in the warehouse only")
+    ok_l = run([PY, "trade_report.py", "--bundles-dir", fair_dir], "41 local")
     ok_w = run([PY, "trade_report.py", "--bundles-dir", WAREHOUSE_DIR],
                "41 warehouse")
     if not (ok_l and ok_w):
         return None
+
+    del fair_dir
 
     def newest(tag):
         pat = re.compile(r"^trade_report_%s\d{4}-\d\d-\d\d\.json$" % tag)
@@ -134,8 +215,11 @@ def compare_breakdown(keep):
     a = json.load(open(pl))
     b = json.load(open(pw))
     for d in (a, b):
-        d.pop("source", None)
-        d.pop("generated", None)
+        for k in ("source", "generated", "generated_utc"):
+            d.pop(k, None)
+        # scope.sessions is the DATE SET, which is the thing we equalised above;
+        # if it still differs the equalisation failed and that is worth seeing,
+        # so it is compared rather than dropped.
     same = a == b
     print(f"  41: {'MATCH' if same else 'DIFF '}  "
           f"local={os.path.basename(pl)} warehouse={os.path.basename(pw)}")

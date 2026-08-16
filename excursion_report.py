@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/excursion_report.py — v3.3 — MFE/MAE distributions from the
+day_trader_pro/excursion_report.py — v3.4 — MFE/MAE distributions from the
 fleet's auto-collected per-symbol trade DBs.
 
 v3.1 — 2026-08-13 — `insurance_stop` WAS REPORTED NOWHERE. It is the MIDDLE
@@ -173,6 +173,12 @@ v2.0 — 2026-07-15 — READS trades/<date>/*_trades.db DIRECTLY (the raw per-bo
         no DB folder. Each snapshot contains the box's FULL history, so
         --since turns a single day's snapshot into a cumulative report.
         Output unchanged: reports/excursions_<date>.txt.
+v3.4 — 2026-08-16 — the --bundles-dir suffix names the DIRECTORY, not
+        "warehouse". v3.3 assumed any bundle run was a warehouse run, but the
+        parity tool legitimately runs this against the LOCAL bundle directory
+        too — to separate "DBs vs bundle" from "local vs warehouse" — and both
+        landed on the same filename. Suffix is now _bundle_<dirname>.
+
 v3.3 — 2026-08-16 — 🔴 A WAREHOUSE RUN WAS OVERWRITING THE LOCAL REPORT.
         v3.2 added --bundles-dir but left the output path alone, so a
         warehouse-sourced run wrote reports/excursions_<date>.txt — THE SAME
@@ -948,7 +954,10 @@ def main():
     # A warehouse-sourced run MUST NOT land on the local run's path. Comparing
     # two sources requires two files.
     if args.bundles_dir:
-        suffix += "_warehouse"
+        # Name the source directory. Two different bundle sources must not
+        # collide on one filename — that was the v3.2 bug in miniature.
+        suffix += "_bundle_" + (os.path.basename(
+            os.path.normpath(args.bundles_dir)) or "dir")
     out_path = os.path.join(REPORTS_DIR, f"excursions_{args.date}{suffix}.txt")
     with open(out_path, "w") as f:
         f.write(text)
