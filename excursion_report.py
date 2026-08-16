@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/excursion_report.py — v3.1 — MFE/MAE distributions from the
+day_trader_pro/excursion_report.py — v3.2 — MFE/MAE distributions from the
 fleet's auto-collected per-symbol trade DBs.
 
 v3.1 — 2026-08-13 — `insurance_stop` WAS REPORTED NOWHERE. It is the MIDDLE
@@ -173,6 +173,12 @@ v2.0 — 2026-07-15 — READS trades/<date>/*_trades.db DIRECTLY (the raw per-bo
         no DB folder. Each snapshot contains the box's FULL history, so
         --since turns a single day's snapshot into a cumulative report.
         Output unchanged: reports/excursions_<date>.txt.
+v3.2 — 2026-08-16 — --bundles-dir, for WH.11. This report normally reads the
+        per-box DBs DIRECTLY and only falls back to a bundle, so it was the one
+        report the warehouse comparison could not exercise at all. Passing a
+        directory forces the BUNDLE path and skips the DB source, which is what
+        makes an output-vs-output diff possible. Default unchanged.
+
 v1.0 — 2026-07-15 — initial (consolidated-file reader); control-server
         companion to trade_logger v3.8 telemetry and the exit_engine v3.8
         runner refinements.
@@ -351,12 +357,20 @@ def _rows_from_csv(path):
         return list(csv.DictReader(f))
 
 
-def load_day(day: str, since: str = ""):
-    rows, src = _rows_from_dbs(day, since)
-    if rows is not None:
-        return rows, src
-    j = os.path.join(REPORTS_DIR, f"fleet_trades_{day}.json")
-    c = os.path.join(REPORTS_DIR, f"fleet_trades_{day}.csv")
+def load_day(day: str, since: str = "", bundles_dir: str = ""):
+    """`bundles_dir` FORCES the bundle path and skips the DB source.
+
+    Deliberate: the DB source is the local pipeline. If it were still consulted
+    first, a warehouse run would silently read local DBs and the "comparison"
+    would compare the local source against itself.
+    """
+    base = bundles_dir or REPORTS_DIR
+    if not bundles_dir:
+        rows, src = _rows_from_dbs(day, since)
+        if rows is not None:
+            return rows, src
+    j = os.path.join(base, f"fleet_trades_{day}.json")
+    c = os.path.join(base, f"fleet_trades_{day}.csv")
     if os.path.exists(j):
         return _rows_from_json(j), j
     if os.path.exists(c):
@@ -834,6 +848,9 @@ def main():
     ap.add_argument("--since",
                     help="cumulative: include trades entered ON/AFTER this "
                          "date (default: the snapshot day only)")
+    ap.add_argument("--bundles-dir", default=None,
+                    help="force the BUNDLE source and read it from here "
+                         "(e.g. reports/warehouse); skips the per-box DBs")
     ap.add_argument("--strategy", help="strategy substring filter")
     ap.add_argument("--by", default="exit", choices=sorted(GROUP_KEYS),
                     help="group the table and floor sweep by this dimension "
@@ -842,7 +859,8 @@ def main():
                     help="live rows (default: paper)")
     args = ap.parse_args()
 
-    all_rows, src = load_day(args.date, args.since or "")
+    all_rows, src = load_day(args.date, args.since or "",
+                             bundles_dir=args.bundles_dir or "")
     if all_rows is None:
         print(f"No trades/{args.date}/*_trades.db and no "
               f"fleet_trades_{args.date}.json/.csv — nothing collected for "

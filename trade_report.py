@@ -1,4 +1,11 @@
-# day_trader_pro/trade_report.py — v1.5
+# day_trader_pro/trade_report.py — v1.6
+# v1.6 (2026-08-16) — --bundles-dir, for WH.11. Lets this report run against
+#   warehouse-sourced bundles in reports/warehouse/ so the OUTPUTS of both
+#   sources can be diffed — bundle-level equivalence does not establish that
+#   the reports agree. Default is unchanged; the local path is byte-identical
+#   to v1.5. ⚠️ Note the glob it depends on: reports/fleet_trades_*.json is
+#   this report's INPUT, so anything written beside those files becomes its
+#   data whether or not that was intended.
 # v1.5 (2026-08-04) — HEADLINE stops printing false sentences. rank() now
 #   returns how many buckets cleared the sample floor, and the printer refuses
 #   the word "worst" when there is only one (it was naming the SAME bucket as
@@ -223,10 +230,18 @@ def session_phase(et: Optional[datetime]) -> str:
 
 
 # ── loading ──────────────────────────────────────────────────────────────────
-def load_trades(since, mode) -> Tuple[List[dict], List[tuple], int]:
+def load_trades(since, mode, bundles_dir=None) -> Tuple[List[dict], List[tuple], int]:
+    """`bundles_dir` lets this run against warehouse-sourced bundles.
+
+    Added for WH.11: the point is to run this report from BOTH sources and diff
+    the OUTPUTS, which bundle-level equivalence does not establish on its own.
+    Default is unchanged, so the local path behaves exactly as before.
+    """
     seen: Dict[str, dict] = {}
     raw = 0
-    for path in sorted(glob.glob(BUNDLE_GLOB)):
+    pattern = (os.path.join(bundles_dir, "fleet_trades_*.json")
+               if bundles_dir else BUNDLE_GLOB)
+    for path in sorted(glob.glob(pattern)):
         try:
             with open(path) as fh:
                 bundle = json.load(fh)
@@ -437,13 +452,17 @@ def main(argv: List[str]) -> int:
     ap.add_argument("--min-n", type=int, default=8,
                     help="thin-bucket flag AND best/worst sample floor (default 8)")
     ap.add_argument("--no-json", action="store_true", help="display only")
+    ap.add_argument("--bundles-dir", default=None,
+                    help="read bundles from here instead of reports/ "
+                         "(e.g. reports/warehouse for the S3-sourced copies)")
     g = ap.add_mutually_exclusive_group()
     g.add_argument("--live", action="store_true")
     g.add_argument("--paper", action="store_true")
     args = ap.parse_args(argv[1:])
     mode = "live" if args.live else ("paper" if args.paper else "all")
 
-    trades, used, raw = load_trades(args.since, None if mode == "all" else mode)
+    trades, used, raw = load_trades(args.since, None if mode == "all" else mode,
+                                    bundles_dir=args.bundles_dir)
     if not trades:
         print(f"No closed trades found in {BUNDLE_GLOB}")
         return 2

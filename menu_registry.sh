@@ -80,6 +80,15 @@ MENU=(
   "ITEM|Verify control IAM role sees the fleet (read-only; no start/stop)|mi_verify_control_iam_role_sees_the_fleet_read"
   "ITEM|Blind-alert DRILL on the fleet (sends REAL Telegram, marked DRILL)|mi_blind_alert_drill_on_the_fleet_sends_real_te"
   "ITEM|Feed maintenance window (fleet up, nothing on the wire) - currently OFF|mi_feed_maintenance_window_fleet_up_nothing_on"
+  "SECTION|S3 WAREHOUSE (read-only; runs ALONGSIDE the local reports)"
+  "ITEM|Warehouse inventory & cost|mi_warehouse_inventory_cost"
+  "ITEM|Warehouse inventory & cost (+ noncurrent versions)|mi_warehouse_inventory_versions"
+  "ITEM|Rebuild a day's bundle FROM S3 -> reports/warehouse/|mi_warehouse_rebuild_bundle"
+  "ITEM|Compare S3 vs local - one date|mi_warehouse_compare_date"
+  "ITEM|Compare S3 vs local - EVERY in-coverage date|mi_warehouse_compare_all"
+  "ITEM|Explain a date's divergence (lists trade_ids)|mi_warehouse_explain_date"
+  "ITEM|Excursion report FROM THE WAREHOUSE|mi_warehouse_excursion_report"
+  "ITEM|Trade breakdown FROM THE WAREHOUSE (cross-day)|mi_warehouse_trade_report"
 )
 
 # ── render + dispatch, the whole of it ──────────────────────────────
@@ -103,7 +112,7 @@ _menu_label() {
 
 menu_render() {
   printf '======================================================\n'
-  printf '  Day Trader Pro — devtools  v1.32 Service Menu\n'
+  printf '  Day Trader Pro — devtools  v1.33 Service Menu\n'
   printf '======================================================\n'
   local i=0 kind rest label
   for entry in "${MENU[@]}"; do

@@ -1,5 +1,14 @@
 #!/usr/bin/env bash
-# day_trader_pro/devtools.sh — v1.32
+# day_trader_pro/devtools.sh — v1.33
+# v1.33  2026-08-16  S3 WAREHOUSE section added (8 items, 59-66). ADDITIVE:
+#        nothing is replaced and no existing report changes its source. The
+#        warehouse variants of the excursion report and the trade breakdown run
+#        ALONGSIDE the local ones precisely so their OUTPUTS can be diffed —
+#        a menu item that quietly switched a report's source would destroy the
+#        comparison it exists to make. `--diff` across this change: 0 labels
+#        removed, 0 commands changed, 8 added.
+#        ⚠️ Adding a whole section moved NO existing number, because the section
+#        went last. That is luck, not design — the number is still arbitrary.
 # v1.32  2026-08-16  THE MENU IS DATA. The heredoc + case block are gone,
 #        replaced by menu_registry.sh (SECTION/LABEL/FUNCTION, in display order)
 #        and menu_functions.sh (one function per item, body copied VERBATIM).

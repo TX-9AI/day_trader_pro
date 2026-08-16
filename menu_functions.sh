@@ -340,3 +340,59 @@ mi_feed_maintenance_window_fleet_up_nothing_on() {
         read -rp "Enter to continue..." _
 }
 
+# ── S3 WAREHOUSE (added 2026-08-16, WH.11 — ADDITIVE, nothing replaced) ─────
+# These sit ALONGSIDE the local reports, they do not replace them. The whole
+# point of this stage is to run both sources and diff the OUTPUTS; a menu item
+# that quietly switched a report's source would destroy the comparison.
+
+# Warehouse inventory & cost
+mi_warehouse_inventory_cost() {
+    echo; $PY warehouse_cost.py; pause
+}
+
+# Warehouse inventory & cost (+ noncurrent versions)
+mi_warehouse_inventory_versions() {
+    echo; $PY warehouse_cost.py --versions; pause
+}
+
+# Rebuild a day's bundle FROM S3 -> reports/warehouse/
+mi_warehouse_rebuild_bundle() {
+    echo; read -rp "Date (YYYY-MM-DD, blank = today): " WD
+    if [ -z "$WD" ]; then $PY warehouse_reader.py; else $PY warehouse_reader.py --date "$WD"; fi
+    pause
+}
+
+# Compare S3 vs local for ONE date
+mi_warehouse_compare_date() {
+    echo; read -rp "Date (YYYY-MM-DD): " WD
+    if [ -n "$WD" ]; then $PY warehouse_reader.py --date "$WD" --compare; fi
+    pause
+}
+
+# Compare EVERY in-coverage date
+mi_warehouse_compare_all() {
+    echo; $PY warehouse_reader.py --all; pause
+}
+
+# Explain a date's divergence (lists the differing trade_ids)
+mi_warehouse_explain_date() {
+    echo; read -rp "Date (YYYY-MM-DD): " WD
+    if [ -n "$WD" ]; then $PY warehouse_reader.py --date "$WD" --explain; fi
+    pause
+}
+
+# Excursion report FROM THE WAREHOUSE (forces the bundle source)
+mi_warehouse_excursion_report() {
+    echo; read -rp "Date (YYYY-MM-DD): " WD
+    if [ -n "$WD" ]; then
+      $PY warehouse_reader.py --date "$WD" && \
+      $PY excursion_report.py --date "$WD" --bundles-dir reports/warehouse
+    fi
+    pause
+}
+
+# Trade breakdown FROM THE WAREHOUSE (cross-day)
+mi_warehouse_trade_report() {
+    echo; echo "Reads reports/warehouse/ — run the rebuild for the dates you want first."
+    $PY trade_report.py --bundles-dir reports/warehouse; pause
+}
