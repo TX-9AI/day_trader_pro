@@ -1,5 +1,15 @@
 #!/usr/bin/env python3
-# day_trader_pro/warehouse_cost.py — v1.1
+# day_trader_pro/warehouse_cost.py — v1.2
+# v1.2 (2026-08-16) — TWO OF MY MISTAKES, COMPOUNDING.
+#      (a) `--versions` calls ListObjectVersions, which needs
+#          `s3:ListBucketVersions` — an action I did NOT put in
+#          VertigoWarehouseControlRead when I wrote it. AccessDenied.
+#      (b) Worse: the whole-bucket scan had ALREADY COMPLETED, and the failure
+#          in the second pass threw that work away, because the report only
+#          printed after BOTH passes. A minute of successful work discarded by
+#          an optional extra. The main report is now computed and PRINTED
+#          FIRST; the version pass is strictly additive and degrades to a
+#          warning naming the exact missing permission.
 # v1.1 (2026-08-16) — IT PRINTED NOTHING FOR TWO MINUTES. A full LIST of ~130k
 #      objects is 130+ paginated API calls, and --versions does a SECOND full
 #      pass, so it was working the whole time — but it said so nowhere. That is
@@ -184,14 +194,21 @@ def report(s3=None, do_versions=False, as_json=False, quiet=False):
             "athena_full_scan_usd": round(r["bytes"] / GB / 1024 * PRICE_ATHENA_TB, 4),
         }
 
+    vers_err = None
     if do_versions:
-        cur, old, marks = scan_versions(s3, quiet=quiet)
-        out["versions"] = {
-            "current": {"n": cur["n"], "gb": round(cur["bytes"] / GB, 4)},
-            "noncurrent": {"n": old["n"], "gb": round(old["bytes"] / GB, 4),
-                           "usd_mo": round(old["bytes"] / GB * PRICE_STORAGE_GB_MO, 3)},
-            "delete_markers": marks,
-        }
+        # STRICTLY ADDITIVE. Everything above is already computed; a failure
+        # here must not cost the caller that work.
+        try:
+            cur, old, marks = scan_versions(s3, quiet=quiet)
+            out["versions"] = {
+                "current": {"n": cur["n"], "gb": round(cur["bytes"] / GB, 4)},
+                "noncurrent": {"n": old["n"], "gb": round(old["bytes"] / GB, 4),
+                               "usd_mo": round(old["bytes"] / GB * PRICE_STORAGE_GB_MO, 3)},
+                "delete_markers": marks,
+            }
+        except Exception as exc:
+            vers_err = str(exc)
+            out["versions_error"] = vers_err
 
     if as_json:
         print(json.dumps(out, indent=2))
@@ -218,6 +235,17 @@ def report(s3=None, do_versions=False, as_json=False, quiet=False):
           f"verify-GET {out['requests_usd_mo']['verify_get']:.2f}")
     print(f"  TOTAL $/mo         ~"
           f"{out['projected_year']['storage_usd_mo_year1_avg'] + out['requests_usd_mo']['put'] + out['requests_usd_mo']['verify_get']:.2f}")
+
+    if vers_err:
+        print()
+        print("  ⚠️  version accounting SKIPPED — everything above still stands.")
+        if "ListBucketVersions" in vers_err or "AccessDenied" in vers_err:
+            print("      The control role lacks s3:ListBucketVersions. Add it to")
+            print("      VertigoWarehouseControlRead (bucket ARN, not /*):")
+            print('        "Action": ["s3:GetObject","s3:ListBucket",'
+                  '"s3:ListBucketVersions"]')
+        else:
+            print(f"      {vers_err[:160]}")
 
     if "versions" in out:
         v = out["versions"]

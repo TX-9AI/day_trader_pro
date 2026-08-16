@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/test_warehouse_cost.py — v1.1
+# day_trader_pro/tests/test_warehouse_cost.py — v1.2
 """
 Pins warehouse_cost v1.0 (WH.9a).
 
 CHANGELOG
+    v1.2 — 2026-08-16 — the DEGRADATION test. `--versions` hit AccessDenied on
+           the real bucket and threw away a completed whole-bucket scan with
+           it. An optional extra must never cost the caller work that already
+           succeeded, so that is now asserted rather than hoped for.
     v1.1 — 2026-08-16 — alongside warehouse_cost v1.1. Adds the check that
            would have caught the two-minute silence: progress must reach
            STDERR, and must NOT contaminate stdout, or --json stops being
@@ -151,6 +155,32 @@ check("--json emits parseable JSON and nothing else",
       json.loads(buf_out2.getvalue())["objects"] == 105)
 check("--quiet silences progress entirely", buf_err2.getvalue() == "",
       buf_err2.getvalue()[:60])
+
+
+# an optional extra must not discard work that already succeeded
+class VersionsBoom(Stub):
+    def get_paginator(self, op):
+        if op == "list_objects_v2":
+            return Stub.get_paginator(self, op)
+
+        class _P:
+            def paginate(self_inner, **kw):
+                raise RuntimeError(
+                    "An error occurred (AccessDenied) when calling the "
+                    "ListObjectVersions operation: ... s3:ListBucketVersions")
+        return _P()
+
+
+bufo, bufe = io.StringIO(), io.StringIO()
+with contextlib.redirect_stdout(bufo), contextlib.redirect_stderr(bufe):
+    outv = WC.report(VersionsBoom(OBJS), do_versions=True, quiet=True)
+txt = bufo.getvalue()
+check("a --versions failure does NOT discard the completed scan",
+      outv["objects"] == 105 and "WAREHOUSE INVENTORY" in txt, outv.get("objects"))
+check("the failure is reported, not swallowed", "versions_error" in outv)
+check("it names the exact missing permission",
+      "s3:ListBucketVersions" in txt)
+check("it says the rest of the report still stands", "still stands" in txt)
 
 print("\n" + ("ALL CHECKS PASSED" if not FAILS else "FAILURES: " + ", ".join(FAILS)))
 sys.exit(1 if FAILS else 0)
