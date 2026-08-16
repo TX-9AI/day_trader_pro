@@ -1,8 +1,26 @@
-# day_trader_pro/eod_backfill.py — v1.2
+# day_trader_pro/eod_backfill.py — v1.3
 # v1.1.1 (2026-07-23) — correct stale data/harvest path references (layout retired; now reports/ + ohlc/ + trades/)
 # v1.1.0 (2026-07-11) — canonical layout: reads/writes ohlc/<date>/<SYM>_ohlc_<date>.csv
 #   (was data/harvest/). Detection accepts legacy _OHLC_ too.
 """
+v1.3 — 2026-08-16 — WH.14: the EOD pass FILLS THE BUCKET, fails loudly, and the
+       pull becomes severable.
+       (a) A box that cannot confirm now fires a REAL Telegram alert through the
+           conductor's existing notify path, named and counted — not a log line
+           nobody reads. Operator: "fail loudly & skip to the next."
+       (b) The scp pull sits behind OT_EOD_PULL (default 1). Severing the
+           control-side copy is then a config flip, not a code change — and it
+           is reversible, which is the whole point of dual-write-then-sever.
+       (c) An explicit inter-box spacing knob on the drain loop. HONEST NOTE:
+           this loop was ALREADY serial, so the five boxes in a batch never
+           drained simultaneously — the knob makes the spacing deliberate and
+           tunable rather than incidental. The real concurrency is each box's
+           own 5-minute timer, which no conductor setting can reach; that is
+           handled on the box by Nice=15 / idle IO.
+       ⚠️ BATCHES REMAIN SEQUENTIAL. Group A completes and is stopped before
+       group B wakes. An earlier cross-batch pipeline idea of mine was wrong and
+       is not built.
+
 v1.2 — 2026-08-13 — WH.4: each batch must PROVE it filled the warehouse before
        it is stopped. `_drain_verify()` runs the box-side pusher in --verify
        mode over SSH between _pull and _stop and logs OK/SHORT per symbol. It
@@ -53,6 +71,7 @@ from zoneinfo import ZoneInfo
 import config
 import ec2ops
 import instance_registry
+import notify
 import ssh_util
 
 _ET = ZoneInfo("US/Eastern")
@@ -208,6 +227,11 @@ def _pull(recs, date, day_dir, dry):
 
 
 DRAIN_TIMEOUT = 300          # s — a first drain on a long-idle box is not fast
+DRAIN_SPACING = float(os.environ.get("OT_EOD_DRAIN_SPACING", "5"))
+# Dual-write control. 1 = keep scp-ing to control alongside the S3 push (the
+# safety net); 0 = the warehouse is the only path for this pass. Flip only once
+# the push has a confirmed track record — decision #5, dual-write then sever.
+PULL_ENABLED = os.environ.get("OT_EOD_PULL", "1") != "0"
 
 
 def _drain_verify(recs, dry):
@@ -225,7 +249,9 @@ def _drain_verify(recs, dry):
     batch loop against the stream cap and can strand the whole backfill.
     """
     out = {}
-    for s_, rec in recs.items():
+    for idx, (s_, rec) in enumerate(sorted(recs.items())):
+        if idx and DRAIN_SPACING and not dry:
+            time.sleep(DRAIN_SPACING)   # deliberate spacing, not incidental
         if dry:
             _log("DRAIN", f"[dry] would verify {s_} filled the bucket")
             out[s_] = "OK"
@@ -321,12 +347,31 @@ def run(date=None, batch=5, stream_cap=10, only=None, dry=False):
         recs = _wake(group, mapping, dry)
         _produce(recs, dry)
         _poll_bars(recs, dry)
-        local = _pull(recs, date, day_dir, dry)
+        if PULL_ENABLED:
+            local = _pull(recs, date, day_dir, dry)
+        else:
+            local = {}
+            _log("PULL", "skipped — OT_EOD_PULL=0, the warehouse is the only "
+                         "path for this pass")
         drained = _drain_verify(recs, dry)
         not_clear = [k for k, v in drained.items() if v != "OK"]
         if not_clear:
-            _log("DRAIN", "⚠️ NOT CLEAR (data stranded on box until its next "
-                          "wake, not lost): " + ", ".join(not_clear))
+            # FAIL LOUDLY, SKIP ON. The box still stops: its data is STRANDED
+            # until the next wake (OnBootSec catch-up), not lost, whereas
+            # holding the pipeline would strand the whole backfill against the
+            # stream cap. So the failure has to be visible somewhere a human
+            # actually looks — Telegram, not the log.
+            msg = ("⚠️ EOD backfill: warehouse NOT confirmed for "
+                   + ", ".join(sorted(not_clear))
+                   + f" ({len(not_clear)}/{len(drained)} in this batch). "
+                     "Boxes stopped anyway; data is stranded on them until "
+                     "their next wake, not lost.")
+            _log("DRAIN", msg)
+            if not dry:
+                try:
+                    notify.send(msg)
+                except Exception as exc:       # never let alerting stop the pass
+                    _log("DRAIN", f"(telegram failed: {exc})")
         _stop(recs, dry)
         for s in group:
             b = local.get(s, -1)
