@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-# day_trader_pro/tools/menu_extract.py — v1.0
+# day_trader_pro/tools/menu_extract.py — v1.1
+# v1.1 (2026-08-16) — READS EITHER SOURCE. v1.0 parsed only the heredoc + case
+#      block, so the instant devtools.sh became declarative the parser would
+#      stop matching and the AFTER side of the diff could not be produced — the
+#      proof tool would have died at exactly the moment it was needed. It now
+#      auto-detects which source devtools.sh is actually using and reads that,
+#      so the same command is valid on both sides of the conversion.
+#      Adds --roundtrip: proves the generated registry is EQUIVALENT to the live
+#      menu before anything is swapped in.
 # v1.0 (2026-08-16) — reconstruct the devtools menu as DATA, so the current
 #      state and any future state can be diffed with numbers removed.
 """
@@ -47,6 +55,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 MENU = os.path.join(ROOT, "devtools.sh")
+REGISTRY = os.path.join(ROOT, "menu_registry.sh")
 
 # Markers, not line numbers — line numbers go stale on the first edit.
 HEREDOC_OPEN = "cat <<'EOF' | _colorize"
@@ -119,11 +128,86 @@ def inventory(display, handlers):
     return rows
 
 
-def cmd_inventory(args):
+def parse_registry(path=REGISTRY):
+    """(section, label, command) from the MENU array. No numbers exist here.
+
+    Split with maxsplit so a SHELL PIPE inside a command cannot be mistaken for
+    the field delimiter — the bash side is safe for the same reason
+    (`${rest%%|*}` / `${rest#*|}` are first-match).
+    """
+    rows, section = [], "?"
+    body = open(path, encoding="utf-8").read()
+    m = re.search(r"^MENU=\((.*?)^\)", body, re.S | re.M)
+    if not m:
+        return rows
+    for line in m.group(1).split("\n"):
+        line = line.strip()
+        if not line.startswith('"') or not line.endswith('"'):
+            continue
+        entry = line[1:-1].replace('\\"', '"').replace("\\\\", "\\")
+        parts = entry.split("|", 2)
+        if parts[0] == "SECTION" and len(parts) >= 2:
+            section = parts[1]
+        elif parts[0] == "ITEM" and len(parts) == 3:
+            rows.append((section, parts[1], parts[2]))
+    return rows
+
+
+def active_source():
+    """Which source devtools.sh actually uses — asked, not assumed."""
+    try:
+        body = open(MENU, encoding="utf-8").read()
+    except Exception:
+        return "registry" if os.path.exists(REGISTRY) else "heredoc"
+    if re.search(r"^\s*(\.|source)\s+.*menu_registry\.sh", body, re.M):
+        return "registry"
+    return "heredoc"
+
+
+def rows_for(source="auto"):
+    if source == "auto":
+        source = active_source()
+    if source == "registry":
+        return parse_registry(), "registry"
     display, handlers = parse()
-    for section, label, cmd in inventory(display, handlers):
+    return inventory(display, handlers), "heredoc"
+
+
+def cmd_inventory(args):
+    rows, src = rows_for(getattr(args, "source", "auto"))
+    sys.stderr.write(f"# source: {src}\n")
+    for section, label, cmd in rows:
         print(f"{section}\t{label}\t{cmd}")
     return 0
+
+
+def cmd_roundtrip(args):
+    """Is the generated registry EQUIVALENT to the live menu?
+
+    The strongest assurance available before the swap: both sides reduced to
+    label -> command, numbers already discarded, and compared. If this is clean
+    the registry can replace the case block without changing behaviour.
+    """
+    if not os.path.exists(REGISTRY):
+        print("  no menu_registry.sh — generate it with --registry first")
+        return 2
+    display, handlers = parse()
+    live = {l: c for _s, l, c in inventory(display, handlers)}
+    reg = {l: c for _s, l, c in parse_registry()}
+    gone = sorted(set(live) - set(reg))
+    extra = sorted(set(reg) - set(live))
+    diff = sorted(l for l in set(live) & set(reg) if live[l] != reg[l])
+    print(f"  live menu {len(live)} item(s) · registry {len(reg)} item(s)")
+    print(f"  in live but not registry : {gone or 'none'}")
+    print(f"  in registry but not live : {extra or 'none'}")
+    print(f"  command differs          : {len(diff)}")
+    for l in diff[:10]:
+        print(f"    ! {l}\n        live: {live[l][:120]}\n        reg : {reg[l][:120]}")
+    ok = not (gone or extra or diff)
+    print("\n  " + ("✅ registry is EQUIVALENT to the live menu — safe to swap in"
+                    if ok else
+                    "❌ registry does NOT reproduce the live menu — do not swap"))
+    return 0 if ok else 1
 
 
 def cmd_check(args):
@@ -245,7 +329,13 @@ def main(argv):
     # NOTE: a subparser named "--diff" was a mistake — argparse then demanded it
     # as a positional and rejected the file arguments. Two plain operands.
     p.add_argument("--diff", nargs=2, metavar=("OLD", "NEW"))
+    p.add_argument("--roundtrip", action="store_true",
+                   help="prove menu_registry.sh reproduces the live menu")
+    p.add_argument("--source", choices=("auto", "heredoc", "registry"),
+                   default="auto", help="which source to read (default: auto)")
     a = p.parse_args(argv)
+    if a.roundtrip:
+        return cmd_roundtrip(a)
     if a.diff:
         a.old, a.new = a.diff
         return cmd_diff(a)
