@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-# day_trader_pro/tools/report_parity.py — v1.1
+# day_trader_pro/tools/report_parity.py — v1.2
+# v1.2 (2026-08-16) — DIAGNOSE, don't just DETECT. v1.1 correctly isolated the
+#      warehouse question but then reported "section differs: dedup" and left
+#      the operator to go find out why. A difference you cannot act on is only
+#      half an answer. Now prints the actual VALUES for the small diagnostic
+#      sections (scope, dedup, overall) and, for report 40, the source LINE
+#      containing the divergent figure from both files.
 # v1.1 (2026-08-16) — 🔴 v1.0's FIRST REAL RUN REPORTED A DIVERGENCE IT HAD
 #      MANUFACTURED ITSELF. Three defects, all mine:
 #      (1) REPORT 41 IS CROSS-DAY. The local run globs every bundle in reports/
@@ -104,6 +110,23 @@ def _first_diff(a, b):
     return None
 
 
+def _locate(path, index):
+    """The source line holding the Nth non-noise figure — 'figure 36' alone is
+    not actionable, and chasing it by hand is exactly the friction that stops
+    a divergence from being investigated."""
+    if not os.path.exists(path):
+        return "(missing)"
+    seen = 0
+    for line in open(path, encoding="utf-8", errors="replace"):
+        if _NOISE.search(line):
+            continue
+        hits = _NUM.findall(line)
+        if seen <= index < seen + len(hits):
+            return line.rstrip()[:160]
+        seen += len(hits)
+    return "(past end)"
+
+
 def compare_excursions(day, keep):
     """Report 40 THREE ways, so a difference can be attributed.
 
@@ -144,6 +167,10 @@ def compare_excursions(day, keep):
     print(f"  40 {day}: DB-vs-localbundle {'same' if d_local is None else d_local}"
           f"   |   localbundle-vs-WAREHOUSE "
           f"{'MATCH' if d_ware is None else 'DIFF ' + d_ware}")
+    if d_ware and d_ware.startswith("figure "):
+        idx = int(d_ware.split()[1].rstrip(":"))
+        print(f"      local bundle : {_locate(p_lb, idx)}")
+        print(f"      warehouse    : {_locate(p_wb, idx)}")
     if d_local is not None and d_local != "n/a" and d_ware is None:
         print("      → the warehouse reproduces the local BUNDLE exactly; the "
               "difference is DB-vs-bundle and predates the warehouse")
@@ -224,9 +251,25 @@ def compare_breakdown(keep):
     print(f"  41: {'MATCH' if same else 'DIFF '}  "
           f"local={os.path.basename(pl)} warehouse={os.path.basename(pw)}")
     if not same:
-        for k in sorted(set(a) | set(b)):
+        # scope/dedup are small and are where a set-vs-content problem shows
+        # itself, so print them rather than naming them.
+        for k in ("scope", "dedup"):
             if a.get(k) != b.get(k):
-                print(f"      section differs: {k}")
+                print(f"      {k}:")
+                print(f"        local     {json.dumps(a.get(k), default=str)[:300]}")
+                print(f"        warehouse {json.dumps(b.get(k), default=str)[:300]}")
+        ov_a, ov_b = a.get("overall") or {}, b.get("overall") or {}
+        if ov_a != ov_b and isinstance(ov_a, dict) and isinstance(ov_b, dict):
+            print("      overall — differing keys:")
+            for k in sorted(set(ov_a) | set(ov_b)):
+                if ov_a.get(k) != ov_b.get(k):
+                    print(f"        {k}: local {ov_a.get(k)!r} vs "
+                          f"warehouse {ov_b.get(k)!r}")
+        rest = [k for k in sorted(set(a) | set(b))
+                if a.get(k) != b.get(k) and k not in ("scope", "dedup", "overall")]
+        if rest:
+            print(f"      also differing (derived from the above): "
+                  f"{', '.join(rest)}")
     if not keep and os.path.exists(pw):
         os.remove(pw)
     return same
