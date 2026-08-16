@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-# day_trader_pro/warehouse_reader.py — v1.0
+# day_trader_pro/warehouse_reader.py — v1.1
+# v1.1 (2026-08-16) — `--all`. The first --compare MATCHED exactly on 2026-08-14
+#      (153 trades, net +5839.50, from 178 stored states). One date is not
+#      evidence: it is one date. This sweeps every local bundle and reports a
+#      per-date verdict plus a tally, so the claim being made is "N of N dates
+#      reproduce" rather than "the one I happened to pick did".
 # v1.0 (2026-08-16) — WH.8. Rebuilds the fleet_trades_<date> bundle from
 #      s3://vertigo-warehouse-tx9ai instead of from the scp'd per-box DBs, so
 #      reports 40/41 can be run against the warehouse and DIFFED against the
@@ -44,6 +49,7 @@ CLI
   python3 warehouse_reader.py --date 2026-08-14
   python3 warehouse_reader.py --date 2026-08-14 --out reports/fleet_trades_s3_2026-08-14.json
   python3 warehouse_reader.py --date 2026-08-14 --compare   # diff vs the local bundle
+  python3 warehouse_reader.py --all                        # compare EVERY local bundle
 """
 
 import argparse
@@ -233,15 +239,84 @@ def compare(date, s3=None):
     return 0 if clean else 1
 
 
+def compare_all(s3=None):
+    """Compare every date that has a local bundle. Read-only.
+
+    A single matching date proves the reader parses one day correctly. It does
+    not establish that the warehouse reproduces the pipeline — for that the
+    claim has to be "N of N dates", and any date that diverges has to be named
+    rather than averaged away.
+    """
+    import glob
+    import re
+    s3 = s3 or _client()
+    paths = sorted(glob.glob(os.path.join(config.REPORTS_DIR, "fleet_trades_*.json")))
+    dates = []
+    for p_ in paths:
+        m = re.search(r"fleet_trades_(\d{4}-\d{2}-\d{2})\.json$", p_)
+        if m:
+            dates.append(m.group(1))
+    if not dates:
+        _log("DIFF", "no local bundles found — nothing to compare against")
+        return 2
+
+    print(f"\n  comparing {len(dates)} date(s) with a local bundle\n")
+    ok, bad, empty = [], [], []
+    for d in dates:
+        try:
+            loc_p = os.path.join(config.REPORTS_DIR, f"fleet_trades_{d}.json")
+            with open(loc_p) as fh:
+                loc = json.load(fh)
+            s3b = build(d, s3)
+            lt = {str(t.get("trade_id")): t for t in loc.get("trades", [])}
+            st = {str(t.get("trade_id")): t for t in s3b.get("trades", [])}
+            diffs = (len(set(lt) ^ set(st))
+                     + sum(1 for k in set(lt) & set(st)
+                           if round(CT._num(lt[k].get("pnl_usd")), 2)
+                           != round(CT._num(st[k].get("pnl_usd")), 2))
+                     + sum(1 for k in set(lt) & set(st)
+                           if str(lt[k].get("status")) != str(st[k].get("status"))))
+            tag = "MATCH " if diffs == 0 else "DIFF  "
+            if diffs == 0:
+                (empty if not lt else ok).append(d)
+            else:
+                bad.append((d, diffs))
+            print(f"  {tag} {d}  local {len(lt):>4}  s3 {len(st):>4}"
+                  f"  states {s3b['meta']['n_trade_objects']:>4}"
+                  + ("" if diffs == 0 else f"   ⚠️ {diffs} difference(s)"))
+        except Exception as exc:
+            bad.append((d, str(exc)[:60]))
+            print(f"  ERROR {d}  {exc}")
+
+    print()
+    print(f"  {len(ok)} date(s) matched with trades · {len(empty)} matched but EMPTY "
+          f"both sides · {len(bad)} divergent")
+    if empty:
+        # An empty-vs-empty date is not evidence of anything. Say so rather than
+        # letting it inflate the pass count.
+        print(f"  (empty dates prove nothing: {', '.join(empty[:8])}"
+              + (" …" if len(empty) > 8 else "") + ")")
+    if bad:
+        print("  ❌ DIVERGENT: " + ", ".join(f"{d}({n})" for d, n in bad))
+        print("  do NOT sever — investigate the dates above")
+        return 1
+    print("  ✅ every date with trades reproduces from the warehouse")
+    return 0
+
+
 def main(argv):
     p = argparse.ArgumentParser(description="Rebuild the fleet_trades bundle from S3")
     p.add_argument("--date", default=None, help="YYYY-MM-DD (default: today ET)")
     p.add_argument("--out", default=None, help="write the bundle here")
     p.add_argument("--compare", action="store_true",
                    help="diff against reports/fleet_trades_<date>.json")
+    p.add_argument("--all", action="store_true",
+                   help="compare EVERY date that has a local bundle")
     a = p.parse_args(argv[1:])
     date = a.date or datetime.now(_ET).date().isoformat()
 
+    if a.all:
+        return compare_all()
     if a.compare:
         return compare(date)
 

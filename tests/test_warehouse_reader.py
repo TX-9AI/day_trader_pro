@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/test_warehouse_reader.py — v1.0
+# day_trader_pro/tests/test_warehouse_reader.py — v1.1
 """
 Pins warehouse_reader v1.0 (WH.8).
 
 CHANGELOG
+    v1.1 — 2026-08-16 — `--all`. The check worth having is that an EMPTY date
+           is not counted as a pass: 30 dates where both sides hold zero trades
+           would otherwise report "30/30 match" and mean nothing.
     v1.0 — 2026-08-16 — alongside warehouse_reader v1.0.
 
 THE CHECK THAT EARNS ITS PLACE
@@ -127,6 +130,36 @@ check("by_box counts per partition",
       bundle["by_box"])
 check("an empty date yields an empty bundle, not a crash",
       WR.build("1999-01-01", s3)["meta"]["n_trades"] == 0)
+
+
+# --all: an empty-vs-empty date must not inflate the pass count
+import io
+import contextlib
+import tempfile
+
+tmpd = tempfile.mkdtemp()
+WR.config.REPORTS_DIR = tmpd
+# one date WITH trades (matches), one EMPTY on both sides
+with open(os.path.join(tmpd, "fleet_trades_%s.json" % D), "w") as fh:
+    json.dump({"trades": [
+        {"trade_id": 1, "status": "closed", "pnl_usd": 412.5},
+        {"trade_id": 2, "status": "closed", "pnl_usd": -120.0}],
+        "fleet_stats": {"net_pnl": 292.5}}, fh)
+with open(os.path.join(tmpd, "fleet_trades_2026-08-01.json"), "w") as fh:
+    json.dump({"trades": [], "fleet_stats": {"net_pnl": 0.0}}, fh)
+
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    rc = WR.compare_all(s3)
+txt = buf.getvalue()
+check("--all returns 0 when nothing diverges", rc == 0, rc)
+check("--all reports the date WITH trades as a match", "MATCH  %s" % D in txt, txt[:200])
+check("an empty-vs-empty date is counted SEPARATELY, not as a pass",
+      "1 date(s) matched with trades" in txt and "1 matched but EMPTY" in txt, txt)
+check("--all says plainly that empty dates prove nothing",
+      "empty dates prove nothing" in txt, txt)
+check("--all shows the stored-state count per date, not just trades",
+      "states" in txt, txt[:200])
 
 print("\n" + ("ALL CHECKS PASSED" if not FAILS else "FAILURES: " + ", ".join(FAILS)))
 sys.exit(1 if FAILS else 0)
