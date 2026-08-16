@@ -1,5 +1,13 @@
 #!/usr/bin/env bash
-# day_trader_pro/devtools.sh — v1.34
+# day_trader_pro/devtools.sh — v1.35
+# v1.35  2026-08-16  Found by DRIVING THE MENU rather than the shell, which is
+#        the path the operator actually uses: items 65/66 passed a RELATIVE
+#        --bundles-dir. devtools cd's to SCRIPT_DIR at line 51 so it resolved
+#        today, but it violated the cwd-independence rule and would break the
+#        moment a handler ran from anywhere else. Now "$SCRIPT_DIR/reports/
+#        warehouse". ⚠️ --diff correctly flags these two as COMMAND CHANGED —
+#        that is the tool working, not a false alarm; the baseline was refreshed
+#        deliberately after reviewing both lines.
 # v1.34  2026-08-16  REPORT PARITY item added (67). Runs reports 40 and 41 from
 #        BOTH sources and diffs their OUTPUTS — WH.11's real gate, since bundle
 #        equivalence is necessary and not sufficient. Still additive: 0 labels

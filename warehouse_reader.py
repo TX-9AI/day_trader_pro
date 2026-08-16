@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-# day_trader_pro/warehouse_reader.py — v1.4
+# day_trader_pro/warehouse_reader.py — v1.5
+# v1.5 (2026-08-16) — an AWS failure printed a RAW TRACEBACK. Found by driving
+#      the new menu items instead of the shell: item 65 dumped 11 lines of
+#      botocore stack for what is really "no credentials". On control it has
+#      credentials so this never showed in shell testing — which is the argument
+#      for testing the path the operator actually uses.
 # v1.4 (2026-08-16) — 🔴 THE DEFAULT OUTPUT PATH CONTAMINATED REPORT 41.
 #      `--out` defaulted to `reports/fleet_trades_s3_<date>.json`, and report 41
 #      globs `reports/fleet_trades_*.json`. So merely RUNNING this reader
@@ -502,5 +507,25 @@ def main(argv):
     return 0
 
 
+def _cli(argv):
+    """Turn an AWS/network failure into a sentence instead of a stack trace."""
+    try:
+        return main(argv)
+    except KeyboardInterrupt:
+        print("\ninterrupted — this reader is read-only, nothing was written")
+        return 130
+    except Exception as exc:                              # noqa: BLE001
+        name = type(exc).__name__
+        msg = str(exc).splitlines()[0][:200]
+        print(f"warehouse_reader: {name}: {msg}")
+        if "Credential" in name or "credential" in msg:
+            print("  the control role is not providing S3 credentials — check "
+                  "the instance profile, or run from 1-REPORTER")
+        elif "AccessDenied" in msg:
+            print("  VertigoWarehouseControlRead is missing an action for this "
+                  "call — the message above names it")
+        return 1
+
+
 if __name__ == "__main__":
-    sys.exit(main(sys.argv))
+    sys.exit(_cli(sys.argv))

@@ -113,7 +113,7 @@ _menu_label() {
 
 menu_render() {
   printf '======================================================\n'
-  printf '  Day Trader Pro — devtools  v1.34 Service Menu\n'
+  printf '  Day Trader Pro — devtools  v1.35 Service Menu\n'
   printf '======================================================\n'
   local i=0 kind rest label
   for entry in "${MENU[@]}"; do

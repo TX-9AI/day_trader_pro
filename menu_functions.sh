@@ -386,7 +386,7 @@ mi_warehouse_excursion_report() {
     echo; read -rp "Date (YYYY-MM-DD): " WD
     if [ -n "$WD" ]; then
       $PY warehouse_reader.py --date "$WD" && \
-      $PY excursion_report.py --date "$WD" --bundles-dir reports/warehouse
+      $PY excursion_report.py --date "$WD" --bundles-dir "$SCRIPT_DIR/reports/warehouse"
     fi
     pause
 }
@@ -394,7 +394,7 @@ mi_warehouse_excursion_report() {
 # Trade breakdown FROM THE WAREHOUSE (cross-day)
 mi_warehouse_trade_report() {
     echo; echo "Reads reports/warehouse/ — run the rebuild for the dates you want first."
-    $PY trade_report.py --bundles-dir reports/warehouse; pause
+    $PY trade_report.py --bundles-dir "$SCRIPT_DIR/reports/warehouse"; pause
 }
 
 # Report PARITY - run 40 & 41 from BOTH sources and diff the OUTPUTS
