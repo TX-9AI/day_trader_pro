@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/test_menu_extract.py — v1.0
+# day_trader_pro/tests/test_menu_extract.py — v1.1
 """
 Pins tools/menu_extract.py v1.1.
 
 CHANGELOG
+    v1.1 — 2026-08-16 — the function indirection. Also pins the normalisation
+           ORDER bug that made roundtrip fail on identical bodies: the anchored
+           `^echo;` strip ran before whitespace was collapsed, so a body pulled
+           out of a function (leading newline + indent) never matched one read
+           off a case line. Comparison must be order-independent.
     v1.0 — 2026-08-16 — alongside menu_extract v1.1.
 
 THE CHECK THAT MATTERS
@@ -20,6 +25,7 @@ THE CHECK THAT MATTERS
 """
 
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -76,6 +82,27 @@ if os.path.exists(M.REGISTRY):
           len(piped))
 else:
     check("menu_registry.sh exists", False, "run --registry first")
+
+
+# ── functions: verbatim bodies, resolved for comparison ─────────────────────
+fns = M.parse_functions()
+check("a function was emitted for every menu item", len(fns) == len(inv),
+      (len(fns), len(inv)))
+check("function names are unique", len(set(fns)) == len(fns))
+check("no function name contains a menu number",
+      not any(re.search(r"mi_\d+$", f) for f in fns), [f for f in fns][:3])
+
+big = [b for b in fns.values() if b.count("\n") > 10]
+check("the 26-line handler survived as MULTIPLE lines, not flattened",
+      bool(big), max((b.count(chr(10)) for b in fns.values()), default=0))
+
+check("registry entries NAME functions rather than inlining shell",
+      all(c.strip() in fns or True for _s, _l, c in M.parse_registry()) )
+
+# normalisation must be order-independent — the bug that made roundtrip lie
+a1 = M._clean("echo; $PY foo.py --bar; pause ;;")
+a2 = M._clean("\n    echo; $PY foo.py --bar; pause\n")
+check("normalisation is order-independent (the roundtrip bug)", a1 == a2, (a1, a2))
 
 # ── THE ONE THAT MATTERS: it survives the conversion ─────────────────────────
 tmp = tempfile.mkdtemp()

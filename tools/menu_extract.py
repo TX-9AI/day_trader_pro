@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-# day_trader_pro/tools/menu_extract.py — v1.1
+# day_trader_pro/tools/menu_extract.py — v1.2
+# v1.2 (2026-08-16) — HANDLER BODIES BECOME FUNCTIONS. --functions emits
+#      menu_functions.sh with each case body copied VERBATIM into `mi_<slug>()`,
+#      and the registry then names the function instead of inlining shell — so
+#      multi-line handlers (option 58 is 26 lines of prompts and conditionals)
+#      survive intact instead of being flattened into one fragile line.
+#      --roundtrip RESOLVES one level of indirection: a registry entry naming a
+#      function is compared against that function's BODY, so the equivalence
+#      check stays semantic rather than trivially failing on "mi_foo" != shell.
 # v1.1 (2026-08-16) — READS EITHER SOURCE. v1.0 parsed only the heredoc + case
 #      block, so the instant devtools.sh became declarative the parser would
 #      stop matching and the AFTER side of the diff could not be produced — the
@@ -56,6 +64,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 MENU = os.path.join(ROOT, "devtools.sh")
 REGISTRY = os.path.join(ROOT, "menu_registry.sh")
+FUNCS = os.path.join(ROOT, "menu_functions.sh")
 
 # Markers, not line numbers — line numbers go stale on the first edit.
 HEREDOC_OPEN = "cat <<'EOF' | _colorize"
@@ -93,31 +102,45 @@ def parse(path=MENU):
             display.append(("UTILITIES", int(m.group(1)), m.group(2).strip()))
             break
 
-    handlers, cur, buf = {}, None, []
+    handlers, raw, cur, buf, rbuf = {}, {}, None, [], []
     for ln in lines[c0:]:
         if re.match(r"^\s*(esac|\*\))", ln):
             break
         m = re.match(r"^\s{4}(\d+)\)\s?(.*)$", ln)
         if m and cur is None:
-            cur, buf = int(m.group(1)), [m.group(2).strip()]
+            cur, buf, rbuf = int(m.group(1)), [m.group(2).strip()], [m.group(2)]
             if ";;" in ln:
                 handlers[cur] = " ".join(buf)
+                raw[cur] = list(rbuf)
                 cur = None
             continue
         if cur is not None:
             buf.append(ln.strip())
+            rbuf.append(ln)
             if ";;" in ln:
                 handlers[cur] = " ".join(buf)
+                raw[cur] = list(rbuf)
                 cur = None
+    parse.raw = raw          # side channel; keeps the signature stable
     return display, handlers
 
 
 def _clean(cmd):
-    cmd = re.sub(r"\s*\\\s*", " ", cmd)
-    cmd = re.sub(r";;\s*$", "", cmd)
-    cmd = re.sub(r"^echo;\s*", "", cmd)
-    cmd = re.sub(r";?\s*pause\s*$", "", cmd)
-    return re.sub(r"\s+", " ", cmd).strip()
+    """Normalise a handler body for COMPARISON only.
+
+    ⚠️ ORDER MATTERS AND IT BIT ME: the anchored `^echo;` and trailing `pause`
+    strips have to run AFTER whitespace is collapsed and trimmed. A case body
+    reads `echo; $PY ...` on one line, but the same body pulled out of a
+    function starts with a newline and indentation, so `^echo;` never matched
+    and the two sides looked different when they were identical. Collapse
+    first, then strip, then the comparison is order-independent.
+    """
+    cmd = re.sub(r"\s*\\\s*", " ", cmd)      # line continuations
+    cmd = re.sub(r"\s+", " ", cmd).strip()     # collapse BEFORE anchoring
+    cmd = re.sub(r";;\s*$", "", cmd).strip()
+    cmd = re.sub(r"^echo;\s*", "", cmd).strip()
+    cmd = re.sub(r";?\s*pause\s*$", "", cmd).strip()
+    return cmd
 
 
 def inventory(display, handlers):
@@ -126,6 +149,63 @@ def inventory(display, handlers):
     for section, n, label in display:
         rows.append((section or "?", label, _clean(handlers.get(n, "«NO HANDLER»"))))
     return rows
+
+
+_SLUG_SEEN = {}
+
+
+def slug(label):
+    """Stable function name from a label. Unique, readable, never a number."""
+    s_ = re.sub(r"[^a-z0-9]+", "_", label.lower()).strip("_")[:44].strip("_")
+    s_ = s_ or "item"
+    n = _SLUG_SEEN.get(s_, 0) + 1
+    _SLUG_SEEN[s_] = n
+    return f"mi_{s_}" if n == 1 else f"mi_{s_}_{n}"
+
+
+def parse_functions(path=FUNCS):
+    """{function_name: body} from menu_functions.sh."""
+    out = {}
+    try:
+        body = open(path, encoding="utf-8").read()
+    except Exception:
+        return out
+    for m in re.finditer(r"^(mi_[a-z0-9_]+)\(\)\s*\{\n(.*?)^\}", body, re.S | re.M):
+        out[m.group(1)] = m.group(2)
+    return out
+
+
+def cmd_functions(args):
+    """Emit menu_functions.sh — each case body copied VERBATIM into a function.
+
+    Verbatim matters: option 58 alone is 26 lines of prompts and nested
+    conditionals. Flattening it to one line to fit a delimited array would be
+    rewriting a destructive handler by hand, which is precisely the kind of edit
+    this whole exercise exists to avoid.
+    """
+    display, handlers = parse()
+    raw = getattr(parse, "raw", {})
+    _SLUG_SEEN.clear()
+    print("#!/usr/bin/env bash")
+    print("# day_trader_pro/menu_functions.sh — GENERATED from devtools.sh")
+    print("# One function per menu item, body copied verbatim from the case block.")
+    print("# Sourced by devtools.sh; named by menu_registry.sh. No numbers here.")
+    print()
+    for _section, n, label in display:
+        body = raw.get(n)
+        if not body:
+            continue
+        fn = slug(label)
+        print(f"# {label}")
+        print(f"{fn}() {{")
+        for i, ln in enumerate(body):
+            txt = ln if i else "    " + ln.strip()
+            txt = re.sub(r"\s*;;\s*$", "", txt.rstrip())
+            if txt.strip():
+                print(txt if txt.startswith(" ") else "    " + txt)
+        print("}")
+        print()
+    return 0
 
 
 def parse_registry(path=REGISTRY):
@@ -150,6 +230,12 @@ def parse_registry(path=REGISTRY):
             section = parts[1]
         elif parts[0] == "ITEM" and len(parts) == 3:
             rows.append((section, parts[1], parts[2]))
+    # Resolve ONE level of indirection: an entry naming a function is compared
+    # against that function's body, so equivalence stays semantic.
+    fns = parse_functions()
+    if fns:
+        rows = [(s_, l_, _clean(fns[c_]) if c_.strip() in fns else c_)
+                for s_, l_, c_ in rows]
     return rows
 
 
@@ -234,9 +320,16 @@ def cmd_check(args):
 
 
 def cmd_registry(args):
-    """Emit the declarative draft. Numbers appear NOWHERE in it."""
+    """Emit the declarative registry. Numbers appear NOWHERE in it.
+
+    Entries NAME a function from menu_functions.sh rather than inlining shell,
+    so a 26-line handler stays 26 lines instead of being flattened into a
+    delimited string.
+    """
     display, handlers = parse()
     rows = inventory(display, handlers)
+    _SLUG_SEEN.clear()
+    rows = [(s_, l_, slug(l_)) for s_, l_, _c in rows]
     print("#!/usr/bin/env bash")
     print("# day_trader_pro/menu_registry.sh — GENERATED DRAFT, review before use")
     print("# Generated by tools/menu_extract.py from devtools.sh.")
@@ -245,8 +338,8 @@ def cmd_registry(args):
     print("# render time from list position, so reordering this list, inserting")
     print("# a section, or deleting an item cannot desynchronise anything.")
     print("#")
-    print("# ⚠️ Multi-line handlers (prompts, conditionals) are emitted as one")
-    print("#    line and MUST be read before this replaces the case block.")
+    print("# Each ITEM names a function in menu_functions.sh — bodies are kept")
+    print("# verbatim there, so multi-line handlers are not flattened.")
     print()
     print("MENU=(")
     last = None
@@ -326,6 +419,8 @@ def main(argv):
     p.add_argument("--inventory", action="store_true")
     p.add_argument("--check", action="store_true")
     p.add_argument("--registry", action="store_true")
+    p.add_argument("--functions", action="store_true",
+                   help="emit menu_functions.sh (verbatim handler bodies)")
     # NOTE: a subparser named "--diff" was a mistake — argparse then demanded it
     # as a positional and rejected the file arguments. Two plain operands.
     p.add_argument("--diff", nargs=2, metavar=("OLD", "NEW"))
@@ -339,6 +434,8 @@ def main(argv):
     if a.diff:
         a.old, a.new = a.diff
         return cmd_diff(a)
+    if a.functions:
+        return cmd_functions(a)
     if a.registry:
         return cmd_registry(a)
     if a.check:
