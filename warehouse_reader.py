@@ -1,5 +1,15 @@
 #!/usr/bin/env python3
-# day_trader_pro/warehouse_reader.py — v1.1
+# day_trader_pro/warehouse_reader.py — v1.2
+# v1.2 (2026-08-16) — COVERAGE WINDOW, DERIVED NOT HARDCODED. `--all` flagged
+#      pre-warehouse dates as divergent, which is noise: reports/ goes back to
+#      07-13 and the bucket only holds 30 days. Asked whether to hardcode a
+#      cutoff — a hardcoded date goes stale the moment history is backfilled or
+#      lifecycle expires something, and then it lies in the safe direction,
+#      silently skipping dates it should be checking. So the window is READ FROM
+#      THE BUCKET: the earliest dt= partition present under raw/trades/, via one
+#      LIST with a delimiter. Dates before it are reported as OUT OF COVERAGE —
+#      a third category, never counted as either a match or a divergence.
+#      `--since` overrides it when a date inside the window is known-partial.
 # v1.1 (2026-08-16) — `--all`. The first --compare MATCHED exactly on 2026-08-14
 #      (153 trades, net +5839.50, from 178 stored states). One date is not
 #      evidence: it is one date. This sweeps every local bundle and reports a
@@ -239,7 +249,32 @@ def compare(date, s3=None):
     return 0 if clean else 1
 
 
-def compare_all(s3=None):
+def warehouse_range(s3, datatype="trades"):
+    """(earliest, latest) dt= partition actually present, or (None, None).
+
+    Read from the bucket rather than hardcoded. A hardcoded cutoff goes stale
+    the moment history is backfilled or a lifecycle rule expires something —
+    and it fails in the SILENT direction, skipping dates it should be checking.
+    One LIST with a delimiter returns the partition prefixes without touching
+    a single object.
+    """
+    days = []
+    try:
+        pg = s3.get_paginator("list_objects_v2")
+        for page in pg.paginate(Bucket=BUCKET,
+                                Prefix=f"{PREFIX}/{datatype}/", Delimiter="/"):
+            for cp in page.get("CommonPrefixes", []) or []:
+                part = cp.get("Prefix", "").rstrip("/").split("/")[-1]
+                if part.startswith("dt="):
+                    days.append(part[3:])
+    except Exception:
+        return None, None
+    if not days:
+        return None, None
+    return min(days), max(days)
+
+
+def compare_all(s3=None, since=None):
     """Compare every date that has a local bundle. Read-only.
 
     A single matching date proves the reader parses one day correctly. It does
@@ -250,6 +285,8 @@ def compare_all(s3=None):
     import glob
     import re
     s3 = s3 or _client()
+    wh_start, wh_end = warehouse_range(s3)
+    floor = since or wh_start
     paths = sorted(glob.glob(os.path.join(config.REPORTS_DIR, "fleet_trades_*.json")))
     dates = []
     for p_ in paths:
@@ -260,9 +297,22 @@ def compare_all(s3=None):
         _log("DIFF", "no local bundles found — nothing to compare against")
         return 2
 
-    print(f"\n  comparing {len(dates)} date(s) with a local bundle\n")
-    ok, bad, empty = [], [], []
+    if floor:
+        src = "warehouse coverage" if not since else "--since"
+        print(f"\n  warehouse holds dt= {wh_start} .. {wh_end}"
+              f"   (floor from {src}: {floor})")
+    else:
+        print("\n  ⚠️ could not read the warehouse's dt= range — comparing all dates")
+    print(f"  {len(dates)} local bundle(s) found\n")
+
+    ok, bad, empty, outside = [], [], [], []
     for d in dates:
+        if floor and d < floor:
+            # NOT a divergence. The warehouse simply did not exist yet for this
+            # date, and calling that a mismatch would train you to ignore the
+            # word.
+            outside.append(d)
+            continue
         try:
             loc_p = os.path.join(config.REPORTS_DIR, f"fleet_trades_{d}.json")
             with open(loc_p) as fh:
@@ -289,6 +339,9 @@ def compare_all(s3=None):
             print(f"  ERROR {d}  {exc}")
 
     print()
+    if outside:
+        print(f"  ⏸  {len(outside)} date(s) OUT OF COVERAGE (before {floor}) — "
+              f"not checked: {outside[0]} .. {outside[-1]}")
     print(f"  {len(ok)} date(s) matched with trades · {len(empty)} matched but EMPTY "
           f"both sides · {len(bad)} divergent")
     if empty:
@@ -300,7 +353,11 @@ def compare_all(s3=None):
         print("  ❌ DIVERGENT: " + ", ".join(f"{d}({n})" for d, n in bad))
         print("  do NOT sever — investigate the dates above")
         return 1
-    print("  ✅ every date with trades reproduces from the warehouse")
+    span = f"{ok[0]} .. {ok[-1]}" if ok else "(no dates with trades)"
+    print(f"  ✅ MATCHED {span} — every in-coverage date with trades reproduces")
+    if outside:
+        print(f"  ⏸  NOT MATCHED before {floor}: those dates predate the "
+              f"warehouse and are unverifiable, not wrong")
     return 0
 
 
@@ -311,12 +368,14 @@ def main(argv):
     p.add_argument("--compare", action="store_true",
                    help="diff against reports/fleet_trades_<date>.json")
     p.add_argument("--all", action="store_true",
-                   help="compare EVERY date that has a local bundle")
+                   help="compare every in-coverage date that has a local bundle")
+    p.add_argument("--since", default=None,
+                   help="override the coverage floor (YYYY-MM-DD)")
     a = p.parse_args(argv[1:])
     date = a.date or datetime.now(_ET).date().isoformat()
 
     if a.all:
-        return compare_all()
+        return compare_all(since=a.since)
     if a.compare:
         return compare(date)
 

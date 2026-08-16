@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/test_warehouse_reader.py — v1.1
+# day_trader_pro/tests/test_warehouse_reader.py — v1.2
 """
 Pins warehouse_reader v1.0 (WH.8).
 
 CHANGELOG
+    v1.2 — 2026-08-16 — the coverage window. Asserts that a pre-warehouse date
+           is reported as OUT OF COVERAGE and is counted as NEITHER a match nor
+           a divergence — the whole point being that "divergent" has to keep
+           meaning something.
     v1.1 — 2026-08-16 — `--all`. The check worth having is that an EMPTY date
            is not counted as a pass: 30 dates where both sides hold zero trades
            would otherwise report "30/30 match" and mean nothing.
@@ -50,8 +54,16 @@ class S3Stub:
         objs = self.objs
 
         class _P:
-            def paginate(self, Bucket=None, Prefix="", **kw):
-                yield {"Contents": [{"Key": k} for k in objs if k.startswith(Prefix)]}
+            def paginate(self, Bucket=None, Prefix="", Delimiter=None, **kw):
+                if Delimiter:
+                    parts = set()
+                    for k in objs:
+                        if k.startswith(Prefix):
+                            rest = k[len(Prefix):].split("/")[0]
+                            parts.add(Prefix + rest + "/")
+                    yield {"CommonPrefixes": [{"Prefix": p} for p in sorted(parts)]}
+                else:
+                    yield {"Contents": [{"Key": k} for k in objs if k.startswith(Prefix)]}
         return _P()
 
     def get_object(self, Bucket=None, Key=None):
@@ -145,7 +157,8 @@ with open(os.path.join(tmpd, "fleet_trades_%s.json" % D), "w") as fh:
         {"trade_id": 1, "status": "closed", "pnl_usd": 412.5},
         {"trade_id": 2, "status": "closed", "pnl_usd": -120.0}],
         "fleet_stats": {"net_pnl": 292.5}}, fh)
-with open(os.path.join(tmpd, "fleet_trades_2026-08-01.json"), "w") as fh:
+# inside coverage (>= the dt= floor) so it tests EMPTY, not OUT-OF-COVERAGE
+with open(os.path.join(tmpd, "fleet_trades_2026-08-20.json"), "w") as fh:
     json.dump({"trades": [], "fleet_stats": {"net_pnl": 0.0}}, fh)
 
 buf = io.StringIO()
@@ -160,6 +173,37 @@ check("--all says plainly that empty dates prove nothing",
       "empty dates prove nothing" in txt, txt)
 check("--all shows the stored-state count per date, not just trades",
       "states" in txt, txt[:200])
+
+
+# the coverage window is READ FROM THE BUCKET, not hardcoded
+lo, hi = WR.warehouse_range(s3)
+check("warehouse_range reads the dt= floor from the bucket", lo == D and hi == D, (lo, hi))
+check("warehouse_range on an empty bucket returns (None, None)",
+      WR.warehouse_range(S3Stub({})) == (None, None))
+
+# a pre-warehouse date must be OUT OF COVERAGE — neither match nor divergence
+with open(os.path.join(tmpd, "fleet_trades_2026-07-13.json"), "w") as fh:
+    json.dump({"trades": [{"trade_id": 99, "status": "closed", "pnl_usd": 7.0}],
+               "fleet_stats": {"net_pnl": 7.0}}, fh)
+buf2 = io.StringIO()
+with contextlib.redirect_stdout(buf2):
+    rc2 = WR.compare_all(s3)
+t2 = buf2.getvalue()
+check("a pre-warehouse date is NOT counted as divergent", rc2 == 0, rc2)
+check("it is reported as OUT OF COVERAGE", "OUT OF COVERAGE" in t2, t2[-400:])
+check("the floor is stated, and comes from the bucket", "warehouse holds dt=" in t2)
+check("the verdict names the matched SPAN, not just a count",
+      "MATCHED %s" % D in t2, t2[-300:])
+check("it says plainly that pre-coverage dates are unverifiable, not wrong",
+      "unverifiable, not wrong" in t2, t2[-300:])
+
+# --since overrides the derived floor
+buf3 = io.StringIO()
+with contextlib.redirect_stdout(buf3):
+    WR.compare_all(s3, since="2099-01-01")
+check("--since overrides the derived floor",
+      "--since" in buf3.getvalue() and "0 date(s) matched" in buf3.getvalue(),
+      buf3.getvalue()[-200:])
 
 print("\n" + ("ALL CHECKS PASSED" if not FAILS else "FAILURES: " + ", ".join(FAILS)))
 sys.exit(1 if FAILS else 0)
