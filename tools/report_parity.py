@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-# day_trader_pro/tools/report_parity.py — v1.3
+# day_trader_pro/tools/report_parity.py — v1.4
+# v1.4 (2026-08-16) — IT COULD NOT TELL "DIVERGED" FROM "DID NOT RUN". Found by
+#      driving menu item 67 in an environment with no S3 credentials: every step
+#      errored, and the tool printed "❌ NOT AT PARITY — investigate the diffs
+#      above" when there were no diffs at all. Someone would have gone hunting
+#      for a divergence that never happened. Three states now, not two:
+#      PARITY / DIVERGENCE / DID NOT RUN — and the last one names the first
+#      failure instead of implying a data problem.
 # v1.3 (2026-08-16) — 🔴 IT WAS READING THE WRONG FILE. `newest()` picked the
 #      most recently modified trade_report_<stamp>.json, which is a GUESS — it
 #      returned a stale full-fleet run (25 sessions, 1,742 rows) instead of the
@@ -314,22 +321,39 @@ def main(argv):
     print("\n  report 41 — trade breakdown (cross-day)")
     r41 = compare_breakdown(a.keep)
 
-    ok40 = [x for x in r40 if x is not None]
+    ok40 = [x for x in r40 if x is not None]      # x is None => the run FAILED
+    failed40 = [d for d, x in zip(days, r40) if x is None]
     bad = [d for d, x in zip(days, r40) if x is False]
     print()
     print(f"  40: {sum(1 for x in ok40 if x)}/{len(ok40)} date(s) match"
-          + (f" — DIFF on {', '.join(bad)}" if bad else ""))
-    print(f"  41: {'MATCH' if r41 else 'DIFF' if r41 is False else 'not run'}")
-    clean = bool(ok40) and all(ok40) and r41 is True
+          + (f" — DIFF on {', '.join(bad)}" if bad else "")
+          + (f" — FAILED to run on {', '.join(failed40)}" if failed40 else ""))
+    print(f"  41: {'MATCH' if r41 is True else 'DIFF' if r41 is False else 'DID NOT RUN'}")
     print()
+
+    ran = bool(ok40) or r41 is not None
+    if not ran:
+        # THE THIRD STATE. Reporting this as a divergence sends someone looking
+        # for diffs that were never produced.
+        print("  ⚠️  DID NOT RUN — nothing was compared, so this says NOTHING")
+        print("     about parity either way. Not a divergence; an absence.")
+        print("     First failure above is the thing to fix — usually no S3")
+        print("     credentials, or no local bundle for the dates requested.")
+        return 2
+
+    clean = bool(ok40) and all(ok40) and r41 is True and not failed40
     if clean:
         print("  ✅ REPORT PARITY — both reports agree across both sources.")
         print("     This is WH.11's gate. OT_EOD_PULL=0 is now defensible.")
-    else:
-        print("  ❌ NOT AT PARITY — do NOT sever. Investigate the diffs above.")
-        print("     A divergence here is information, not a setback: it means")
-        print("     a report reaches past the bundle for something.")
-    return 0 if clean else 1
+        return 0
+    if failed40 or r41 is None:
+        print("  ⚠️  PARTIAL — some comparisons ran and some could not.")
+        print("     Do NOT sever: an unrun date is not a passing date.")
+        return 2
+    print("  ❌ DIVERGENCE — do NOT sever. Investigate the diffs above.")
+    print("     A divergence here is information, not a setback: it means")
+    print("     a report reaches past the bundle for something.")
+    return 1
 
 
 if __name__ == "__main__":
