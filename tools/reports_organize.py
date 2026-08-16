@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-# day_trader_pro/tools/reports_organize.py — v1.1
+# day_trader_pro/tools/reports_organize.py — v1.2
+# v1.2 (2026-08-16) — ONE-OFFS ARE NAMED, NOT COUNTED. `sweep` tripped the
+#      MIN_RECURRING=3 threshold with three files and would have been given a
+#      folder, but sweeps are one-time diagnostics. Raising the threshold to 4
+#      would not fix the class — the next diagnostic run three times gets a
+#      folder too, and fit_report (5) sits close to the edge. A count is a proxy
+#      for "is this automated"; the answer is knowable, so it is declared.
 # v1.1 (2026-08-16) — `fleet_trades/` is REBUILT FROM S3, not copied. The
 #      backfill survey proved the warehouse is equal to control on 27 dates and
 #      strictly BETTER on two: 2026-07-15 holds 45 closed trades in S3 while
@@ -64,6 +70,12 @@ SKIP_DIRS = {"warehouse", "backtests"}
 # the better copy, so tidying must not freeze the worse one in place.
 REBUILD_FROM_S3 = {"fleet_trades"}
 
+# Known one-time diagnostics. These stay at root no matter how many files they
+# happen to have — the operator identified them, and a count cannot.
+ALWAYS_ONEOFF = {"sweep", "orb", "tc7", "regime_grid", "named_sweeps",
+                 "bull_floor", "bear_floor", "rejection_summary",
+                 "session_labels", "gap_pct"}
+
 # Types other reports READ. Copying is fine; deleting the originals is not.
 CONSUMED_BY_OTHERS = {
     "fleet_trades": "report 41 BUNDLE_GLOB + report 40 fallback",
@@ -99,8 +111,10 @@ def classify():
         if os.path.isdir(path) or name in SKIP_DIRS or name.startswith("."):
             continue
         groups[stem_of(name)].append(name)
-    recurring = {k: v for k, v in groups.items() if len(v) >= MIN_RECURRING}
-    oneoff = {k: v for k, v in groups.items() if len(v) < MIN_RECURRING}
+    recurring = {k: v for k, v in groups.items()
+                 if len(v) >= MIN_RECURRING and k not in ALWAYS_ONEOFF}
+    oneoff = {k: v for k, v in groups.items()
+              if len(v) < MIN_RECURRING or k in ALWAYS_ONEOFF}
     return recurring, oneoff
 
 
