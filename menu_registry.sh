@@ -85,17 +85,38 @@ MENU=(
 # ── render + dispatch, the whole of it ──────────────────────────────
 # The number is a loop counter. It is never stored, never compared, and never
 # written down anywhere — which is the entire point.
+# One item's label is LIVE, not static: the feed-maintenance row turns red when
+# the flag is on. It used to be printed between two heredocs for exactly this
+# reason. Here it is a label override, so the item stays in the list like any
+# other and nothing special-cases its position.
+_menu_label() {
+  case "$1" in
+    "Feed maintenance window"*)
+      if _maint_on; then
+        printf '%s' "${_RED}*** FEED MAINTENANCE IS ACTIVE - no tape is being collected ***${_RST}"
+      else
+        printf '%s' "Feed maintenance window (fleet up, nothing on the wire) - currently OFF"
+      fi ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+
 menu_render() {
-  local i=0 kind rest
+  printf '======================================================\n'
+  printf '  Day Trader Pro — devtools  v1.32 Service Menu\n'
+  printf '======================================================\n'
+  local i=0 kind rest label
   for entry in "${MENU[@]}"; do
     IFS='|' read -r kind rest <<< "$entry"
     if [ "$kind" = "SECTION" ]; then
       printf '\n %s:\n' "$rest"
     else
-      i=$((i+1)); printf '  %2d) %s\n' "$i" "${rest%%|*}"
+      i=$((i+1)); label="$(_menu_label "${rest%%|*}")"
+      printf '  %2d) %s\n' "$i" "$label"
     fi
   done
   printf '\n   0) Exit\n'
+  printf '======================================================\n'
 }
 
 menu_dispatch() {

@@ -1,9 +1,15 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/test_menu_extract.py — v1.1
+# day_trader_pro/tests/test_menu_extract.py — v1.2
 """
 Pins tools/menu_extract.py v1.1.
 
 CHANGELOG
+    v1.2 — 2026-08-16 — POST-CONVERSION. devtools.sh is now declarative, so the
+           heredoc parser has no source and correctly returns empty. The suite
+           therefore branches: pre-conversion it reconciles display vs handlers;
+           post-conversion it checks the registry names real functions and every
+           script exists. It must not fail merely because the thing it was
+           guarding has been fixed.
     v1.1 — 2026-08-16 — the function indirection. Also pins the normalisation
            ORDER bug that made roundtrip fail on identical bodies: the anchored
            `^echo;` strip ran before whitespace was collapsed, so a body pulled
@@ -50,15 +56,21 @@ print("\n=== menu_extract v1.1 ===\n")
 
 # ── the live menu reconciles ────────────────────────────────────────────────
 display, handlers = M.parse()
-d = {n for _s, n, _l in display}
-h = set(handlers) - {0}
-check("every displayed item has a handler", not (d - h), sorted(d - h))
-check("every handler is displayed", not (h - d), sorted(h - d))
-check("no duplicate display numbers",
-      len(d) == len(display), (len(d), len(display)))
-check("a real menu was found (not an empty parse)", len(d) > 40, len(d))
-
-inv = M.inventory(display, handlers)
+CONVERTED = not display
+if CONVERTED:
+    check("devtools.sh is declarative — heredoc parser degrades, does not throw",
+          True)
+    inv = M.parse_registry()
+    check("the registry yields the full menu", len(inv) > 40, len(inv))
+else:
+    d = {n for _s, n, _l in display}
+    h = set(handlers) - {0}
+    check("every displayed item has a handler", not (d - h), sorted(d - h))
+    check("every handler is displayed", not (h - d), sorted(h - d))
+    check("no duplicate display numbers",
+          len(d) == len(display), (len(d), len(display)))
+    check("a real menu was found (not an empty parse)", len(d) > 40, len(d))
+    inv = M.inventory(display, handlers)
 check("inventory carries no numbers",
       all(not any(ch.isdigit() and f"{ch})" in c for ch in "0123456789")
           for _s, _l, c in inv[:1]) or True)
@@ -67,7 +79,7 @@ check("labels are unique — they are the identity", len(set(labels)) == len(lab
       len(labels) - len(set(labels)))
 
 # ── registry equivalence ────────────────────────────────────────────────────
-if os.path.exists(M.REGISTRY):
+if os.path.exists(M.REGISTRY) and not CONVERTED:
     reg = M.parse_registry()
     live = {l: c for _s, l, c in inv}
     rmap = {l: c for _s, l, c in reg}
@@ -80,7 +92,7 @@ if os.path.exists(M.REGISTRY):
     check("a shell PIPE in a command is not eaten by the field delimiter",
           all(c.count("|") >= 1 for c in piped) if piped else True,
           len(piped))
-else:
+elif not os.path.exists(M.REGISTRY):
     check("menu_registry.sh exists", False, "run --registry first")
 
 
@@ -114,8 +126,9 @@ try:
     M.MENU = os.path.join(tmp, "devtools.sh")
     M.REGISTRY = os.path.join(tmp, "menu_registry.sh")
 
-    check("before conversion, auto-detect reads the heredoc",
-          M.active_source() == "heredoc", M.active_source())
+    expect = "registry" if CONVERTED else "heredoc"
+    check(f"auto-detect reads the live source ({expect})",
+          M.active_source() == expect, M.active_source())
     rows_before, src_before = M.rows_for("auto")
 
     # simulate: devtools.sh now sources the registry
@@ -123,16 +136,21 @@ try:
     body = body.replace('menu() {', 'source "$SCRIPT_DIR/menu_registry.sh"\n\nmenu() {', 1)
     open(M.MENU, "w", encoding="utf-8").write(body)
 
-    check("after conversion, auto-detect switches to the registry",
+    check("after conversion, auto-detect uses the registry",
           M.active_source() == "registry", M.active_source())
     rows_after, src_after = M.rows_for("auto")
     check("the SAME command still yields an inventory after conversion",
           len(rows_after) == len(rows_before), (len(rows_before), len(rows_after)))
     check("and the inventory is identical across the conversion",
           {l: c for _s, l, c in rows_before} == {l: c for _s, l, c in rows_after})
-    check("the two sources are reported distinctly",
-          src_before == "heredoc" and src_after == "registry",
-          (src_before, src_after))
+    # Pre-conversion this proves the switch heredoc -> registry. Post-
+    # conversion both sides are already the registry, which is correct, not a
+    # regression — assert what is actually true in each state rather than
+    # forcing a value the world no longer has.
+    check("the source is reported and is the live one",
+          src_after == "registry" and src_before == ("registry" if CONVERTED
+                                                     else "heredoc"),
+          (src_before, src_after, CONVERTED))
 finally:
     M.ROOT, M.MENU, M.REGISTRY = before_root, before_menu, before_reg
     shutil.rmtree(tmp, ignore_errors=True)

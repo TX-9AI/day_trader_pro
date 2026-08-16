@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-# day_trader_pro/tools/menu_extract.py — v1.2
+# day_trader_pro/tools/menu_extract.py — v1.3
+# v1.3 (2026-08-16) — DEGRADES AFTER THE CONVERSION. Once devtools.sh became
+#      declarative the heredoc vanished, and `parse()` raised StopIteration —
+#      the parser THREW instead of reporting that its source was gone. Callers
+#      that only need the inventory already route via rows_for(); now `parse()`
+#      returns empty structures when the markers are absent, and --check works
+#      off whichever source is live. The conversion is supposed to retire this
+#      parser, not break the tool that proves the conversion.
 # v1.2 (2026-08-16) — HANDLER BODIES BECOME FUNCTIONS. --functions emits
 #      menu_functions.sh with each case body copied VERBATIM into `mi_<slug>()`,
 #      and the registry then names the function instead of inlining shell — so
@@ -72,16 +79,28 @@ SELECT_LINE = 'read -rp "Select: " choice'
 
 
 def _bounds(lines):
-    """(display_start, display_end, case_start) from MARKERS, not offsets."""
-    d0 = next(i for i, l in enumerate(lines) if HEREDOC_OPEN in l) + 1
-    d1 = next(i for i in range(d0, len(lines)) if lines[i].strip() == "EOF")
-    c0 = next(i for i, l in enumerate(lines) if SELECT_LINE in l) + 2
-    return d0, d1, c0
+    """(display_start, display_end, case_start), or None once the heredoc is gone.
+
+    Returns None rather than raising: after the conversion this parser has no
+    source, and that is SUCCESS, not an error. A tool that throws when the thing
+    it measures has been improved is a tool you stop running.
+    """
+    try:
+        d0 = next(i for i, l in enumerate(lines) if HEREDOC_OPEN in l) + 1
+        d1 = next(i for i in range(d0, len(lines)) if lines[i].strip() == "EOF")
+        c0 = next(i for i, l in enumerate(lines) if SELECT_LINE in l) + 2
+        return d0, d1, c0
+    except StopIteration:
+        return None
 
 
 def parse(path=MENU):
     lines = open(path, encoding="utf-8").read().split("\n")
-    d0, d1, c0 = _bounds(lines)
+    b = _bounds(lines)
+    if b is None:
+        parse.raw = {}
+        return [], {}          # converted: the registry is the source now
+    d0, d1, c0 = b
 
     section = None
     display = []                      # (section, number, label) in menu order
@@ -268,6 +287,8 @@ def cmd_inventory(args):
 
 
 def cmd_roundtrip(args):
+    """Only meaningful BEFORE the conversion; afterwards there is nothing to
+    compare the registry against, because the registry IS the menu."""
     """Is the generated registry EQUIVALENT to the live menu?
 
     The strongest assurance available before the swap: both sides reduced to
@@ -278,6 +299,11 @@ def cmd_roundtrip(args):
         print("  no menu_registry.sh — generate it with --registry first")
         return 2
     display, handlers = parse()
+    if not display:
+        print("  devtools.sh is already declarative — the registry IS the menu,")
+        print("  so there is nothing left to compare it against. Use --diff")
+        print("  against docs/MENU_INVENTORY.tsv instead.")
+        return 0
     live = {l: c for _s, l, c in inventory(display, handlers)}
     reg = {l: c for _s, l, c in parse_registry()}
     gone = sorted(set(live) - set(reg))
@@ -298,6 +324,33 @@ def cmd_roundtrip(args):
 
 def cmd_check(args):
     display, handlers = parse()
+    if not display:
+        # Post-conversion: the numbers are generated, so "displayed vs handled"
+        # cannot disagree by construction. What is still worth checking is that
+        # every named function EXISTS and every referenced script is on disk.
+        rows = parse_registry()
+        fns = parse_functions()
+        raw_rows = []
+        body = open(REGISTRY, encoding="utf-8").read()
+        for m in re.finditer(r'"ITEM\|([^|]+)\|([^"]+)"', body):
+            raw_rows.append((m.group(1), m.group(2)))
+        missing_fn = sorted(f for _l, f in raw_rows if f not in fns)
+        scripts = set()
+        for b_ in fns.values():
+            scripts |= set(re.findall(r"\$PY\s+([\w./-]+\.py)", b_))
+            scripts |= set(re.findall(r"bash\s+([\w./-]+\.sh)", b_))
+        missing_s = sorted(s_ for s_ in scripts
+                           if not os.path.exists(os.path.join(ROOT, s_)))
+        dup = sorted({l for l, _f in raw_rows
+                      if [x for x, _ in raw_rows].count(l) > 1})
+        ok = not (missing_fn or missing_s or dup)
+        print("  source: registry (devtools.sh is declarative)")
+        print(f"  items {len(rows)} · functions {len(fns)} · scripts {len(scripts)}")
+        print(f"  item names a MISSING function : {missing_fn or 'none'}")
+        print(f"  duplicate LABELS              : {dup or 'none'}")
+        print(f"  referenced but missing script : {missing_s or 'none'}")
+        print("  " + ("OK" if ok else "PROBLEMS ABOVE"))
+        return 0 if ok else 1
     d = {n for _, n, _ in display}
     h = set(handlers) - {0}
     shown_unhandled = sorted(d - h)
