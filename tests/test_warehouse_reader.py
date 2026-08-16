@@ -1,9 +1,18 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/test_warehouse_reader.py — v1.2
+# day_trader_pro/tests/test_warehouse_reader.py — v1.4
 """
 Pins warehouse_reader v1.0 (WH.8).
 
 CHANGELOG
+    v1.4 — 2026-08-16 — the glob-contamination guard. The reader's default
+           output landed inside report 41's input glob, so running the
+           comparison tool changed what it was comparing against. Asserted
+           directly, because "we'll remember not to write there" is not a
+           control.
+    v1.3 — 2026-08-16 — the floor is COLLECTION START, not the earliest dt=
+           partition. v1.2's floor read 2026-07-06 off the bucket and excluded
+           nothing, because the first push shipped months of surviving history
+           in one go. Also `--explain`.
     v1.2 — 2026-08-16 — the coverage window. Asserts that a pre-warehouse date
            is reported as OUT OF COVERAGE and is counted as NEITHER a match nor
            a divergence — the whole point being that "divergent" has to keep
@@ -204,6 +213,66 @@ with contextlib.redirect_stdout(buf3):
 check("--since overrides the derived floor",
       "--since" in buf3.getvalue() and "0 date(s) matched" in buf3.getvalue(),
       buf3.getvalue()[-200:])
+
+
+# the floor is COLLECTION START, not the oldest partition present
+check("COLLECTION_START is a real date, not derived from dt=",
+      WR.COLLECTION_START == "2026-08-13", WR.COLLECTION_START)
+WR.COLLECTION_START = D            # pin for the stub bucket
+buf4 = io.StringIO()
+with contextlib.redirect_stdout(buf4):
+    WR.compare_all(s3)
+t4 = buf4.getvalue()
+check("output distinguishes what the bucket HOLDS from what it COLLECTS",
+      "but only" in t4 and "COLLECTS from" in t4, t4[:300])
+check("it says pre-floor dates are partial BY CONSTRUCTION",
+      "partial by construction" in t4, t4[:300])
+
+# --explain names the rows, not just the count
+buf5 = io.StringIO()
+with contextlib.redirect_stdout(buf5):
+    WR.explain(D, s3)
+t5 = buf5.getvalue()
+check("--explain runs and reports on the date", D in t5, t5[:120])
+check("--explain says plainly when a date matches",
+      "no differences" in t5 or "ONLY IN" in t5, t5[:200])
+
+# a date where s3 has a trade the local bundle lacks — the 07-21 shape
+with open(os.path.join(tmpd, "fleet_trades_%s.json" % D), "w") as fh:
+    json.dump({"trades": [{"trade_id": 1, "status": "closed", "pnl_usd": 412.5}],
+               "fleet_stats": {"net_pnl": 412.5}}, fh)
+buf6 = io.StringIO()
+with contextlib.redirect_stdout(buf6):
+    WR.explain(D, s3)
+t6 = buf6.getvalue()
+check("--explain surfaces a trade present in S3 but missing locally",
+      "ONLY IN S3" in t6 and "missing from" in t6, t6[-400:])
+check("--explain prints the row detail, not just the id",
+      "pnl=" in t6, t6[-200:])
+
+
+# ── the output path must not be report 41's input ───────────────────────────
+import glob as _glob
+
+check("warehouse bundles default OUTSIDE reports/",
+      os.path.basename(WR.WAREHOUSE_OUT) == "warehouse"
+      and WR.WAREHOUSE_OUT != WR.config.REPORTS_DIR, WR.WAREHOUSE_OUT)
+
+# report 41's glob is non-recursive, so a subdirectory is genuinely safe —
+# assert that rather than assume it
+_tmp41 = tempfile.mkdtemp()
+os.makedirs(os.path.join(_tmp41, "warehouse"), exist_ok=True)
+open(os.path.join(_tmp41, "fleet_trades_2026-08-14.json"), "w").write("{}")
+open(os.path.join(_tmp41, "warehouse", "fleet_trades_2026-08-14.json"), "w").write("{}")
+hits = _glob.glob(os.path.join(_tmp41, "fleet_trades_*.json"))
+check("report 41's glob does NOT reach into the warehouse subdir",
+      len(hits) == 1 and "warehouse" not in hits[0], hits)
+
+# the old default WOULD have been caught by it — proving the bug was real
+old_default = os.path.join(_tmp41, "fleet_trades_s3_2026-08-14.json")
+open(old_default, "w").write("{}")
+check("the OLD default path WOULD have polluted 41 (the bug was real)",
+      len(_glob.glob(os.path.join(_tmp41, "fleet_trades_*.json"))) == 2)
 
 print("\n" + ("ALL CHECKS PASSED" if not FAILS else "FAILURES: " + ", ".join(FAILS)))
 sys.exit(1 if FAILS else 0)

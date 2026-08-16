@@ -1,5 +1,25 @@
 #!/usr/bin/env python3
-# day_trader_pro/warehouse_reader.py — v1.2
+# day_trader_pro/warehouse_reader.py — v1.4
+# v1.4 (2026-08-16) — 🔴 THE DEFAULT OUTPUT PATH CONTAMINATED REPORT 41.
+#      `--out` defaulted to `reports/fleet_trades_s3_<date>.json`, and report 41
+#      globs `reports/fleet_trades_*.json`. So merely RUNNING this reader
+#      silently injected warehouse-sourced bundles into 41's input set — and
+#      because 41 de-dupes by keeping the MOST-FILLED row, an S3 row could win
+#      over the local one. **The tool built to compare the two sources was
+#      quietly merging them.** Output now goes to `reports/warehouse/`, which is
+#      outside the glob (41's pattern is non-recursive), and a write into the
+#      glob namespace is REFUSED rather than warned about.
+# v1.3 (2026-08-16) — THE FLOOR WAS THE WRONG QUANTITY, and `--explain`.
+#      v1.2 derived the floor from the earliest dt= partition and got
+#      2026-07-06, which excluded nothing. **dt= coverage is not COLLECTION
+#      coverage.** The first push ran 2026-08-13 and shipped every row then in
+#      each box's trades.db, whose entry_time values reach back to early July —
+#      so pre-08-13 dates hold only what SURVIVED on the boxes (trim_trade_dbs
+#      trims them) and are partial by construction. The floor is now the
+#      COLLECTION START, read from `meta/collection_start` if present and
+#      otherwise OT_WAREHOUSE_START, defaulting to 2026-08-13.
+#      `--explain <date>` lists the specific trade_ids on each side so a
+#      divergence is READ rather than inferred.
 # v1.2 (2026-08-16) — COVERAGE WINDOW, DERIVED NOT HARDCODED. `--all` flagged
 #      pre-warehouse dates as divergent, which is noise: reports/ goes back to
 #      07-13 and the bucket only holds 30 days. Asked whether to hardcode a
@@ -57,7 +77,7 @@ THE ONE PIECE OF REAL LOGIC HERE: LATEST-STATE-PER-TRADE
 
 CLI
   python3 warehouse_reader.py --date 2026-08-14
-  python3 warehouse_reader.py --date 2026-08-14 --out reports/fleet_trades_s3_2026-08-14.json
+  python3 warehouse_reader.py --date 2026-08-14      # -> reports/warehouse/
   python3 warehouse_reader.py --date 2026-08-14 --compare   # diff vs the local bundle
   python3 warehouse_reader.py --all                        # compare EVERY local bundle
 """
@@ -80,6 +100,18 @@ REGION = os.environ.get("OT_S3_REGION", "us-east-2")
 PREFIX = os.environ.get("OT_S3_PREFIX", "raw")
 
 _ET = ZoneInfo("US/Eastern")
+
+# The date the warehouse began COLLECTING, which is not the same as the earliest
+# dt= partition it holds: the first push shipped whatever history each box still
+# had on disk, so earlier dates are partial by construction and comparing them
+# to a full local bundle is meaningless.
+COLLECTION_START = os.environ.get("OT_WAREHOUSE_START", "2026-08-13")
+
+# Warehouse-sourced bundles live HERE, never in reports/ itself.
+# report 41 globs reports/fleet_trades_*.json (non-recursive), so anything
+# written beside it becomes 41's input whether or not that was intended.
+WAREHOUSE_OUT = os.path.join(config.REPORTS_DIR, "warehouse")
+GLOB_HAZARD = "fleet_trades_"
 
 
 def _log(tag, msg):
@@ -286,7 +318,9 @@ def compare_all(s3=None, since=None):
     import re
     s3 = s3 or _client()
     wh_start, wh_end = warehouse_range(s3)
-    floor = since or wh_start
+    # NOT wh_start — see the v1.3 note. wh_start is the oldest entry_time that
+    # happened to survive on a box, not the day collection began.
+    floor = since or COLLECTION_START
     paths = sorted(glob.glob(os.path.join(config.REPORTS_DIR, "fleet_trades_*.json")))
     dates = []
     for p_ in paths:
@@ -298,9 +332,12 @@ def compare_all(s3=None, since=None):
         return 2
 
     if floor:
-        src = "warehouse coverage" if not since else "--since"
-        print(f"\n  warehouse holds dt= {wh_start} .. {wh_end}"
-              f"   (floor from {src}: {floor})")
+        src = "--since" if since else "collection start"
+        print(f"\n  warehouse holds dt= {wh_start} .. {wh_end}, but only "
+              f"COLLECTS from {COLLECTION_START}")
+        print(f"  dates before {floor} hold whatever survived on the boxes at "
+              f"first push — partial by construction")
+        print(f"  floor: {floor} ({src})")
     else:
         print("\n  ⚠️ could not read the warehouse's dt= range — comparing all dates")
     print(f"  {len(dates)} local bundle(s) found\n")
@@ -361,6 +398,63 @@ def compare_all(s3=None, since=None):
     return 0
 
 
+def explain(date, s3=None):
+    """List the trade_ids that differ on a single date, with why.
+
+    A count tells you THAT two sides disagree. Diagnosing needs the specific
+    rows, so this prints them rather than leaving the divergence to be reasoned
+    about from totals.
+    """
+    s3 = s3 or _client()
+    local_path = os.path.join(config.REPORTS_DIR, f"fleet_trades_{date}.json")
+    if not os.path.exists(local_path):
+        _log("EXPLAIN", f"no local bundle at {local_path}")
+        return 2
+    with open(local_path) as fh:
+        loc = json.load(fh)
+    s3b = build(date, s3)
+    lt = {str(t.get("trade_id")): t for t in loc.get("trades", [])}
+    st = {str(t.get("trade_id")): t for t in s3b.get("trades", [])}
+
+    def _row(t):
+        return (f"{str(t.get('box') or t.get('symbol') or '?'):<6} "
+                f"{str(t.get('entry_time') or '')[:19]:<19} "
+                f"{str(t.get('status') or ''):<8} "
+                f"pnl={CT._num(t.get('pnl_usd')):>9.2f}")
+
+    only_l = sorted(set(lt) - set(st))
+    only_s = sorted(set(st) - set(lt))
+    print(f"\n  {date}: local {len(lt)} · s3 {len(st)} "
+          f"(from {s3b['meta']['n_trade_objects']} stored states)\n")
+    if only_l:
+        print(f"  ONLY IN LOCAL ({len(only_l)}) — in the bundle, absent from S3:")
+        for tid in only_l[:25]:
+            print(f"    {tid:<12} {_row(lt[tid])}")
+        if len(only_l) > 25:
+            print(f"    … and {len(only_l) - 25} more")
+    if only_s:
+        print(f"\n  ONLY IN S3 ({len(only_s)}) — pushed by a box, missing from "
+              f"the bundle:")
+        for tid in only_s[:25]:
+            print(f"    {tid:<12} {_row(st[tid])}")
+        if len(only_s) > 25:
+            print(f"    … and {len(only_s) - 25} more")
+    both = sorted(set(lt) & set(st))
+    mism = [t for t in both
+            if round(CT._num(lt[t].get("pnl_usd")), 2)
+            != round(CT._num(st[t].get("pnl_usd")), 2)
+            or str(lt[t].get("status")) != str(st[t].get("status"))]
+    if mism:
+        print(f"\n  PRESENT BOTH SIDES BUT DIFFERENT ({len(mism)}):")
+        for tid in mism[:25]:
+            print(f"    {tid:<12} local {_row(lt[tid])}")
+            print(f"    {'':<12} s3    {_row(st[tid])}")
+    if not (only_l or only_s or mism):
+        print("  no differences — this date matches")
+    print()
+    return 0
+
+
 def main(argv):
     p = argparse.ArgumentParser(description="Rebuild the fleet_trades bundle from S3")
     p.add_argument("--date", default=None, help="YYYY-MM-DD (default: today ET)")
@@ -371,9 +465,13 @@ def main(argv):
                    help="compare every in-coverage date that has a local bundle")
     p.add_argument("--since", default=None,
                    help="override the coverage floor (YYYY-MM-DD)")
+    p.add_argument("--explain", action="store_true",
+                   help="list the trade_ids that differ on --date")
     a = p.parse_args(argv[1:])
     date = a.date or datetime.now(_ET).date().isoformat()
 
+    if a.explain:
+        return explain(date)
     if a.all:
         return compare_all(since=a.since)
     if a.compare:
@@ -385,7 +483,17 @@ def main(argv):
           f"{m['n_trades']} trades ({m['n_closed']} closed) from "
           f"{m['n_trade_objects']} stored states, net {st['net_pnl']:+.2f}, "
           f"win {st['win_rate']:.0%}")
-    out = a.out or os.path.join(config.REPORTS_DIR, f"fleet_trades_s3_{date}.json")
+    out = a.out or os.path.join(WAREHOUSE_OUT, f"fleet_trades_{date}.json")
+    # Refuse, do not warn. A warning about a path that silently changes another
+    # report's inputs is a warning nobody reads until the numbers are wrong.
+    if (os.path.dirname(os.path.abspath(out)) == os.path.abspath(config.REPORTS_DIR)
+            and os.path.basename(out).startswith(GLOB_HAZARD)):
+        print(f"refusing to write {out}\n"
+              f"  reports/{GLOB_HAZARD}*.json is report 41's input glob — a file\n"
+              f"  there becomes 41's data. Use {WAREHOUSE_OUT}/ or a path outside\n"
+              f"  reports/.")
+        return 2
+    os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     tmp = out + ".tmp"
     with open(tmp, "w") as fh:
         json.dump(bundle, fh, indent=2, default=str)
