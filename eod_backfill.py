@@ -1,4 +1,23 @@
-# day_trader_pro/eod_backfill.py — v1.3
+# day_trader_pro/eod_backfill.py — v1.4
+# v1.4  2026-08-17  WH.5: THE DIAGNOSIS EXISTED AND WAS TRUNCATED TWICE.
+#         `s3_push --verify` ALREADY prints the full audit trail - manifest,
+#         progress, outcome, and `SHORT <prefix> expected>=N got=M` per prefix.
+#         The operator was being told only "warehouse NOT confirmed", which cannot
+#         distinguish STILL UPLOADING from FINISHED BUT SHORT from NEVER STARTED -
+#         three failures with three different fixes.
+#         LOST AT TWO STACKED TRUNCATIONS, BOTH HERE:
+#           1. `| tail -3` on the remote command. The pusher emits 1 header + up
+#              to 5 SHORT lines, so with 3+ shorts this DISCARDED THE HEADER -
+#              the very line carrying the OK/SHORT verdict. Now tail -8.
+#           2. `line.splitlines()[0]` kept ONE line of whatever survived. Now
+#              every line is logged.
+#         The SHORT lines now reach TELEGRAM (the verdict alone did before) and
+#         are appended to reports/S3Error.log, because the journal dies with the
+#         box: systemd routes the pusher's stdout to that instance's journal and
+#         the conductor stops the box moments later.
+#         AND AN ABSENT SHORT LINE IS NOW ITS OWN DIAGNOSIS - no shortfall
+#         reported means a REACHABILITY or startup failure, not a partial upload.
+#         NOTHING WAS ADDED TO THE PUSHER. It was already saying all of this.
 # v1.1.1 (2026-07-23) — correct stale data/harvest path references (layout retired; now reports/ + ohlc/ + trades/)
 # v1.1.0 (2026-07-11) — canonical layout: reads/writes ohlc/<date>/<SYM>_ohlc_<date>.csv
 #   (was data/harvest/). Detection accepts legacy _OHLC_ too.
@@ -62,6 +81,7 @@ CLI:
 
 import argparse
 import os
+import datetime as _dt
 import re
 import sys
 import time
@@ -209,6 +229,7 @@ def _poll_bars(recs, dry):
 def _pull(recs, date, day_dir, dry):
     """scp each box's CSV into the shared dated folder. Returns {sym: local_bars}."""
     out = {}
+    _DRAIN_DETAIL.clear()
     for s, rec in recs.items():
         local = os.path.join(day_dir, f"{s}_ohlc_{date}.csv")
         if dry:
@@ -232,6 +253,11 @@ DRAIN_SPACING = float(os.environ.get("OT_EOD_DRAIN_SPACING", "5"))
 # safety net); 0 = the warehouse is the only path for this pass. Flip only once
 # the push has a confirmed track record — decision #5, dual-write then sever.
 PULL_ENABLED = os.environ.get("OT_EOD_PULL", "1") != "0"
+
+
+# WH.5: per-symbol raw --verify output, so the caller can report the DIAGNOSIS
+# rather than the verdict. Cleared each pass by _drain_verify.
+_DRAIN_DETAIL: dict = {}
 
 
 def _drain_verify(recs, dry):
@@ -260,8 +286,20 @@ def _drain_verify(recs, dry):
         if not ip:
             out[s_] = "NO_IP"
             continue
+        # ── WH.5 (2026-08-17) — STOP TRUNCATING THE ONLY DIAGNOSIS WE HAVE ──
+        # The pusher ALREADY emits the full audit trail on --verify:
+        #     DRAIN host= sym= drained= pushed= failed= prefixes= local= s3=
+        #           short= OK|SHORT
+        #       SHORT <prefix> expected>=N got=M      (up to FIVE of these)
+        # Manifest, progress, outcome and per-prefix shortfall — all of it
+        # existed while the operator was being told only "warehouse NOT
+        # confirmed". It was lost at TWO stacked truncations, both here:
+        #   1. `| tail -3` — with 3+ shorts this DISCARDS THE DRAIN HEADER
+        #      itself, which is the line carrying the OK/SHORT verdict.
+        #   2. `line.splitlines()[0]` — kept one line of whatever survived.
+        # tail is now 8 (1 header + 5 shorts + margin) and every line is kept.
         cmd = ("/usr/bin/python3 " + REMOTE_REPO +
-               "/warehouse/s3_push.py --verify 2>&1 | tail -3")
+               "/warehouse/s3_push.py --verify 2>&1 | tail -8")
         line = ""
         for attempt in (1, 2):
             rc, so, se = ssh_util.ssh_run(ip, cmd, timeout=DRAIN_TIMEOUT)
@@ -272,8 +310,40 @@ def _drain_verify(recs, dry):
                 _log("DRAIN", f"{s_} not clear yet — one retry")
         state = "OK" if (" OK" in line) else "SHORT"
         out[s_] = state
-        _log("DRAIN", f"{s_} {state}: {line.splitlines()[0] if line else '(no output)'}")
+        # ⚠️ EVERY LINE, not the first. The `SHORT <prefix> expected>= got=`
+        # lines are what turn "not confirmed" into a diagnosis.
+        if line:
+            for i, ln in enumerate(line.splitlines()):
+                _log("DRAIN", f"{s_} {state}: {ln}" if i == 0
+                     else f"{s_}   {ln.strip()}")
+        else:
+            _log("DRAIN", f"{s_} {state}: (no output)")
+        _DRAIN_DETAIL[s_] = line or "(no output)"
     return out
+
+
+def _write_s3_error_log(symbols) -> None:
+    """Append the raw --verify output to reports/S3Error.log.
+
+    ⚠️ THE JOURNAL DIES WITH THE BOX. `s3_push` prints its diagnosis to stdout,
+    systemd routes it to that instance's journal, and the conductor stops the
+    box moments later — so the only record of WHY a push fell short evaporates
+    with the machine that produced it. This file lives on control and is read by
+    Market Report on its next run, which is what makes the trail outlive the
+    instance.
+    ⚠️ APPEND, never truncate: a second batch must not erase the first.
+    """
+    try:
+        d = os.path.join(os.path.dirname(os.path.abspath(__file__)), "reports")
+        os.makedirs(d, exist_ok=True)
+        stamp = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        with open(os.path.join(d, "S3Error.log"), "a", encoding="utf-8") as fh:
+            for s_ in sorted(symbols):
+                fh.write(f"{stamp} {s_} NOT_CONFIRMED\n")
+                for ln in (_DRAIN_DETAIL.get(s_, "") or "(no output)").splitlines():
+                    fh.write(f"{stamp} {s_}   {ln.strip()}\n")
+    except Exception as exc:                                       # noqa: BLE001
+        _log("DRAIN", f"(could not write S3Error.log: {exc})")
 
 
 def _stop(recs, dry):
@@ -361,11 +431,34 @@ def run(date=None, batch=5, stream_cap=10, only=None, dry=False):
             # holding the pipeline would strand the whole backfill against the
             # stream cap. So the failure has to be visible somewhere a human
             # actually looks — Telegram, not the log.
+            # ⚠️ WH.5 — SEND THE DIAGNOSIS, NOT THE VERDICT. "NOT confirmed"
+            # names the symbol and stops there; the operator then has no way to
+            # tell "still uploading" from "finished but short" from "never
+            # started" — three failures with three different fixes. The
+            # `SHORT <prefix> expected>= got=` lines answer that, and they were
+            # being captured and discarded two steps upstream.
+            _detail = []
+            for _s in sorted(not_clear):
+                for _ln in (_DRAIN_DETAIL.get(_s, "") or "").splitlines():
+                    _ln = _ln.strip()
+                    if _ln.startswith("SHORT ") or "expected>=" in _ln:
+                        _detail.append(f"{_s}: {_ln}")
             msg = ("⚠️ EOD backfill: warehouse NOT confirmed for "
                    + ", ".join(sorted(not_clear))
                    + f" ({len(not_clear)}/{len(drained)} in this batch). "
                      "Boxes stopped anyway; data is stranded on them until "
                      "their next wake, not lost.")
+            if _detail:
+                msg += "\n" + "\n".join(_detail[:8])
+            else:
+                # No SHORT line at all is itself diagnostic: the pusher never
+                # got far enough to report one, which is NOT the same as a
+                # shortfall. Say which, rather than letting silence read as
+                # "short".
+                msg += ("\n(no SHORT detail returned — the pusher did not "
+                        "report a shortfall, so this is a REACHABILITY or "
+                        "startup failure, not a partial upload)")
+            _write_s3_error_log(not_clear)
             _log("DRAIN", msg)
             if not dry:
                 try:
