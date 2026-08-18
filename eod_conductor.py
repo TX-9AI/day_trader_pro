@@ -1,4 +1,16 @@
-# day_trader_pro/eod_conductor.py — v1.13.0
+# day_trader_pro/eod_conductor.py — v1.14.0
+# v1.14.0 (2026-08-18) — +PHASE 15 WAREHOUSE COVERAGE (VIX). Gate for the
+#   sever: once S3 is the official store the control-side copy stops being
+#   written, so anything absent from the bucket is gone. VIX carries the
+#   highest exposure in that transition because it has ONE writer —
+#   s3_push.push_candles skips VIX unless the box is SPX — so any day SPX is
+#   down or its candles stage fails, VIX does not land, and NOTHING reports it,
+#   since 28 boxes skipping VIX is correct behaviour. Runs
+#   warehouse_coverage.py (LIST-only, read-only) and warns on a missing date,
+#   separating "SPX pushed candles but no VIX" (a push defect) from "SPX pushed
+#   nothing" (box down). LAST in the chain on purpose: the pusher runs on its
+#   own timer, so checking earlier would report objects that are merely still
+#   in flight as missing. Warn-never-stop, like every other phase.
 # v1.13.0 (2026-08-04) — PHASE 10 NAMES THE NEW SWALLOWS. The 08-03 warning read
 #   "silent handlers ROSE 83 -> 87 — a new swallow was added" and stopped there,
 #   so every firing cost a manual census to find out WHICH. Both snapshots are
@@ -908,6 +920,55 @@ def phase_evm(date, dry, warns):
             pass
 
 
+def phase_coverage(date, dry, warns):
+    """Phase 15 — IS THE WAREHOUSE ACTUALLY HOLDING VIX? (pre-sever gate)
+
+    WHY THIS IS A PHASE AND NOT A COMMAND SOMEONE RUNS: after the sever the
+    bucket is the only copy, and a stream that quietly stops landing is
+    unrecoverable — DXFeed history is use-it-or-lose-it and nothing in the
+    system can delete or re-create it. A check that depends on anyone
+    remembering to run it is a comment, not a control.
+
+    WHY VIX SPECIFICALLY: it is the only stream with a SINGLE writer. Every box
+    logs VIX into feed_store, but push_candles skips it unless the box is SPX
+    ("SPX owns VIX" — the dedup decision). So VIX collection is exactly as
+    reliable as one box, and its absence looks identical to normal behaviour on
+    the other 28.
+
+    Control-side, read-only, LIST-only against S3 — never touches a box, never
+    fetches an object body. Warn-never-stop per the recovery-path rule.
+    """
+    script = os.path.join(config.BASE_DIR, "warehouse_coverage.py")
+    out = os.path.join(config.REPORTS_DIR, f"warehouse_coverage_{date}.json")
+    if dry:
+        _log("COVERAGE", f"[dry] would run {script} --date {date} --json -> {out}")
+        return
+    if not os.path.isfile(script):
+        _warn(warns, "COVERAGE", f"{script} not found — VIX coverage NOT checked")
+        return
+    try:
+        proc = subprocess.run([sys.executable, script, "--date", date,
+                               "--json", out],
+                              capture_output=True, text=True, timeout=180)
+    except Exception as exc:  # noqa: BLE001
+        _warn(warns, "COVERAGE", f"warehouse_coverage.py raised: {exc}")
+        return
+    for line in (proc.stdout or "").splitlines():
+        _log("COVERAGE", line.rstrip())
+    if proc.returncode == 2:
+        _warn(warns, "COVERAGE", "could not list the bucket — coverage UNKNOWN "
+                                 f"for {date}: {(proc.stderr or '').strip()[:160]}")
+        return
+    if proc.returncode != 0:
+        # rc=1 means a checked date is missing VIX. The stdout above already
+        # names which of the two diagnoses it is; the warning has to carry
+        # enough to act on without re-running anything.
+        _warn(warns, "COVERAGE",
+              f"VIX MISSING from the warehouse for {date} — see "
+              f"{os.path.basename(out)}. Do NOT sever the control-side copy "
+              f"while this is red.")
+
+
 def phase_readiness(date, dry, warns):
     """Phase 9 — readiness digest (trade_readiness v1.1 dial-tuning report).
 
@@ -954,7 +1015,7 @@ def phase_readiness(date, dry, warns):
 
 def run(date=None, batch=5, dry=False, do_regime=True, do_tables=True,
         do_swallow=True, do_vwap=True, do_evm=True, do_recover=True,
-        do_readiness=True):
+        do_readiness=True, do_coverage=True):
     date = date or _today_et()
     mapping, _ = instance_registry.discover(config.UNIVERSE)
     running = {s: r.get("private_ip", "") for s, r in mapping.items()
@@ -1006,6 +1067,12 @@ def run(date=None, batch=5, dry=False, do_regime=True, do_tables=True,
         phase_readiness(date, dry, warns)
     else:
         _log("READINESS", "skipped (--no-readiness)")
+    # LAST on purpose — the box-side pusher runs on its own timer, so an
+    # earlier check would call objects still in flight "missing".
+    if do_coverage:
+        phase_coverage(date, dry, warns)
+    else:
+        _log("COVERAGE", "skipped (--no-coverage)")
 
     if warns:
         _log("DONE", f"⚠️ EOD conductor finished {date} with {len(warns)} warning(s):")
@@ -1035,12 +1102,15 @@ def main(argv):
     p.add_argument("--no-evm", action="store_true")
     p.add_argument("--no-recover", action="store_true")
     p.add_argument("--no-readiness", action="store_true")
+    p.add_argument("--no-coverage", action="store_true",
+                   help="skip the VIX warehouse-coverage check (phase 15)")
     args = p.parse_args(argv[1:])
     return run(date=args.date, batch=args.batch, dry=args.dry_run,
                do_regime=not args.no_regime, do_tables=not args.no_tables,
                do_swallow=not args.no_swallow, do_vwap=not args.no_vwap,
                do_evm=not args.no_evm, do_recover=not args.no_recover,
-               do_readiness=not args.no_readiness)
+               do_readiness=not args.no_readiness,
+               do_coverage=not args.no_coverage)
 
 
 if __name__ == "__main__":
