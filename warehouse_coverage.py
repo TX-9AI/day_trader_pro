@@ -1,5 +1,22 @@
 #!/usr/bin/env python3
-# day_trader_pro/warehouse_coverage.py — v1.0
+# day_trader_pro/warehouse_coverage.py — v1.1
+# v1.1 (2026-08-18) — 🔴 IT CRIED WOLF ON A SUNDAY. v1.0 judged every dt=
+#      partition present in the bucket without asking whether that date was a
+#      TRADING DAY, so one stray weekend object (2026-08-16, SPX candles=1 —
+#      a late flush or a daily bar) manufactured a partition and then a
+#      PUSH_DEFECT verdict against a day the market was closed. There were no
+#      VIX 1-minute bars to miss. A check that reports a defect on a Sunday
+#      trains the operator to skim its output, which is the exact failure the
+#      phase exists to prevent (the CV.1 lesson).
+#      Two categories added, both REPORTED rather than silently skipped — a
+#      tool that quietly shrinks its own scope is as misleading as one that
+#      over-reports:
+#        NOT_A_SESSION      market_calendar.is_trading_day() is False
+#        PARTIAL_BY_DESIGN  before COLLECTION_START, where the first push
+#                           shipped whatever history each box still had, so
+#                           absence proves nothing (the warehouse reader's
+#                           third category, applied here)
+#      Neither counts as a failure; neither counts as coverage.
 # v1.0 (2026-08-18) — VIX COVERAGE IN THE WAREHOUSE, BEFORE THE SEVER.
 #      Once S3 becomes the official store, the control-side copy stops being
 #      written and anything absent from the bucket is GONE. VIX is the highest
@@ -43,6 +60,7 @@ from datetime import date as _date, timedelta
 import boto3
 
 import config  # noqa: F401  (kept for path/env parity with the other tools)
+import market_calendar
 
 BUCKET = os.environ.get("OT_S3_BUCKET", "vertigo-warehouse-tx9ai")
 REGION = os.environ.get("OT_S3_REGION", "us-east-2")
@@ -56,6 +74,10 @@ EXPECTED_STREAMS = {
     "VIX_1d": ("candles", "VIX", "1d"),
 }
 OWNER = "SPX"          # the only box permitted to push VIX (s3_push.push_candles)
+
+# The date the warehouse began COLLECTING — earlier partitions exist but are
+# partial by construction. Same constant and same reasoning as warehouse_reader.
+COLLECTION_START = os.environ.get("OT_WAREHOUSE_START", "2026-08-13")
 
 
 def _log(tag, msg):
@@ -88,15 +110,35 @@ def _dt_days(s3, datatype):
     return sorted(days)
 
 
+def _is_session(day):
+    """v1.1 — was the market open? Weekends AND holidays, via the repo's own
+    calendar rather than a weekday test, because a holiday looks exactly like
+    a defect otherwise."""
+    try:
+        return market_calendar.is_trading_day(_date.fromisoformat(day))
+    except Exception:                                          # noqa: BLE001
+        return True        # unknown date format: judge it rather than excuse it
+
+
 def check_date(s3, day):
     """One date's verdict. Pure lookup — no side effects."""
     row = {"date": day}
+    if not _is_session(day):
+        # v1.1 — no session, no bars. Reported, not skipped.
+        row.update({"VIX_1m": 0, "VIX_1d": 0, "owner_candles": 0,
+                    "verdict": "NOT_A_SESSION"})
+        return row
     for name, (datatype, sym, interval) in EXPECTED_STREAMS.items():
         row[name] = _count(
             s3, f"{PREFIX}/{datatype}/dt={day}/sym={sym}/interval={interval}/")
     row["owner_candles"] = _count(
         s3, f"{PREFIX}/{datatype}/dt={day}/sym={OWNER}/")
-    if row["VIX_1m"] > 0:
+    if day < COLLECTION_START:
+        # v1.1 — the first push shipped whatever history survived on each box,
+        # so a thin pre-collection date is expected and proves nothing either
+        # way. Never a defect, never counted as coverage.
+        row["verdict"] = "PARTIAL_BY_DESIGN"
+    elif row["VIX_1m"] > 0:
         row["verdict"] = "OK"
     elif row["owner_candles"] > 0:
         row["verdict"] = "PUSH_DEFECT"      # SPX pushed candles, VIX missing
@@ -135,11 +177,16 @@ def main(argv=None):
         days = present[-args.last:]
 
     rows = [check_date(s3, d) for d in days]
-    missing = [r for r in rows if r["verdict"] != "OK"]
+    # v1.1 — only two verdicts are failures. NOT_A_SESSION and
+    # PARTIAL_BY_DESIGN are explanations, and treating an explanation as a
+    # failure is how an alarm stops being read.
+    missing = [r for r in rows
+               if r["verdict"] in ("PUSH_DEFECT", "OWNER_DOWN")]
 
     _log("COVERAGE", f"s3://{BUCKET}/{PREFIX}/candles/ — {len(rows)} date(s) checked")
     for r in rows:
-        mark = {"OK": "✅", "PUSH_DEFECT": "🔴", "OWNER_DOWN": "⚠️"}[r["verdict"]]
+        mark = {"OK": "✅", "PUSH_DEFECT": "🔴", "OWNER_DOWN": "⚠️",
+                "NOT_A_SESSION": "·", "PARTIAL_BY_DESIGN": "◐"}[r["verdict"]]
         _log("COVERAGE",
              f"  {mark} {r['date']}  VIX 1m={r['VIX_1m']:<4} 1d={r['VIX_1d']:<3} "
              f"{OWNER} candles={r['owner_candles']:<4} {r['verdict']}")
@@ -156,7 +203,11 @@ def main(argv=None):
                              f"{', '.join(downs)} — VIX has a single writer, so "
                              f"those days have no VIX anywhere once control is severed.")
     else:
-        _log("COVERAGE", "✅ every checked date has VIX 1m in the warehouse")
+        _sess = sum(1 for r in rows if r["verdict"] == "OK")
+        _skip = len(rows) - _sess
+        _log("COVERAGE", f"✅ every trading day checked has VIX 1m in the "
+                         f"warehouse ({_sess} session(s); {_skip} not judged — "
+                         f"non-session or pre-collection)")
 
     if args.json:
         try:

@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """
-tests/test_warehouse_coverage.py — the three verdicts, exercised. v1.0
+tests/test_warehouse_coverage.py — the verdicts, exercised. v1.1
+v1.1 — 2026-08-18 — +the two NON-verdicts. v1.0 asserted the three failure/OK
+       states and shipped a checker that called a SUNDAY a push defect: the
+       real 08-16 run showed 🔴 PUSH_DEFECT for a day the market was closed,
+       because one stray weekend object created a dt= partition. Adds: a
+       non-session is NEVER a defect, a pre-collection date is NEVER counted
+       as coverage, and neither is silently dropped from the report.
 v1.0 — 2026-08-18 — INITIAL.
 
 `warehouse_coverage.check_date` decides which of three things happened on a
@@ -105,6 +111,33 @@ def main():
     check("a different dt= does not count as coverage",
           r["verdict"] == "OWNER_DOWN", r["verdict"])
 
+    # ── v1.1 — the two states that are explanations, not failures ──────────
+    sunday = "2026-08-16"          # a real date this tool got wrong at v1.0
+    r = WC.check_date(_FakeS3(_keys_for(sunday, vix_1m=0, spx=1)), sunday)
+    check("a Sunday with a stray object is NOT a defect",
+          r["verdict"] == "NOT_A_SESSION", r["verdict"])
+
+    holiday = "2026-07-03"         # observed Independence Day
+    r = WC.check_date(_FakeS3(_keys_for(holiday, vix_1m=0, spx=1)), holiday)
+    check("a market holiday is NOT a defect", r["verdict"] == "NOT_A_SESSION",
+          r["verdict"])
+
+    early = "2026-08-10"           # before COLLECTION_START
+    r = WC.check_date(_FakeS3(_keys_for(early, vix_1m=0, spx=2)), early)
+    check("a pre-collection date is PARTIAL_BY_DESIGN, not a defect",
+          r["verdict"] == "PARTIAL_BY_DESIGN", r["verdict"])
+
+    r = WC.check_date(_FakeS3(_keys_for(early, vix_1m=9, spx=2)), early)
+    check("and a pre-collection date is not counted as coverage either",
+          r["verdict"] == "PARTIAL_BY_DESIGN", r["verdict"])
+
+    # a real session with no VIX must still be caught — the guard must not
+    # have been widened into an excuse
+    r = WC.check_date(_FakeS3(_keys_for("2026-08-17", vix_1m=0, spx=9)),
+                      "2026-08-17")
+    check("a real Monday with no VIX is STILL a push defect",
+          r["verdict"] == "PUSH_DEFECT", r["verdict"])
+
     # the partition lister must find the days that exist and only those
     days = WC._dt_days(_FakeS3(_keys_for("2026-08-17", vix_1m=1)
                                + _keys_for("2026-08-18", spx=1)), "candles")
@@ -115,8 +148,9 @@ def main():
     if FAILS:
         print(f"warehouse_coverage: {len(FAILS)} FAILED — " + "; ".join(FAILS))
         return 1
-    print("warehouse_coverage: ALL PASS "
-          "(OK · PUSH_DEFECT · OWNER_DOWN · 1d≠coverage · date isolation · dt= list)")
+    print("warehouse_coverage: ALL PASS (OK · PUSH_DEFECT · OWNER_DOWN · "
+          "1d≠coverage · date isolation · dt= list · Sunday · holiday · "
+          "pre-collection · guard-not-widened)")
     return 0
 
 
