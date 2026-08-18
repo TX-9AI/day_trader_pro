@@ -1,4 +1,16 @@
-# day_trader_pro/wake_and_bake.py — v1.3
+# day_trader_pro/wake_and_bake.py — v1.4
+# v1.4 (2026-08-18) — VERIFY IS NOW REPO-AWARE, because the fleet no longer
+#   shares one repo: the QQQ box runs the options_trader_smc fork while the
+#   other 28 stay on options_trader_v3. VERIFY required ONE commit across ALL
+#   boxes, so a heterogeneous fleet printed "🚨 NOT converged" and returned
+#   rc=1 on EVERY run — nothing broken, nothing reverted, just a red light
+#   that means nothing. That is the CV.1 class: a check that cries wolf trains
+#   you to ignore red runs. Convergence is now asked PER REMOTE — every box in
+#   a repo group must share one commit, and every box must be accounted for.
+#   BAKE_CMD carries the remote in its OK line to make that possible.
+#   ⚠️ UNCHANGED BY DESIGN: BAKE still does `git fetch origin && git reset
+#   --hard origin/main` and still names NO repo — it follows whatever remote
+#   the box carries, which is what makes the fork deployable at all.
 # v1.3 (2026-08-16) — WH.7: THE EMERGENCY STOP NO LONGER HANGS.
 #   Option 27 pinged all 29 boxes over SSH before stopping anything. Discovery
 #   returns STOPPED instances with a stale private_ip, so the ping SSHed
@@ -106,7 +118,9 @@ SERVICE = "optionsbot"
 # Remote bake: fetch, list the files that are about to change (name-status,
 # exactly what a git pull prints), hard-reset to origin/main, then emit one
 # parseable line:
-#   OK|<HEAD sha>|<origin/main sha>|<subject>
+#   OK|<HEAD sha>|<origin/main sha>|<repo>|<subject>
+# v1.4 added <repo> (the remote's basename, .git stripped) so VERIFY can group
+# by repo instead of demanding one commit across a fleet that has two.
 # The && chain means any git failure yields a non-zero rc and no OK line.
 # The diff lines (e.g. "M\tfleet.py") arrive BEFORE the OK line on stdout.
 BAKE_CMD = (
@@ -114,6 +128,7 @@ BAKE_CMD = (
     f"git diff --name-status HEAD origin/main && "
     f"git reset --hard origin/main -q && "
     f'echo "OK|$(git rev-parse HEAD)|$(git rev-parse origin/main)|'
+    f'$(basename "$(git remote get-url origin 2>/dev/null)" .git)|'
     f"$(git log --oneline -1 | tr '|' ' ')\""
 )
 
@@ -226,13 +241,14 @@ def stage_bake(mapping, symbols, dry):
     if dry:
         _log("BAKE", f"[dry-run] would run on {len(symbols)} box(es):")
         _log("BAKE", f"          {BAKE_CMD}")
-        return {"heads": {}, "fails": [], "n_files": 0}
+        return {"heads": {}, "fails": [], "n_files": 0, "repos": {}}
     if config.MOCK_AWS:
         _log("BAKE", f"[mock] all {len(symbols)} boxes -> mocksha0000 (0 files)")
         return {"heads": {s: "mocksha0000" for s in symbols}, "fails": [],
-                "n_files": 0}
+                "n_files": 0,
+                "repos": {s: "options_trader_v3" for s in symbols}}
 
-    heads, fails = {}, []
+    heads, fails, repos = {}, [], {}
     total_files = 0
     for sym in sorted(symbols):
         rc, out, err = _exec(mapping[sym].get("private_ip", ""), BAKE_CMD)
@@ -243,7 +259,16 @@ def stage_bake(mapping, symbols, dry):
             continue
         parts = line.split("|")
         head, origin = (parts + ["", ""])[1:3]
-        subject = parts[3] if len(parts) > 3 else ""
+        # v1.4 — five fields now: OK|head|origin|repo|subject. A four-field
+        # line means the box answered an older BAKE_CMD; treat the repo as
+        # UNKNOWN rather than mistaking the subject for a repo name.
+        if len(parts) >= 5:
+            repo = parts[3].strip() or "?"
+            subject = parts[4]
+        else:
+            repo = "?"
+            subject = parts[3] if len(parts) > 3 else ""
+        repos[sym] = repo
         if head != origin or not head:
             fails.append(sym)
             _log("BAKE", f"{sym:<5} 🚨 HEAD!=origin ({head[:8]} vs {origin[:8]})")
@@ -260,7 +285,59 @@ def stage_bake(mapping, symbols, dry):
             _log("BAKE", f"{sym:<5} ✅ {head[:10]}  {subject[:40]} — already up to date")
     _log("BAKE", f"successfully synched {total_files} file(s) across "
                  f"{len(heads)}/{len(symbols)} box(es)")
-    return {"heads": heads, "fails": fails, "n_files": total_files}
+    return {"heads": heads, "fails": fails, "n_files": total_files,
+            "repos": repos}
+
+
+def verify_convergence(heads, repos, fails, expected):
+    """v1.4 — is every box where it should be, GROUPED BY REPO?
+
+    Pure and side-effect free so it can be tested without a fleet (the
+    property the old inline block did not have). Returns
+    (ok: bool, lines: [(level, text)], note: str).
+
+    The rule that changed: convergence is asked WITHIN each repo group, not
+    across the fleet. Two boxes on two different repos are SUPPOSED to sit on
+    different commits — that is the point of the fork, not a fault. What is
+    still a fault: two boxes on the SAME repo disagreeing, a bake failure, or
+    a box that never reported at all.
+    """
+    lines = []
+    if fails:
+        lines.append(("err", f"🚨 bake failed on: {', '.join(sorted(fails))}"))
+
+    groups = {}
+    for sym, head in heads.items():
+        groups.setdefault(repos.get(sym, "?"), {})[sym] = head
+
+    bad = []
+    for repo in sorted(groups):
+        g = groups[repo]
+        shas = set(g.values())
+        if len(shas) == 1:
+            lines.append(("info", f"✅ {len(g)}/{len(g)} on {next(iter(shas))[:10]} "
+                                  f"({repo})"))
+        else:
+            head_map = ", ".join(f"{s}:{h[:8]}" for s, h in sorted(g.items()))
+            lines.append(("err", f"🚨 {repo}: {len(shas)} distinct commit(s) "
+                                 f"across {len(g)} box(es). {head_map}"))
+            bad.append(repo)
+
+    missing = expected - len(heads)
+    if missing > 0:
+        lines.append(("err", f"🚨 {len(heads)}/{expected} boxes reported — "
+                             f"{missing} did not answer"))
+
+    ok = not fails and not bad and missing <= 0
+    if ok:
+        note = ("converged: " +
+                " · ".join(f"{len(groups[r])}×{r}" for r in sorted(groups)))
+        if len(groups) > 1:
+            lines.append(("info", f"ℹ️  {len(groups)} repo groups on this fleet "
+                                  f"— separate repos are EXPECTED to differ"))
+    else:
+        note = "git NOT converged"
+    return ok, lines, note
 
 
 def stage_pyclear(mapping, symbols, dry):
@@ -464,20 +541,15 @@ def run(only=None, assume_yes=False, dry=False, leave_running=False,
 
         # 4 VERIFY convergence
         if live:
-            heads, fails = bake["heads"], bake["fails"]
-            shas = set(heads.values())
-            if fails:
-                summary.append(f"bake failed: {', '.join(fails)}")
-                rc_final = 1
-            if not fails and len(shas) == 1 and len(heads) == expected:
-                sha = next(iter(shas))[:10]
-                _log("VERIFY", f"✅ all {len(heads)}/{expected} boxes on {sha} (== origin/main)")
-                summary.append(f"synched {bake['n_files']} file(s) → {sha}")
-            else:
-                head_map = ", ".join(f"{s}:{h[:8]}" for s, h in sorted(heads.items()))
-                _log("VERIFY", f"🚨 NOT converged: {len(heads)}/{expected} synced, "
-                               f"{len(shas)} distinct commit(s). {head_map}")
-                summary.append("git NOT converged")
+            ok, lines, note = verify_convergence(
+                bake["heads"], bake.get("repos", {}), bake["fails"], expected)
+            for lvl, text in lines:
+                _log("VERIFY", text)
+            if bake["fails"]:
+                summary.append(f"bake failed: {', '.join(bake['fails'])}")
+            summary.append(note if not ok
+                           else f"synched {bake['n_files']} file(s) — {note}")
+            if not ok:
                 rc_final = 1
         else:
             _log("VERIFY", "[dry/mock] convergence check skipped")

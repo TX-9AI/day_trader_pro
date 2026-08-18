@@ -1,7 +1,14 @@
 #!/usr/bin/env bash
-# day_trader_pro/menu_functions.sh — GENERATED from devtools.sh
+# day_trader_pro/menu_functions.sh — GENERATED from devtools.sh — v1.1
 # One function per menu item, body copied verbatim from the case block.
 # Sourced by devtools.sh; named by menu_registry.sh. No numbers here.
+#
+# v1.1  2026-08-18  The six REPOINT items now ABORT when ask_url() returns
+#       non-zero (empty answer). Without this the aborted prompt would pass an
+#       empty string straight to `fleet.py repoint ""`, which prints a usage
+#       error — recoverable, but it reads like a bug rather than like the
+#       cancellation the operator asked for. Pairs with devtools v1.36.
+# v1.0  2026-08-16  Extracted from devtools.sh v1.32 (the menu is data).
 
 # Full spool-up (mock)
 mi_full_spool_up_mock() {
@@ -140,32 +147,32 @@ mi_emergency_stop_no_eod_no_pycache_rth_exempt() {
 
 # Check only
 mi_check_only() {
-    echo; U=$(ask_url); $PY fleet.py repoint "$U" --check-only; pause
+    echo; U=$(ask_url) || { pause; return 0; }; $PY fleet.py repoint "$U" --check-only; pause
 }
 
 # FULL
 mi_full() {
-    echo; U=$(ask_url); $PY fleet.py repoint "$U"; pause
+    echo; U=$(ask_url) || { pause; return 0; }; $PY fleet.py repoint "$U"; pause
 }
 
 # Full + wake
 mi_full_wake() {
-    echo; U=$(ask_url); $PY fleet.py repoint "$U" --wake; pause
+    echo; U=$(ask_url) || { pause; return 0; }; $PY fleet.py repoint "$U" --wake; pause
 }
 
 # No restart
 mi_no_restart() {
-    echo; U=$(ask_url); $PY fleet.py repoint "$U" --no-restart; pause
+    echo; U=$(ask_url) || { pause; return 0; }; $PY fleet.py repoint "$U" --no-restart; pause
 }
 
 # Scoped
 mi_scoped() {
-    echo; U=$(ask_url); read -rp "Symbols (comma-sep, e.g. SPX,QQQ): " SY; $PY fleet.py repoint "$U" --only "$SY"; pause
+    echo; U=$(ask_url) || { pause; return 0; }; read -rp "Symbols (comma-sep, e.g. SPX,QQQ): " SY; $PY fleet.py repoint "$U" --only "$SY"; pause
 }
 
 # Mock preview
 mi_mock_preview() {
-    echo; U=$(ask_url); $PY fleet.py repoint "$U" --mock --yes; pause
+    echo; U=$(ask_url) || { pause; return 0; }; $PY fleet.py repoint "$U" --mock --yes; pause
 }
 
 # Snapshot dir -> repo-ready tarball

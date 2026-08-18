@@ -1,4 +1,15 @@
-# day_trader_pro/fleet.py — v0.6.1
+# day_trader_pro/fleet.py — v0.7.0
+# v0.7.0 (2026-08-18) — REPOINT WILL NOT SILENTLY UN-FORK THE FLEET.
+#   The fleet now holds two repos: the QQQ box runs options_trader_smc, the
+#   other 28 run options_trader_v3. `repoint <url>` with no --only rewrites
+#   origin on EVERY running box, so one unscoped run — or one Enter on
+#   devtools' old pre-filled default — ends the SMC experiment with no error
+#   and no obvious trace. Repoint now SURVEYS the remotes first; if more than
+#   one distinct repo is in play it refuses unless the run is scoped (--only)
+#   or the operator passes --all-repos, and it names every box that would be
+#   overwritten and what it would be overwritten FROM.
+#   ⚠️ `update` is untouched and was never the risk: it runs push.sh --deploy,
+#   which parses the repo from the box's own remote.
 # v0.6.1 (2026-07-23) — correct stale data/harvest path references (layout retired; now reports/ + ohlc/ + trades/)
 """
 Fleet SSH fan-out. Pulls every monitored box's private IP from its tag and
@@ -355,8 +366,70 @@ def _phase2_commit_cmd(new_url, repo, restart):
     )
 
 
+_REMOTE_PROBE = (f"cd {INSTALL_DIR} 2>/dev/null && "
+                 f"basename \"$(git remote get-url origin 2>/dev/null)\" .git "
+                 f"|| echo '?'")
+
+
+def survey_remotes(running, exec_fn=None):
+    """v0.7.0 — {symbol: repo-name} for the boxes we are about to touch.
+
+    Read-only. A box that cannot be reached or has no remote reports '?',
+    which counts as its own group — an unknown remote is not evidence of
+    sameness.
+    """
+    ex = exec_fn or _exec
+    out_map = {}
+    for s, ip, _ in running:
+        try:
+            rc, out, _err = ex(s, ip, _REMOTE_PROBE)
+            name = (out or "").strip().splitlines()[-1].strip() if out else ""
+            out_map[s] = name if (rc == 0 and name) else "?"
+        except Exception:                                  # noqa: BLE001
+            out_map[s] = "?"
+    return out_map
+
+
+def repoint_refusal(remote_map, target_repo, only, all_repos):
+    """v0.7.0 — should this unscoped repoint be REFUSED? Pure; returns the
+    refusal message, or None to proceed.
+
+    Refuse when the fleet holds more than one distinct repo and the run is
+    neither scoped nor explicitly acknowledged. Naming the boxes matters more
+    than the refusal: the operator needs to see WHICH box is about to lose
+    its remote and what it is losing.
+    """
+    if only or all_repos:
+        return None
+    distinct = {r for r in remote_map.values()}
+    if len(distinct) <= 1:
+        return None
+    losers = sorted(s for s, r in remote_map.items()
+                    if target_repo and r != target_repo and r != "?")
+    unknown = sorted(s for s, r in remote_map.items() if r == "?")
+    lines = [
+        "🛑 REFUSING an unscoped repoint: this fleet holds "
+        f"{len(distinct)} distinct repos.",
+        "   current: " + " · ".join(
+            f"{r}×{sum(1 for v in remote_map.values() if v == r)}"
+            for r in sorted(distinct)),
+    ]
+    if losers:
+        lines.append("   would be OVERWRITTEN onto "
+                     f"{target_repo}: " +
+                     ", ".join(f"{s} (now {remote_map[s]})" for s in losers))
+    if unknown:
+        lines.append("   remote UNKNOWN (unreachable or no origin): "
+                     + ", ".join(unknown))
+    lines += [
+        "   Scope it:      --only QQQ",
+        "   Or say it out loud: --all-repos",
+    ]
+    return "\n".join(lines)
+
+
 def cmd_repoint(new_url, only=None, restart=True, wake=False,
-                check_only=False, assume_yes=False):
+                check_only=False, assume_yes=False, all_repos=False):
     if not new_url or "github.com" not in new_url:
         print(f"repoint needs a GitHub repo URL, e.g.:\n"
               f"  python fleet.py repoint https://github.com/TX-9AI/options_trader_v3.git")
@@ -370,6 +443,14 @@ def cmd_repoint(new_url, only=None, restart=True, wake=False,
         running = _wait_running_and_ssh(only)
     else:
         running = [(s, ip, st) for s, ip, st in fleet if st == "running" and ip]
+
+    # ── v0.7.0 GUARD — survey before mutating ──────────────────────────────
+    if running:
+        remote_map = survey_remotes(running)
+        refusal = repoint_refusal(remote_map, repo, only, all_repos)
+        if refusal:
+            print(refusal)
+            return 3
 
     if not running:
         print("No running, SSH-reachable boxes to repoint. "
@@ -536,6 +617,9 @@ def main(argv):
                    help="repoint: run phase-1 collision check only, change nothing")
     p.add_argument("--yes", action="store_true",
                    help="repoint: skip the confirmation prompt")
+    p.add_argument("--all-repos", action="store_true",
+                   help="repoint a fleet that holds MORE THAN ONE repo "
+                        "(required for an unscoped run once a fork exists)")
     p.add_argument("--mock", action="store_true", help="offline preview")
     args = p.parse_args(argv[1:])
 
@@ -562,7 +646,7 @@ def main(argv):
             return 2
         return cmd_repoint(args.command, only=only, restart=not args.no_restart,
                            wake=args.wake, check_only=args.check_only,
-                           assume_yes=args.yes)
+                           assume_yes=args.yes, all_repos=args.all_repos)
     if args.action == "pull":
         what = (args.command or "").lower()
         if what not in ("db", "ohlc"):

@@ -1,5 +1,13 @@
 #!/usr/bin/env bash
-# day_trader_pro/devtools.sh — v1.35
+# day_trader_pro/devtools.sh — v1.36
+# v1.36  2026-08-18  REPOINT NO LONGER OFFERS THE PARENT REPO AS A ONE-KEY
+#        DEFAULT. ask_url() pre-filled options_trader_v3 and took a bare Enter
+#        as consent, which was harmless while all 29 boxes shared one repo and
+#        is not harmless now: the QQQ box runs the options_trader_smc fork, so
+#        Enter on any REPOINT item would drag it back and silently end the
+#        experiment. The URL must now be typed; an empty answer aborts. The
+#        old default is printed as a REFERENCE line, not a value — visible to
+#        copy, impossible to select by accident.
 # v1.35  2026-08-16  Found by DRIVING THE MENU rather than the shell, which is
 #        the path the operator actually uses: items 65/66 passed a RELATIVE
 #        --bundles-dir. devtools cd's to SCRIPT_DIR at line 51 so it resolved
@@ -59,6 +67,9 @@ source "$SCRIPT_DIR/menu_registry.sh"
 cd "$SCRIPT_DIR"
 PY="${PYTHON:-python3}"
 DEFAULT_V3="https://github.com/TX-9AI/options_trader_v3.git"
+# 2026-08-18: the fleet is no longer single-repo. Reference values only —
+# neither is ever used as an automatic answer (see ask_url).
+SMC_FORK_URL="https://github.com/TX-9AI/options_trader_smc.git"
 INSTALL_DIR="~/options-trader"
 FEED_DB="~/options-trader/data/feed_store.db"
 OTV3_DIR="$HOME/options-trader-v3"          # control-box checkout (boxes use ~/options-trader)
@@ -89,11 +100,26 @@ ask_scope() {
   [ -n "$sc" ] && echo "--only $sc" || echo ""
 }
 
-# Repoint target URL, defaulting to the v3 repo (just press Enter).
+# Repoint target URL. v1.36: NO DEFAULT — repoint rewrites `origin` on every
+# box it touches, and since 2026-08-18 the fleet holds two repos (the QQQ box
+# runs options_trader_smc). A pre-filled Enter-default is one keystroke from
+# un-forking the fleet with no error and no obvious trace, so the URL is typed
+# or the operation aborts. Prompts and notices go to STDERR because callers
+# capture this function's stdout with $( ).
 ask_url() {
   local u
-  read -rp "New repo URL [Enter = ${DEFAULT_V3}]: " u
-  echo "${u:-$DEFAULT_V3}"
+  {
+    echo "  repoint rewrites origin on every box in scope. Type the URL."
+    echo "  for reference — legacy fleet: ${DEFAULT_V3}"
+    echo "                  SMC fork:     ${SMC_FORK_URL}"
+  } >&2
+  read -rp "New repo URL (no default; empty aborts): " u
+  u="$(echo "$u" | tr -d '[:space:]')"
+  if [ -z "$u" ]; then
+    echo "  aborted — no URL given, nothing was repointed." >&2
+    return 1
+  fi
+  echo "$u"
 }
 
 reset_mock_state() { rm -f data/mock_state.json; echo "[devtools] cleared mock EC2 state."; }
