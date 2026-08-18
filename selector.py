@@ -1,4 +1,27 @@
-# day_trader_pro/selector.py — v0.2.1
+# day_trader_pro/selector.py  v0.3.1
+# v0.3.1 (2026-08-17)  THE PANEL IS HARDCODED, NOT AN ENV VAR. v0.3.0 read
+#   OT_PANEL_OVERRIDE; the operator's answer  "I'm not setting jack shit in
+#   the morning"  is the correct one: a variable that must be exported before
+#   each run is a MANUAL PRE-RUN STEP, and a manual pre-run step never happens.
+#   Same class as the FEED.1 maintenance flag, which was built and never used.
+#   `PANEL` is now a module constant. It stays that way indefinitely; changing
+#   the panel is a commit, and `PANEL = []` restores discretionary selection.
+# v0.3.0 (2026-08-17)  PANEL OVERRIDE. `OT_PANEL_OVERRIDE=SYM,SYM,...` pins the
+#   trading panel and BYPASSES the discretionary selection entirely.
+#   TRADING ONLY  every box still wakes, collects and pushes; the candle tape,
+#   chain snapshots and S3 corpus keep their full 29-symbol breadth.
+#   WHY (measurement, not P&L): every trade in the sample is currently
+#   conditioned on "the selector approved this symbol this morning". If that
+#   preference correlates with outcome, P0.1's separation test measures the
+#   SELECTOR'S TASTE alongside the primitive. A fixed panel removes it.
+#   THE RANKING RULE IS NEUTRAL AND IT WAS CHECKED: ranked by TRADE COUNT,
+#   never P&L  ranking on profit would select on the outcome the retool is
+#   trying to predict. Across ~1,045 closed trades the top 15 by count hold
+#   both the WORST performer (SPX -$4,270) and among the best (AVGO +$3,744).
+#   TSLA (34) is ONE trade behind AMD (35)  the 15/16 cut is a coin flip.
+#   ALWAYS_ON is injected regardless; unknown symbols are DROPPED AND NAMED;
+#   and it ANNOUNCES ITSELF, because a fixed panel is otherwise
+#   indistinguishable from a selector that keeps picking the same names.
 # v0.2.1 (2026-07-21) — add ranked[] to select(): the full discretionary universe as
 #   the reporter ranked it (symbol, strength, score, rank, selected). Powers
 #   the wake message's per-pick scores and near-miss cutoff view. No change to
@@ -160,6 +183,21 @@ def _validate(raw):
     return clean, rationale, confidence
 
 
+# ── THE FIXED TRADING PANEL (2026-08-17) ─────────────────────────────────────
+# The 15 symbols with the MOST TRADE HISTORY, measured across ~1,045 closed
+# trades. Set `PANEL = []` to restore discretionary selection.
+#
+# ⚠️ RANKED BY TRADE COUNT, NEVER BY P&L. Ranking on profitability would select
+# on the very outcome the retool is trying to predict. Checked rather than
+# assumed: the top 15 by count contain both the WORST performer (SPX −$4,270)
+# and among the best (AVGO +$3,744) — count and profit are uncorrelated, so
+# "most history" smuggles no preference in.
+# ⚠️ TSLA (34) sits ONE trade behind AMD (35). The 15/16 boundary is a coin
+# flip, not a verdict.
+PANEL = ["NVDA", "SPX", "PLTR", "MU", "QQQ", "GOOGL", "AMZN", "AVGO",
+         "ORCL", "MSFT", "LLY", "CRM", "UNH", "SMH", "AMD"]
+
+
 def select(report):
     """
     Main entry. Returns a dict:
@@ -167,6 +205,67 @@ def select(report):
        "rationale": {...}, "confidence": {...}, "fallback": bool, "error": str|None}
     Never raises; falls back to ALWAYS_ON only on failure.
     """
+    # ── PANEL OVERRIDE (2026-08-17) — A FIXED TRADING PANEL ──────────────────
+    # Operator: pin the 15 symbols with the most trade history and bypass the
+    # discretionary selection entirely. **TRADING ONLY** — every box still
+    # wakes, collects and pushes; only the trade set is fixed.
+    #
+    # WHY, and it is a measurement reason rather than a P&L one: today every
+    # trade in the sample is conditioned on *"the selector approved this symbol
+    # this morning."* If that preference correlates with outcome, the P0.1
+    # separation test measures the SELECTOR'S TASTE alongside the primitive. A
+    # fixed panel removes the confounder outright.
+    #
+    # ⚠️ THE RULE IS NEUTRAL, AND THAT WAS CHECKED, NOT ASSUMED. The panel is
+    # ranked by TRADE COUNT, never by P&L — ranking on profitability would
+    # select on the very outcome the retool is trying to predict. Measured
+    # 2026-08-17 across ~1,045 closed trades: net is scattered through the
+    # ranking (the top 15 contain both the WORST performer, SPX −$4,270, and
+    # among the best, AVGO +$3,744), so count and profitability are
+    # uncorrelated and "most history" smuggles nothing in.
+    # ⚠️ TSLA (34) sits ONE TRADE behind AMD (35). The 15/16 boundary is a coin
+    # flip, not a verdict — recorded so nobody later reads the cut as meaningful.
+    #
+    # ⚠️ IT ANNOUNCES ITSELF. A fixed panel is otherwise INDISTINGUISHABLE from
+    # a selector that happens to keep choosing the same names — the failure
+    # shape of every silent gate this project has hit.
+    # ⚠️ HARDCODED, NOT AN ENV VAR. v0.3.0 read `OT_PANEL_OVERRIDE` and the
+    # operator's answer was correct: a variable that must be exported before
+    # each run is a manual pre-run step, and **a manual pre-run step never
+    # happens.** Same class as the FEED.1 maintenance flag. The panel is now
+    # simply how the fleet is configured; changing it is a commit.
+    _panel = list(PANEL)
+    if _panel:
+        _known = set(getattr(config, "UNIVERSE", []) or _panel)
+        _bad = [s for s in _panel if _known and s not in _known]
+        _use = [s for s in _panel if not _known or s in _known]
+        for s in config.ALWAYS_ON:          # the daily floor is not negotiable
+            if s not in _use:
+                _use.append(s)
+        # ⚠️ `print`, not a logger: this module has none, and the caller
+        # captures stdout. A logger call here would raise NameError inside the
+        # selection path — which `select()` swallows by design, so the override
+        # would silently fall through to the model and nobody would know.
+        print("[panel] FIXED PANEL — trading "
+              f"{len(_use)}: {','.join(_use)}. The discretionary selector was "
+              "NOT consulted. Every box still wakes, collects and pushes; only "
+              "the TRADE set is pinned."
+              + (f" DROPPED as unknown: {','.join(_bad)}" if _bad else ""))
+        return {
+            "final": _use,
+            "discretionary": [s for s in _use if s not in config.ALWAYS_ON],
+            "always_on": list(config.ALWAYS_ON),
+            "brief_strength": {},
+            "ranked": [{"symbol": s, "strength": 0.0, "score": 0.0,
+                        "rank": i + 1, "selected": True}
+                       for i, s in enumerate(_use)],
+            "rationale": {s: "fixed panel (selector.PANEL)" for s in _use},
+            "confidence": {},
+            "fallback": False,
+            "error": None,
+            "panel_override": True,
+        }
+
     fallback, error = False, None
     try:
         raw = _mock_select(report) if config.MOCK_LLM else _call_anthropic(report)
