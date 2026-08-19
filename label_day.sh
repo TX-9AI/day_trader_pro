@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# label_day.sh v1.0 — 2026-07-18 — EOD session labeling for Layer-1 Tier-B acceptance.
+# label_day.sh v1.1 — 2026-08-19 (v1.0 2026-07-18) — EOD session labeling for Layer-1 Tier-B acceptance.
 #
 # WHY: REPLAY_VALIDATION.md §2 Tier B has sat at ❌ since 07-09 not for lack of
 # tape but for lack of LABELS — each acceptance row needs a session whose type
@@ -44,15 +44,43 @@ show_gaps() {
   for tag in TREND SWEEP PIN BREAKOUT; do
     local_n=0
     [ -f "$OUT" ] && { local_n=$(grep -c "\"$tag\"" "$OUT" 2>/dev/null); local_n=${local_n:-0}; }
-    case "$tag" in
-      TREND)    need="❌ tape gap — need ≥1 genuine trend day";;
-      SWEEP)    need="❌ tape gap — need ≥1 mapper-confirmed reclaim";;
-      PIN)      need="partial — need a clean QQQ/SPX pin day";;
-      BREAKOUT) need="partial — have MU/NVDA, more carries welcome";;
-    esac
+    # ── v1.1 (2026-08-19) — THE STATUS WAS A CONSTANT ────────────────────
+    # `need` was a hardcoded string per tag: TREND printed "tape gap — need
+    # >=1 genuine trend day" whether the count was 0, 28 or 280. **The count
+    # was computed; the verdict beside it was decoration.** The row therefore
+    # looked permanently open, which sent three separate investigations
+    # hunting for a code blocker (1h starvation, an A2 regression, an
+    # architectural veto) — all real defects, none of them the reason this
+    # line said ❌.
+    # It now reports what the file actually holds.
+    if [ "${local_n:-0}" -ge 1 ]; then
+      case "$tag" in
+        TREND)    need="✅ have ${local_n} — verify A2 PASSES on the session you rely on";;
+        SWEEP)    need="✅ have ${local_n} — verify a mapper-confirmed reclaim in one";;
+        PIN)      need="✅ have ${local_n} — a clean QQQ/SPX pin day is still the strongest";;
+        BREAKOUT) need="✅ have ${local_n} — more symbol variety still welcome";;
+      esac
+    else
+      case "$tag" in
+        TREND)    need="❌ none labeled — need ≥1 genuine trend day";;
+        SWEEP)    need="❌ none labeled — need ≥1 mapper-confirmed reclaim";;
+        PIN)      need="❌ none labeled — need a clean QQQ/SPX pin day";;
+        BREAKOUT) need="❌ none labeled — need ≥1 clean breakout with carry";;
+      esac
+    fi
     printf "  %-9s labeled sessions: %-3s  (%s)\n" "$tag" "$local_n" "$need"
   done
   echo "  Flat-angle sweep needs ≥ several distinct labeled sessions (any tag counts)."
+  echo
+  echo "  ⚠️ A LABEL IS NOT ACCEPTANCE. This counts what a human TAGGED; it does"
+  echo "     not check that the session passes its Tier-B criterion. TRENDING"
+  echo "     needs the label AND \"RANGING vetoed through it\" — measured by A2."
+  echo "     Measured 2026-08-19 on three 97-100%-dominant sessions:"
+  echo "       AVGO 08-14  RANGING p90 0.305  ->  A2  2.6%  PASS"
+  echo "       META 08-18  RANGING p90 0.615  ->  A2 12.8%  FAIL"
+  echo "       TSLA 08-04  RANGING p90 0.615  ->  A2 14.0%  FAIL"
+  echo "     **DOMINANCE DOES NOT PREDICT THE VETO; RANGING p90 DOES.** Pick"
+  echo "     candidates on p90 (~0.3, not ~0.6), then confirm with A2."
 }
 
 case "${1:-}" in
