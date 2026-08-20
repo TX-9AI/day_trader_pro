@@ -1,0 +1,6 @@
+tape_1 <- AMZN_ohlc_2026-08-13.csv
+tape_2 <- AVGO_ohlc_2026-08-04.csv
+tape_3 <- PLTR_ohlc_2026-08-10.csv
+tape_4 <- GS_ohlc_2026-08-12.csv
+tape_5 <- MU_ohlc_2026-07-27.csv
+tape_6 <- NVDA_ohlc_2026-08-11.csv

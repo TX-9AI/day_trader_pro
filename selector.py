@@ -1,4 +1,4 @@
-# day_trader_pro/selector.py  v0.3.1
+# day_trader_pro/selector.py  v0.4.1
 # v0.3.1 (2026-08-17)  THE PANEL IS HARDCODED, NOT AN ENV VAR. v0.3.0 read
 #   OT_PANEL_OVERRIDE; the operator's answer  "I'm not setting jack shit in
 #   the morning"  is the correct one: a variable that must be exported before
@@ -194,8 +194,31 @@ def _validate(raw):
 # "most history" smuggles no preference in.
 # ⚠️ TSLA (34) sits ONE trade behind AMD (35). The 15/16 boundary is a coin
 # flip, not a verdict.
+# ── PANEL v2, 2026-08-20 ────────────────────────────────────────────────────
+# OUT: LLY, SMH, MSFT, ORCL      IN: META, NFLX, CVX, TSLA   (operator's call)
+#
+# ⚠️ THE PANEL IS TECH-HEAVY AND THAT IS A CORRELATION RISK, not a preference.
+# Even after this swap: NVDA, MU, AVGO, PLTR, GOOGL, AMZN, META, NFLX, CRM, AMD
+# plus QQQ - roughly two thirds move together on a semiconductor session, which
+# is part of why the late-July 2026 selloff was hard to read across the fleet.
+# UNH (healthcare), CVX (energy), TSLA (its own thing) and SPX are the only
+# genuine diversifiers.
+# TSLA over JPM was the call here: financials remain the largest liquid sector
+# with NO representation, and it is the obvious next addition if a slot opens.
+#
+# ⚠️ THIS IS A POPULATION BOUNDARY. Any measurement spanning 2026-08-20 mixes
+# two different trading panels, and a per-symbol result from before the change
+# does not describe the fleet after it. Name the window or the numbers are not
+# comparable - the archive now carries SIX such boundaries (pre-LIQ.1,
+# post-LIQ.1, post-LIQ.6, post-FEED.2, post-STOP.1, post-PANEL.2).
+#
+# ⚠️ AND IT DOES NOT AFFECT COLLECTION. The panel decides which boxes TRADE;
+# all 29 continue to collect. The open-interest accumulation started 2026-08-19
+# for the GEX butterfly is fleet-wide and is NOT interrupted by this change.
+# **A box that stopped collecting because it stopped trading would be a box
+# whose pitchfork and ADX depth quietly dies** - WA §30.
 PANEL = ["NVDA", "SPX", "PLTR", "MU", "QQQ", "GOOGL", "AMZN", "AVGO",
-         "ORCL", "MSFT", "LLY", "CRM", "UNH", "SMH", "AMD"]
+         "TSLA", "META", "NFLX", "CRM", "UNH", "CVX", "AMD"]
 
 
 def select(report):
