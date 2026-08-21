@@ -1,4 +1,10 @@
-# day_trader_pro/eod_conductor.py — v1.15.0
+# day_trader_pro/eod_conductor.py — v1.16.0
+# v1.16.0 (2026-08-22) — the six otv3-dependent phases (REGIME, TABLES,
+#   SWALLOW, VWAP, EVM, READINESS) are DELETED with their CLI flags. Each
+#   shelled into a checkout that is not present, took its not-found branch,
+#   and fired a Telegram warning every night about an engine that was
+#   deliberately retired. Rebuild against v4 data if wanted; do not
+#   resurrect by path.
 # v1.15.0 (2026-08-20) — PHASE 4b (SAT-OUT ARCHIVE RECOVERY) DELETED. It existed
 #   for boxes that did not trade that day: phase_backfill woke them five at a
 #   time for candles, and while they were up they handed over journal/chain
@@ -203,10 +209,6 @@ CLI:
   python eod_conductor.py --date D
   python eod_conductor.py --dry-run
   python eod_conductor.py --batch 5
-  python eod_conductor.py --no-regime
-  python eod_conductor.py --no-tables   # skip the conditional-tables phase
-  python eod_conductor.py --no-swallow  # skip the silent-failure census
-  python eod_conductor.py --no-vwap     # skip the VWAP orientation ledger
 
 Env:
   DTP_EXCURSION_LIVE=1        also produce the live excursion report
@@ -596,30 +598,6 @@ def phase_daily_bars(dry, warns):
               f"at index 14). Fills at one bar per session; not actionable.")
 
 
-# ── 6. REGIME (always) ────────────────────────────────────────────────────────
-def phase_regime(dry, warns):
-    if dry:
-        _log("REGIME", f"[dry] would run bash {NIGHTLY_REGIME} (replay + diary + backfill sweep)")
-        return
-    if not os.path.isfile(NIGHTLY_REGIME):
-        _warn(warns, "REGIME", f"{NIGHTLY_REGIME} not found — diary NOT updated")
-        return
-    _log("REGIME", f"{NIGHTLY_REGIME} — replay + diary + gap-day sweep over complete tape")
-    try:
-        rc = subprocess.run(["bash", NIGHTLY_REGIME], timeout=1800).returncode
-    except Exception as exc:  # noqa: BLE001
-        _warn(warns, "REGIME", f"nightly_regime.sh raised: {exc}")
-        return
-    if rc not in (0, 2):
-        _warn(warns, "REGIME", f"nightly_regime.sh rc={rc}")
-    else:
-        _log("REGIME", f"✅ diary upserted + gap sweep done (rc={rc})")
-
-
-AUTO_LABEL_PY = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                             "auto_label.py")
-
-
 def phase_label(date, dry, warns):
     """v1.4.0 — Tier-B session labeling, automated (ROADMAP L1.8/L1.6/L1.7).
 
@@ -699,243 +677,53 @@ OTV3_DIR = os.environ.get("DTP_OTV3_DIR",
                           os.path.expanduser("~/options-trader-v3"))
 
 
-def phase_tables(dry, warns):
-    """Phase 8 — conditional-probability tables (ROADMAP L3.4 substrate).
+def phase_coverage(date, dry, warns):
+    """Phase 15 — IS THE WAREHOUSE ACTUALLY HOLDING VIX? (pre-sever gate)
 
-    Deliberately CUMULATIVE: no --date is passed, so every session on disk is
-    re-binned each night. That is the point — a cell like
-    "ORB x TRENDING_BULL x grade A" is noise at n=6 and decision-grade at n=60,
-    and only calendar time moves it. The tool prints one honest headline in
-    --quiet mode: it names a cell ONLY when that cell's Wilson 95% interval has
-    cleared 50%, and otherwise says nothing has separated from chance — which
-    is the expected message for the first weeks.
+    WHY THIS IS A PHASE AND NOT A COMMAND SOMEONE RUNS: after the sever the
+    bucket is the only copy, and a stream that quietly stops landing is
+    unrecoverable — DXFeed history is use-it-or-lose-it and nothing in the
+    system can delete or re-create it. A check that depends on anyone
+    remembering to run it is a comment, not a control.
 
-    The tool lives in the options_trader_v3 repo (analysis tooling belongs with
-    the engine it analyses — same rule as tests/a2_cooccurrence.py). It is
-    stdlib-only and read-only against the trade DBs, so it cannot disturb the
-    chain; per the recovery-path rule any failure here is a loud warning and
-    never a stop.
+    WHY VIX SPECIFICALLY: it is the only stream with a SINGLE writer. Every box
+    logs VIX into feed_store, but push_candles skips it unless the box is SPX
+    ("SPX owns VIX" — the dedup decision). So VIX collection is exactly as
+    reliable as one box, and its absence looks identical to normal behaviour on
+    the other 28.
+
+    Control-side, read-only, LIST-only against S3 — never touches a box, never
+    fetches an object body. Warn-never-stop per the recovery-path rule.
     """
-    script = os.path.join(OTV3_DIR, "tests", "conditional_tables.py")
+    script = os.path.join(config.BASE_DIR, "warehouse_coverage.py")
+    out = os.path.join(config.REPORTS_DIR, f"warehouse_coverage_{date}.json")
     if dry:
-        _log("TABLES", f"[dry] would run {script} --quiet (all sessions on disk)")
+        _log("COVERAGE", f"[dry] would run {script} --date {date} --json -> {out}")
         return
     if not os.path.isfile(script):
-        _warn(warns, "TABLES", f"{script} not found — is {OTV3_DIR} checked out? "
-                               f"conditional tables NOT updated")
+        _warn(warns, "COVERAGE", f"{script} not found — VIX coverage NOT checked")
         return
-    venv_py = os.path.join(OTV3_DIR, "venv", "bin", "python")
-    py = venv_py if os.access(venv_py, os.X_OK) else sys.executable
-    cmd = [py, script, "--quiet",
-           "--trades-root",  config.TRADES_DIR,
-           "--reports-dir",  config.REPORTS_DIR,
-           "--journal-root", os.path.join(config.BASE_DIR, "signal_journal"),
-           "--min-n",        os.environ.get("DTP_CT_MIN_N", "5")]
-    _log("TABLES", "conditional_tables.py --quiet (cumulative, all sessions)")
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
-    except Exception as exc:  # noqa: BLE001
-        _warn(warns, "TABLES", f"conditional_tables.py raised: {exc}")
-        return
-    if proc.returncode != 0:
-        _warn(warns, "TABLES", f"conditional_tables.py rc={proc.returncode}: "
-                               f"{(proc.stderr or '').strip()[:200]}")
-        return
-    headline = next((ln for ln in proc.stdout.splitlines() if ln.strip()), "")
-    _log("TABLES", f"✅ {headline}")
-    try:
-        notify.send(f"🎲 {headline}")
-    except Exception:  # noqa: BLE001
-        pass
-
-
-def phase_swallow(date, dry, warns):
-    """Phase 10 — nightly SILENT-FAILURE CENSUS (backlog W.2).
-
-    Runs options_trader_v3's tests/swallow_audit.py, writes a dated JSON
-    snapshot, and compares the silent-handler count against the most recent
-    prior snapshot. A rise means a new exception handler that swallows without
-    logging was added since last night.
-
-    WHY THIS IS A CONDUCTOR PHASE AND NOT A COMMAND SOMEONE RUNS: the week of
-    2026-07-27 produced eight defects that all shared one shape — code that
-    failed without saying so. The census that finds them is worthless if it
-    depends on anyone remembering to run it, which is the same reasoning that
-    put the completeness check in phase_harvest. A one-off check that matters
-    is a phase; a check nobody runs is a comment.
-
-    Control-side, read-only, static analysis — it never imports the code it
-    audits and never touches a box. Warn-never-stop per the recovery-path rule.
-    """
-    script = os.path.join(OTV3_DIR, "tests", "swallow_audit.py")
-    out = os.path.join(config.REPORTS_DIR, f"swallow_audit_{date}.json")
-    if dry:
-        _log("SWALLOW", f"[dry] would run {script} --json -> {out}")
-        return
-    if not os.path.isfile(script):
-        _warn(warns, "SWALLOW", f"{script} not found — census NOT run")
-        return
-    venv_py = os.path.join(OTV3_DIR, "venv", "bin", "python")
-    py = venv_py if os.access(venv_py, os.X_OK) else sys.executable
-    try:
-        proc = subprocess.run([py, script, "--json", "--root", OTV3_DIR],
+        proc = subprocess.run([sys.executable, script, "--date", date,
+                               "--json", out],
                               capture_output=True, text=True, timeout=180)
     except Exception as exc:  # noqa: BLE001
-        _warn(warns, "SWALLOW", f"swallow_audit.py raised: {exc}")
+        _warn(warns, "COVERAGE", f"warehouse_coverage.py raised: {exc}")
+        return
+    for line in (proc.stdout or "").splitlines():
+        _log("COVERAGE", line.rstrip())
+    if proc.returncode == 2:
+        _warn(warns, "COVERAGE", "could not list the bucket — coverage UNKNOWN "
+                                 f"for {date}: {(proc.stderr or '').strip()[:160]}")
         return
     if proc.returncode != 0:
-        _warn(warns, "SWALLOW", f"swallow_audit.py rc={proc.returncode}: "
-                                f"{(proc.stderr or '').strip()[:200]}")
-        return
-    try:
-        rows = json.loads(proc.stdout)
-    except Exception as exc:  # noqa: BLE001
-        _warn(warns, "SWALLOW", f"unparseable census output: {exc}")
-        return
-    os.makedirs(config.REPORTS_DIR, exist_ok=True)
-    with open(out, "w") as fh:
-        json.dump(rows, fh, indent=1, sort_keys=True)
-
-    silent = sum(1 for r in rows if str(r.get("loudness", "")).startswith("SILENT"))
-    t1 = sum(1 for r in rows
-             if r.get("tier") == 0 and str(r.get("loudness", "")).startswith("SILENT"))
-    # compare against the newest EARLIER snapshot, whatever date it carries
-    prior, prior_silent = None, None
-    try:
-        snaps = sorted(f for f in os.listdir(config.REPORTS_DIR)
-                       if f.startswith("swallow_audit_") and f.endswith(".json")
-                       and f < os.path.basename(out))
-        if snaps:
-            prior = snaps[-1]
-            pr = json.load(open(os.path.join(config.REPORTS_DIR, prior)))
-            prior_silent = sum(1 for r in pr
-                               if str(r.get("loudness", "")).startswith("SILENT"))
-    except Exception:  # noqa: BLE001
-        pass
-
-    if prior_silent is not None and silent > prior_silent:
-        # v1.13.0 — name them. Identity deliberately excludes the line number.
-        def _ident(r):
-            return (r.get("file"), r.get("func"), r.get("guards"))
-        try:
-            was = {_ident(r) for r in pr
-                   if str(r.get("loudness", "")).startswith("SILENT")}
-            added = [r for r in rows
-                     if str(r.get("loudness", "")).startswith("SILENT")
-                     and _ident(r) not in was]
-            added.sort(key=lambda r: (r.get("tier", 9), r.get("file", ""),
-                                      r.get("line", 0)))
-            names = "; ".join(
-                f"T{int(r.get('tier', 8)) + 1} {r.get('file')}:{r.get('line')} "
-                f"{r.get('func')}" for r in added[:5])
-            more = f" (+{len(added) - 5} more)" if len(added) > 5 else ""
-        except Exception as exc:  # noqa: BLE001
-            names, more = f"could not diff snapshots: {exc}", ""
-        _warn(warns, "SWALLOW",
-              f"silent handlers ROSE {prior_silent} -> {silent} since {prior} — "
-              f"NEW: {names}{more}. Classify each: "
-              f"python3 tests/swallow_audit.py --since reports/{prior}")
-    else:
-        delta = ("" if prior_silent is None
-                 else f" ({silent - prior_silent:+d} vs {prior})")
-        _log("SWALLOW", f"\u2705 {len(rows)} handlers, {silent} silent "
-                        f"({t1} in tier-1 risk/orders/record){delta}")
-
-
-def phase_vwap(date, dry, warns):
-    """Phase 11 — VWAP orientation ledger (backlog item E evidence).
-
-    Per strategy x direction x VWAP alignment, with realized P&L: would the
-    proposed VWAP_FILTER_ACTIVE hard gate have blocked winners or losers? Writes
-    reports/vwap_orientation_<date>.txt.
-
-    WHY NIGHTLY AND AUTOMATIC: item E must not be BUILT until the evidence says
-    which direction the gate belongs in, or whether it belongs on a given
-    strategy at all — VWAP alignment is a trend-following filter, and Sweep
-    Reversal enters counter to extension by design. Evidence that accrues only
-    when someone remembers to run a script is evidence that will not be there on
-    decision day.
-
-    FALSIFICATION ONLY. The tool emits no weights and no thresholds, and nothing
-    in the live path reads its output. A verdict licenses a design review whose
-    conclusion must stand on mechanism, not on the P&L that flagged it.
-    """
-    script = os.path.join(OTV3_DIR, "tests", "vwap_orientation_ledger.py")
-    out = os.path.join(config.REPORTS_DIR, f"vwap_orientation_{date}.txt")
-    if dry:
-        _log("VWAP", f"[dry] would run {script} {date} -> {out}")
-        return
-    if not os.path.isfile(script):
-        _warn(warns, "VWAP", f"{script} not found — orientation ledger NOT run")
-        return
-    venv_py = os.path.join(OTV3_DIR, "venv", "bin", "python")
-    py = venv_py if os.access(venv_py, os.X_OK) else sys.executable
-    try:
-        proc = subprocess.run([py, script, date], capture_output=True,
-                              text=True, timeout=300)
-    except Exception as exc:  # noqa: BLE001
-        _warn(warns, "VWAP", f"vwap_orientation_ledger.py raised: {exc}")
-        return
-    os.makedirs(config.REPORTS_DIR, exist_ok=True)
-    with open(out, "w") as fh:
-        fh.write(proc.stdout or "")
-        if proc.stderr:
-            fh.write("\n--- stderr ---\n" + proc.stderr)
-    if proc.returncode != 0:
-        _warn(warns, "VWAP", f"ledger rc={proc.returncode} — see {out}")
-        return
-    verdicts = [ln.strip() for ln in (proc.stdout or "").splitlines()
-                if "orientation looks" in ln or "INSUFFICIENT" in ln]
-    _log("VWAP", f"\u2705 orientation ledger -> {os.path.basename(out)}")
-    for v in verdicts[:6]:
-        _log("VWAP", f"    {v}")
-
-
-def phase_evm(date, dry, warns):
-    """Phase 12 — EARNED VALUE against docs/BACKLOG.md.
-
-    Reports schedule performance nightly so a slip is visible while it is still
-    small. Two indices, deliberately: SPI(all) is calendar truth, SPI(desk) is
-    accountability — of the work that was OURS to move, how much moved. A late
-    [DESK·DATA] item is a DC&A dependency and must not be averaged into the
-    number that measures execution, or the metric stops being actionable.
-
-    Here because of the standing rule: a check that depends on someone
-    remembering to run it is a check that will not run. Read-only.
-    """
-    script = os.path.join(OTV3_DIR, "tests", "evm_status.py")
-    if dry:
-        _log("EVM", f"[dry] would run {script} --quiet")
-        return
-    if not os.path.isfile(script):
-        _warn(warns, "EVM", f"{script} not found — no earned-value reading")
-        return
-    venv_py = os.path.join(OTV3_DIR, "venv", "bin", "python")
-    py = venv_py if os.access(venv_py, os.X_OK) else sys.executable
-    try:
-        proc = subprocess.run([py, script, "--quiet", "--asof", date],
-                              capture_output=True, text=True, timeout=120)
-    except Exception as exc:  # noqa: BLE001
-        _warn(warns, "EVM", f"evm_status.py raised: {exc}")
-        return
-    if proc.returncode != 0:
-        _warn(warns, "EVM", f"evm_status.py rc={proc.returncode}: "
-                            f"{(proc.stderr or '').strip()[:200]}")
-        return
-    line = next((l for l in proc.stdout.splitlines() if l.strip()), "")
-    _log("EVM", f"\U0001F4CA {line}")
-    # A DESK slip is the only variance effort can fix, so it is the only one
-    # that pages. Data waits are re-dated, not compressed.
-    m = re.search(r"SPI\(desk\)\s+([0-9.]+)", line)
-    if m and float(m.group(1)) < 1.0:
-        _warn(warns, "EVM", f"SPI(desk) {m.group(1)} — DESK work is behind and "
-                            f"nothing is blocking it. See the get-well plan: "
-                            f"python3 tests/evm_status.py")
-    else:
-        try:
-            notify.send(f"\U0001F4CA {line}")
-        except Exception:  # noqa: BLE001
-            pass
+        # rc=1 means a checked date is missing VIX. The stdout above already
+        # names which of the two diagnoses it is; the warning has to carry
+        # enough to act on without re-running anything.
+        _warn(warns, "COVERAGE",
+              f"VIX MISSING from the warehouse for {date} — see "
+              f"{os.path.basename(out)}. Do NOT sever the control-side copy "
+              f"while this is red.")
 
 
 def phase_coverage(date, dry, warns):
@@ -987,53 +775,7 @@ def phase_coverage(date, dry, warns):
               f"while this is red.")
 
 
-def phase_readiness(date, dry, warns):
-    """Phase 9 — readiness digest (trade_readiness v1.1 dial-tuning report).
-
-    Digests the harvested signal-journal readiness rows (machine states, R
-    distribution, would-fire counts, arm episodes, staged picks, anticipation
-    lead-times) into reports/readiness_digest_<date>.{txt,jsonl}. This is the
-    file the readiness bars (OT_TR_*) get tuned from — the whole point of the
-    log-only observer is that this report accumulates with no manual step.
-    Consumes what harvest v0.5.0 pulled; on a fleet that has not yet deployed
-    main v4.4 the tool prints an honest "no readiness rows" headline and
-    returns 0, so this phase is safe to ship AHEAD of the fleet deploy.
-    Warn-never-stop, same recovery rule as every phase.
-    """
-    script = os.path.join(OTV3_DIR, "tests", "readiness_digest.py")
-    if dry:
-        _log("READINESS", f"[dry] would run {script} --quiet --date {date}")
-        return
-    if not os.path.isfile(script):
-        _warn(warns, "READINESS", f"{script} not found — is {OTV3_DIR} checked out? "
-                                  f"readiness digest NOT written")
-        return
-    venv_py = os.path.join(OTV3_DIR, "venv", "bin", "python")
-    py = venv_py if os.access(venv_py, os.X_OK) else sys.executable
-    cmd = [py, script, "--quiet", "--date", date,
-           "--journal-root", os.path.join(config.BASE_DIR, "signal_journal"),
-           "--reports-dir",  config.REPORTS_DIR]
-    _log("READINESS", f"readiness_digest.py --quiet --date {date}")
-    try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-    except Exception as exc:  # noqa: BLE001
-        _warn(warns, "READINESS", f"readiness_digest.py raised: {exc}")
-        return
-    if proc.returncode != 0:
-        _warn(warns, "READINESS", f"readiness_digest.py rc={proc.returncode}: "
-                                  f"{(proc.stderr or '').strip()[:200]}")
-        return
-    headline = next((ln for ln in proc.stdout.splitlines() if ln.strip()), "")
-    _log("READINESS", f"✅ {headline}")
-    try:
-        notify.send(headline)
-    except Exception:  # noqa: BLE001
-        pass
-
-
-def run(date=None, batch=5, dry=False, do_regime=True, do_tables=True,
-        do_swallow=True, do_vwap=True, do_evm=True, do_recover=True,
-        do_readiness=True, do_coverage=True):
+def run(date=None, batch=5, dry=False, do_recover=True, do_coverage=True):
     date = date or _today_et()
     mapping, _ = instance_registry.discover(config.UNIVERSE)
     running = {s: r.get("private_ip", "") for s, r in mapping.items()
@@ -1066,25 +808,29 @@ def run(date=None, batch=5, dry=False, do_regime=True, do_tables=True,
     phase_archive_report(date, dry, warns)
     phase_consolidate(date, dry, warns)
     phase_label(date, dry, warns)
-    if do_regime:
-        phase_regime(dry, warns)
-    else:
-        _log("REGIME", "skipped (--no-regime)")
+    # ── 🔴 v1.16.0 (2026-08-22) — SIX otv3-DEPENDENT PHASES DELETED ─────────
+    # REGIME, TABLES, SWALLOW, VWAP, EVM and READINESS all shelled out to
+    # scripts inside the options_trader_v3 checkout. That checkout is not
+    # present, so every one of them took its not-found branch and fired a
+    # Telegram WARNING every single night:
+    #     "EOD conductor [EVM] .../options-trader-v3/tests/evm_status.py not
+    #      found - no earned-value reading"
+    # ...five of those, plus a summary line, on a fleet that no longer runs v3.
+    #
+    # ⚠️ THEY WERE NOT BROKEN - THEY WERE ORPHANED. Each phase was written
+    # warn-never-stop, so the correct not-found branch ran correctly forever.
+    # The conductor was faithfully reporting the absence of an engine that was
+    # deliberately retired. A nightly warning nobody can action is worse than
+    # silence: it is the alarm that teaches you to ignore alarms.
+    #
+    # ⚠️ REGIME WENT WITH THEM. phase_regime ran nightly_regime.sh ->
+    # v3's validate_regime.sh - the Layer-1 confluence replay whose premise
+    # otv4 retired. Operator, 2026-08-22: the term is gone from the menu too.
+    #
+    # If any of this analysis is wanted against v4, it gets REBUILT against
+    # v4's own data, not resurrected by path. See docs/ for the r58/r59
+    # precedent: a ported tool is a claim about v4 nobody has checked.
     phase_excursion(date, dry, warns)
-    if do_tables:
-        phase_tables(dry, warns)
-    if do_swallow:
-        phase_swallow(date, dry, warns)
-    if do_vwap:
-        phase_vwap(date, dry, warns)
-    if do_evm:
-        phase_evm(date, dry, warns)
-    else:
-        _log("TABLES", "skipped (--no-tables)")
-    if do_readiness:
-        phase_readiness(date, dry, warns)
-    else:
-        _log("READINESS", "skipped (--no-readiness)")
     # LAST on purpose — the box-side pusher runs on its own timer, so an
     # earlier check would call objects still in flight "missing".
     if do_coverage:
@@ -1113,21 +859,12 @@ def main(argv):
     p.add_argument("--date", default=None)
     p.add_argument("--batch", type=int, default=5)
     p.add_argument("--dry-run", action="store_true")
-    p.add_argument("--no-regime", action="store_true")
-    p.add_argument("--no-tables", action="store_true")
-    p.add_argument("--no-swallow", action="store_true")
-    p.add_argument("--no-vwap", action="store_true")
-    p.add_argument("--no-evm", action="store_true")
     p.add_argument("--no-recover", action="store_true")
-    p.add_argument("--no-readiness", action="store_true")
     p.add_argument("--no-coverage", action="store_true",
                    help="skip the VIX warehouse-coverage check (phase 15)")
     args = p.parse_args(argv[1:])
     return run(date=args.date, batch=args.batch, dry=args.dry_run,
-               do_regime=not args.no_regime, do_tables=not args.no_tables,
-               do_swallow=not args.no_swallow, do_vwap=not args.no_vwap,
-               do_evm=not args.no_evm, do_recover=not args.no_recover,
-               do_readiness=not args.no_readiness,
+               do_recover=not args.no_recover,
                do_coverage=not args.no_coverage)
 
 

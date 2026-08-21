@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# day_trader_pro/devtools.sh — v1.36
+# day_trader_pro/devtools.sh — v1.37
+# v1.37 (2026-08-22) — menu: REGIME VALIDATION section deleted (6 dead items);
+# NEW item 18 "Hotfix launcher (repo synch & flush)" at the end of FLEET. Numbers
+# are assigned at render from list position, so DEBUG/LOGS simply moves to 19-22.
 # v1.36  2026-08-18  REPOINT NO LONGER OFFERS THE PARENT REPO AS A ONE-KEY
 #        DEFAULT. ask_url() pre-filled options_trader_v3 and took a bare Enter
 #        as consent, which was harmless while all 29 boxes shared one repo and

@@ -1,3 +1,18 @@
+# ── v1.37 (2026-08-22) — THE REGIME VALIDATION SECTION IS DELETED ────────────
+# Six handlers went with it: the Layer-1 confluence replay (today / pick-a-date
+# / view report / view diary / backfill gaps) and the A2 co-occurrence tool.
+# All six shelled into ~/options-trader-v3, a checkout that is not present, so
+# every one printed "missing ... is ~/options-trader-v3 checked out?" — a menu
+# section whose every entry was a dead end.
+#
+# ⚠️ DELETED, NOT REPOINTED. The confluence premise is what otv4 retired; there
+# is nothing in v4 for these to validate. Operator, 2026-08-22: "Delete the
+# entire regime validation section — I'm tired of seeing that term." If any of
+# this analysis is wanted again it is REBUILT on v4's own data under a
+# different name, so it cannot be mistaken for the artifact.
+#
+# The numbering is safe: devtools.sh assigns numbers at render from list
+# position, so removing a section cannot desynchronise anything.
 #!/usr/bin/env bash
 # day_trader_pro/menu_functions.sh — GENERATED from devtools.sh — v1.1
 # One function per menu item, body copied verbatim from the case block.
@@ -230,35 +245,11 @@ mi_fit_report_everything_for_fitting_in_one_tex() {
 }
 
 # Run replay - today
-mi_run_replay_today() {
-    echo; if [ -x "$VALIDATE_SH" ]; then "$VALIDATE_SH"; else echo "missing/non-exec $VALIDATE_SH (chmod +x $OTV3_DIR/validate_regime.sh?)"; fi; pause
-}
-
 # Run replay - pick a date
-mi_run_replay_pick_a_date() {
-    echo; read -rp "Date (YYYY-MM-DD, ENTER=today): " D; D="${D:-$(date +%F)}"; if [ -x "$VALIDATE_SH" ]; then "$VALIDATE_SH" "$D"; else echo "missing/non-exec $VALIDATE_SH"; fi; pause
-}
-
 # View a day's report
-mi_view_a_day_s_report() {
-    echo; D_DEF="$(date +%F)"; read -rp "Date to view (YYYY-MM-DD, ENTER=${D_DEF}): " D; D="${D:-$D_DEF}"; if [ -x "$VALIDATE_SH" ]; then "$VALIDATE_SH" --report "$D"; else echo "missing/non-exec $VALIDATE_SH"; fi; pause
-}
-
 # View the diary (all days)
-mi_view_the_diary_all_days() {
-    echo; if [ -x "$VALIDATE_SH" ]; then "$VALIDATE_SH" --diary; else echo "missing/non-exec $VALIDATE_SH"; fi; pause
-}
-
 # Backfill missing days      (fills diary gaps that have tape)
-mi_backfill_missing_days_fills_diary_gaps_that() {
-    echo; read -rp "Rebuild ALL dated tapes (else only fill gaps)? [y/N]: " RB; if [ -x "$VALIDATE_SH" ]; then if [ "$RB" = "y" ]; then "$VALIDATE_SH" --backfill --rebuild; else "$VALIDATE_SH" --backfill; fi; else echo "missing/non-exec $VALIDATE_SH"; fi; pause
-}
-
 # A2 co-occurrence + HTF drift  (read-only; auto-finds replay logs)
-mi_a2_co_occurrence_htf_drift_read_only_auto_fi() {
-    echo; if [ -x "$OTV3_PY" ]; then (cd "$OTV3_DIR" && "$OTV3_PY" -m tests.a2_cooccurrence); else echo "missing $OTV3_PY (is ~/options-trader-v3 checked out with its venv?)"; fi; pause
-}
-
 # Live P&L standings (read-only)
 mi_live_p_l_standings_read_only() {
     echo; read -rp "Push to Telegram too? [y/N]: " S; if [ "$S" = "y" ]; then $PY standings.py --send; else $PY standings.py; fi; pause
@@ -412,6 +403,36 @@ mi_warehouse_report_parity() {
     else
       read -rp "Since (YYYY-MM-DD): " WS
       if [ -n "$WS" ]; then $PY tools/report_parity.py --since "$WS"; fi
+    fi
+    pause
+}
+
+mi_hotfix_launcher_repo_synch_flush() {
+    # v1.37 (2026-08-22) — promoted from a notepad paste the operator ran
+    # through option 14 nearly every session. A command typed by hand daily is
+    # a command that will eventually be typed WRONG on the day it matters, and
+    # this one stops trading services on 15 live boxes.
+    #
+    # ⚠️ `git checkout -- config.py` IS NOT OPTIONAL. Boxes carry a sed-dirty
+    # config.py whenever LOG_LEVEL has been flipped to DEBUG, and `git pull`
+    # REFUSES to overwrite a dirty file — the pull fails, the services restart
+    # on the OLD code, and every surface reports success. That is exactly how
+    # r59 sat on control all Friday while the boxes ran the bug it fixed.
+    # Restoring config.py first also returns LOG_LEVEL to INFO.
+    #
+    # ⚠️ FEED FIRST, THEN A 5s GAP, THEN THE BOT. The bot's first tick reads
+    # the store; starting it against a feed that has not connected gives it an
+    # empty frame at the worst possible moment.
+    echo
+    echo "  Hotfix launcher — stop services, restore config.py, pull, purge"
+    echo "  __pycache__, restart feed-then-bot, and report both states."
+    echo "  Runs on RUNNING boxes only."
+    read -rp "  Symbols (ENTER = ALL, or comma-sep e.g. NVDA,SPX): " hf_scope
+    local hf_cmd='sudo systemctl stop optionsbot candle-feed; cd ~/options-trader && git checkout -- config.py && git pull --ff-only; find ~/options-trader -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null; sudo systemctl start candle-feed && sleep 5 && sudo systemctl start optionsbot && systemctl is-active candle-feed optionsbot'
+    if [ -n "$hf_scope" ]; then
+        $PY fleet.py run "$hf_cmd" --only "$hf_scope"
+    else
+        $PY fleet.py run "$hf_cmd"
     fi
     pause
 }
