@@ -1,4 +1,4 @@
-# day_trader_pro/config.py — v0.1.4
+# day_trader_pro/config.py — v0.1.5
 """
 Central configuration for the day_trader_pro control server (orchestrator).
 
@@ -10,7 +10,12 @@ the mock switches used for offline development.
 Design intent:
   - The control server auto-discovers instances by their tag "Name".
     You never hardcode instance IDs here; the registry resolves them.
-  - SPX and QQQ always trade. The model adds EXACTLY MAX_DISCRETIONARY more.
+  - SPX and QQQ always trade. The panel supplies the rest (selector v0.3.1);
+    MAX_DISCRETIONARY bounds the model only if discretionary selection returns.
+
+v0.1.5 — 2026-08-20 — UNIVERSE pruned 29 -> 15 after the fleet resize. The 14
+         terminated boxes were still being scanned, still being counted, and
+         still being handed to eod_backfill's sat-out wake every night.
   - Everything can run end-to-end with zero real credentials via MOCK_MODE.
 """
 
@@ -28,11 +33,39 @@ REGION = os.environ.get("DTP_REGION", "us-east-2")
 # NOTE: Confirmed-known names from market_brief_v1 are listed first. The list
 # is currently short of 30 on purpose — paste your full 30-symbol universe here
 # so the tag filter matches your fleet exactly. Order does not matter.
+# v0.1.5 (2026-08-20) — THE UNIVERSE IS THE FLEET THAT EXISTS.
+#
+# The 14 boxes below were TERMINATED on 2026-08-20, not stopped:
+#   AAPL COST DIA GLD GS IWM JPM LLY MSFT ORCL SMCI SMH TLT XOM
+# They are gone from EC2. Leaving them here did not merely waste a describe
+# call — every consumer of this list reasons about boxes that cannot exist:
+#
+#   · `instance_registry.discover/reconcile` re-scans all 29 by tag Name and
+#     prints 14 "no live instance found" lines on every run.
+#   · `eod_backfill._missing()` iterates THIS LIST and reports any symbol with
+#     no OHLC csv as missing — so all 14 were flagged short every night and
+#     handed to the sat-out WAKE, which is the very phase the resize was meant
+#     to retire. Pruning here removes that wake BY CONSTRUCTION while leaving
+#     the phase's real job intact: a panel box whose harvest genuinely failed.
+#   · `wake_and_bake` compares its result count against len(UNIVERSE) and would
+#     report a permanent 14-box shortfall.
+#   · `fleet.py run --all` (devtools 14, and the feed-maintenance toggle at 58)
+#     would keep attempting boxes that are not there.
+#
+# ⚠️ THIS LIST MIRRORS `selector.py::PANEL` AND `market_brief_v1/config.py::
+# PANEL`. Three files, one fleet. Pinned by `tests/test_panel_mirror.py` rather
+# than by comment — when the panel changes, all three change in one commit.
+#
+# ⚠️ UNIVERSE IS NO LONGER WIDER THAN THE PANEL, and that is a real narrowing.
+# It used to be the SELECTABLE set from which 13 discretionary names were
+# chosen. Selection is now a hardcoded panel (selector v0.3.1), so the two
+# collapsed into one thing. Restoring discretionary selection means restoring
+# a wider universe here AND provisioning the boxes to go with it — the list is
+# not a preference, it is an inventory.
 UNIVERSE = [
-    "AAPL", "AMD", "AMZN", "AVGO", "COST", "CRM", "CVX", "DIA", "GLD", "GOOGL",
-    "GS", "IWM", "JPM", "LLY", "META", "MSFT", "MU", "NFLX", "NVDA", "ORCL",
-    "PLTR", "QQQ", "SMCI", "SMH", "SPX", "TLT", "TSLA", "UNH", "XOM",
-]  # 29 confirmed. SPX + QQQ are ALWAYS_ON; the other 27 are discretionary.
+    "NVDA", "SPX", "PLTR", "MU", "QQQ", "GOOGL", "AMZN", "AVGO",
+    "TSLA", "META", "NFLX", "CRM", "UNH", "CVX", "AMD",
+]  # 15 — the panel. SPX + QQQ are ALWAYS_ON; the other 13 are the fixed panel.
 # SPY intentionally excluded: SPX runs daily and tracks the same underlying,
 # so a SPY box would be redundant and is never woken.
 
