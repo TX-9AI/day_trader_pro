@@ -1,4 +1,19 @@
-# day_trader_pro/eod_conductor.py — v1.14.0
+# day_trader_pro/eod_conductor.py — v1.15.0
+# v1.15.0 (2026-08-20) — PHASE 4b (SAT-OUT ARCHIVE RECOVERY) DELETED. It existed
+#   for boxes that did not trade that day: phase_backfill woke them five at a
+#   time for candles, and while they were up they handed over journal/chain
+#   dates control had never pulled. After the 2026-08-20 fleet resize there are
+#   no sat-outs by construction — UNIVERSE is the panel (config v0.1.5), every
+#   box is up every session, and the phase degraded to a logged
+#   "no boxes running - deferred". Operator: "Sat-outs is now archaic."
+#   ⚠️ NOTHING IS LOST, and that was checked rather than assumed: phase 2b runs
+#   the SAME recovery earlier in the chain with the WHOLE fleet up, right after
+#   harvest and before phase_report stops them. 4b only ever reached boxes 2b
+#   could not. `scope` is gone with it — a parameter with one caller and one
+#   possible value misleads the next reader into thinking a second mode exists.
+#   ⚠️ phase_backfill STAYS. Its sat-out wake disappeared with the UNIVERSE
+#   prune, but its real job did not: a PANEL box whose harvest genuinely failed
+#   still has to be woken and fetched.
 # v1.14.0 (2026-08-18) — +PHASE 15 WAREHOUSE COVERAGE (VIX). Gate for the
 #   sever: once S3 is the official store the control-side copy stops being
 #   written, so anything absent from the bucket is gone. VIX carries the
@@ -62,6 +77,7 @@
 #   and BEFORE phase_report stops them — logs first, then the lights go out.
 #   4b: the sat-out boxes, right after phase_backfill wakes them five at a time
 #   for candles; while they are up they hand over anything control never pulled.
+#   (4b REMOVED at v1.15.0 — the fleet resize left no sat-outs. 2b remains.)
 #   WHY: the makedirs defect meant nothing reached signal_journal/ or
 #   chain_snapshots/ before 07-27, while the boxes wrote from 07-18 and 07-23 and
 #   NEITHER WRITER PRUNES — five sessions of journal and two of chains were
@@ -367,14 +383,16 @@ def _archive_gaps():
     return gaps
 
 
-def phase_archive_recovery(dry, warns, scope):
-    """Phase 2b / 4b — SELF-HEALING ARCHIVE GAP RECOVERY, run while boxes are up.
+def phase_archive_recovery(dry, warns):
+    """Phase 2b — SELF-HEALING ARCHIVE GAP RECOVERY, run while the boxes are up.
 
-    scope = "traders"  -> the 15 that traded today, still up after phase_harvest
-                          and BEFORE phase_report stops them.
-    scope = "satouts"  -> the sat-out boxes woken five at a time by phase_backfill
-                          to fetch candles; while they are up they also hand over
-                          any journal/chain dates control never pulled.
+    Runs ONCE, after phase_harvest and BEFORE phase_report stops the fleet —
+    logs first, then the lights go out.
+
+    v1.15.0: the second call (scope="satouts", after phase_backfill) is deleted
+    along with the `scope` parameter. It served boxes that had not traded that
+    day; the panel now trades every box every session, so it reached nobody 2b
+    had not already reached.
 
     WHY THIS EXISTS: the makedirs defect meant NOTHING was pulled into
     signal_journal/ or chain_snapshots/ before 2026-07-27, while the boxes wrote
@@ -391,11 +409,11 @@ def phase_archive_recovery(dry, warns, scope):
     """
     gaps = _archive_gaps()
     if not gaps:
-        _log("RECOVER", f"[{scope}] no archive gaps — journal + chains complete")
+        _log("RECOVER", "no archive gaps — journal + chains complete")
         return
     todo = sorted({d for ds in gaps.values() for d in ds})[:MAX_RECOVERY_DATES]
     for root, ds in gaps.items():
-        _log("RECOVER", f"[{scope}] {root}: {len(ds)} session(s) missing "
+        _log("RECOVER", f"{root}: {len(ds)} session(s) missing "
                         f"({ds[0]} … {ds[-1]})")
     if dry:
         _log("RECOVER", f"[dry] would back-harvest {todo} (journal+chains only)")
@@ -406,24 +424,24 @@ def phase_archive_recovery(dry, warns, scope):
             res = harvest.backharvest(d, quiet=True,
                                       artifacts=("journal", "chains"))
         except Exception as exc:  # noqa: BLE001
-            _warn(warns, "RECOVER", f"[{scope}] {d} raised: {exc}")
+            _warn(warns, "RECOVER", f"{d} raised: {exc}")
             continue
         if res is None:
-            _log("RECOVER", f"[{scope}] {d}: no boxes running — deferred")
+            _log("RECOVER", f"{d}: no boxes running — deferred")
             continue
         got = len(res.get("journal", {}).get("ok", [])) + \
               len(res.get("chains", {}).get("ok", []))
         failed = len(res.get("journal", {}).get("failed", [])) + \
                  len(res.get("chains", {}).get("failed", []))
         ok += 1
-        _log("RECOVER", f"[{scope}] {d}: recovered {got} file(s)"
+        _log("RECOVER", f"{d}: recovered {got} file(s)"
                         + (f", {failed} FAILED" if failed else ""))
         if failed:
-            _warn(warns, "RECOVER", f"[{scope}] {d}: {failed} pull(s) FAILED "
+            _warn(warns, "RECOVER", f"{d}: {failed} pull(s) FAILED "
                                     f"(not merely absent)")
     remaining = sum(len(v) for v in gaps.values()) - ok
     if remaining > 0:
-        _log("RECOVER", f"[{scope}] {remaining} session(s) still to recover — "
+        _log("RECOVER", f"{remaining} session(s) still to recover — "
                         f"next run continues (cap {MAX_RECOVERY_DATES}/night)")
 
 
@@ -1034,13 +1052,13 @@ def run(date=None, batch=5, dry=False, do_regime=True, do_tables=True,
     # 2b. Traders are STILL UP here; phase_report stops them. Take their backlog
     #     first, exactly as instructed — logs before the lights go out.
     if do_recover:
-        phase_archive_recovery(dry, warns, "traders")
+        phase_archive_recovery(dry, warns)
     phase_report(running, dry, warns)
+    # phase_backfill KEEPS its retry job (a panel box whose harvest failed), but
+    # its sat-out wake is gone: UNIVERSE is the panel, so _missing() can only
+    # name a box that was up and short. v1.15.0 deleted the 4b recovery call
+    # that used to piggyback on that wake.
     still = phase_backfill(date, batch, dry, warns)
-    # 4b. The sat-out boxes were just woken five at a time to fetch candles.
-    #     While they are up, collect any journal/chain dates control never pulled.
-    if do_recover:
-        phase_archive_recovery(dry, warns, "satouts")
     # After BACKFILL on purpose: backfill fetches candles for days the boxes
     # never handed over, so aggregating earlier would build daily bars from
     # tape that is about to get more complete.
