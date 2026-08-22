@@ -320,14 +320,34 @@ def _run_close(running, date, dry, a) -> int:
     # 4 ─ take down what verified
     ok, held = takedown(results, dry, not a.no_takedown)
 
+    # ── P&L, FROM THE WAREHOUSE, AFTER THE BOXES ARE OFF ────────────────
+    # 🔴 THE OLD CHAIN COMPUTED P&L TWICE: eod_summary on each box at 15:50 and
+    # eod_report on control at 16:15. Two answers to one question, and if they
+    # disagreed nothing noticed. One source now, and it reads S3 — so it works
+    # with every box already stopped, which is the whole point.
+    if not dry:
+        try:
+            import pnl_s3
+            dates = [date]
+            per_day, per_sym, tot = pnl_s3.collect(dates)
+            text = pnl_s3.render(dates, per_day, per_sym, tot)
+            print(text.replace("*", "").replace("`", ""))
+            _notify(text)
+        except Exception as exc:                               # noqa: BLE001
+            # ⚠️ A P&L FAILURE MUST NOT MASK THE CLOSE. The takedown already
+            # happened and its verdict is the important one; this says the
+            # report failed rather than pretending the day was flat.
+            _log("PNL", f"warehouse P&L unavailable: {exc}")
+            _notify(f"⚠️ EOD {date}: boxes closed, but the warehouse P&L "
+                    f"could not be read: {exc}")
+
     _log("DONE", f"{len(ok)} verified and stopped · {len(held)} HELD UP")
     if held and not dry:
         _notify(f"⚠️ EOD {date}: {len(held)} box(es) HELD UP — data not "
                 f"verified in S3: {', '.join(sorted(held))}. They are still "
                 f"running.")
     elif not dry:
-        _notify(f"✅ EOD {date}: all {len(ok)} box(es) verified against S3 "
-                f"and stopped.")
+        _log("DONE", f"all {len(ok)} box(es) verified against S3 and stopped")
     # ⚠️ NON-ZERO ONLY WHEN A BOX IS HELD. A held box is the one condition that
     # needs a human tonight.
     return 1 if held else 0

@@ -308,6 +308,27 @@ mi_live_p_l_standings_read_only() {
     echo; read -rp "Push to Telegram too? [y/N]: " S; if [ "$S" = "y" ]; then $PY standings.py --send; else $PY standings.py; fi; pause
 }
 
+# P&L from the WAREHOUSE (day or range; boxes not involved)
+mi_pnl_from_warehouse() {
+    # r207 — reads S3, never the boxes.
+    # ⚠️ ITEM 54 (standings.py) SSHes INTO EVERY BOX, so seeing YESTERDAY's P&L
+    # meant WAKING FIFTEEN MACHINES to answer a question about data already
+    # sitting in the bucket. Its SQL is also hardcoded to today, so a past
+    # session was unaskable at any price. 54 stays for the LIVE intraday read;
+    # this is for everything else.
+    echo
+    echo "  P&L from the S3 warehouse. Boxes stay off."
+    read -rp "  Date (YYYY-MM-DD, ENTER=today), or START of a range: " D1
+    read -rp "  END of range (ENTER = single day): " D2
+    read -rp "  Push to Telegram too? [y/N]: " S
+    ARGS=""
+    if [ -n "$D1" ] && [ -n "$D2" ]; then ARGS="--from $D1 --to $D2"
+    elif [ -n "$D1" ];               then ARGS="--date $D1"; fi
+    [ "$S" = "y" ] && ARGS="$ARGS --send"
+    $PY pnl_s3.py $ARGS
+    pause
+}
+
 # Backfill missing OHLC (auto-batched)
 mi_backfill_missing_ohlc_auto_batched() {
     echo; read -rp "Backfill date (YYYY-MM-DD, ENTER=today): " D; D="${D:-$(date +%F)}"; read -rp "Batch size (ENTER=5): " B; B="${B:-5}"; echo; $PY eod_backfill.py --date "$D" --batch "$B" --dry-run; echo; read -rp "Proceed with LIVE backfill (wakes/stops boxes)? [y/N]: " GO; [ "$GO" = "y" ] && $PY eod_backfill.py --date "$D" --batch "$B"; pause

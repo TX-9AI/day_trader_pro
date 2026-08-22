@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
-# day_trader_pro/devtools.sh — v1.41
+# day_trader_pro/devtools.sh — v1.42
+# v1.42 (2026-08-25) — NEW item 55 "P&L from WAREHOUSE (day or range; boxes
+# off)". Item 54 SSHes into every box, so seeing YESTERDAY P&L meant WAKING
+# FIFTEEN MACHINES to ask about data already in the bucket — and its SQL is
+# hardcoded to today, so a past session was unaskable at any price. 54 keeps
+# its place for the LIVE intraday read and now says so in its label.
 # v1.41 (2026-08-25) — the retired classifier is GONE from day_trader_pro:
 # 298 mentions -> 0. Five dead files deleted: two shell scripts and a census
 # tool for the retired engine, plus the v3 backtest harness and its sweep,
