@@ -88,6 +88,7 @@ MENU=(
   "ITEM|Blind-alert DRILL on the fleet (sends REAL Telegram, marked DRILL)|mi_blind_alert_drill_on_the_fleet_sends_real_te"
   "ITEM|Feed maintenance window (fleet up, nothing on the wire) - currently OFF|mi_feed_maintenance_window_fleet_up_nothing_on"
   "SECTION|S3 WAREHOUSE (read-only; runs ALONGSIDE the local reports)"
+  "ITEM|S3 SWEEP — hygiene (dups / culled symbols; lists first)|mi_s3_sweep"
   "ITEM|Warehouse inventory & cost|mi_warehouse_inventory_cost"
   "ITEM|Warehouse inventory & cost (+ noncurrent versions)|mi_warehouse_inventory_versions"
   "ITEM|Rebuild a day's bundle FROM S3 -> reports/warehouse/|mi_warehouse_rebuild_bundle"

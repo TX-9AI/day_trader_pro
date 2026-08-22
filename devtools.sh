@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
-# day_trader_pro/devtools.sh — v1.44
+# day_trader_pro/devtools.sh — v1.45
+# v1.45 (2026-08-25) — NEW S3 SWEEP item: legacy-hash duplicates and culled-
+# symbol data. Delete lives on CONTROL only — traders write and never delete.
+# The duplicate rule is SELF-VERIFYING: an object is current if its key suffix
+# equals sha256(canon(record)); proven 2026-08-25 by fetching a pair whose
+# records were byte-identical and differed only in pushed_at_utc, which the
+# canonicaliser excludes. Lists before deleting, and requires typing DELETE.
 # v1.44 (2026-08-25) — FIT REPORT REPLACED BY FIT READINESS. The old report
 # sourced everything from `trades` — the population that FIRED — while the
 # question "is this setup ready to fit?" is mostly answered by the population

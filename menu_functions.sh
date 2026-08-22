@@ -328,6 +328,37 @@ mi_live_p_l_standings_read_only() {
     echo; read -rp "Push to Telegram too? [y/N]: " S; if [ "$S" = "y" ]; then $PY standings.py --send; else $PY standings.py; fi; pause
 }
 
+# S3 SWEEP — warehouse hygiene (lists first; --apply required)
+mi_s3_sweep() {
+    # r212 — DELETE LIVES ON CONTROL ONLY. The traders write and never delete,
+    # so a compromised or buggy box cannot destroy the warehouse.
+    # ⚠️ IT LISTS BEFORE IT DELETES, ALWAYS. Deletion is the one irreversible
+    # act in this system.
+    echo
+    echo "  1) Legacy-hash duplicates  (self-verifying: keeps the object whose"
+    echo "     key == sha of its own record; a one-time migration artifact)"
+    echo "  2) Culled symbols          (the 14 terminated 2026-08-20 — trades"
+    echo "     AND tape; panel symbols are refused by a hard guard)"
+    read -rp "  Choose 1 or 2 (ENTER = cancel): " C
+    [ -z "$C" ] && { pause; return 0; }
+    case "$C" in
+      1) $PY s3_sweep.py --dups ;;
+      2) $PY s3_sweep.py --culled ;;
+      *) echo "  no."; pause; return 0 ;;
+    esac
+    echo
+    read -rp "  Delete the objects listed above? Type DELETE to confirm: " OK
+    if [ "$OK" = "DELETE" ]; then
+        case "$C" in
+          1) $PY s3_sweep.py --dups --apply ;;
+          2) $PY s3_sweep.py --culled --apply ;;
+        esac
+    else
+        echo "  cancelled — nothing deleted."
+    fi
+    pause
+}
+
 # EOD ANALYSIS — the reports, from S3, boxes stay off
 mi_eod_analysis() {
     # r208 — the REPORTS half of the EOD split. eod_conductor_v2 owns the
