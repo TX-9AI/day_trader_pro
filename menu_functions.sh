@@ -1,4 +1,4 @@
-# ── v1.37 (2026-08-22) — THE REGIME VALIDATION SECTION IS DELETED ────────────
+# ── v1.37 (2026-08-22) — THE OBSOLETE VALIDATION SECTION IS DELETED ──────────
 # Six handlers went with it: the Layer-1 confluence replay (today / pick-a-date
 # / view report / view diary / backfill gaps) and the A2 co-occurrence tool.
 # All six shelled into ~/options-trader-v3, a checkout that is not present, so
@@ -7,7 +7,7 @@
 #
 # ⚠️ DELETED, NOT REPOINTED. The confluence premise is what otv4 retired; there
 # is nothing in v4 for these to validate. Operator, 2026-08-22: "Delete the
-# entire regime validation section — I'm tired of seeing that term." If any of
+# entire validation section — I'm tired of seeing that term." If any of
 # this analysis is wanted again it is REBUILT on v4's own data under a
 # different name, so it cannot be mistaken for the artifact.
 #
@@ -273,7 +273,7 @@ mi_excursion_report_mfe_mae_reports_excursions() {
         $PY excursion_report.py $ARGS; pause
 }
 
-# Trade breakdown (cross-day: regime/strategy/grade + regime x strategy)
+# Trade breakdown (cross-day: strategy/grade/setup)
 # ⚠️ LABEL AND HANDLER RENAMED r203 (2026-08-25). The old name promised a
 # breakdown by a column that otv4 PHYSICALLY DROPPED in r65 — a query against
 # it now RAISES rather than returning empty, so the promise was not merely

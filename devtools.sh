@@ -1,5 +1,13 @@
 #!/usr/bin/env bash
-# day_trader_pro/devtools.sh — v1.40
+# day_trader_pro/devtools.sh — v1.41
+# v1.41 (2026-08-25) — the retired classifier is GONE from day_trader_pro:
+# 298 mentions -> 0. Five dead files deleted: two shell scripts and a census
+# tool for the retired engine, plus the v3 backtest harness and its sweep,
+# which imported analysis modules that do not exist in otv4 at all. Report
+# generators lost a grouping dimension and a score column built on a database
+# column otv4 PHYSICALLY DROPPED in r65 — a query naming it now RAISES.
+# fit_report section 3 deleted: it shelled into an absent v3 checkout and had
+# only ever printed "SKIPPED, rc 127".
 # v1.40 (2026-08-25) — the rendered banner DERIVES its version from this
 # header instead of a literal typed in menu_registry.sh; it had read "v1.35"
 # against a v1.39 header, and drifted the same way at v1.26/v1.28. Guarded by
@@ -22,7 +30,7 @@
 # r61-r70 laid down ten derived tables and two tools with NO WAY TO READ ANY OF
 # THEM — a sensor nobody can query is a sensor that does not exist. DEBUG/LOGS
 # moves to 29-32; numbers are assigned at render from list position.
-# v1.37 (2026-08-22) — menu: REGIME VALIDATION section deleted (6 dead items);
+# v1.37 (2026-08-22) — menu: obsolete validation section deleted (6 dead items);
 # NEW item 18 "Hotfix launcher (repo synch & flush)" at the end of FLEET. Numbers
 # are assigned at render from list position, so DEBUG/LOGS simply moves to 19-22.
 # v1.36  2026-08-18  REPOINT NO LONGER OFFERS THE PARENT REPO AS A ONE-KEY
@@ -102,7 +110,6 @@ OTV3_PY="$OTV3_DIR/venv/bin/python"
 # 2026-07-23: canonical copy lives in the otv3 repo. Nothing operational
 # should sit loose in /home/ubuntu. MUST be defined AFTER OTV3_DIR —
 # `set -uo pipefail` (line 112) makes a forward reference fatal at load.
-VALIDATE_SH="$OTV3_DIR/validate_regime.sh"
 
 # Open an interactive shell in a directory via tmux (a menu item can't cd the
 # parent shell). Inside tmux -> new window; otherwise attach-or-create a session.

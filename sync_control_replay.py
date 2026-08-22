@@ -5,7 +5,7 @@ Sync the control-side replay checkout to origin/main.
 The trading fleet's ~/options-trader engine checkouts are resolved to
 origin/main by wake_and_bake's BAKE stage. The control box also keeps a
 SEPARATE, inert checkout at ~/options-trader-v3 that the Layer-1 replay
-harness (validate_regime.sh) reads so its regime telemetry matches what the
+harness reads so its telemetry matches what the
 live bots compute. BAKE deliberately never touches that path, so it drifts
 out of parity until pulled by hand — this script is that hand.
 

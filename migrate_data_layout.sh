@@ -4,8 +4,8 @@
 #   data/harvest/<date>/<SYM>_OHLC_<date>.csv   -> ohlc/<date>/<SYM>_ohlc_<date>.csv
 #   data/harvest/<date>/<SYM>_trades_<date>.db  -> trades/<date>/<SYM>_<date>_trades.db
 #   data/harvest/<date>/{daily,fleet}_trades_*  -> reports/
-#   data/harvest/<date>/regime_replay_*.jsonl   -> reports/
-#   data/{daily_trades_*.json, regime_diary.*}  -> reports/
+#   data/harvest/<date>/replay_*.jsonl          -> reports/
+#   data/daily_trades_*.json                    -> reports/
 #   pulls/<SYM>_OHLC_<date>.csv                 -> ohlc/<date>/... ; dateless
 #   pulls/*_trades.db (no date in name)         -> trades/_undated_legacy/
 # data/ keeps operational state (instance_map, mock_state, selection_log, report.json).
@@ -26,14 +26,14 @@ for daydir in data/harvest/*/; do
     sym="${f##*/}"; sym="${sym%%_*}"
     mv_v "$f" "trades/$d/${sym}_${d}_trades.db"
   done
-  for f in "$daydir"daily_trades_*.json "$daydir"fleet_trades_*.json "$daydir"fleet_trades_*.csv "$daydir"regime_replay_*.jsonl; do
+  for f in "$daydir"daily_trades_*.json "$daydir"fleet_trades_*.json "$daydir"fleet_trades_*.csv "$daydir"replay_*.jsonl; do
     mv_v "$f" "reports/$(basename "$f")"
   done
   rmdir "$daydir" 2>/dev/null && echo "  removed empty $daydir"
 done
 rmdir data/harvest 2>/dev/null && echo "  removed empty data/harvest"
 
-for f in data/daily_trades_*.json data/regime_diary.jsonl data/regime_diary.md; do
+for f in data/daily_trades_*.json; do
   [ -e "$f" ] && mv_v "$f" "reports/$(basename "$f")"
 done
 

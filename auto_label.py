@@ -13,12 +13,12 @@ WHY THIS EXISTS
     discipline can retroactively tag. This labels all of them in one run.
 
 THE INDEPENDENCE RULE (why this is legitimate, and where the line is)
-    Tier-B labels are GROUND TRUTH used to validate regime_confluence. Deriving
-    them FROM regime_confluence would grade the classifier against its own
+    Tier-B labels are GROUND TRUTH used to validate a classifier. Deriving
+    them FROM that classifier would grade it against its own
     output and prove nothing.
 
-    So this module imports NOTHING from the regime stack. No regime_confluence,
-    no conviction_integrator, no trend_engine, no regime_classifier. Every rule
+    So this module imports NOTHING from any classification stack, and no
+    trend engine. Every rule
     below is computed from OHLC bars alone using textbook price-action
     definitions that existed long before this system did. That is what keeps the
     acceptance test honest.

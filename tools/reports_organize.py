@@ -36,8 +36,6 @@ WHAT IT DOES AND DELIBERATELY DOES NOT DO
     Three of these types are READ BACK by other reports:
       fleet_trades_*.json   -> report 41's BUNDLE_GLOB, and report 40's fallback
       morning_report_*.json -> report 41's sentiment join
-      regime_replay_*.jsonl -> report 47 auto-discovers these
-      regime_diary.*        -> the diary viewers
     Copying is harmless. **DELETING the root originals is not** — it would
     silently shorten report 41's cumulative window, which is the exact failure
     the reports/-is-both-input-and-output warning exists for. This script
@@ -72,7 +70,7 @@ REBUILD_FROM_S3 = {"fleet_trades"}
 
 # Known one-time diagnostics. These stay at root no matter how many files they
 # happen to have — the operator identified them, and a count cannot.
-ALWAYS_ONEOFF = {"sweep", "orb", "tc7", "regime_grid", "named_sweeps",
+ALWAYS_ONEOFF = {"sweep", "orb", "tc7", "named_sweeps",
                  "bull_floor", "bear_floor", "rejection_summary",
                  "session_labels", "gap_pct"}
 
@@ -80,8 +78,6 @@ ALWAYS_ONEOFF = {"sweep", "orb", "tc7", "regime_grid", "named_sweeps",
 CONSUMED_BY_OTHERS = {
     "fleet_trades": "report 41 BUNDLE_GLOB + report 40 fallback",
     "morning_report": "report 41 sentiment join",
-    "regime_replay": "report 47 auto-discovery",
-    "regime_diary": "the diary viewers",
     "session_labels": "possible analysis input — verify before touching",
     "gap_pct": "possible analysis input — verify before touching",
 }

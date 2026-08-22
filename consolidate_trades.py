@@ -35,7 +35,6 @@ Sources (all local — pure SQLite reads, no fleet round-trip):
 From each db it reads, VERBATIM (SELECT * — so any future ALTER TABLE ADD COLUMN
 is carried automatically, nothing hard-coded):
   * trades                  — every row, every column (full ~55-field schema)
-  * regime_log              — the day's regime classifications (conviction/ADX/trigger)
   * circuit_breaker_events  — any daily-loss halts that fired
 Each row is tagged with `box` (the SYMBOL from the FILENAME — authoritative fleet
 tag), and the row's own `symbol` column is left untouched, so a mislabeled db can
@@ -43,12 +42,12 @@ never confuse the merge and both values survive for audit.
 
 Outputs (FLAT, into reports/ — not the day folder):
   fleet_trades_<date>.json   ← THE deliverable for the analysis thread (bundle:
-                               meta + selection + fleet_stats + regime_timeline +
+                               meta + selection + fleet_stats +
                                breaker_events + ohlc_index + every trade, full schema)
   fleet_trades_<date>.csv    ← flat trades union (superset of columns) for pandas
 
 Robust: a missing/locked/corrupt db is skipped and reported, never fatal; a box on
-an older schema (no regime_log / circuit_breaker_events table) is handled gracefully.
+an older schema (no circuit_breaker_events table) is handled gracefully.
 
 CLI:
   python consolidate_trades.py                      # today, default harvest dir
@@ -176,7 +175,6 @@ def _stats(trades):
         "by_strategy": _bucket("strategy"),
         "by_setup_type": _bucket("setup_type"),
         "by_setup_grade": _bucket("setup_grade"),
-        "by_regime": _bucket("regime"),
         "by_exit_reason": _bucket("exit_reason"),
     }
 
@@ -196,7 +194,6 @@ def consolidate(date=None, write_csv=True):
         print("    run harvest first (python harvest.py), or stage dbs as "
               "trades/<date>/<SYM>_trades_<date>.db.")
     trades = []
-    regime = []
     breaker = []
     by_box = OrderedDict()
     boxes_read = []
@@ -219,15 +216,13 @@ def consolidate(date=None, write_csv=True):
                 for c in r:
                     col_union.setdefault(c, None)
                 trades.append(r)
-            _rc, rrows = _read_table(conn, "regime_log", date, "logged_at")
             for r in rrows:
                 r["box"] = sym
-                regime.append(r)
             _bc, brows = _read_table(conn, "circuit_breaker_events", date, "event_time")
             for r in brows:
                 r["box"] = sym
                 breaker.append(r)
-            by_box[sym] = {"trades": len(trows), "regime_log": len(rrows),
+            by_box[sym] = {"trades": len(trows),
                            "breaker_events": len(brows)}
             boxes_read.append(sym)
         except sqlite3.DatabaseError as exc:
@@ -237,7 +232,6 @@ def consolidate(date=None, write_csv=True):
 
     # Deterministic ordering for readability (does not drop anything).
     trades.sort(key=lambda t: (str(t.get("box", "")), str(t.get("entry_time") or "")))
-    regime.sort(key=lambda r: (str(r.get("logged_at") or ""), str(r.get("box", ""))))
     breaker.sort(key=lambda b: (str(b.get("event_time") or ""), str(b.get("box", ""))))
 
     ohlc_index = sorted(os.path.basename(p) for p in (
@@ -259,7 +253,6 @@ def consolidate(date=None, write_csv=True):
         ("selection", _load_selection(date)),            # AM picks + reasoning
         ("fleet_stats", _stats(trades)),
         ("by_box", by_box),
-        ("regime_timeline", regime),
         ("breaker_events", breaker),
         ("ohlc_index", ohlc_index),                      # cross-ref, not embedded
         ("trades", trades),                              # every row, every column

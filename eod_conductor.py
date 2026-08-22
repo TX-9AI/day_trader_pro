@@ -1,5 +1,5 @@
 # day_trader_pro/eod_conductor.py — v1.16.0
-# v1.16.0 (2026-08-22) — the six otv3-dependent phases (REGIME, TABLES,
+# v1.16.0 (2026-08-22) — the six otv3-dependent phases (the nightly replay,
 #   SWALLOW, VWAP, EVM, READINESS) are DELETED with their CLI flags. Each
 #   shelled into a checkout that is not present, took its not-found branch,
 #   and fired a Telegram warning every night about an engine that was
@@ -165,19 +165,18 @@
 #          runs (recovery-path rule); any failure is a loud warning, never a
 #          stop. DTP_EXCURSION_LIVE=1 additionally produces the live-rows
 #          report (written with a _live suffix once live boxes exist).
-# v1.2.0 — 2026-07-15 — box-state-independent recovery: BACKFILL/CONSOLIDATE/REGIME
+# v1.2.0 — 2026-07-15 — box-state-independent recovery: BACKFILL/CONSOLIDATE/REPLAY
 #          ALWAYS run regardless of whether traded boxes are up/down/never-ran; the
 #          upstream gate/harvest/report steps now WARN-and-proceed instead of halting,
 #          so box state can never block the candle recovery. (Same code as the v1.1.0
 #          fix; version re-stamped for deploy clarity.)
-# v1.0.1 — 2026-07-15 — regime phase calls nightly_regime.sh (today + gap-day sweep).
 # v1.0.0 — 2026-07-11 — initial gated conductor.
 """
 End-of-day conductor (control server). ONE ordered chain that calls the existing
 helpers in sequence — it sequences them, it rewrites none of them.
 
 v1.1.0 principle: the WHOLE point of EOD is to end up with complete tape + diary,
-so the recovery path (BACKFILL → CONSOLIDATE → REGIME) ALWAYS runs — regardless of
+so the recovery path (BACKFILL → CONSOLIDATE → REPLAY) ALWAYS runs — regardless of
 whether the traded boxes are up, down, never ran, or errored. The upstream steps
 (gate/harvest/report) only act on boxes that are actually running; if there's
 nothing to collect they SKIP, and any problem is a LOUD WARNING, never a dead-end.
@@ -193,7 +192,6 @@ Order:
   4. BACKFILL    — ALWAYS: wake the sat-out symbols in batches, produce → pull →
                    stop, until every symbol's OHLC is on the server.
   5. CONSOLIDATE — ALWAYS: fleet_trades bundle over whatever tape is present.
-  6. REGIME      — ALWAYS: nightly_regime.sh (replay + diary + gap-day sweep).
   7. EXCURSION   — ALWAYS: excursion_report.py over the harvested trade DBs
                    (MFE/MAE per exit reason + floor/leash verdicts) →
                    reports/excursions_<date>.txt, headline to Telegram.
@@ -239,7 +237,6 @@ import ssh_util
 
 _ET = ZoneInfo("US/Eastern")
 REMOTE_REPO = "options-trader"
-NIGHTLY_REGIME = os.path.expanduser("~/day_trader_pro/nightly_regime.sh")
 
 GATE_TIMEOUT = 420
 GATE_POLL = 15
@@ -603,8 +600,8 @@ def phase_label(date, dry, warns):
 
     Was a manual 10-minute EOD habit via label_day.sh, which also could not
     label the archived past. auto_label.py derives the labels from RAW PRICE
-    ACTION only — it imports nothing from the regime stack, so the labels stay
-    independent ground truth for validating regime_confluence rather than a
+    ACTION only — it imports nothing from the retired classifier, so the
+    labels stay INDEPENDENT ground truth rather than a
     restatement of its output. Rows are tagged source="auto"; a human override
     via label_day.sh writes the same date and wins downstream.
 
@@ -809,7 +806,7 @@ def run(date=None, batch=5, dry=False, do_recover=True, do_coverage=True):
     phase_consolidate(date, dry, warns)
     phase_label(date, dry, warns)
     # ── 🔴 v1.16.0 (2026-08-22) — SIX otv3-DEPENDENT PHASES DELETED ─────────
-    # REGIME, TABLES, SWALLOW, VWAP, EVM and READINESS all shelled out to
+    # The nightly replay, TABLES, SWALLOW, VWAP, EVM and READINESS all
     # scripts inside the options_trader_v3 checkout. That checkout is not
     # present, so every one of them took its not-found branch and fired a
     # Telegram WARNING every single night:
@@ -823,8 +820,8 @@ def run(date=None, batch=5, dry=False, do_recover=True, do_coverage=True):
     # deliberately retired. A nightly warning nobody can action is worse than
     # silence: it is the alarm that teaches you to ignore alarms.
     #
-    # ⚠️ REGIME WENT WITH THEM. phase_regime ran nightly_regime.sh ->
-    # v3's validate_regime.sh - the Layer-1 confluence replay whose premise
+    # ⚠️ THE NIGHTLY REPLAY WENT WITH THEM. That phase shelled out to
+    # a v3 replay script whose premise
     # otv4 retired. Operator, 2026-08-22: the term is gone from the menu too.
     #
     # If any of this analysis is wanted against v4, it gets REBUILT against

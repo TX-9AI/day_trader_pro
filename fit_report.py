@@ -14,7 +14,7 @@ v1.1 — sections 5 and 6 now receive THE RANGE. v1.0 let ramp_calibration and
 ONE FILE CONTAINING EVERY REPORT NEEDED TO FIT SOMETHING.
 
 WHY IT EXISTS. Fitting a ramp, a stop or an entry gate needs the trade
-breakdown, the excursion/MFE-MAE read, the regime diary and the calibration
+breakdown, the excursion/MFE-MAE read and the calibration
 telemetry TOGETHER — and they were four separate menu options producing four
 separate screenfuls. Running them one at a time and screenshotting each is slow
 on mobile and, worse, it makes it easy to fit against numbers drawn from
@@ -34,7 +34,7 @@ never quietly disagree with the tool it is quoting.
      not reproducible, and this project has already had one calibration
      invalidated by bounds fitted against an engine that no longer ran.
 
-  2. THE BAKE-BOUNDARY WARNING. Engine changes land on dated bakes, and per-regime
+  2. THE BAKE-BOUNDARY WARNING. Engine changes land on dated bakes, and per-bucket
      statistics are NOT poolable across one. If the requested range spans a known
      bake the report says so at the TOP, before any number, rather than leaving
      the reader to remember. Add new bake dates to BAKE_DATES as they happen.
@@ -69,7 +69,6 @@ HOME        = os.path.expanduser("~")
 DTP_DIR     = os.path.dirname(os.path.abspath(__file__))
 OTV3_DIR    = os.path.join(HOME, "options-trader-v3")
 OTV3_PY     = os.path.join(OTV3_DIR, "venv", "bin", "python")
-VALIDATE_SH = os.path.join(OTV3_DIR, "validate_regime.sh")
 REPORTS_DIR = os.path.join(DTP_DIR, "reports")
 JOURNAL_ROOT = os.path.join(DTP_DIR, "signal_journal")
 
@@ -143,8 +142,11 @@ def replay_files(since, date):
     """
     lo = since or date
     out = []
-    for p in sorted(glob.glob(os.path.join(REPORTS_DIR, "regime_replay_*.jsonl"))):
-        d = os.path.basename(p)[len("regime_replay_"):-len(".jsonl")]
+    # ⚠️ r204: this globbed the replay corpus of a retired engine. Nothing
+    # writes those files any more, so the loop found nothing and the
+    # bake-boundary warning below could never trigger.
+    for p in sorted(glob.glob(os.path.join(REPORTS_DIR, "replay_*.jsonl"))):
+        d = os.path.basename(p)[len("replay_"):-len(".jsonl")]
         if lo <= d <= date:
             out.append(p)
     return out
@@ -189,10 +191,10 @@ def main(argv):
         bakes = spanned_bakes(a.since, a.date)
         if bakes:
             fh.write(f"\n  {'!' * 72}\n")
-            fh.write("  ⚠️  THIS RANGE SPANS A FLEET BAKE. Per-regime and per-strategy\n")
+            fh.write("  ⚠️  THIS RANGE SPANS A FLEET BAKE. Per-bucket and per-strategy\n")
             fh.write("      statistics either side of one are NOT THE SAME MEASUREMENT and\n")
             fh.write("      must not be pooled. Split the range at the date(s) below before\n")
-            fh.write("      fitting anything to a per-regime number.\n")
+            fh.write("      fitting anything to a per-bucket number.\n")
             for d, why in sorted(bakes.items()):
                 fh.write(f"        {d} — {why}\n")
             fh.write(f"  {'!' * 72}\n")
@@ -200,9 +202,9 @@ def main(argv):
             fh.write("\n  bake boundaries in range: none\n")
 
         fh.write("\n  WHAT EACH SECTION IS FOR WHEN FITTING\n")
-        fh.write("    1 trade breakdown  — population, regime x strategy, exit vocabulary\n")
+        fh.write("    1 trade breakdown  — population, strategy, exit vocabulary\n")
         fh.write("    2 excursion        — STOPS: floor sweep, never-favourable, giveback\n")
-        fh.write("    3 regime report    — LABELS: L1 distribution, L2 churn, acceptance\n")
+
         fh.write("    4 readiness digest — ENTRIES: arming, would-fire vs fired, pegged ramps\n")
         fh.write("    5 ramp calibration — RAMPS: per-term saturation + input percentiles\n")
         fh.write("    6 A2 + HTF drift   — forward drift by label; the null control\n")
@@ -214,7 +216,7 @@ def main(argv):
                                          ["--since", a.date])
         results["trade breakdown"] = section(
             fh, "1. TRADE BREAKDOWN (trade_report.py)", cmd, cwd=DTP_DIR,
-            note="population, regime x strategy, exit reason x session spread")
+            note="population, strategy, exit reason x session spread")
 
         # ── 2. EXCURSION ────────────────────────────────────────────────────
         cmd = [py, "excursion_report.py", "--date", a.date]
@@ -225,19 +227,17 @@ def main(argv):
             note="STOP fitting: floor sweep, never-favourable, leash verdict, "
                  "score dispersion")
 
-        # ── 3. REGIME REPORT / DIARY ────────────────────────────────────────
-        if os.access(VALIDATE_SH, os.X_OK):
-            cmd = ([VALIDATE_SH, "--diary"] if cumulative
-                   else [VALIDATE_SH, "--report", a.date])
-            results["regime"] = section(
-                fh, "3. REGIME " + ("DIARY (all days)" if cumulative else
-                                    f"REPORT ({a.date})"),
-                cmd, cwd=OTV3_DIR,
-                note="LABEL fitting: L1 score distribution, L2 churn, A1-A5 acceptance")
-        else:
-            head(fh, "3. REGIME REPORT")
-            fh.write(f"  SKIPPED — {VALIDATE_SH} missing or not executable\n")
-            results["regime"] = 127
+        # ── SECTION 3 DELETED r204 (2026-08-25) ─────────────────────────────
+        # It shelled into a validation script inside the otv3 checkout — a
+        # script for the retired classifier, in a directory not present here.
+        # ⚠️ SO IT COULD ONLY EVER TAKE ITS ELSE BRANCH: "SKIPPED — missing or
+        # not executable", rc 127, in every fitting report ever produced. A
+        # section of the FITTING report — the document whose whole job is to
+        # supply numbers worth fitting to — that has never once produced a
+        # number.
+        # ⚠️ NOT REPLACED. If label-style analysis is ever wanted again it is
+        # rebuilt on v4's own derived stores (character_ledger, fork_series,
+        # gate_disposition), not resurrected by path.
 
         # ── 4. READINESS DIGEST ─────────────────────────────────────────────
         if otv3_py:
@@ -292,7 +292,7 @@ def main(argv):
         fh.write("  answer. Read the section text before treating it as a failure.\n")
         if bakes:
             fh.write("\n  ⚠️  REMINDER: this range spans a fleet bake (see the top of\n")
-            fh.write("      this file). Do not pool per-regime numbers across it.\n")
+            fh.write("      this file). Do not pool per-bucket numbers across it.\n")
         fh.write(f"\n  written {out_path}\n")
 
     size = os.path.getsize(out_path)

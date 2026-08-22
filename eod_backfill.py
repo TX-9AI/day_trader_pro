@@ -51,7 +51,7 @@ v1.2 — 2026-08-13 — WH.4: each batch must PROVE it filled the warehouse befo
 EOD candle backfill for sat-out symbols.
 
 Stream capacity caps live trading at ~N boxes/day, so the symbols that sat out
-never wrote their 1-min OHLC — leaving gaps in the tape the regime diary needs.
+never wrote their 1-min OHLC — leaving gaps in the tape the analysis needs.
 This walks the day's harvest folder, finds which symbols are MISSING their CSV,
 and brings them up in small capacity-safe batches to fetch the candles:
 

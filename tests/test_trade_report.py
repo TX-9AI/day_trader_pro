@@ -64,10 +64,10 @@ def test_normalises_the_pnl_suffix_so_one_reason_is_one_row():
 # ── sub-minute contamination of the hold ratio ─────────────────────────────
 
 def test_flicker_rows_are_counted_and_ratio_reported_both_ways():
-    """44 of 88 rows on 2026-08-03 were regime-flip flicker, p25 12 seconds."""
-    trades = [t("regime_flip (RANGING)", "2026-08-03", pnl=-1.0, hold=0.2)
+    """44 of 88 rows on 2026-08-03 were sub-minute flicker, p25 12 seconds."""
+    trades = [t("flip_exit (SOME_LABEL)", "2026-08-03", pnl=-1.0, hold=0.2)
               for _ in range(20)]
-    trades += [t("regime_flip (RANGING)", "2026-08-03", pnl=1.0, hold=0.2)
+    trades += [t("flip_exit (SOME_LABEL)", "2026-08-03", pnl=1.0, hold=0.2)
                for _ in range(20)]
     trades += [t("continuation_trail", "2026-08-03", pnl=50.0, hold=30.0)
                for _ in range(10)]

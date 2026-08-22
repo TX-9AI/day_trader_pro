@@ -136,7 +136,7 @@ check("_sym_of parses the partition", WR._sym_of(K % ("NVDA", "x")) == "NVDA")
 # the bundle shape must match consolidate_trades'
 WR.CT._load_selection = lambda d: None
 bundle = WR.build(D, s3)
-for k in ("meta", "selection", "fleet_stats", "by_box", "regime_timeline",
+for k in ("meta", "selection", "fleet_stats", "by_box",
           "breaker_events", "ohlc_index", "trades"):
     check(f"bundle has '{k}' (consolidate_trades parity)", k in bundle)
 check("meta records how many STATES were seen, not just trades",

@@ -50,7 +50,7 @@ MENU=(
   "SECTION|MAINTENANCE (wake_and_bake)"
   "ITEM|Retire — off-hours stop (one/all/some)|mi_retire_one_all_some"
   "ITEM|FULL (wake->bake->restart->STOP)|mi_full_wake_bake_restart_stop"
-  "ITEM|Wake (one/all/some)|mi_wake_one_all_some"
+  "ITEM|Wake|mi_wake_one_all_some"
   "ITEM|Bake only (sync, no restart - RTH-safe)|mi_bake_only_sync_no_restart_rth_safe"
   "ITEM|Leave on (skip shutdown)|mi_leave_on_skip_shutdown"
   "ITEM|EMERGENCY STOP — mid-session, abandons positions (one/all/some)|mi_emergency_stop_no_eod_no_pycache_rth_exempt"

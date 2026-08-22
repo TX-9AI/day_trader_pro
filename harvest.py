@@ -48,7 +48,7 @@
 # v0.4.0 (2026-07-11) — canonical layout: raw OHLC -> ohlc/<date>/<SYM>_ohlc_<date>.csv,
 #   raw trades.db -> trades/<date>/<SYM>_trades_<date>.db, aggregates (daily_trades,
 #   fleet_trades) -> reports/ (flat). Replaces the old data/harvest/<date>/ tree so the
-#   regime harness reads the same tape we collect. Paths come from config.*.
+#   analysis harness reads the same tape we collect. Paths come from config.*.
 """
 Trade-anatomy + raw-artifact harvester. Runs on the control server AFTER each bot
 has written trades_today.json (15:50) and the per-box candle-logger has written
@@ -242,7 +242,7 @@ def _mock_pull(sym):
             "setup_grade": ["A", "B", "C"][(h + i) % 3],
             "option_side": "call" if (h + i) % 2 else "put",
             "contracts": 1 + (h + i) % 4, "pnl_usd": pnl,
-            "exit_reason": ["target", "stop", "regime_flip", "eod"][(h + i) % 4],
+            "exit_reason": ["target", "stop", "trail_stop", "eod"][(h + i) % 4],
         })
     return {"date_et": _today_et(), "instrument": sym, "paper": True,
             "trades": trades, "open_positions": []}, None

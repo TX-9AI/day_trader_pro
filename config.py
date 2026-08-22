@@ -102,11 +102,11 @@ MODEL_MAX_TOKENS = int(os.environ.get(
 # --------------------------------------------------------------------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
-# Canonical on-disk layout (repo root, shared with the regime harness):
+# Canonical on-disk layout (repo root, shared with the analysis harness):
 #   trades/<date>/<SYM>_trades_<date>.db   — raw per-box trade DBs
 #   ohlc/<date>/<SYM>_ohlc_<date>.csv      — raw per-box 1-min tape (harness reads here)
 #   reports/                                — FLAT: every aggregate (fleet_trades_*,
-#                                             daily_trades_*, regime_diary.*, regime_replay_*)
+#                                             daily_trades_*, replay_*)
 TRADES_DIR  = os.path.join(BASE_DIR, "trades")
 OHLC_DIR    = os.path.join(BASE_DIR, "ohlc")
 REPORTS_DIR = os.path.join(BASE_DIR, "reports")

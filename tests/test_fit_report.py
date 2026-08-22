@@ -66,7 +66,7 @@ def test_replay_files_respect_the_range():
     import tempfile
     with tempfile.TemporaryDirectory() as td:
         for d in ("2026-07-13", "2026-08-07", "2026-08-10"):
-            open(os.path.join(td, f"regime_replay_{d}.jsonl"), "w").close()
+            open(os.path.join(td, f"replay_{d}.jsonl"), "w").close()
         old, FR.REPORTS_DIR = FR.REPORTS_DIR, td
         try:
             one = FR.replay_files(None, "2026-08-10")

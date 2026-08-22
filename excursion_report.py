@@ -38,7 +38,7 @@ v3.0 — 2026-08-07 — THE ONE-SESSION GUARD REFUSED AN ELEVEN-SESSION READ.
        silently and in the direction that looks like correct caution.
 
 v2.9 — 2026-08-06 — SCORE DISPERSION. The v2.8 columns showed SETUP.nf ==
-       SETUP.ok at 0.96 on grade A (n=277) and 1.50 on ORB (n=97), and RGCV
+       SETUP.ok at 0.96 on grade A (n=277) and 1.50 on ORB (n=97), and the
        pegged 1.00/1.00 on TRENDING_BULL (n=206). Identical MEDIANS cannot
        distinguish "varies, same centre" from "constant" — and only the second
        makes a cutoff impossible. Percentiles settle it: p10 == p90 means the
@@ -49,7 +49,7 @@ v2.8 — 2026-08-05 — TWO SCORE COLUMNS on the never-favorable composition tab
        and neither surfaced here.
        SETUP = `setup_score`, the composite that AUTHORISED the trade (the A/B
        grade is its bucketing). This is the cutoff question.
-       RGCV = `regime_conviction`, L2's confidence in the LABEL — a different
+       (the second score column was dropped in r204 — it belonged to a
        question entirely: a tick can be 1.00-conviction TRENDING_BULL and still
        be a poor continuation entry.
        Carrying BOTH is the point: where setup_score separates and conviction
@@ -69,10 +69,10 @@ v2.6 — 2026-08-04 — (a) PEAK TIMING from trade_logger v3.9's
        report was asking for a column it already had and declining to answer a
        question it could. Early-peak vs late-peak separates a loose trail from a
        move that simply turned, and those need opposite fixes.
-       (b) EXIT-REASON FAMILIES POOLED. `regime_flip (LABEL)` and
+       (b) EXIT-REASON FAMILIES POOLED. `<label>_flip` variants and
        `max_loss_floor_NNpct` fragmented every cell and each fragment then
        correctly reported itself UNDERPOWERED — output that looks right and can
-       never conclude. On 2026-08-04 that was 12 regime_flips split 6/4/1/1.
+       never conclude. On 2026-08-04 that was 12 such exits split 6/4/1/1.
        The detail is preserved by reason_detail(), not discarded.
 v2.5 — 2026-08-03 — THE TWO-POPULATION SPLIT, per the operator's framing:
         separate the trades that were NEVER winners — not favorable for one
@@ -97,19 +97,19 @@ v2.5 — 2026-08-03 — THE TWO-POPULATION SPLIT, per the operator's framing:
         difference between a trail that is too loose and a trail that is fine.
         Extending the winners needs that timestamp; the block says so instead
         of implying an answer it cannot reach.
-v2.4 — 2026-08-03 — REGIME DIMENSION + FLOOR SWEEP. The pre-go-live question is
-        which strategies are configured for which regimes and where the stop
+v2.4 — 2026-08-03 — GROUPING DIMENSIONS + FLOOR SWEEP. The pre-go-live question is
+        which strategies are configured for which conditions and where the stop
         belongs for each — and NOTHING could answer it: this report crossed
-        exit x strategy with excursion but had no regime dimension, while
-        trade_report crossed regime x strategy but carried only P&L, no
+        exit x strategy with excursion but few dimensions, while
+        trade_report crossed dimensions but carried only P&L, no
         excursion. Neither could say whether a losing cell's trades ever went
-        favorable at all. --by now groups the table by regime, strategy,
-        strategy_x_regime, setup_type, setup_grade or regime_x_setup, so MFE
+        favorable at all. --by now groups the table by strategy,
+        setup_type or setup_grade, so MFE
         and MAE can be read per cell.
         SESSIONS column added to every table, because on 2026-08-03 the
         07-23..08-03 "cumulative" turned out to be 67% two sessions (07-31 n=116
         and 08-03 n=88 of 303). A cell drawn from one or two dates is a day, not
-        a regime finding, and nothing in the old output said so.
+        a grouping finding, and nothing in the old output said so.
         FLOOR SWEEP answers the stop half WITHOUT needing exit-reason cells,
         which is what makes it reachable before the freeze: every trade
         contributes its MAE to the counterfactual regardless of which exit
@@ -262,17 +262,14 @@ FLOOR_REASON_PREFIXES = ("hard_stop", "max_loss_floor")
 GROUP_KEYS = {
     "exit":              ("exit_reason", "strategy"),
     "strategy":          ("strategy",),
-    "regime":            ("regime",),
-    "strategy_x_regime": ("strategy", "regime"),
     "setup_type":        ("setup_type",),
     "setup_grade":       ("setup_grade",),
-    "regime_x_setup":    ("regime", "setup_type"),
 }
 
 # Pre-registered refusal floors. A cell under either is reported as
 # UNDERPOWERED, which is not a null — the distinction the operator insists on.
 MIN_CELL_N = 40          # reads roughly a 0.20 R effect at this sample
-MIN_SESSIONS = 3         # 1-2 dates is a day, not a regime
+MIN_SESSIONS = 3         # 1-2 dates is a day, not a pattern
 
 FLOOR_CANDIDATES = (0.15, 0.20, 0.25, 0.30, 0.40, 0.50)
 
@@ -284,7 +281,7 @@ NEVER_FAVORABLE_CUTS = (0.00, 0.02, 0.05)
 # ET-offset, so hour-of-day is deliberately ABSENT here — trade_report already
 # does that conversion with ZoneInfo and duplicating it half-done is how the
 # 2026-07 verdict got inverted.
-SPLIT_DIMS = ("regime", "strategy", "setup_type", "setup_grade", "symbol")
+SPLIT_DIMS = ("strategy", "setup_type", "setup_grade", "symbol")
 
 MIN_GROUP_N = 15         # a group under this is not rated, only counted
 
@@ -452,10 +449,10 @@ def norm_reason(reason) -> str:
     v2.6 — two families were fragmenting the sample and every fragment then
     honestly reported itself UNDERPOWERED, which is the worst possible failure
     mode: correct-looking output that can never reach a verdict.
-      `regime_flip (BREAKOUT_VOLATILE)` — the label rides in PARENTHESES, which
-        survived the old strip. 2026-08-04: twelve regime_flip trades became
-        four cells of 6/4/1/1, all REFUSED. Pooled they are one cell of 12 and
-        reach n=40 in about four sessions.
+      A label riding in PARENTHESES survived the old strip, so one exit
+        family split by its own parenthetical. 2026-08-04: twelve such trades
+        became four cells of 6/4/1/1, all REFUSED. Pooled they are one cell of
+        12 and reach n=40 in about four sessions.
       `max_loss_floor_25pct` / `..._24pct` — the percentage varies with config,
         so the same exit splits by its own setting. 2 and 1 instead of 3.
     The detail is NOT discarded — `reason_detail()` returns it, so a pooled cell
@@ -466,15 +463,13 @@ def norm_reason(reason) -> str:
     if r.startswith("hard_close"):
         return "hard_close"
     r = r.split(" pnl=")[0].split(":")[0].strip() or "unknown"
-    if r.startswith("regime_flip"):
-        return "regime_flip"
     if r.startswith("max_loss_floor"):
         return "max_loss_floor"
     return r
 
 
 def reason_detail(reason) -> str:
-    """The part norm_reason() pools away: the regime label, or the floor pct.
+    """The part norm_reason() pools away: a parenthetical, or the floor pct.
 
     Kept so pooling never destroys information — only defers it.
     """
@@ -656,16 +651,13 @@ def build_report(rows, day, src, skipped, mode, hints=None,
         groups = {}
         for r in rows:
             groups.setdefault(str(r.get(dim) or "?"), []).append(r)
-        # v2.8 — MEDIAN CONVICTION, SPLIT NEVER vs REST. `regime_conviction`
-        # has been on every trade row since 2026-07-24 and never appeared in
-        # this table. The question it answers is the one the rate cannot: not
-        # WHICH cells go wrong, but whether the engine was CONFIDENT when they
-        # did. A never-favorable cell whose conviction sits BELOW the rest has a
-        # threshold in the wrong place — a cutoff to find. One where the two are
-        # equal says conviction does not separate outcomes in that cell at all,
-        # which is a much larger finding and cannot be fixed by moving a bar.
-        # MEDIAN, not mean: conviction pegs at 1.00 often enough (measured on
-        # the A2 co-occurrence ticks) that a mean would be dragged by the peg.
+        # v2.8 added a SECOND score column beside setup_score, split never-vs-
+        # rest. ⚠️ r204: that column was the retired classifier's confidence and
+        # otv4 DROPPED it in r65, so it can only be None on every post-r65 row.
+        # The setup_score half of the idea is kept and is the valuable half —
+        # it is the number that AUTHORISED the trade.
+        # MEDIAN, not mean: these scores peg at 1.00 often enough that a mean
+        # would be dragged by the peg.
         def _med(rs, field):
             v = [c for c in (fnum(r, field) for r in rs)
                  if c is not None and c > 0]
@@ -678,21 +670,17 @@ def build_report(rows, day, src, skipped, mode, hints=None,
             rated = len(rs) >= MIN_GROUP_N
             scored.append((v, len(rs), len(nf), len(nf) / len(rs), rated,
                            _med(nf, "setup_score"), _med(ok, "setup_score"),
-                           _med(nf, "regime_conviction"),
-                           _med(ok, "regime_conviction")))
+                           None, None))
         scored.sort(key=lambda t: (-t[4], -t[3]))
         w("")
         w(f"  by {dim}")
         w(f"    {'':<24}{'N':>5}{'NEVER':>7}{'RATE':>7}{'LIFT':>7}"
-          f"{'SETUP.nf':>10}{'SETUP.ok':>10}"
-          f"{'RGCV.nf':>9}{'RGCV.ok':>9}")
-        for v, n, n_nf, rate, rated, s_nf, s_ok, c_nf, c_ok in scored:
+          f"{'SETUP.nf':>10}{'SETUP.ok':>10}")
+        for v, n, n_nf, rate, rated, s_nf, s_ok, _c1, _c2 in scored:
             lift = (rate / overall) if overall else 0
             tail = f"{lift:>7.2f}" if rated else "      -"
             sn = f"{s_nf:>10.2f}" if s_nf is not None else f"{'—':>10}"
             so = f"{s_ok:>10.2f}" if s_ok is not None else f"{'—':>10}"
-            cn = f"{c_nf:>9.2f}" if c_nf is not None else f"{'—':>9}"
-            co = f"{c_ok:>9.2f}" if c_ok is not None else f"{'—':>9}"
             # NOT named `flag` — that is a module-level function used earlier
             # in this same scope, and binding the name locally makes Python
             # treat EVERY reference in build_report as local. The first crash
@@ -700,14 +688,10 @@ def build_report(rows, day, src, skipped, mode, hints=None,
             # unrelated code, before any of it ran.
             thin = "" if rated else "  <- n<%d" % MIN_GROUP_N
             w(f"    {v[:24]:<24}{n:>5}{n_nf:>7}{rate:>7.0%}{tail}"
-              f"{sn}{so}{cn}{co}{thin}")
+              f"{sn}{so}{thin}")
         w("    SETUP = median setup_score (THE NUMBER THAT AUTHORISED THE "
-          "TRADE); RGCV = median")
-        w("    regime_conviction (L2's confidence in the LABEL — a different "
-          "question: a tick can")
-        w("    be 1.00-conviction TRENDING_BULL and still be a poor entry). "
-          "`.nf` is the")
-        w("    never-favorable trades, `.ok` the rest.")
+          "TRADE).")
+        w("    `.nf` is the never-favorable trades, `.ok` the rest.")
         w("    nf BELOW ok  -> a cutoff exists to find in that column.")
         w("    nf EQUAL ok  -> that score does not separate outcomes here and "
           "no threshold")
@@ -742,7 +726,7 @@ def build_report(rows, day, src, skipped, mode, hints=None,
     w("  Identical medians can mean 'varies, same centre' or 'constant'. Only")
     w("  the second makes a cutoff impossible — and the median cannot tell them")
     w("  apart. p10 == p90 means the score does not vary in that population.")
-    for field, label in (("setup_score", "SETUP"), ("regime_conviction", "RGCV")):
+    for field, label in (("setup_score", "SETUP"),):
         w("")
         w(f"  {label} by strategy")
         w(f"    {'':<26}{'N':>5}{'p10':>8}{'p50':>8}{'p90':>8}{'max':>8}"
@@ -774,7 +758,7 @@ def build_report(rows, day, src, skipped, mode, hints=None,
             w(f"  n={len(caps)}  median capture {median(caps):.0%}  "
               f"mean {mean(caps):.0%}  median MFE "
               f"{median(e[0] for _, e in winners):.0%}")
-        for dim in ("strategy", "regime"):
+        for dim in ("strategy",):
             groups = {}
             for r, e in winners:
                 if e[0] > 0:

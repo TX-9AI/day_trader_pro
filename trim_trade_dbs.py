@@ -2,7 +2,7 @@
 """
 day_trader_pro/trim_trade_dbs.py — v1.2 — 2026-08-05
 
-v1.2 — `--purge-before`. Everything before 2026-07-23 ran the v1.3 regime
+v1.2 — `--purge-before`. Everything before 2026-07-23 ran the v1.3
 fallback and a much tighter entry gate — a different machine, and mixing it into
 the measured population is the same category error as comparing across a deploy
 boundary. Those folders are MOVED to `trades/_archive_pre_<date>/` (reversible,
@@ -94,7 +94,7 @@ def main(argv) -> int:
     # v1.2 — a purged window is NOT preserved anywhere, so its rows are safe to
     # remove from the surviving folders: they are deliberately out of scope, not
     # orphans. Operator directive 2026-08-05 — everything before 2026-07-23 ran
-    # the v1.3 regime fallback and a much tighter entry gate, so it is a
+    # the v1.3 fallback and a much tighter entry gate, so it is a
     # different machine and mixing it in would be the same category error as
     # comparing across a deploy boundary.
     cut = a.purge_before

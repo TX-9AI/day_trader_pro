@@ -19,7 +19,7 @@ echo "purged old timers: dtp-harvest, dtp-eod"
 
 sudo tee /etc/systemd/system/dtp-eod-conductor.service >/dev/null <<UNIT
 [Unit]
-Description=day_trader_pro EOD conductor (gate->harvest->report->backfill->consolidate->regime)
+Description=day_trader_pro EOD conductor (gate->harvest->report->backfill->consolidate)
 After=network-online.target
 Wants=network-online.target
 

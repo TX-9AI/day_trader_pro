@@ -202,13 +202,6 @@ def build(date, s3=None):
     trades = latest_per_trade(trade_objs)
     _log("READ", f"trades: {len(trade_objs)} object(s) -> {len(trades)} unique trade(s)")
 
-    regime = []
-    for sym, env in read_prefix(s3, "regime_log", date):
-        r = dict(env.get("record") or {})
-        r["box"] = sym
-        regime.append(r)
-    regime.sort(key=lambda r: (str(r.get("logged_at") or ""), str(r.get("box", ""))))
-
     breaker = []
     for sym, env in read_prefix(s3, "circuit_breaker", date):
         b = dict(env.get("record") or {})
@@ -226,7 +219,6 @@ def build(date, s3=None):
     for b in boxes:
         by_box[b] = {
             "trades": sum(1 for t in trades if t.get("box") == b),
-            "regime_log": sum(1 for r in regime if r.get("box") == b),
             "breaker_events": sum(1 for x in breaker if x.get("box") == b),
         }
 
@@ -252,7 +244,6 @@ def build(date, s3=None):
         ("selection", CT._load_selection(date)),    # control's own file
         ("fleet_stats", CT._stats(trades)),         # SAME code as the local path
         ("by_box", by_box),
-        ("regime_timeline", regime),
         ("breaker_events", breaker),
         ("ohlc_index", ohlc_syms),
         ("trades", trades),

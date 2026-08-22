@@ -22,7 +22,7 @@
 #   the word "worst" when there is only one (it was naming the SAME bucket as
 #   best and worst — day_of_week: Tuesday twice, on a single-session report) and
 #   flags it as LOWEST-not-a-loss when every eligible bucket is positive
-#   (2026-08-04 announced "worst regime BREAKOUT_VOLATILE net +1041.50", the
+#   (2026-08-04 announced a "worst ... net +1041.50", the
 #   second-best bucket, on a profit). Arithmetically right, semantically false —
 #   and it is the section people skim.
 # v1.4 — 2026-08-03 — EXIT SPREAD + a contaminated verdict fenced off.
@@ -37,7 +37,7 @@
 #        heaviest one, flagging >=80% as SINGLE-SESSION. exit_x_date is also
 #        written to the JSON in full.
 #        (b) flag_runners_cut_early was computed over EVERY row including the
-#        regime-flip flicker (main.py pre-v5.0: median hold 0.8 min, p25 12
+#        sub-minute flicker (main.py pre-v5.0: median hold 0.8 min, p25 12
 #        SECONDS — 44 of 88 rows on 2026-08-03 alone). Those exits were a
 #        DEFECT, not exit behaviour, and they drag both medians toward zero, so
 #        a ratio built on them is evidence about a bug rather than about
@@ -69,8 +69,8 @@
 #        evidence than a null on an untruncated variable would be.
 # v1.2 — 2026-07-22 — Machine-readable artifact + new dimensions. Writes
 #        reports/trade_report_<last-session>.json containing every bucket with
-#        full stats plus a FINDINGS block (best/worst regime, strategy, setup,
-#        symbol, hour, weekday, exit reason, regime x strategy, and the single
+#        full stats plus a FINDINGS block (best/worst strategy, setup,
+#        symbol, hour, weekday, exit reason, and the single
 #        best/worst trade). New display dimensions: by symbol, by hour (ET), by
 #        weekday, by session phase, by session date. Best/worst claims only
 #        consider buckets with n >= --min-n so a 1-trade bucket cannot win.
@@ -348,9 +348,9 @@ def rank(d: Dict[str, dict], min_n: int, worst: bool = False):
     """Best/worst by NET among buckets meeting the sample floor.
 
     v1.5 — returns `n_elig` so the caller can refuse to say "worst" when the
-    word would be a lie. On 2026-08-04 only TWO regime buckets cleared the floor
-    and BOTH were positive, so the report announced
-    `worst regime BREAKOUT_VOLATILE net +1041.50` — the second-BEST bucket, on a
+    word would be a lie. On 2026-08-04 only TWO buckets in one dimension cleared
+    the floor and BOTH were positive, so the report announced a
+    `worst ... net +1041.50` — the second-BEST bucket, on a
     positive number, labelled worst. With one eligible bucket it printed the
     SAME bucket as both best and worst (day_of_week: Tuesday twice). The ranking
     was arithmetically correct and the sentence was false, which is the class of
@@ -367,8 +367,12 @@ def trade_extremes(trades: List[dict]) -> Tuple[Optional[dict], Optional[dict]]:
     scored = [t for t in trades if _f(t.get("pnl_usd")) is not None]
     if not scored:
         return None, None
+    # ⚠️ THE RETIRED CLASSIFIER'S COLUMN IS GONE FROM THIS LIST (r204). otv4
+    # PHYSICALLY DROPPED it in r65, so reading it on a post-r65 row is
+    # not merely empty — the column does not exist, and a SELECT naming it
+    # RAISES. Carrying it here produced a column of Nones at best.
     keys = ("trade_id", "_date", "_sym", "strategy", "setup_type", "setup_grade",
-            "regime", "pnl_usd", "exit_reason", "contracts", "entry_premium",
+            "pnl_usd", "exit_reason", "contracts", "entry_premium",
             "exit_premium", "entry_time", "exit_time", "_hold")
     def slim(t):
         return {k: t.get(k) for k in keys}
@@ -406,7 +410,7 @@ def exit_behaviour(trades: List[dict]) -> dict:
         r = statistics.median(wh) / statistics.median(lh)
         out["winner_loser_hold_ratio"] = round(r, 2)
         out["flag_runners_cut_early"] = r < 1.2
-    # Sub-minute holds are not exit behaviour. The pre-v5.0 regime-flip flicker
+    # Sub-minute holds are not exit behaviour. The pre-v5.0 flicker
     # closed positions in a median 0.8 min (p25 12 seconds); pooling those with
     # real exits pulls both medians toward zero and makes the ratio a statement
     # about a defect. Reported alongside, never substituted, never dropped.
@@ -497,7 +501,6 @@ def main(argv: List[str]) -> int:
             n_scored += 1
 
     dims = {
-        "by_regime":        bucket(trades, "regime"),
         "by_strategy":      bucket(trades, "strategy"),
         "by_setup_type":    bucket(trades, "setup_type"),
         "by_setup_grade":   bucket(trades, "setup_grade"),
@@ -510,7 +513,6 @@ def main(argv: List[str]) -> int:
         "by_sentiment":     bucket(trades, "_sentiment"),
     }
     crosses = {
-        "regime_x_strategy": cross(trades, "regime", "strategy"),
         "symbol_x_strategy": cross(trades, "_sym", "strategy"),
         "phase_x_strategy":  cross(trades, "_phase", "strategy"),
         # THE cross for the operator's question: does a bullish morning help
@@ -541,7 +543,7 @@ def main(argv: List[str]) -> int:
     best_t, worst_t = trade_extremes(trades)
 
     findings = {"min_n_applied": args.min_n}
-    for label, d in [("regime", dims["by_regime"]), ("strategy", dims["by_strategy"]),
+    for label, d in [("strategy", dims["by_strategy"]),
                      ("setup_type", dims["by_setup_type"]),
                      ("setup_grade", dims["by_setup_grade"]),
                      ("exit_reason", dims["by_exit_reason"]),
@@ -549,7 +551,6 @@ def main(argv: List[str]) -> int:
                      ("day_of_week", dims["by_day_of_week"]),
                      ("session_phase", dims["by_session_phase"]),
                      ("session_date", dims["by_session_date"]),
-                     ("regime_x_strategy", crosses["regime_x_strategy"]),
                      ("symbol_x_strategy", crosses["symbol_x_strategy"])]:
         findings[f"best_{label}"] = rank(d, args.min_n)
         findings[f"worst_{label}"] = rank(d, args.min_n, worst=True)
@@ -565,7 +566,6 @@ def main(argv: List[str]) -> int:
     if overall["median_hold_min"] is not None:
         print(f"  median hold {overall['median_hold_min']} min")
 
-    show("BY REGIME", dims["by_regime"], args.min_n)
     show("BY STRATEGY", dims["by_strategy"], args.min_n)
     show("BY SYMBOL", dims["by_symbol"], args.min_n)
     show("BY SETUP TYPE", dims["by_setup_type"], args.min_n)
@@ -574,7 +574,6 @@ def main(argv: List[str]) -> int:
     show("BY SESSION PHASE (ET)", dims["by_session_phase"], args.min_n)
     show("BY HOUR (ET)", dims["by_hour_et"], args.min_n)
     show("BY DAY OF WEEK", dims["by_day_of_week"], args.min_n)
-    show("REGIME x STRATEGY", crosses["regime_x_strategy"], args.min_n)
 
     conc = exit_concentration(trades, args.min_n)
     print("\nEXIT REASON x SESSION SPREAD")
@@ -610,7 +609,7 @@ def main(argv: List[str]) -> int:
             print("       exits may be cutting runners as fast as mistakes.")
 
     print("\nHEADLINE")
-    for lab in ("regime", "strategy", "symbol", "session_phase", "day_of_week"):
+    for lab in ("strategy", "symbol", "session_phase", "day_of_week"):
         b, w = findings.get(f"best_{lab}"), findings.get(f"worst_{lab}")
         if b:
             print(f"  best {lab:<14} {b['key'][:30]:<30} net {b['net']:>+10.2f} (n={b['n']})")
