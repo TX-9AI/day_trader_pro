@@ -189,7 +189,19 @@ def find_dead_streams(s3) -> list:
     return out
 
 
-def write_manifest(keys: list, path: str) -> str:
+# ⚠️ A MANIFEST WITHOUT PROVENANCE IS AMBIGUOUS, AND IT BIT ON 2026-08-25.
+# The dead-stream rule deletes by PREFIX — `raw/shadow/` is dead whatever
+# symbol is in the path — but `--from-manifest` re-applied the SYMBOL guard and
+# refused 359,123 shadow keys because they sit under sym=QQQ, sym=NVDA and the
+# rest. Half the purge silently did not happen.
+# 🔑 THE RULE TRAVELS WITH THE LIST. The header records which sweep produced
+# the manifest, so the delete applies the guard that rule actually needs
+# instead of guessing — and a hand-edited manifest with no header gets the
+# SAFE default, not the permissive one.
+MANIFEST_HEADER = "# vertigo-s3-sweep rule="
+
+
+def write_manifest(keys: list, path: str, rule: str = "symbol") -> str:
     """Freeze the delete list to disk BEFORE anything is removed.
 
     🔴 THE MANIFEST IS THE REVIEW SURFACE, and it exists because control has
@@ -203,6 +215,7 @@ def write_manifest(keys: list, path: str) -> str:
     reviewed.
     """
     with open(path, "w") as fh:
+        fh.write(f"{MANIFEST_HEADER}{rule}\n")
         for k in keys:
             fh.write(k + "\n")
     print(f"\n  manifest written: {path}  ({len(keys):,} keys)")
@@ -211,11 +224,19 @@ def write_manifest(keys: list, path: str) -> str:
 
 def delete_from_manifest(s3, path: str, apply: bool) -> int:
     """Delete exactly what the manifest lists — re-checking the guard."""
-    keys = [l.strip() for l in open(path) if l.strip()]
-    print(f"  manifest holds {len(keys):,} key(s)")
-    # ⚠️ THE GUARD RUNS AGAIN HERE. A manifest is a file; a file can be edited,
-    # and the cost of re-checking is nothing against the cost of not.
-    return delete(s3, keys, apply, guard_panel=True)
+    lines = [l.rstrip("\n") for l in open(path)]
+    rule = "symbol"                       # ⚠️ SAFE DEFAULT when unstated.
+    for l in lines:
+        if l.startswith(MANIFEST_HEADER):
+            rule = l[len(MANIFEST_HEADER):].strip() or "symbol"
+    keys = [l.strip() for l in lines if l.strip() and not l.startswith("#")]
+    # ⚠️ THE GUARD STILL RUNS for symbol-scoped rules — a manifest is a file
+    # and a file can be edited. It is skipped ONLY for prefix rules, where the
+    # key was selected because of WHERE it lives, not who owns it.
+    guard = (rule != "prefix")
+    print(f"  manifest holds {len(keys):,} key(s)   rule={rule}   "
+          f"panel-guard={'ON' if guard else 'OFF (prefix rule)'}")
+    return delete(s3, keys, apply, guard_panel=guard)
 
 
 def delete(s3, keys: list, apply: bool, guard_panel: bool = True) -> int:
@@ -300,7 +321,7 @@ def main(argv=None) -> int:
         print("DEAD-STREAM SWEEP — never installed / retired")
         keys = find_dead_streams(s3)
         if a.manifest:
-            write_manifest(keys, a.manifest)
+            write_manifest(keys, a.manifest, rule="prefix")
         else:
             delete(s3, keys, a.apply, guard_panel=False)
         return 0
@@ -336,7 +357,7 @@ def main(argv=None) -> int:
             return 0
         keys = find_culled(s3, syms)
         if a.manifest:
-            write_manifest(keys, a.manifest)
+            write_manifest(keys, a.manifest, rule="symbol")
         else:
             delete(s3, keys, a.apply)
     return 0

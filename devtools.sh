@@ -1,5 +1,12 @@
 #!/usr/bin/env bash
-# day_trader_pro/devtools.sh — v1.46
+# day_trader_pro/devtools.sh — v1.47
+# v1.47 (2026-08-25) — THE MANIFEST NOW CARRIES ITS RULE. A dead-stream purge
+# deletes by PREFIX (raw/shadow/ is dead whatever symbol is in the path) but
+# --from-manifest re-applied the SYMBOL guard and refused 359,123 shadow keys
+# under sym=QQQ, sym=NVDA etc — half the purge silently did not happen. The
+# manifest header records rule=prefix or rule=symbol so the delete applies the
+# guard that rule needs; a header-less (hand-edited) manifest defaults to the
+# SAFE setting, never the permissive one.
 # v1.46 (2026-08-25) — S3 SWEEP HARDENED after a dry run proposed deleting
 # 321,835 objects INCLUDING THE EXTENDED-HOURS TAPE OF EVERY PANEL SYMBOL and
 # VIX: the guard matched PANEL exactly, so "NVDA_EXT" != "NVDA" passed through.
