@@ -1,4 +1,4 @@
-# day_trader_pro/notify.py — v0.2.0
+# day_trader_pro/notify.py — v0.3.0
 """
 Telegram notifier for the control server (orchestrator alerts + EOD summary).
 Separate from the trading boxes' own Telegram alerts.
@@ -6,6 +6,10 @@ Separate from the trading boxes' own Telegram alerts.
 Reads token/chat from the environment (never hardcode):
     DTP_TELEGRAM_TOKEN
     DTP_TELEGRAM_CHAT_ID
+
+v0.3.0 — TEST-MODE GUARD: a test can no longer page the operator. Detected
+from sys.modules/argv, or forced with DTP_NOTIFY_CAPTURE=1; messages are
+CAPTURED so a test can assert on them. See the block above send().
 
 v0.2.0 — send as PLAIN TEXT (no parse_mode). Machine-generated P&L text is
 full of characters (- . _ + | negative numbers) that Telegram's Markdown
@@ -38,9 +42,56 @@ def _plain(text: str) -> str:
     return _STRIP.sub("", text)
 
 
+# ── 🔴 TEST-MODE GUARD (v0.3.0, 2026-08-25) ─────────────────────────────────
+# A TEST MUST NEVER BE ABLE TO PAGE THE OPERATOR. On 2026-08-25 they received
+# "EOD conductor [RECOVER] 2026-08-18: 2 pull(s) FAILED" on EVERY COMMIT for
+# days. The cause: tests/test_conductor_recovery.py drives the partial-failure
+# branch ON PURPOSE, that branch sends, and the test stubbed `harvest` but not
+# `notify`. It runs in every deploy gate. The dates in the alert were nothing
+# but the test's own fixture literals.
+#
+# ⚠️ FIXING THE ONE TEST WAS NOT ENOUGH. The next test that exercises an alert
+# branch reintroduces it, and it fails SILENTLY-IN-REVERSE: the alert looks
+# real, so the operator investigates data that was never wrong. The guard makes
+# the whole class impossible instead of the instance.
+#
+# ⚠️ AND IT TRAINS THE CHANNEL TO BE IGNORED, which is the actual damage. The
+# standing rule is that Telegram is an EMERGENCY channel: routine traffic there
+# teaches the operator to skip it, and then it fails the one time it matters.
+#
+# ⚠️ DETECTED, NOT DECLARED. Relying on each test to remember `notify.send = ...`
+# is exactly what failed. `pytest`/`unittest` in sys.modules, or a filename
+# under tests/, is enough — plus DTP_NOTIFY_CAPTURE=1 for anything that runs
+# outside those (a menu smoke test, a manual harness).
+_CAPTURED: list = []
+
+
+def _in_test() -> bool:
+    if os.environ.get("DTP_NOTIFY_CAPTURE") == "1":
+        return True
+    if "pytest" in sys.modules or "unittest" in sys.modules:
+        return True
+    # A plain-script test (this repo's own convention) has no pytest import.
+    arg0 = (sys.argv[0] or "")
+    return "/tests/" in arg0 or os.path.basename(arg0).startswith(("test_", "check_"))
+
+
+def captured() -> list:
+    """What WOULD have been sent. Lets a test assert on the message."""
+    return list(_CAPTURED)
+
+
 def send(text, silent=False):
     """Send a Telegram message as plain text. Returns True on success (or mock)."""
     body = _plain(text)
+
+    # ⚠️ RECORDED, NOT DISCARDED — capturing is strictly stronger than
+    # silencing, because a test can then assert the alert was COMPOSED.
+    if _in_test():
+        _CAPTURED.append(body)
+        print(f"[notify] CAPTURED (test mode, not sent): {body[:90]}",
+              file=sys.stderr)
+        return True
 
     if config.MOCK_TELEGRAM:
         print("----- [MOCK TELEGRAM] -----")
