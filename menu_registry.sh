@@ -72,7 +72,7 @@ MENU=(
   "ITEM|Re-run consolidation -> fleet_trades_<date>.json (+ .csv)|mi_re_run_consolidation_fleet_trades_date_json"
   "ITEM|Excursion report (MFE/MAE) -> reports/excursions_<date>.txt|mi_excursion_report_mfe_mae_reports_excursions"
   "ITEM|Trade breakdown (cross-day: strategy/grade/setup)|mi_trade_breakdown_cross_day"
-  "ITEM|FIT REPORT — everything for fitting in ONE text file (1 day or a range)|mi_fit_report_everything_for_fitting_in_one_tex"
+  "ITEM|FIT READINESS — per setup: taken vs skipped, is it fittable yet|mi_fit_readiness"
   "SECTION|EOD CONDUCTOR, BACKFILL & LIVE P&L"
   "ITEM|Live P&L standings (reads the BOXES; must be up)|mi_live_p_l_standings_read_only"
   "ITEM|P&L from WAREHOUSE (day or range; boxes off)|mi_pnl_from_warehouse"

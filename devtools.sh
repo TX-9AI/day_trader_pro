@@ -1,5 +1,13 @@
 #!/usr/bin/env bash
-# day_trader_pro/devtools.sh — v1.43
+# day_trader_pro/devtools.sh — v1.44
+# v1.44 (2026-08-25) — FIT REPORT REPLACED BY FIT READINESS. The old report
+# sourced everything from `trades` — the population that FIRED — while the
+# question "is this setup ready to fit?" is mostly answered by the population
+# that did NOT. Its section 3 had also never produced a number, shelling into
+# an otv3 checkout that is not present. The new report sections by SETUP TYPE
+# and puts TAKEN beside SKIPPED with the derived vector on both sides. Its
+# verdict is COVERAGE, not volume: 245 evaluations are not fittable if 96% of
+# declines land on one rung. fit_report.py and its test are deleted.
 # v1.43 (2026-08-25) — NEW item 56 "EOD analysis — all reports from S3 (boxes
 # off)", and install_eod_analysis.sh puts it on a 16:30 timer. This is the
 # REPORTS half of the EOD split: eod_conductor_v2 owns the CLOSE (stop trading,

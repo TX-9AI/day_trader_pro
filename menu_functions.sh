@@ -288,13 +288,33 @@ mi_trade_breakdown_cross_day() {
 }
 
 # FIT REPORT — everything for fitting in ONE text file (1 day or a range)
-mi_fit_report_everything_for_fitting_in_one_tex() {
-    echo; read -rp "Day, or END of range (YYYY-MM-DD, ENTER=today): " D; D="${D:-$(date +%F)}"; \
-        read -rp "Cumulative since (YYYY-MM-DD, ENTER=that day only): " S; \
-        read -rp "Skip the slow replay-corpus sections (ramps, A2 drift)? [y/N]: " NS; \
-        ARGS="--date $D"; [ -n "$S" ] && ARGS="$ARGS --since $S"; [ "$NS" = "y" ] && ARGS="$ARGS --no-slow"; \
-        echo "Running — the replay-corpus sections take minutes; output is a FILE, not this screen."; \
-        $PY fit_report.py $ARGS; pause
+# FIT READINESS — per setup type: taken vs skipped, and is it fittable yet
+mi_fit_readiness() {
+    # r209 — REPLACES the old FIT REPORT, which is obsolete.
+    # ⚠️ THAT REPORT SOURCED EVERYTHING FROM `trades` — the population that
+    # FIRED. The question "is this setup ready to fit?" is mostly answered by
+    # the population that did NOT, and strategy_note / gate_disposition /
+    # plan_ledger did not exist when it was written. One of its four sections
+    # had also never produced a number: it shelled into an otv3 checkout that
+    # is not present, printing "SKIPPED, rc 127" in every report ever made.
+    # 🔑 THE TEST IS COVERAGE, NOT VOLUME. A setup with 245 evaluations is NOT
+    # fittable if 96% of its declines land on one rung — every observation sits
+    # on one side of the boundary, so the data says where the line IS and
+    # nothing about where it should be.
+    echo
+    echo "  Fit readiness — per setup type, TAKEN vs SKIPPED, with the"
+    echo "  derived vector on both sides. Reads the derived store."
+    read -rp "  Date (YYYY-MM-DD, ENTER=today), or START of a range: " D1
+    read -rp "  END of range (ENTER = single day): " D2
+    read -rp "  One setup only (ENTER = all): " SU
+    read -rp "  Derived store path (ENTER = ~/options-trader/data/derived_store.db): " DB
+    ARGS=""
+    if [ -n "$D1" ] && [ -n "$D2" ]; then ARGS="--from $D1 --to $D2"
+    elif [ -n "$D1" ];               then ARGS="--date $D1"; fi
+    [ -n "$SU" ] && ARGS="$ARGS --setup $SU"
+    [ -n "$DB" ] && ARGS="$ARGS --db $DB"
+    $PY fit_readiness.py $ARGS
+    pause
 }
 
 # Run replay - today
