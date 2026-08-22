@@ -108,16 +108,37 @@ def _canon(rec) -> bytes:
                       default=str).encode("utf-8")
 
 
-def _iter_keys(s3, prefix: str):
-    tok = None
+def _iter_keys(s3, prefix: str, quiet: bool = False):
+    """Page through a prefix, SAYING SO while it happens.
+
+    🔴 THE METER WENT ON THE DELETE LOOP AND NOT ON THE SCAN, WHICH IS THE PART
+    THAT TAKES MINUTES. A full-bucket walk is ~900 sequential LIST calls with
+    nothing on screen, so a working scan and a hung one look identical — the
+    operator hit Ctrl-C on a healthy run because there was no way to tell.
+    ⚠️ SAME LESSON, SECOND PLACE: the fix belongs on EVERY long loop, not on
+    the one that happened to get complained about first.
+    """
+    tok, n, pages = None, 0, 0
+    t0 = time.time()
     while True:
         kw = {"Bucket": BUCKET, "Prefix": prefix, "MaxKeys": 1000}
         if tok:
             kw["ContinuationToken"] = tok
         r = s3.list_objects_v2(**kw)
+        pages += 1
         for o in r.get("Contents", []):
+            n += 1
             yield o["Key"], o.get("Size", 0)
+        if not quiet and (pages % 10 == 0):
+            el = time.time() - t0
+            sys.stdout.write(f"\r  scanning {prefix} — {n:,} objects, "
+                             f"{pages} page(s), {el:.0f}s      ")
+            sys.stdout.flush()
         if not r.get("IsTruncated"):
+            if not quiet and pages >= 10:
+                sys.stdout.write(f"\r  scanned {prefix} — {n:,} objects in "
+                                 f"{time.time() - t0:.0f}s              \n")
+                sys.stdout.flush()
             return
         tok = r.get("NextContinuationToken")
 
@@ -133,7 +154,11 @@ def find_legacy(s3, datatype: str, limit_prefix: str = "") -> list:
     """Objects whose key suffix does NOT match sha(canon(record))."""
     base = f"{PREFIX}/{datatype}/{limit_prefix}"
     stale, checked = [], 0
-    for key, _size in _iter_keys(s3, base):
+    # ⚠️ THIS IS THE SLOWEST PATH IN THE FILE — one GET per object to recompute
+    # the hash, not one LIST per thousand. On 40k chain snapshots that is 40k
+    # round trips, so it needs its own meter even more than the scan does.
+    t0 = time.time()
+    for key, _size in _iter_keys(s3, base, quiet=True):
         name = key.rsplit("/", 1)[-1]
         if "-" not in name or not name.endswith(".json"):
             continue
@@ -153,7 +178,13 @@ def find_legacy(s3, datatype: str, limit_prefix: str = "") -> list:
         checked += 1
         if suffix != want:
             stale.append(key)
-    print(f"  checked {checked} object(s) under {base}")
+        if checked % 250 == 0:
+            el = time.time() - t0
+            sys.stdout.write(f"\r  checked {checked:,} object(s), "
+                             f"{len(stale):,} legacy, {checked / max(el, 1):.0f}/s      ")
+            sys.stdout.flush()
+    print(f"\r  checked {checked:,} object(s) under {base} — "
+          f"{len(stale):,} legacy            ")
     return stale
 
 

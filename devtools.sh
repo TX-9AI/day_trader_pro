@@ -1,5 +1,12 @@
 #!/usr/bin/env bash
-# day_trader_pro/devtools.sh — v1.48
+# day_trader_pro/devtools.sh — v1.49
+# v1.49 (2026-08-25) — THE METER GOES ON EVERY LONG LOOP, not just the one
+# that got complained about. r215 put progress on the DELETE loop and left the
+# SCAN silent — and the scan is the part that takes minutes (~900 sequential
+# LIST calls for a full-bucket walk), so the operator hit Ctrl-C on a healthy
+# run because a working scan and a hung one looked identical. _iter_keys now
+# reports objects/pages/elapsed, and --dups (one GET per object, the slowest
+# path here) reports checked/legacy/rate.
 # v1.48 (2026-08-25) — the sweep SHOWS PROGRESS and summarises BY PREFIX. A
 # 500k-key delete printed nothing between 1,000-key batches, so a working run
 # and a wedged one looked identical — the operator had to ask. Now one
