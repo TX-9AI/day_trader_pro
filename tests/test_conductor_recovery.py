@@ -66,7 +66,22 @@ def main() -> int:
           "has nothing to fetch it")
 
     # ── C3/C4/C5 drive every message-formatting branch ───────────────────
+    # 🔴 notify IS STUBBED, AND THIS IS A BUG FIX, NOT HYGIENE. C5 drives the
+    # PARTIAL-FAILURE branch on purpose, and that branch sends a Telegram — so
+    # every run of this test fired a REAL alert at the operator's phone.
+    # It runs in every deploy gate, so the operator received
+    # "EOD conductor [RECOVER] 2026-08-18: 2 pull(s) FAILED" on EVERY COMMIT,
+    # for dates that were nothing but the fixture literals on the C4 line below.
+    # ⚠️ AND IT TRAINED THE CHANNEL TO BE IGNORED — the exact harm the standing
+    # rule names: Telegram is an EMERGENCY channel, and a test that pages on
+    # success is worse than a test that does not run.
+    # ⚠️ CAPTURING IS STRONGER THAN SILENCING. The stub RECORDS what would have
+    # been sent, so the test now ASSERTS the alert was composed — which the old
+    # version never checked, it merely caused it.
     real_gaps, real_harvest = ec._archive_gaps, ec.harvest
+    real_notify_send = ec.notify.send
+    sent: list = []
+    ec.notify.send = lambda m: sent.append(m)
 
     class _FakeHarvest:
         """Stands in for harvest.backharvest — no fleet, no network."""
@@ -102,6 +117,12 @@ def main() -> int:
               "never learn a pull failed")
         check("C5 warnings name the date, not a dead scope tag",
               all("scope" not in w for w in warns), f"warns={warns}")
+        # C5b — the alert was COMPOSED. Asserting on the captured message is
+        # STRONGER than the old behaviour, which merely CAUSED a real send and
+        # never checked what it said.
+        check("C5b partial failure composes a Telegram alert",
+              any("FAILED" in m for m in sent),
+              f"the failure branch sent nothing alert-shaped: {sent}")
 
         # C6 — a deferred recovery (no boxes running) must not warn.
         ec.harvest = _FakeHarvest(None)
@@ -115,6 +136,7 @@ def main() -> int:
               f"deleted parameter")
     finally:
         ec._archive_gaps, ec.harvest = real_gaps, real_harvest
+        ec.notify.send = real_notify_send
 
     print("=" * 68)
     if PROBLEMS:
