@@ -1,5 +1,13 @@
 #!/usr/bin/env bash
-# day_trader_pro/devtools.sh — v1.45
+# day_trader_pro/devtools.sh — v1.46
+# v1.46 (2026-08-25) — S3 SWEEP HARDENED after a dry run proposed deleting
+# 321,835 objects INCLUDING THE EXTENDED-HOURS TAPE OF EVERY PANEL SYMBOL and
+# VIX: the guard matched PANEL exactly, so "NVDA_EXT" != "NVDA" passed through.
+# Now normalises _EXT to the base symbol and keeps VIX unconditionally (the
+# session guard and condor read it). Adds --dead-streams (raw/shadow is 43% of
+# the bucket and was never installed; raw/regime_log was retired in r65) and a
+# MANIFEST workflow, because control has DeleteObject but NOT PutObject so a
+# quarantine-by-move is unavailable without undoing that separation.
 # v1.45 (2026-08-25) — NEW S3 SWEEP item: legacy-hash duplicates and culled-
 # symbol data. Delete lives on CONTROL only — traders write and never delete.
 # The duplicate rule is SELF-VERIFYING: an object is current if its key suffix

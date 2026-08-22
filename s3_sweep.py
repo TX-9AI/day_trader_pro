@@ -69,6 +69,32 @@ PREFIX = "raw"
 PANEL = {"NVDA", "SPX", "PLTR", "MU", "QQQ", "GOOGL", "AMZN", "AVGO",
          "TSLA", "META", "NFLX", "CRM", "UNH", "CVX", "AMD"}
 
+# 🔴 ALWAYS KEEP, WHATEVER THE PANEL SAYS. VIX is not traded and is therefore
+# not a panel symbol — but the session guard and the condor READ IT, so its
+# tape is live input to live behaviour. The first version of this tool listed
+# VIX and VIX_EXT for deletion.
+ALWAYS_KEEP = {"VIX"}
+
+
+def _base_symbol(sym: str) -> str:
+    """Strip the extended-hours suffix. `NVDA_EXT` is NVDA's tape.
+
+    🔴 THE BUG THIS FIXES, CAUGHT BY A DRY RUN ON 2026-08-25. The guard did an
+    EXACT match against PANEL, so `"NVDA_EXT" != "NVDA"` passed straight
+    through it — and the sweep proposed deleting 321,835 objects including the
+    EXTENDED-HOURS TAPE OF EVERY SYMBOL THE FLEET ACTIVELY TRADES, plus VIX.
+    ⚠️ A guard that matches on a name FORMAT rather than on IDENTITY is not a
+    guard. The operator's instinct to scan the bucket before deleting is what
+    surfaced it; nothing in the tool would have.
+    """
+    s = (sym or "").upper()
+    return s[:-4] if s.endswith("_EXT") else s
+
+
+def _is_protected(sym: str) -> bool:
+    b = _base_symbol(sym)
+    return b in PANEL or b in ALWAYS_KEEP
+
 
 def _client():
     import boto3
@@ -140,6 +166,58 @@ def find_culled(s3, symbols: set) -> list:
     return out
 
 
+# 🔑 DEAD STREAMS — the largest win and the least ambiguous one. Measured
+# 2026-08-25 against a 1,148,645-object bucket:
+#   raw/shadow        492,945 objects — 43% OF THE WHOLE BUCKET. The shadow
+#                     observer was NEVER INSTALLED on the v4 fleet (verified on
+#                     a box: no shadow timers), so this is a v3 corpse.
+#   raw/regime_log      9,655 objects — the retired stream, dropped from the
+#                     push in r65. Nothing has written to it since.
+# ⚠️ NOTE THE SCALE AGAINST THE SYMBOL SWEEP: shadow alone is more objects than
+# every culled symbol combined, and it carries none of the risk.
+DEAD_STREAMS = ["shadow", "regime_log"]
+
+
+def find_dead_streams(s3) -> list:
+    out = []
+    for ds in DEAD_STREAMS:
+        n = 0
+        for key, _ in _iter_keys(s3, f"{PREFIX}/{ds}/"):
+            out.append(key)
+            n += 1
+        print(f"  {ds:<16} {n:>9,} object(s)")
+    return out
+
+
+def write_manifest(keys: list, path: str) -> str:
+    """Freeze the delete list to disk BEFORE anything is removed.
+
+    🔴 THE MANIFEST IS THE REVIEW SURFACE, and it exists because control has
+    `DeleteObject` but NOT `PutObject` — proven by probe 2026-08-25 — so
+    quarantining by MOVING objects into a purge/ prefix is not available
+    without granting write back to control and undoing the separation the
+    operator specified.
+    ⚠️ IT ALSO PINS WHAT WAS APPROVED. Deleting from a manifest deletes exactly
+    the list a human read; deleting from a fresh scan deletes whatever the
+    bucket looks like at that moment, which is not the same thing and cannot be
+    reviewed.
+    """
+    with open(path, "w") as fh:
+        for k in keys:
+            fh.write(k + "\n")
+    print(f"\n  manifest written: {path}  ({len(keys):,} keys)")
+    return path
+
+
+def delete_from_manifest(s3, path: str, apply: bool) -> int:
+    """Delete exactly what the manifest lists — re-checking the guard."""
+    keys = [l.strip() for l in open(path) if l.strip()]
+    print(f"  manifest holds {len(keys):,} key(s)")
+    # ⚠️ THE GUARD RUNS AGAIN HERE. A manifest is a file; a file can be edited,
+    # and the cost of re-checking is nothing against the cost of not.
+    return delete(s3, keys, apply, guard_panel=True)
+
+
 def delete(s3, keys: list, apply: bool, guard_panel: bool = True) -> int:
     """Delete, with the panel guard on unless the caller has a proven rule.
 
@@ -156,7 +234,7 @@ def delete(s3, keys: list, apply: bool, guard_panel: bool = True) -> int:
     does not care which symbol it belongs to. `guard_panel=False` is only ever
     correct for a rule of the second kind.
     """
-    guarded = [k for k in keys if guard_panel and (_sym_of(k) or "") in PANEL]
+    guarded = [k for k in keys if guard_panel and _is_protected(_sym_of(k) or "")]
     if guarded:
         print(f"\n  🔴 REFUSING {len(guarded)} key(s) naming a PANEL symbol:")
         for k in guarded[:5]:
@@ -198,14 +276,34 @@ def main(argv=None) -> int:
     ap.add_argument("--dt", default="", help="limit --dups to dt=YYYY-MM-DD/")
     ap.add_argument("--symbols", default="",
                     help="for --culled: comma-separated; default = discovered")
+    ap.add_argument("--dead-streams", action="store_true",
+                    help="shadow + regime_log — never installed / retired")
+    ap.add_argument("--manifest", default="",
+                    help="write the list here instead of deleting")
+    ap.add_argument("--from-manifest", default="",
+                    help="delete exactly the keys in this file")
     ap.add_argument("--apply", action="store_true",
                     help="actually delete. Without it, this only lists.")
     a = ap.parse_args(argv[1:] if argv else None)
 
-    if not (a.dups or a.culled):
-        ap.error("choose --dups or --culled")
+    if not (a.dups or a.culled or a.dead_streams or a.from_manifest):
+        ap.error("choose --dups, --culled, --dead-streams or --from-manifest")
 
     s3 = _client()
+
+    if a.from_manifest:
+        print(f"DELETE FROM MANIFEST — {a.from_manifest}")
+        delete_from_manifest(s3, a.from_manifest, a.apply)
+        return 0
+
+    if a.dead_streams:
+        print("DEAD-STREAM SWEEP — never installed / retired")
+        keys = find_dead_streams(s3)
+        if a.manifest:
+            write_manifest(keys, a.manifest)
+        else:
+            delete(s3, keys, a.apply, guard_panel=False)
+        return 0
 
     if a.dups:
         pfx = f"dt={a.dt}/" if a.dt else ""
@@ -226,7 +324,8 @@ def main(argv=None) -> int:
                 s = _sym_of(key)
                 if s:
                     seen.add(s)
-            syms = seen - PANEL
+            # ⚠️ FILTER ON THE BASE SYMBOL, not the literal string.
+            syms = {s for s in seen if not _is_protected(s)}
         # ⚠️ SAY WHICH SYMBOLS, BEFORE COUNTING KEYS. A list of 40,000 keys is
         # unreviewable; a list of 14 tickers is checkable at a glance, and it
         # is where a mistake would actually be caught.
@@ -236,7 +335,10 @@ def main(argv=None) -> int:
         if not syms:
             return 0
         keys = find_culled(s3, syms)
-        delete(s3, keys, a.apply)
+        if a.manifest:
+            write_manifest(keys, a.manifest)
+        else:
+            delete(s3, keys, a.apply)
     return 0
 
 
