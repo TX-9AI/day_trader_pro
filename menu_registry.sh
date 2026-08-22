@@ -78,7 +78,7 @@ MENU=(
   "ITEM|P&L from WAREHOUSE (day or range; boxes off)|mi_pnl_from_warehouse"
   "ITEM|EOD analysis — all reports from S3 (boxes off)|mi_eod_analysis"
   "ITEM|Backfill missing OHLC (auto-batched)|mi_backfill_missing_ohlc_auto_batched"
-  "ITEM|EOD conductor v2 (dry-run / verify-only / live close)|mi_eod_conductor_full_gated_eod_dry_run_preview"
+  "ITEM|EOD conductor v2 (verify one box / live close / plumbing)|mi_eod_conductor_full_gated_eod_dry_run_preview"
   "SECTION|UTILITIES"
   "ITEM|OHLC 21-day fetch from yfinance (prompts symbol, default ^VIX)|mi_ohlc_21_day_fetch_from_yfinance_prompts_symb"
   "ITEM|Rotate fleet tokens/secrets (pushes to running boxes)|mi_rotate_fleet_tokens_secrets_pushes_to_runnin"

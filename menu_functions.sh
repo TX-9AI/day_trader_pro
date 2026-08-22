@@ -422,20 +422,29 @@ mi_eod_conductor_full_gated_eod_dry_run_preview() {
     # verifies for real and stops NOTHING, so it can be run mid-session
     # without consequence — except that it stops the BOT on each box it
     # touches, which is why it is scoped to one symbol here.
+    # ⚠️ VERIFY-ONLY IS OPTION 1 BECAUSE IT IS THE REAL PREVIEW. --dry-run
+    # never SSHes, so it stamps "OK short=0" on every box whatever the truth
+    # is — measured 2026-08-22: it reported 15/15 verified minutes before a
+    # real run on NVDA came back SHORT. Leaving the fabricated one in the
+    # first slot points the default reach at the check that cannot fail.
     echo
-    echo "  1) DRY RUN         — plumbing only; verification is FAKED"
-    echo "  2) VERIFY ONLY     — real drain + verify, ONE box, stops nothing"
-    echo "  3) LIVE CLOSE      — stop trading, drain, verify, take down"
+    echo "  1) VERIFY ONE BOX  — REAL drain + verify. Stops nothing. THE preview."
+    echo "  2) LIVE CLOSE      — stop trading, drain, verify, take down per box"
+    echo "  3) plumbing check  — enumerates the fleet; VERIFICATION IS FAKED"
     read -rp "  Choose 1/2/3 (ENTER = cancel): " C
     case "$C" in
-      1) $PY eod_conductor_v2.py --dry-run ;;
-      2) read -rp "  Symbol [NVDA]: " S; S="${S:-NVDA}"
+      1) read -rp "  Symbol [NVDA]: " S; S="${S:-NVDA}"
          $PY eod_conductor_v2.py --no-takedown --only "$S" ;;
-      3) $PY eod_conductor_v2.py --dry-run
-         echo
-         echo "  ⚠️ The preview above did NOT verify anything — it fabricates OK."
-         read -rp "  Run the LIVE close now? Type CLOSE to confirm: " GO
+      # ⚠️ NO FAKE PREVIEW BEFORE THE LIVE RUN. Printing a fabricated OK and
+      # then disclaiming it is theatre — it trains the operator to click past
+      # a green screen. Option 1 is the preview; this asks for the word.
+      2) echo
+         echo "  This STOPS TRADING on every running box, drains to S3,"
+         echo "  verifies, and takes down the ones that verified."
+         read -rp "  Type CLOSE to confirm: " GO
          [ "$GO" = "CLOSE" ] && $PY eod_conductor_v2.py || echo "  cancelled." ;;
+      3) echo "  (plumbing only — every OK below is fabricated)"
+         $PY eod_conductor_v2.py --dry-run ;;
       *) echo "  cancelled." ;;
     esac
     pause

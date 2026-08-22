@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
-# day_trader_pro/devtools.sh — v1.52
+# day_trader_pro/devtools.sh — v1.53
+# v1.53 (2026-08-25) — the conductor item now leads with VERIFY ONE BOX. The
+# fabricated --dry-run was in the first slot, so the default reach was the
+# check that CANNOT FAIL: it stamps OK on every box without SSHing, and on
+# 2026-08-22 it reported 15/15 verified minutes before a real run on NVDA came
+# back SHORT. The live path no longer prints a fake preview and then disclaims
+# it — that trains the operator to click past a green screen.
 # v1.52 (2026-08-25) — --manifest now works on --dups. It was wired into the
 # culled and dead-stream branches and not that one, so the SLOWEST sweep (one
 # GET per object, ~35 min over 40k chain snapshots) printed "12,003 legacy" and
