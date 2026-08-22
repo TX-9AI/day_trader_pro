@@ -1,5 +1,13 @@
 #!/usr/bin/env bash
-# day_trader_pro/devtools.sh — v1.49
+# day_trader_pro/devtools.sh — v1.50
+# v1.50 (2026-08-25) — THE EOD CHAIN SWITCHES OVER. install_eod_v2.sh repoints
+# the 16:05 unit to eod_conductor_v2 (stop trading, drain, verify, take down
+# per box), adds the 16:30 analysis timer, and DISABLES dtp-harvest (15:55) and
+# dtp-eod (16:15) — the conductor drains to S3 itself and P&L now comes from
+# the warehouse. Disabled, not deleted: --rollback re-arms the old chain in one
+# command. Menu item 58 repointed to v2 with three modes, and it now SAYS that
+# --dry-run fabricates its verification instead of letting a column of green
+# imply otherwise.
 # v1.49 (2026-08-25) — THE METER GOES ON EVERY LONG LOOP, not just the one
 # that got complained about. r215 put progress on the DELETE loop and left the
 # SCAN silent — and the scan is the part that takes minutes (~900 sequential

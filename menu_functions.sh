@@ -409,7 +409,36 @@ mi_backfill_missing_ohlc_auto_batched() {
 
 # EOD conductor - full gated EOD (dry-run preview -> confirm -> run)
 mi_eod_conductor_full_gated_eod_dry_run_preview() {
-    echo; read -rp "Backfill batch size (ENTER=5): " B; B="${B:-5}"; echo; $PY eod_conductor.py --batch "$B" --dry-run; echo; read -rp "Run the LIVE EOD conductor now (gate->harvest->P&L+stop->backfill->consolidate->diary)? [y/N]: " GO; [ "$GO" = "y" ] && $PY eod_conductor.py --batch "$B"; pause
+    # r217 — REPOINTED to eod_conductor_v2. Same preview-then-confirm shape the
+    # operator already had; only the conductor underneath changed.
+    #
+    # ⚠️ THE DRY RUN HERE PROVES PLUMBING, NOT VERIFICATION. --dry-run never
+    # SSHes and never drains, so it FABRICATES an OK verdict for every box —
+    # a column of green that means nothing. Verified 2026-08-22: the dry run
+    # showed 15/15 verified; a real --no-takedown run on NVDA immediately
+    # returned SHORT. Use option (2) below to actually verify.
+    #
+    # ⚠️ AND (2) IS THE SAFE ONE TO EXPLORE WITH. --no-takedown drains and
+    # verifies for real and stops NOTHING, so it can be run mid-session
+    # without consequence — except that it stops the BOT on each box it
+    # touches, which is why it is scoped to one symbol here.
+    echo
+    echo "  1) DRY RUN         — plumbing only; verification is FAKED"
+    echo "  2) VERIFY ONLY     — real drain + verify, ONE box, stops nothing"
+    echo "  3) LIVE CLOSE      — stop trading, drain, verify, take down"
+    read -rp "  Choose 1/2/3 (ENTER = cancel): " C
+    case "$C" in
+      1) $PY eod_conductor_v2.py --dry-run ;;
+      2) read -rp "  Symbol [NVDA]: " S; S="${S:-NVDA}"
+         $PY eod_conductor_v2.py --no-takedown --only "$S" ;;
+      3) $PY eod_conductor_v2.py --dry-run
+         echo
+         echo "  ⚠️ The preview above did NOT verify anything — it fabricates OK."
+         read -rp "  Run the LIVE close now? Type CLOSE to confirm: " GO
+         [ "$GO" = "CLOSE" ] && $PY eod_conductor_v2.py || echo "  cancelled." ;;
+      *) echo "  cancelled." ;;
+    esac
+    pause
 }
 
 # OHLC 21-day fetch from yfinance (prompts symbol, default ^VIX)
