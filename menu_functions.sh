@@ -131,8 +131,29 @@ mi_bot_log_tail_last_20() {
 }
 
 # Dry-run
-mi_dry_run() {
-    echo; $PY wake_and_bake.py --dry-run; pause
+# Retire (stop the fleet)   (one/all/some)
+mi_retire_one_all_some() {
+    # r202 (2026-08-25) — REPLACES "Dry-run", which the operator never used.
+    # ⚠️ THE OPERATOR WAS FORCED THROUGH OPTION 34 (FULL wake->bake->restart->
+    # STOP) TO DO NOTHING BUT STOP THE FLEET — a whole cycle, including a
+    # resync and a restart of every box, when all he wanted was the shutdown at
+    # the end of it. `--shutdown-only` ALREADY EXISTED in wake_and_bake.py and
+    # had no menu item, so the capability was there and unreachable.
+    #
+    # ⚠️ THIS IS NOT THE EOD PATH. --shutdown-only clears pycache and stops the
+    # boxes cleanly with NO EOD and NO P&L harvest. Use it after maintenance or
+    # a check, not at the close — the conductor owns the close because
+    # chain_snapshots cannot be reconstructed after 16:00.
+    echo
+    echo "  RETIRE — OFF-HOURS clean stop. No EOD, no P&L harvest, no resync."
+    echo "  For after maintenance or a check, outside the session."
+    echo "  During RTH use option 38 (EMERGENCY STOP) — same mechanism,"
+    echo "  different intent, and it warns about open positions."
+    echo "  The CONDUCTOR owns the close: chain_snapshots cannot be"
+    echo "  reconstructed after 16:00, so never use this at 15:59."
+    SC=$(ask_scope)
+    $PY wake_and_bake.py --shutdown-only $SC
+    pause
 }
 
 # FULL (wake->bake->restart->STOP)
@@ -157,7 +178,30 @@ mi_leave_on_skip_shutdown() {
 
 # EMERGENCY STOP (no EOD, no pycache, RTH-exempt, HALT-gated)
 mi_emergency_stop_no_eod_no_pycache_rth_exempt() {
-    echo; $PY wake_and_bake.py --shutdown-only; pause
+    # r202 — SCOPE ADDED. This ran unscoped, so the only way to kill ONE
+    # misbehaving box mid-session was to stop all fifteen.
+    #
+    # ⚠️ 33 AND 38 CALL THE SAME MECHANISM (--shutdown-only) AND THAT IS FINE —
+    # the difference is INTENT AND TIMING, not plumbing. 33 is the off-hours
+    # tidy-up; 38 is mid-session and abandons live positions. The banner below
+    # is the difference that matters, because the mechanism will not warn you.
+    #
+    # ⚠️ VERIFIED IN SOURCE, NOT ASSUMED: the RTH guard at wake_and_bake.py:424
+    # applies to `mode == "full"` ONLY, so --shutdown-only genuinely IS
+    # RTH-exempt and needs no --force mid-session. (The module docstring at
+    # line 82 claims the guard blocks shutdown-only — that line is WRONG and
+    # would have someone believe an emergency stop is unavailable during a
+    # session.)
+    echo
+    echo "  🔴 EMERGENCY STOP — RUNS DURING RTH, NO --force NEEDED."
+    echo "  Stops by INSTANCE ID, not SSH: a box that cannot answer still dies."
+    echo "  ⚠️ NO EOD. NO P&L HARVEST. ANY OPEN POSITION IS ABANDONED AT THE"
+    echo "     BROKER — it does not get flattened, it is simply no longer"
+    echo "     watched. You own it manually from that moment."
+    echo "  For an orderly off-hours stop use option 33 (Retire) instead."
+    SC=$(ask_scope)
+    $PY wake_and_bake.py --shutdown-only $SC
+    pause
 }
 
 # Check only

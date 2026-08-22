@@ -1,5 +1,14 @@
 #!/usr/bin/env bash
-# day_trader_pro/devtools.sh — v1.38
+# day_trader_pro/devtools.sh — v1.39
+# v1.39 (2026-08-25) — MAINTENANCE: item 33 "Dry-run" REPLACED by "Retire —
+# off-hours stop (one/all/some)", and item 38 EMERGENCY STOP GAINS SCOPE. The
+# operator was forced through option 34 (FULL wake->bake->restart->STOP) just to
+# stop boxes after a check — a full resync and restart to reach the shutdown at
+# the end. wake_and_bake --shutdown-only ALREADY EXISTED with no menu item.
+# 33 and 38 share that mechanism deliberately; the difference is INTENT AND
+# TIMING — 33 is the off-hours tidy-up, 38 is mid-session and ABANDONS OPEN
+# POSITIONS at the broker. 38 ran unscoped, so killing one misbehaving box
+# mid-session meant stopping all fifteen. Both stop by instance ID, not SSH.
 # v1.38 (2026-08-25) — NEW SENSORS section (items 19-28): manifold health board,
 # strategy notes, plan ledger, exit counterfactual, fire snapshot, surface
 # (charm/vanna/GEX), indicators, forks with reject reasons, levels, order flow.

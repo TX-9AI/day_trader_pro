@@ -80,6 +80,12 @@ Changelog:
     * Because bake-only no longer restarts, it is EXEMPT from the RTH guard —
       it can run any time, including mid-session, without --force. The guard
       now blocks only `full` and `shutdown-only` during RTH.
+      ⚠️ CORRECTION 2026-08-25: THE LAST SENTENCE IS WRONG AND HAS BEEN SINCE
+      IT WAS WRITTEN. The guard at line ~424 tests `mode == "full"` ONLY, so
+      `--shutdown-only` is RTH-EXEMPT and needs no --force mid-session. Left
+      in place with the correction attached rather than silently edited,
+      because a reader who believed it would think the EMERGENCY STOP is
+      unavailable during a session — which is the one moment it is for.
   v1.1 (2026-07-09)
     * NEW modes: --wake-only, --bake-only, --shutdown-only.
     * SYNC stage renamed BAKE. Now runs `git diff --name-status HEAD
