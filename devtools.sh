@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
-# day_trader_pro/devtools.sh — v1.47
+# day_trader_pro/devtools.sh — v1.48
+# v1.48 (2026-08-25) — the sweep SHOWS PROGRESS and summarises BY PREFIX. A
+# 500k-key delete printed nothing between 1,000-key batches, so a working run
+# and a wedged one looked identical — the operator had to ask. Now one
+# refreshing line with count, rate and ETA. And the pre-delete listing is a
+# per-prefix breakdown instead of 25 sample keys, which was neither a review
+# nor useful: the manifest is the review surface.
 # v1.47 (2026-08-25) — THE MANIFEST NOW CARRIES ITS RULE. A dead-stream purge
 # deletes by PREFIX (raw/shadow/ is dead whatever symbol is in the path) but
 # --from-manifest re-applied the SYMBOL guard and refused 359,123 shadow keys

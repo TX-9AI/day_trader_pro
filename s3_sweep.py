@@ -56,6 +56,7 @@ import hashlib
 import json
 import os
 import sys
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -265,24 +266,43 @@ def delete(s3, keys: list, apply: bool, guard_panel: bool = True) -> int:
     if not keys:
         print("\n  nothing to delete.")
         return 0
-    print(f"\n  {len(keys)} object(s) would be deleted:")
-    for k in keys[:25]:
-        print(f"     {k}")
-    if len(keys) > 25:
-        print(f"     … and {len(keys) - 25} more")
+    # ⚠️ A SAMPLE IS NOT A REVIEW. Printing 25 keys of a 359,000-key list is
+    # neither — the MANIFEST is the review surface, and a per-prefix breakdown
+    # says more about what is about to go than any 25 paths could.
+    from collections import Counter
+    by_pfx = Counter("/".join(k.split("/")[:2]) for k in keys)
+    print(f"\n  {len(keys):,} object(s) would be deleted:")
+    for pfx, n in by_pfx.most_common():
+        print(f"     {pfx + '/':<28} {n:>9,}")
+    print(f"     {'sample':<28} {keys[0]}")
 
     if not apply:
         print("\n  DRY RUN — nothing deleted. Re-run with --apply.")
         return 0
 
-    done = 0
-    for i in range(0, len(keys), 1000):
+    # ⚠️ PROGRESS, BECAUSE SILENCE MEANS TWO THINGS. A delete loop that prints
+    # nothing between batches looks IDENTICAL whether it is working or wedged —
+    # and at 1,000 keys per call a 500k purge is 500 round trips with nothing
+    # on screen. The operator asked mid-run whether it had stalled and there
+    # was no way to tell. `warehouse_cost.py` already counts its LIST pages for
+    # exactly this reason; this is that habit, carried across.
+    done, total = 0, len(keys)
+    t0 = time.time()
+    for i in range(0, total, 1000):
         batch = [{"Key": k} for k in keys[i:i + 1000]]
         r = s3.delete_objects(Bucket=BUCKET, Delete={"Objects": batch})
         done += len(r.get("Deleted", []))
         for err in r.get("Errors", []):
             print(f"  ! {err.get('Key')}: {err.get('Message')}")
-    print(f"\n  deleted {done} object(s).")
+        el = time.time() - t0
+        rate = done / el if el > 0 else 0
+        eta = (total - done) / rate if rate > 0 else 0
+        # \r keeps it to one line; the final newline comes from the summary.
+        sys.stdout.write(f"\r  deleted {done:,}/{total:,} "
+                         f"({100.0 * done / total:.0f}%)  "
+                         f"{rate:,.0f}/s  eta {eta / 60:.1f} min      ")
+        sys.stdout.flush()
+    print(f"\n\n  deleted {done:,} object(s) in {(time.time() - t0) / 60:.1f} min.")
     return done
 
 
