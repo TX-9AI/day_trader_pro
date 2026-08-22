@@ -382,10 +382,18 @@ def main(argv=None) -> int:
         print(f"LEGACY-HASH SWEEP — {a.datatype} {pfx or '(all dates)'}")
         print("  keeping any object whose key == sha256(canon(record))[:16]")
         stale = find_legacy(s3, a.datatype, pfx)
-        # ⚠️ guard OFF here, and ONLY here: every key in `stale` was proven
-        # superseded by recomputing the sha of its own record, so the symbol it
-        # belongs to is irrelevant — and the duplicates are ON panel boxes.
-        delete(s3, stale, a.apply, guard_panel=False)
+        # ⚠️ --manifest WAS IGNORED HERE. It was wired into the culled and
+        # dead-stream branches and not this one, so a 35-minute scan (one GET
+        # per object) printed its result and threw the list away. The SLOWEST
+        # sweep was the one that could not save its work.
+        if a.manifest:
+            write_manifest(stale, a.manifest, rule="prefix")
+        else:
+            # ⚠️ guard OFF here, and ONLY here: every key in `stale` was proven
+            # superseded by recomputing the sha of its own record, so the
+            # symbol it belongs to is irrelevant — and the duplicates are ON
+            # panel boxes.
+            delete(s3, stale, a.apply, guard_panel=False)
 
     if a.culled:
         if a.symbols:

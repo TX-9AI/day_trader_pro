@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
-# day_trader_pro/devtools.sh — v1.51
+# day_trader_pro/devtools.sh — v1.52
+# v1.52 (2026-08-25) — --manifest now works on --dups. It was wired into the
+# culled and dead-stream branches and not that one, so the SLOWEST sweep (one
+# GET per object, ~35 min over 40k chain snapshots) printed "12,003 legacy" and
+# threw the list away.
 # v1.51 (2026-08-25) — THE REPORTS ARE ORDERED, NOT SCHEDULED. eod_conductor_v2
 # now invokes eod_analysis itself once the boxes are down, and the 16:30 timer
 # is DISABLED (unit kept on disk for item 56 and --rollback). The gap was a
