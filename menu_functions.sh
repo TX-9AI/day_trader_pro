@@ -274,7 +274,16 @@ mi_excursion_report_mfe_mae_reports_excursions() {
 }
 
 # Trade breakdown (cross-day: regime/strategy/grade + regime x strategy)
-mi_trade_breakdown_cross_day_regime_strategy_gr() {
+# ⚠️ LABEL AND HANDLER RENAMED r203 (2026-08-25). The old name promised a
+# breakdown by a column that otv4 PHYSICALLY DROPPED in r65 — a query against
+# it now RAISES rather than returning empty, so the promise was not merely
+# stale, it was a crash waiting for the first person who selected it against a
+# post-r65 trades.db.
+# ⚠️ THE UNDERLYING trade_report.py STILL GROUPS BY THAT COLUMN — 8 live lines
+# — and this rename does NOT fix that. It stops the MENU lying; the report
+# itself is part of the day_trader_pro sweep still owed (125 live lines across
+# 12 files, incl. fit_report.py and warehouse_reader.py).
+mi_trade_breakdown_cross_day() {
     echo; read -rp "Since date (YYYY-MM-DD, ENTER=all): " SD; if [ -n "$SD" ]; then $PY trade_report.py --since "$SD"; else $PY trade_report.py; fi; pause
 }
 

@@ -1,5 +1,12 @@
 #!/usr/bin/env bash
-# day_trader_pro/devtools.sh — v1.39
+# day_trader_pro/devtools.sh — v1.40
+# v1.40 (2026-08-25) — the rendered banner DERIVES its version from this
+# header instead of a literal typed in menu_registry.sh; it had read "v1.35"
+# against a v1.39 header, and drifted the same way at v1.26/v1.28. Guarded by
+# tests/test_menu_banner.py, which RENDERS the menu rather than grepping it and
+# fails if a version literal returns. Item 52 relabelled and its handler
+# renamed: it promised a breakdown by a column otv4 DROPPED in r65, so a query
+# now RAISES rather than returning empty.
 # v1.39 (2026-08-25) — MAINTENANCE: item 33 "Dry-run" REPLACED by "Retire —
 # off-hours stop (one/all/some)", and item 38 EMERGENCY STOP GAINS SCOPE. The
 # operator was forced through option 34 (FULL wake->bake->restart->STOP) just to

@@ -71,7 +71,7 @@ MENU=(
   "SECTION|TRADES DATA"
   "ITEM|Re-run consolidation -> fleet_trades_<date>.json (+ .csv)|mi_re_run_consolidation_fleet_trades_date_json"
   "ITEM|Excursion report (MFE/MAE) -> reports/excursions_<date>.txt|mi_excursion_report_mfe_mae_reports_excursions"
-  "ITEM|Trade breakdown (cross-day: regime/strategy/grade + regime x strategy)|mi_trade_breakdown_cross_day_regime_strategy_gr"
+  "ITEM|Trade breakdown (cross-day: strategy/grade/setup)|mi_trade_breakdown_cross_day"
   "ITEM|FIT REPORT — everything for fitting in ONE text file (1 day or a range)|mi_fit_report_everything_for_fitting_in_one_tex"
   "SECTION|EOD CONDUCTOR, BACKFILL & LIVE P&L"
   "ITEM|Live P&L standings (read-only)|mi_live_p_l_standings_read_only"
@@ -116,9 +116,30 @@ _menu_label() {
   esac
 }
 
+# ── 🔴 THE BANNER READS ITS VERSION FROM devtools.sh, IT IS NOT TYPED HERE ──
+# It said "v1.35" against a v1.39 header on 2026-08-25 — FOUR revisions stale,
+# and it had drifted before: the file's own v1.28 note records the banner
+# reading v1.26 while the header had moved on.
+#
+# ⚠️ THE CAUSE IS THAT THE BANNER LIVES IN A DIFFERENT FILE FROM THE HEADER IT
+# QUOTES. Bumping devtools.sh cannot move a literal in menu_registry.sh, so the
+# standing "title == newest changelog entry" rule was being followed and the
+# banner still lied. A rule that a careful person can obey while the output
+# stays wrong is not a rule, it is a trap.
+#
+# ⚠️ DERIVED, NOT DUPLICATED. There is now ONE place the version is written.
+_devtools_version() {
+  local d="${BASH_SOURCE%/*}/devtools.sh"
+  sed -n 's/^# day_trader_pro\/devtools\.sh — \(v[0-9.]*\).*/\1/p' "$d" \
+    2>/dev/null | head -1
+}
+
 menu_render() {
+  local _ver
+  _ver="$(_devtools_version)"
+  [ -z "$_ver" ] && _ver="(version unreadable)"
   printf '======================================================\n'
-  printf '  Day Trader Pro — devtools  v1.35 Service Menu\n'
+  printf '  Day Trader Pro — devtools  %s Service Menu\n' "$_ver"
   printf '======================================================\n'
   local i=0 kind rest label
   for entry in "${MENU[@]}"; do
