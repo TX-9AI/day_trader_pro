@@ -76,6 +76,7 @@ MENU=(
   "SECTION|EOD CONDUCTOR, BACKFILL & LIVE P&L"
   "ITEM|Live P&L standings (reads the BOXES; must be up)|mi_live_p_l_standings_read_only"
   "ITEM|P&L from WAREHOUSE (day or range; boxes off)|mi_pnl_from_warehouse"
+  "ITEM|EOD analysis — all reports from S3 (boxes off)|mi_eod_analysis"
   "ITEM|Backfill missing OHLC (auto-batched)|mi_backfill_missing_ohlc_auto_batched"
   "ITEM|EOD conductor - full gated EOD (dry-run preview -> confirm -> run)|mi_eod_conductor_full_gated_eod_dry_run_preview"
   "SECTION|UTILITIES"

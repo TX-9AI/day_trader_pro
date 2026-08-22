@@ -308,6 +308,28 @@ mi_live_p_l_standings_read_only() {
     echo; read -rp "Push to Telegram too? [y/N]: " S; if [ "$S" = "y" ]; then $PY standings.py --send; else $PY standings.py; fi; pause
 }
 
+# EOD ANALYSIS — the reports, from S3, boxes stay off
+mi_eod_analysis() {
+    # r208 — the REPORTS half of the EOD split. eod_conductor_v2 owns the
+    # CLOSE; this owns the reports and the two never overlap.
+    # ⚠️ SAFE TO RE-RUN AND SAFE TO RUN LATE. Nothing here touches a box, so a
+    # failed night can simply be run again tomorrow against the same bucket.
+    echo
+    echo "  EOD analysis — P&L, bundle, daily bars, label, excursion, coverage."
+    echo "  Reads S3 and control-side state only. No boxes are woken."
+    read -rp "  Date (YYYY-MM-DD, ENTER=today): " D
+    read -rp "  Dry-run first? [Y/n]: " DR
+    ARGS=""; [ -n "$D" ] && ARGS="--date $D"
+    if [ "$DR" != "n" ]; then
+        $PY eod_analysis.py $ARGS --dry-run
+        echo
+        read -rp "  Proceed for real? [y/N]: " GO
+        [ "$GO" = "y" ] || { pause; return 0; }
+    fi
+    $PY eod_analysis.py $ARGS
+    pause
+}
+
 # P&L from the WAREHOUSE (day or range; boxes not involved)
 mi_pnl_from_warehouse() {
     # r207 — reads S3, never the boxes.

@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
-# day_trader_pro/devtools.sh — v1.42
+# day_trader_pro/devtools.sh — v1.43
+# v1.43 (2026-08-25) — NEW item 56 "EOD analysis — all reports from S3 (boxes
+# off)", and install_eod_analysis.sh puts it on a 16:30 timer. This is the
+# REPORTS half of the EOD split: eod_conductor_v2 owns the CLOSE (stop trading,
+# drain, verify, take down per box) and is done by ~16:08; the reports run 20
+# minutes later against the bucket, so a slow report can never delay a close
+# and a slow close can never collide with the reports.
 # v1.42 (2026-08-25) — NEW item 55 "P&L from WAREHOUSE (day or range; boxes
 # off)". Item 54 SSHes into every box, so seeing YESTERDAY P&L meant WAKING
 # FIFTEEN MACHINES to ask about data already in the bucket — and its SQL is
