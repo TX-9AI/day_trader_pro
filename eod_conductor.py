@@ -723,54 +723,10 @@ def phase_coverage(date, dry, warns):
               f"while this is red.")
 
 
-def phase_coverage(date, dry, warns):
-    """Phase 15 — IS THE WAREHOUSE ACTUALLY HOLDING VIX? (pre-sever gate)
-
-    WHY THIS IS A PHASE AND NOT A COMMAND SOMEONE RUNS: after the sever the
-    bucket is the only copy, and a stream that quietly stops landing is
-    unrecoverable — DXFeed history is use-it-or-lose-it and nothing in the
-    system can delete or re-create it. A check that depends on anyone
-    remembering to run it is a comment, not a control.
-
-    WHY VIX SPECIFICALLY: it is the only stream with a SINGLE writer. Every box
-    logs VIX into feed_store, but push_candles skips it unless the box is SPX
-    ("SPX owns VIX" — the dedup decision). So VIX collection is exactly as
-    reliable as one box, and its absence looks identical to normal behaviour on
-    the other 28.
-
-    Control-side, read-only, LIST-only against S3 — never touches a box, never
-    fetches an object body. Warn-never-stop per the recovery-path rule.
-    """
-    script = os.path.join(config.BASE_DIR, "warehouse_coverage.py")
-    out = os.path.join(config.REPORTS_DIR, f"warehouse_coverage_{date}.json")
-    if dry:
-        _log("COVERAGE", f"[dry] would run {script} --date {date} --json -> {out}")
-        return
-    if not os.path.isfile(script):
-        _warn(warns, "COVERAGE", f"{script} not found — VIX coverage NOT checked")
-        return
-    try:
-        proc = subprocess.run([sys.executable, script, "--date", date,
-                               "--json", out],
-                              capture_output=True, text=True, timeout=180)
-    except Exception as exc:  # noqa: BLE001
-        _warn(warns, "COVERAGE", f"warehouse_coverage.py raised: {exc}")
-        return
-    for line in (proc.stdout or "").splitlines():
-        _log("COVERAGE", line.rstrip())
-    if proc.returncode == 2:
-        _warn(warns, "COVERAGE", "could not list the bucket — coverage UNKNOWN "
-                                 f"for {date}: {(proc.stderr or '').strip()[:160]}")
-        return
-    if proc.returncode != 0:
-        # rc=1 means a checked date is missing VIX. The stdout above already
-        # names which of the two diagnoses it is; the warning has to carry
-        # enough to act on without re-running anything.
-        _warn(warns, "COVERAGE",
-              f"VIX MISSING from the warehouse for {date} — see "
-              f"{os.path.basename(out)}. Do NOT sever the control-side copy "
-              f"while this is red.")
-
+# ⚠️ A SECOND, BYTE-IDENTICAL phase_coverage WAS DEFINED HERE AND DELETED
+# 2026-08-25. Python bound the later one, so 48 lines of the first were
+# unreachable — and an edit to the wrong copy would have changed nothing
+# with no error anywhere.
 
 def run(date=None, batch=5, dry=False, do_recover=True, do_coverage=True):
     date = date or _today_et()
