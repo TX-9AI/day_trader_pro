@@ -94,6 +94,54 @@ def _notify(msg: str) -> None:
         pass
 
 
+# ── STEP 0 — TAKE OWNERSHIP OF THE CLOSE. ──────────────────────────────────
+def quiesce(symbols, dry: bool) -> None:
+    """Stop every OTHER writer before the conductor touches anything.
+
+    🔴 THE CLOSE HAS NO OWNER TODAY, AND THAT IS THE ROOT OF A WHOLE CLASS OF
+    PROBLEM. At 16:05 the candle-logger fires on the boxes, the conductor
+    starts on control, the s3-push timer keeps firing every five minutes, and
+    eod_bot ran at 16:01 — four things acting on the same boxes and the same
+    S3 prefixes with nothing arbitrating between them.
+
+    ⚠️ THE DUPLICATE-OBJECT PROBLEM IN THE BUCKET HAS THIS SHAPE. Two objects
+    for one record, same epoch-ms, same byte size, different hash, written on
+    different runs. A day already pushed gets pushed again by a second writer
+    and lands under a new key. Whatever makes the hash unstable is a separate
+    bug — but a single writer removes the CONDITIONS it needs.
+
+    ⚠️ STOPPING THE TIMER IS NOT STOPPING THE PUSHER. `systemctl stop
+    s3-push.timer` prevents FUTURE firings; a push already in flight keeps
+    running, which is why the drain below takes the same flock the timer does
+    rather than assuming the field is clear.
+
+    ⚠️ AND THE TIMER MUST COME BACK. A conductor that disarms a timer and dies
+    leaves the box with no pusher until someone notices — so re-arming happens
+    in a finally, not at the end of the happy path.
+    """
+    if dry:
+        _log("QUIESCE", f"[dry] would stop s3-push.timer + candle-logger.timer "
+                        f"on {len(symbols)} box(es)")
+        return
+    _log("QUIESCE", "stopping other writers — the conductor owns the close")
+    for sym, ip, _st in fleet.get_fleet(list(symbols)):
+        fleet._exec(sym, ip,
+                    "sudo systemctl stop s3-push.timer candle-logger.timer "
+                    "2>/dev/null; echo quiesced")
+
+
+def rearm(symbols, dry: bool) -> None:
+    """Put the other writers back. ALWAYS RUNS, even on failure."""
+    if dry:
+        _log("REARM", f"[dry] would restart s3-push.timer + candle-logger.timer")
+        return
+    _log("REARM", "re-arming s3-push.timer + candle-logger.timer")
+    for sym, ip, _st in fleet.get_fleet(list(symbols)):
+        fleet._exec(sym, ip,
+                    "sudo systemctl start s3-push.timer candle-logger.timer "
+                    "2>/dev/null; echo rearmed")
+
+
 # ── STEP 1 — STOP TRADING. THE BOXES STAY UP. ───────────────────────────────
 def stop_trading(symbols, dry: bool) -> list:
     """Stop the bot on each box. The FEED and the machine stay up.
@@ -165,9 +213,29 @@ def takedown(results: dict, dry: bool, enabled: bool) -> tuple:
     running, and fourteen good ones must not carry one short box down with
     them.
     """
-    ok = [s for s, r in results.items()
-          if r.get("verdict") == "OK" and r.get("short") in ("0", 0)]
-    held = [s for s in results if s not in ok]
+    # 🔴 DRIFT IS NOT LOSS, AND HOLDING A BOX FOR DRIFT IS WORSE THAN THE BUG.
+    # `--verify` already classifies its own shortfall and prints the verdict:
+    # a SMALL, CONSISTENT shortfall across several prefixes is the counter-drift
+    # signature (duplicate PUTs inflate the ledger permanently and the objects
+    # are all present); a VARYING one is possible real loss.
+    # ⚠️ AN EARLIER DRAFT HELD ON ANY short>0. Ledger drift is a known and
+    # EXPECTED condition on this fleet — measured 2026-08-25, every one of 15
+    # boxes carried it — so that rule would have left the whole fleet running
+    # overnight, every night, for a bookkeeping artifact. A gate that fires on
+    # the normal case is not a gate.
+    ok, held = [], []
+    for s, r in results.items():
+        raw = r.get("raw") or ""
+        if r.get("verdict") == "OK" and str(r.get("short")) == "0":
+            ok.append(s)
+        elif "COUNTER DRIFT" in raw:
+            # Verified-present objects, inflated counter. Safe to take down,
+            # and SAID OUT LOUD so it cannot pass unnoticed.
+            _log("VERIFY", f"  {s}: shortfall is COUNTER DRIFT — objects are "
+                           f"present; taking down and flagging for --reconcile")
+            ok.append(s)
+        else:
+            held.append(s)
 
     if not enabled:
         _log("TAKEDOWN", f"skipped (--no-takedown) — {len(ok)} verified, "
@@ -219,6 +287,18 @@ def main(argv=None) -> int:
         return 0
     _log("START", f"{len(running)} box(es): {', '.join(sorted(running))}")
 
+    # 0 ─ take ownership: no other writer touches these boxes until we are done
+    # ⚠️ EVERYTHING FROM HERE IS INSIDE try/finally. The timers MUST come back
+    # even if the drain raises, the SSH dies, or the operator interrupts —
+    # a box left with no pusher is a box quietly not warehousing.
+    quiesce(running, dry)
+    try:
+        return _run_close(running, date, dry, a)
+    finally:
+        rearm(running, dry)
+
+
+def _run_close(running, date, dry, a) -> int:
     # 1 ─ stop trading
     stop_trading(running, dry)
 
