@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
-# day_trader_pro/devtools.sh — v1.37
+# day_trader_pro/devtools.sh — v1.38
+# v1.38 (2026-08-25) — NEW SENSORS section (items 19-28): manifold health board,
+# strategy notes, plan ledger, exit counterfactual, fire snapshot, surface
+# (charm/vanna/GEX), indicators, forks with reject reasons, levels, order flow.
+# r61-r70 laid down ten derived tables and two tools with NO WAY TO READ ANY OF
+# THEM — a sensor nobody can query is a sensor that does not exist. DEBUG/LOGS
+# moves to 29-32; numbers are assigned at render from list position.
 # v1.37 (2026-08-22) — menu: REGIME VALIDATION section deleted (6 dead items);
 # NEW item 18 "Hotfix launcher (repo synch & flush)" at the end of FLEET. Numbers
 # are assigned at render from list position, so DEBUG/LOGS simply moves to 19-22.

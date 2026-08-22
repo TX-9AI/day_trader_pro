@@ -436,3 +436,125 @@ mi_hotfix_launcher_repo_synch_flush() {
     fi
     pause
 }
+
+# ── SENSORS (r201, 2026-08-25) ───────────────────────────────────────────────
+# The r61-r70 work laid down ten new tables and two tools and gave the operator
+# NO WAY TO READ ANY OF THEM. A sensor nobody can query is a sensor that does
+# not exist — which is the same failure as the silent gates it was built to
+# replace.
+#
+# ⚠️ EVERY ITEM IS READ-ONLY AND SCOPE-SELECTABLE. These run on the boxes where
+# the data lives; nothing is pulled to control (the warehouse holds the
+# archive, and the conductor redesign is what will read it).
+#
+# ⚠️ EACH ONE STATES ITS SOURCE TABLE. When a report is empty the next question
+# is always "is the sensor broken or is the answer genuinely nothing", and
+# naming the table is what lets the operator go look.
+
+# Manifold health board          (one/all/some)
+mi_manifold_health_board() {
+    echo; echo "  Per-stream bulbs from tools/manifold_health.py."
+    echo "  GREEN fresh · AMBER stale · RED missing · WHITE idle (outside RTH)"
+    SC=$(ask_scope)
+    $PY fleet.py run "cd $INSTALL_DIR; python3 tools/manifold_health.py" $SC
+    pause
+}
+
+# Strategy notes: what each engine SAW   (one/all/some)
+mi_sensor_strategy_notes() {
+    echo; echo "  Source: derived_store.db -> strategy_note"
+    echo "  One row per strategy EVALUATION - fired AND declined."
+    read -rp "  Date (YYYY-MM-DD, blank = today): " d
+    [ -z "$d" ] && d=$(date +%F)
+    SC=$(ask_scope)
+    $PY fleet.py run "cd $INSTALL_DIR; sqlite3 data/derived_store.db \"SELECT strategy, SUM(fired) AS fired, COUNT(*)-SUM(fired) AS declined, COUNT(*) AS looks FROM strategy_note WHERE date(ts_epoch,'unixepoch','localtime')='$d' GROUP BY strategy ORDER BY looks DESC;\" 2>&1; echo ok" $SC
+    pause
+}
+
+# Plan ledger: intent and its outcome    (one/all/some)
+mi_sensor_plan_ledger() {
+    echo; echo "  Source: derived_store.db -> plan_ledger"
+    echo "  Plans are INTENT. A plan can produce no trade at all, or two."
+    echo "  WIPED_BY_RESTART is its own category - the cost of deploying"
+    echo "  mid-session, which cost four boxes their setups on 2026-08-21."
+    read -rp "  Date (YYYY-MM-DD, blank = today): " d
+    [ -z "$d" ] && d=$(date +%F)
+    SC=$(ask_scope)
+    $PY fleet.py run "cd $INSTALL_DIR; sqlite3 -header -column data/derived_store.db \"SELECT strategy, state, COALESCE(terminal_reason,'(live)') AS reason, COUNT(*) AS n FROM plan_ledger WHERE date(created_ts,'unixepoch','localtime')='$d' GROUP BY strategy, state, reason ORDER BY n DESC;\" 2>&1; echo ok" $SC
+    pause
+}
+
+# Exit counterfactual: would a flow exit have beaten the stop?
+mi_sensor_exit_counterfactual() {
+    echo; echo "  Source: derived_store.db -> exit_counterfactual"
+    echo "  RECORDS ONLY - the mechanical stop is untouched. bos_exit measured"
+    echo "  34% / -\$7,085 against the trail's 96% / +\$30,696, so this idea"
+    echo "  gets MEASURED before it is trusted."
+    SC=$(ask_scope)
+    $PY fleet.py run "cd $INSTALL_DIR; sqlite3 -header -column data/derived_store.db \"SELECT trade_id, strategy, reason, COUNT(*) AS evals, MAX(threat) AS peak_threat, MAX(would_fire) AS would_have FROM exit_counterfactual GROUP BY trade_id, strategy, reason ORDER BY peak_threat DESC LIMIT 25;\" 2>&1; echo ok" $SC
+    pause
+}
+
+# Fire snapshot: the derived vector at entry
+mi_sensor_fire_snapshot() {
+    echo; echo "  Source: derived_store.db -> fire_snapshot (joins trades on trade_id)"
+    echo "  Everything derived at the INSTANT a trade fired. Pre-r61 trades"
+    echo "  have no row - that is honest, they genuinely had none."
+    SC=$(ask_scope)
+    $PY fleet.py run "cd $INSTALL_DIR; sqlite3 data/derived_store.db \"SELECT trade_id, datetime(fired_ts,'unixepoch','localtime') AS fired, substr(payload,1,160) FROM fire_snapshot ORDER BY fired_ts DESC LIMIT 10;\" 2>&1; echo ok" $SC
+    pause
+}
+
+# Surface: charm / vanna / GEX through the session
+mi_sensor_surface() {
+    echo; echo "  Source: derived_store.db -> surface_series"
+    echo "  CHARM = dDelta/dt, VANNA = dDelta/dVol. Neither was computable"
+    echo "  before the greeks series existed - chain_marks overwrote one row"
+    echo "  per symbol, so there was no series to difference."
+    SC=$(ask_scope)
+    $PY fleet.py run "cd $INSTALL_DIR; sqlite3 -header -column data/derived_store.db \"SELECT strike, ROUND(AVG(charm),4) AS charm, ROUND(AVG(vanna),4) AS vanna, ROUND(MAX(gex)/1e6,2) AS gex_m, COUNT(*) AS n FROM surface_series WHERE ts_epoch > strftime('%s','now','-1 day') GROUP BY strike ORDER BY n DESC LIMIT 20;\" 2>&1; echo ok" $SC
+    pause
+}
+
+# Indicators: ADX / ATR / VWAP series
+mi_sensor_indicators() {
+    echo; echo "  Source: derived_store.db -> indicator_series"
+    echo "  ⚠️ THE ADX WOBBLE QUESTION. Friday's logs showed ADX swinging"
+    echo "  16 -> 48 on the same symbols. Some real, some possibly window"
+    echo "  artifact - and adx_at_entry is a column on every trade while"
+    echo "  CONT_BREAKOUT_MIN_ADX is a live gate. This is how you tell."
+    SC=$(ask_scope)
+    $PY fleet.py run "cd $INSTALL_DIR; sqlite3 -header -column data/derived_store.db \"SELECT interval, COUNT(*) AS n, ROUND(MIN(adx),1) AS adx_lo, ROUND(MAX(adx),1) AS adx_hi, ROUND(AVG(adx),1) AS adx_avg, ROUND(AVG(vwap),2) AS vwap FROM indicator_series WHERE ts_epoch > strftime('%s','now','-1 day') GROUP BY interval;\" 2>&1; echo ok" $SC
+    pause
+}
+
+# Forks: built vs rejected, WITH the reason
+mi_sensor_forks() {
+    echo; echo "  Source: derived_store.db -> fork_series"
+    echo "  Six named reject reasons exist and none of them used to reach a"
+    echo "  log - 'rails=absent' was ONE message covering six problems, which"
+    echo "  is why the r59 diagnosis took two wrong turns."
+    SC=$(ask_scope)
+    $PY fleet.py run "cd $INSTALL_DIR; sqlite3 -header -column data/derived_store.db \"SELECT interval, CASE built WHEN 1 THEN 'BUILT' ELSE COALESCE(reject_reason,'?') END AS outcome, COUNT(*) AS n, ROUND(AVG(containment),3) AS contain FROM fork_series WHERE ts_epoch > strftime('%s','now','-1 day') GROUP BY interval, outcome ORDER BY n DESC;\" 2>&1; echo ok" $SC
+    pause
+}
+
+# Levels: touch counts and retirements
+mi_sensor_levels() {
+    echo; echo "  Source: derived_store.db -> level_ledger"
+    echo "  A touch is a HOLD; a close through RETIRES the level. Bodies"
+    echo "  decide, wicks test."
+    SC=$(ask_scope)
+    $PY fleet.py run "cd $INSTALL_DIR; sqlite3 -header -column data/derived_store.db \"SELECT provenance, kind, COUNT(*) AS levels, SUM(touch_count) AS touches, SUM(CASE WHEN retired_ts IS NULL THEN 0 ELSE 1 END) AS retired FROM level_ledger GROUP BY provenance, kind ORDER BY touches DESC;\" 2>&1; echo ok" $SC
+    pause
+}
+
+# Order flow: aggression and depth from the tape
+mi_sensor_order_flow() {
+    echo; echo "  Source: feed_store.db -> prints / quote_series"
+    echo "  aggressor_side is buy vs sell INITIATED. bid_size/ask_size is depth"
+    echo "  at the touch - the signal FRC.1 needed and never had."
+    SC=$(ask_scope)
+    $PY fleet.py run "cd $INSTALL_DIR; sqlite3 -header -column data/feed_store.db \"SELECT COALESCE(aggressor_side,'(untagged)') AS side, COUNT(*) AS prints, ROUND(SUM(size)) AS volume FROM prints WHERE ts_epoch > strftime('%s','now','-1 day') GROUP BY side;\" 2>&1; sqlite3 -header -column data/feed_store.db \"SELECT COUNT(*) AS quote_rows, ROUND(AVG(bid_size)) AS avg_bid_sz, ROUND(AVG(ask_size)) AS avg_ask_sz FROM quote_series WHERE ts_epoch > strftime('%s','now','-1 day');\" 2>&1; echo ok" $SC
+    pause
+}
