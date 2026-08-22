@@ -320,7 +320,7 @@ def _run_close(running, date, dry, a) -> int:
     # 4 ─ take down what verified
     ok, held = takedown(results, dry, not a.no_takedown)
 
-    # ── P&L, FROM THE WAREHOUSE, AFTER THE BOXES ARE OFF ────────────────
+    # ── P&L headline, before the full report run ────────────────────────
     # 🔴 THE OLD CHAIN COMPUTED P&L TWICE: eod_summary on each box at 15:50 and
     # eod_report on control at 16:15. Two answers to one question, and if they
     # disagreed nothing noticed. One source now, and it reads S3 — so it works
@@ -340,6 +340,29 @@ def _run_close(running, date, dry, a) -> int:
             _log("PNL", f"warehouse P&L unavailable: {exc}")
             _notify(f"⚠️ EOD {date}: boxes closed, but the warehouse P&L "
                     f"could not be read: {exc}")
+
+    # ── 5 ─ THE REPORTS, ORDERED, NOT TIMED ─────────────────────────────
+    # 🔑 THE CONDUCTOR KNOWS WHEN THE CLOSE IS DONE, so it starts the reports
+    # itself. An earlier version left them on a 16:30 timer with a 25-minute
+    # gap "so a slow report cannot delay the close" — but ORDERING already
+    # guarantees that: the reports begin AFTER takedown, when the close is
+    # finished by definition. The gap was a clock standing in for a dependency.
+    # ⚠️ IF CONTROL IS DISABLED, NO REPORTS RUN — and that is correct. Reports
+    # are a control function; the BOXES still close themselves at 16:45 on
+    # their own timer, which is the part that must not depend on control.
+    # ⚠️ A REPORT FAILURE MUST NOT CHANGE THE CLOSE'S VERDICT. The takedown
+    # already happened and its result is the one that matters, so this is
+    # wrapped and its rc is not propagated.
+    if not dry:
+        try:
+            import eod_analysis
+            _log("REPORTS", "starting the analysis run (reads S3; boxes are off)")
+            eod_analysis.run(date, dry=False)
+        except Exception as exc:                               # noqa: BLE001
+            _log("REPORTS", f"analysis failed: {exc}")
+            _notify(f"⚠️ EOD {date}: the close completed, but the report run "
+                    f"failed: {exc}. Re-run devtools item 56 — it reads S3 and "
+                    f"is safe to run any time.")
 
     _log("DONE", f"{len(ok)} verified and stopped · {len(held)} HELD UP")
     if held and not dry:

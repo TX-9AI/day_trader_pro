@@ -9,10 +9,20 @@
 # s3_push's `--verify` sitting unused for twelve days because nothing called it.
 #
 # WHAT THIS DOES:
-#   16:05  dtp-eod-conductor  -> eod_conductor_v2.py   (was eod_conductor.py)
-#   16:30  dtp-eod-analysis   -> eod_analysis.py       (NEW; reports from S3)
+#   16:05  dtp-eod-conductor  -> eod_conductor_v2.py, WHICH THEN RUNS THE
+#                                REPORTS ITSELF once the boxes are down
 #   15:55  dtp-harvest        -> DISABLED   (the conductor drains to S3 itself)
 #   16:15  dtp-eod            -> DISABLED   (P&L now comes from the warehouse)
+#   16:30  dtp-eod-analysis   -> DISABLED   (ordered by the conductor, not timed)
+#
+# 🔑 THE REPORTS ARE ORDERED, NOT SCHEDULED. A 16:30 timer with a 25-minute gap
+# was a CLOCK STANDING IN FOR A DEPENDENCY. The conductor knows when the close
+# finished, so it starts the reports then — and "a slow report must not delay
+# the close" is satisfied by ORDER, since the reports begin after takedown.
+# ⚠️ CONSEQUENCE, STATED PLAINLY: if control is disabled, NO REPORTS RUN. That
+# is correct — reports are a control function. The BOXES still close themselves
+# at 16:45 on their own timer, and that is the part that must never depend on
+# control being alive.
 #
 # ⚠️ DISABLED, NOT DELETED. `systemctl disable` leaves the unit on disk, so
 # --rollback re-arms the old chain in one command. A switchover you cannot undo
@@ -35,7 +45,7 @@ if [ "$MODE" = "--rollback" ]; then
   sudo sed -i "s|eod_conductor_v2.py|eod_conductor.py|" \
        /etc/systemd/system/dtp-eod-conductor.service
   sudo systemctl enable --now dtp-harvest.timer dtp-eod.timer 2>/dev/null || true
-  sudo systemctl disable --now dtp-eod-analysis.timer 2>/dev/null || true
+  sudo systemctl enable --now dtp-eod-analysis.timer 2>/dev/null || true
   sudo systemctl daemon-reload
   echo; systemctl list-timers 'dtp-*' --all --no-pager
   exit 0
@@ -58,9 +68,10 @@ TimeoutStartSec=1800
 UNIT
 
 # ── 2. the reports, 25 minutes later ────────────────────────────────────────
-# ⚠️ THE GAP IS THE POINT. The conductor has the boxes down by ~16:08; starting
-# reports at 16:30 means a slow close can never collide with them and a slow
-# report can never delay a close.
+# ⚠️ THIS UNIT IS INSTALLED BUT ITS TIMER IS DISABLED. The conductor invokes
+# eod_analysis directly once the boxes are down, so the schedule below is only
+# a fallback the operator can re-arm; the service definition is what devtools
+# item 56 and any manual re-run use.
 sudo tee /etc/systemd/system/dtp-eod-analysis.service >/dev/null <<UNIT
 [Unit]
 Description=day_trader_pro EOD analysis (reports from S3; no boxes touched)
@@ -96,9 +107,13 @@ UNIT
 sudo systemctl disable --now dtp-harvest.timer 2>/dev/null || true
 sudo systemctl disable --now dtp-eod.timer 2>/dev/null || true
 
+# ⚠️ THE ANALYSIS TIMER IS DISABLED, NOT DELETED. The unit stays on disk so
+# devtools item 56 and a manual re-run still work, and so --rollback can re-arm
+# it without reinstalling anything.
+sudo systemctl disable --now dtp-eod-analysis.timer 2>/dev/null || true
+
 mkdir -p "$REPO/logs"
 sudo systemctl daemon-reload
-sudo systemctl enable --now dtp-eod-analysis.timer
 
 echo
 echo "=============================================================="
@@ -107,7 +122,7 @@ echo "=============================================================="
 systemctl list-timers 'dtp-*' --all --no-pager
 echo
 echo "  16:05  conductor v2 — stop trading, drain, verify, take down per box"
-echo "  16:30  analysis     — P&L + reports, read from S3, boxes stay off"
+echo "  ordered  analysis   — run BY the conductor once the boxes are down"
 echo "  15:55  harvest      — DISABLED (conductor drains to S3 itself)"
 echo "  16:15  eod_report   — DISABLED (P&L comes from the warehouse)"
 echo

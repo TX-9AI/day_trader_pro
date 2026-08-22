@@ -1,5 +1,12 @@
 #!/usr/bin/env bash
-# day_trader_pro/devtools.sh — v1.50
+# day_trader_pro/devtools.sh — v1.51
+# v1.51 (2026-08-25) — THE REPORTS ARE ORDERED, NOT SCHEDULED. eod_conductor_v2
+# now invokes eod_analysis itself once the boxes are down, and the 16:30 timer
+# is DISABLED (unit kept on disk for item 56 and --rollback). The gap was a
+# clock standing in for a dependency: "a slow report must not delay the close"
+# is satisfied by ORDER, since the reports begin after takedown. Consequence,
+# stated plainly: control disabled = no reports. The BOXES still self-close at
+# 16:45 on their own timer, which is the part that must not depend on control.
 # v1.50 (2026-08-25) — THE EOD CHAIN SWITCHES OVER. install_eod_v2.sh repoints
 # the 16:05 unit to eod_conductor_v2 (stop trading, drain, verify, take down
 # per box), adds the 16:30 analysis timer, and DISABLES dtp-harvest (15:55) and
