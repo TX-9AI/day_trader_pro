@@ -1,5 +1,14 @@
 #!/usr/bin/env bash
-# day_trader_pro/devtools.sh — v1.53
+# day_trader_pro/devtools.sh — v1.54
+# v1.54 (2026-08-23) — THE CONDUCTOR VERIFY WAS TIMING OUT AT 22 SECONDS.
+# ssh_util.ssh_run uses SSH_CONNECT_TIMEOUT(12)+10, and --verify walks 200+
+# prefixes against S3 — minutes of work. NVDA returned NO_ANSWER because the
+# TRANSPORT gave up, not the box: a timeout is indistinguishable from a silent
+# box, so the conductor correctly refused to take it down for a reason that did
+# not exist. Now 900s via DTP_VERIFY_TIMEOUT. The operator standing rule
+# already said "--verify must NOT go through option 14" — same ceiling; I built
+# on fleet._exec without carrying it across. Also: the DAILY_BARS phase label
+# said "yfinance" when it rebuilds from the 1m tape.
 # v1.53 (2026-08-25) — the conductor item now leads with VERIFY ONE BOX. The
 # fabricated --dry-run was in the first slot, so the default reach was the
 # check that CANNOT FAIL: it stamps OK on every box without SSHing, and on

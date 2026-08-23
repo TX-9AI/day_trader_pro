@@ -200,7 +200,7 @@ def run(date: str, dry: bool) -> int:
         else:
             _log("COVERAGE", "✅ coverage checked")
 
-    for nm, fn, note in (("DAILY_BARS", _daily_bars, "yfinance daily bars"),
+    for nm, fn, note in (("DAILY_BARS", _daily_bars, "daily bars rebuilt from the 1m tape"),
                          ("LABEL", _label, "price-action session label"),
                          ("EXCURSION", _excursion, "MFE/MAE report"),
                          ("COVERAGE", _coverage, "warehouse coverage")):

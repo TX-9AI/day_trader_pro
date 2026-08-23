@@ -66,12 +66,18 @@ import config                                                   # noqa: E402
 import ec2ops                                                   # noqa: E402
 import fleet                                                    # noqa: E402
 import instance_registry                                        # noqa: E402
+import ssh_util                                                 # noqa: E402
 try:
     import notify                                               # noqa: E402
 except Exception:                                               # noqa: BLE001
     notify = None
 
 INSTALL_DIR = getattr(config, "INSTALL_DIR", "~/options-trader")
+
+# ⚠️ A DRAIN+VERIFY IS MINUTES OF WORK, NOT SECONDS. Generous on purpose: the
+# cost of waiting is a slower close, the cost of timing out is a box held up
+# for a transport failure that looks exactly like a data failure.
+VERIFY_TIMEOUT_S = int(os.environ.get("DTP_VERIFY_TIMEOUT", "900"))
 
 # ⚠️ ONE LINE PER BOX, PARSED. Not scraped prose — s3_push prints a stable
 # key=value line precisely so this can be machine-read.
@@ -190,8 +196,18 @@ def drain_and_verify(symbols, dry: bool) -> dict:
     cmd = (f"cd {INSTALL_DIR} && python3 warehouse/s3_push.py --verify 2>&1 | "
            f"grep -E '^DRAIN|^  SHORT' || true")
     results = {}
+    # 🔴 THE DEFAULT SSH TIMEOUT KILLS THIS. `ssh_util.ssh_run` uses
+    # SSH_CONNECT_TIMEOUT (12s) + 10 = 22 SECONDS, and `--verify` walks 200+
+    # prefixes against S3 — MINUTES of work. Measured 2026-08-23: NVDA came
+    # back NO_ANSWER because the transport gave up, not because the box failed.
+    # ⚠️ THE VERDICT LOGIC WAS RIGHT AND THE TRANSPORT WAS WRONG, which is the
+    # worse shape: a timeout is INDISTINGUISHABLE from a silent box, so it
+    # correctly refused to take a box down for a reason that did not exist.
+    # ⚠️ AND THE OPERATOR'S STANDING RULE ALREADY SAID SO — "`--verify` must NOT
+    # go through option 14" names this exact ceiling. I built on fleet._exec
+    # without carrying the constraint across.
     for sym, ip, _st in fleet.get_fleet(list(symbols)):
-        rc, text, err = fleet._exec(sym, ip, cmd)
+        rc, text, err = ssh_util.ssh_run(ip, cmd, timeout=VERIFY_TIMEOUT_S)
         m = DRAIN_RE.search(text or "")
         if not m:
             # ⚠️ NO LINE IS NOT "OK". A box that did not answer has not been
