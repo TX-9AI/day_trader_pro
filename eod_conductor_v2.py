@@ -1,7 +1,18 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/eod_conductor_v2.py — v2.0.0
+day_trader_pro/eod_conductor_v2.py — v2.0.1
 STOP TRADING → FILL THE BUCKET → VERIFY IT LANDED → TAKE THEM DOWN.
+
+v2.0.1  2026-08-23  AUDIT F7: the COUNTER-DRIFT exception in takedown() was
+DEAD CODE. drain_and_verify filtered the box's output with
+`grep -E '^DRAIN|^  SHORT'`; the drift line s3_push prints begins
+`  ⚠️ SMALL, CONSISTENT SHORTFALL…`, which matches neither, so "COUNTER DRIFT"
+never reached `raw` and every drifted box was HELD — the exact overnight-fleet
+outcome the v2.0.0 docstring says an earlier draft was rewritten to avoid.
+Meanwhile otv4's self_close reads the FULL output and halts on the same
+signal, so the two close paths disagreed despite sharing one verifier. The
+filter now keeps the drift/variance lines too. Fail direction unchanged: a
+box with no parseable DRAIN line is still NO_ANSWER and still held.
 
 v2.0.0  2026-08-25  Operator's statement of intent, verbatim in effect:
 "the boxes stop trading, fill the bucket. Conductor verifies data landed &
@@ -193,8 +204,11 @@ def drain_and_verify(symbols, dry: bool) -> dict:
         return {s: {"verdict": "OK", "short": "0", "dry": True} for s in symbols}
 
     _log("DRAIN", f"draining + verifying {len(symbols)} box(es) against S3")
+    # v2.0.1 — F7: the drift/variance verdict lines MUST survive the filter,
+    # or takedown()'s drift exception can never fire. Keep the whole verdict
+    # block: the DRAIN line, the SHORT samples and the two-space diagnosis.
     cmd = (f"cd {INSTALL_DIR} && python3 warehouse/s3_push.py --verify 2>&1 | "
-           f"grep -E '^DRAIN|^  SHORT' || true")
+           f"grep -E '^DRAIN|^  ' || true")
     results = {}
     # 🔴 THE DEFAULT SSH TIMEOUT KILLS THIS. `ssh_util.ssh_run` uses
     # SSH_CONNECT_TIMEOUT (12s) + 10 = 22 SECONDS, and `--verify` walks 200+

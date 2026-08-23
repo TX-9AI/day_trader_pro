@@ -1,7 +1,22 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/s3_sweep.py  v1.0
+day_trader_pro/s3_sweep.py  v1.1
 Control-side warehouse hygiene. Lists first, deletes only when told twice.
+
+v1.1  2026-08-23  AUDIT F2 + F10 — the third guard bug, and a fourth list.
+  F2: the legacy-hash rule is self-verifying ONLY for streams whose key is
+      sha256(canon(record)). Whole-file streams (ohlc, eod, liquidity_ledger)
+      key on sha256(raw bytes) and store `record` as the file TEXT, so the
+      recompute NEVER matches: `--dups --datatype ohlc --apply` would have
+      classified 100% of the OHLC archive as legacy and deleted it with the
+      panel guard OFF. Proven in sandbox against the real push-side helpers.
+      `--datatype` is now restricted to the record-hashed streams, and the
+      sweep REFUSES if every checked object reads legacy — a rule that proves
+      every object superseded has proven itself wrong.
+  F10: PANEL was a fourth hand-copied list that tests/test_panel_mirror.py
+      did not pin. A symbol added to selector.PANEL but not here would have
+      been CULLED. It now reads selector.PANEL; the literal is the fallback
+      only if the import fails, and says so.
 
 v1.0  2026-08-25  Operator: "Control will be responsible for S3 hygiene and
 maintenance." The traders write and never delete; delete lives here and only
@@ -67,8 +82,25 @@ PREFIX = "raw"
 
 # 🔴 THE 15 SYMBOLS THE FLEET ACTUALLY RUNS. Any key naming one of these is
 # UNTOUCHABLE by this tool, whatever the flags say.
-PANEL = {"NVDA", "SPX", "PLTR", "MU", "QQQ", "GOOGL", "AMZN", "AVGO",
-         "TSLA", "META", "NFLX", "CRM", "UNH", "CVX", "AMD"}
+# v1.1 — ONE LIST. selector.PANEL is the commit that defines the fleet; this
+# file must not carry its own copy (r82's failure class: two state holders,
+# one meaning). The literal survives only as a fallback if the import fails.
+try:
+    import selector as _sel                                     # noqa: E402
+    PANEL = set(s.upper() for s in _sel.PANEL)
+    if not PANEL:
+        raise ImportError("selector.PANEL is empty")
+except Exception as _exc:                                       # noqa: BLE001
+    print(f"  ⚠️ selector.PANEL unavailable ({_exc}) — using the built-in "
+          f"fallback list. Do NOT --apply a culled sweep in this state.")
+    PANEL = {"NVDA", "SPX", "PLTR", "MU", "QQQ", "GOOGL", "AMZN", "AVGO",
+             "TSLA", "META", "NFLX", "CRM", "UNH", "CVX", "AMD"}
+
+# v1.1 — F2. The legacy rule holds only where the push side keyed the object
+# on sha256(canon(record)). Whole-file streams key on the raw bytes and store
+# the text, so the recompute can never match and EVERY object reads legacy.
+RECORD_HASHED_DATATYPES = {"chain_snapshots", "trades", "circuit_breaker",
+                           "signal_journal", "shadow", "candles"}
 
 # 🔴 ALWAYS KEEP, WHATEVER THE PANEL SAYS. VIX is not traded and is therefore
 # not a panel symbol — but the session guard and the condor READ IT, so its
@@ -185,6 +217,14 @@ def find_legacy(s3, datatype: str, limit_prefix: str = "") -> list:
             sys.stdout.flush()
     print(f"\r  checked {checked:,} object(s) under {base} — "
           f"{len(stale):,} legacy            ")
+    # v1.1 — F2. If the rule condemns EVERYTHING it checked, the rule is
+    # wrong for this stream, not the stream. Refuse rather than return a
+    # delete list that is the whole archive.
+    if checked and len(stale) == checked:
+        print(f"  🔴 REFUSING: all {checked:,} checked object(s) read LEGACY — "
+              f"that is the signature of a key basis this rule does not "
+              f"understand, not of duplicates. Nothing returned.")
+        return []
     return stale
 
 
@@ -378,6 +418,11 @@ def main(argv=None) -> int:
         return 0
 
     if a.dups:
+        if a.datatype not in RECORD_HASHED_DATATYPES:
+            print(f"  🔴 REFUSING --dups on '{a.datatype}': the legacy-hash rule "
+                  f"is only self-verifying for {sorted(RECORD_HASHED_DATATYPES)}. "
+                  f"Whole-file streams key on raw bytes and would read 100% legacy.")
+            return 2
         pfx = f"dt={a.dt}/" if a.dt else ""
         print(f"LEGACY-HASH SWEEP — {a.datatype} {pfx or '(all dates)'}")
         print("  keeping any object whose key == sha256(canon(record))[:16]")
