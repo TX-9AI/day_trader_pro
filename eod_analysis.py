@@ -1,7 +1,21 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/eod_analysis.py  v1.0
+day_trader_pro/eod_analysis.py  v1.1
 The reports. Runs AFTER the boxes are down, reads the warehouse.
+
+v1.1  2026-08-23  TWO R-SUITE PHASES, conductor-driven, no new timers.
+  · R_LEDGER — nightly. Shells to the otv4 checkout's tests/r_ledger.py
+    (S3 source; the tool prints its own SOURCE line). Telegram carries the
+    HEADLINE ONLY — R, expectancy, capture — never the table: Telegram is an
+    emergency-services channel and a nightly wall of numbers is how it stops
+    being read.
+  · EDGE_SCAN — FRIDAYS ONLY, and SILENT unless a feature clears the
+    pre-registered bar. Its bar needs 10 sessions and 200 trades per side;
+    nightly it would say NOT YET five times a week and train the operator to
+    scroll past the one night it says something else.
+  Both shell out (the otv4 tools own their argv), both warn-never-stop, and
+  a MISSING otv4 checkout is a NAMED warning — "0 trades" from an empty day
+  and "0 trades" from a wrong path must never look alike.
 
 v1.0  2026-08-25  The second half of the EOD streamline. `eod_conductor_v2.py`
 owns the CLOSE (stop trading → drain → verify → take down); this owns the
@@ -200,11 +214,84 @@ def run(date: str, dry: bool) -> int:
         else:
             _log("COVERAGE", "✅ coverage checked")
 
+    # ── the R suite (otv4 tools, S3-sourced, run HERE on control) ───────
+    # ⚠️ CROSS-REPO BY SUBPROCESS, NEVER BY IMPORT — the modularity contract.
+    # Precedent: the conductor has always shelled to validate_regime.sh in
+    # the trading repo's control checkout.
+    otv4 = os.environ.get("DTP_OTV4_DIR",
+                          os.path.join(os.path.expanduser("~"), "options-trader-v4"))
+
+    def _r_ledger():
+        import subprocess
+        tool = os.path.join(otv4, "tests", "r_ledger.py")
+        if not os.path.exists(tool):
+            _warn(warns, "R_LEDGER", f"otv4 checkout missing at {otv4} — set "
+                                     f"DTP_OTV4_DIR (this is a PATH fault, not "
+                                     f"an empty day)")
+            return
+        r = subprocess.run([sys.executable, tool, "--date", date],
+                           capture_output=True, text=True, timeout=600)
+        print(r.stdout)
+        if r.returncode != 0:
+            _warn(warns, "R_LEDGER", f"rc={r.returncode} "
+                                     f"{(r.stdout or r.stderr or '').strip()[-160:]}")
+            return
+        head = next((l.strip() for l in (r.stdout or "").splitlines()
+                     if l.strip().startswith("BOOK")), "")
+        if head and notify:
+            # HEADLINE ONLY. The full table lives in the analysis log.
+            try:
+                notify.send(f"📐 R {date}: {head[:300]}")
+            except Exception:                                   # noqa: BLE001
+                pass
+        _log("R_LEDGER", f"✅ {head or 'no closed trades in the warehouse'}")
+
+    def _edge_scan():
+        import subprocess
+        tool = os.path.join(otv4, "tests", "edge_scan.py")
+        if not os.path.exists(tool):
+            _warn(warns, "EDGE_SCAN", f"otv4 checkout missing at {otv4}")
+            return
+        r = subprocess.run([sys.executable, tool, "--from",
+                            _weeks_ago(date, 6), "--to", date],
+                           capture_output=True, text=True, timeout=1200)
+        print(r.stdout)
+        if r.returncode != 0:
+            _warn(warns, "EDGE_SCAN", f"rc={r.returncode}")
+            return
+        if "MEETS THE PRE-REGISTERED BAR" in (r.stdout or ""):
+            block = r.stdout.split("MEETS THE PRE-REGISTERED BAR", 1)[1][:500]
+            if notify:
+                try:
+                    notify.send(f"🔎 edge_scan {date}: a feature CLEARED the "
+                                f"pre-registered bar:\n{block}")
+                except Exception:                               # noqa: BLE001
+                    pass
+            _log("EDGE_SCAN", "✅ a feature cleared the bar — paged")
+        else:
+            # ⚠️ SILENT BY DESIGN. NOT YET is the expected answer for weeks,
+            # and a weekly NOT-YET page is how the real page gets ignored.
+            _log("EDGE_SCAN", "✅ ran; nothing clears the bar (expected)")
+
     for nm, fn, note in (("DAILY_BARS", _daily_bars, "daily bars rebuilt from the 1m tape"),
                          ("LABEL", _label, "price-action session label"),
                          ("EXCURSION", _excursion, "MFE/MAE report"),
-                         ("COVERAGE", _coverage, "warehouse coverage")):
+                         ("COVERAGE", _coverage, "warehouse coverage"),
+                         ("R_LEDGER", _r_ledger, "R baseline from the warehouse (headline → Telegram)"),
+                         ("EDGE_SCAN", _edge_scan, "weekly edge scan (Fridays; silent unless the bar clears)")):
+        if nm == "EDGE_SCAN":
+            try:
+                is_friday = datetime.strptime(date, "%Y-%m-%d").weekday() == 4
+            except ValueError:
+                is_friday = False
+            if not is_friday:
+                _log(nm, "skipped — runs Fridays only (its bar needs ~10 "
+                         "sessions; a nightly NOT-YET is noise)")
+                continue
         if dry:
+            # ⚠️ THE DRY RUN SAYS "WOULD", NEVER "DID" — the conductor's own
+            # dry-run fabricates its verification and is labelled; these must
+            # not imply success either.
             _log(nm, f"[dry] would run {note}")
             continue
         _log(nm, note)
@@ -230,6 +317,11 @@ def run(date: str, dry: bool) -> int:
     # and a warned-but-complete report run is not a failed unit — the 08-06
     # lesson where the conductor showed `failed` on healthy nights.
     return 0
+
+
+def _weeks_ago(date: str, n: int) -> str:
+    from datetime import datetime as _dt, timedelta as _td
+    return (_dt.strptime(date, "%Y-%m-%d") - _td(weeks=n)).strftime("%Y-%m-%d")
 
 
 def main(argv=None) -> int:

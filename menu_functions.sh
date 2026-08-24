@@ -14,7 +14,14 @@
 # The numbering is safe: devtools.sh assigns numbers at render from list
 # position, so removing a section cannot desynchronise anything.
 #!/usr/bin/env bash
-# day_trader_pro/menu_functions.sh — GENERATED from devtools.sh — v1.1
+# day_trader_pro/menu_functions.sh — GENERATED from devtools.sh — v1.2
+# v1.2  2026-08-23  R SUITE section: two on-demand decision tools. Both run ON
+#   CONTROL against the otv4 checkout's tests/ (S3 source; the tools print
+#   their own SOURCE line, so an empty day and a broken read cannot look
+#   alike). Neither touches a box, neither is scheduled — the operator's
+#   ruling: decision tools run when a question is being asked, and the
+#   scheduled pair (r_ledger nightly, edge_scan Fridays) belongs to
+#   eod_analysis, not to a timer.
 # One function per menu item, body copied verbatim from the case block.
 # Sourced by devtools.sh; named by menu_registry.sh. No numbers here.
 #
@@ -646,6 +653,36 @@ mi_manifold_health_board() {
 }
 
 # Strategy notes: what each engine SAW   (one/all/some)
+_r_tool() {  # $1 = tool filename under otv4 tests/
+    local OTV4="${DTP_OTV4_DIR:-$HOME/options-trader-v4}"
+    local TOOL="$OTV4/tests/$1"
+    if [ ! -f "$TOOL" ]; then
+        echo "  🔴 $TOOL missing — set DTP_OTV4_DIR (path fault, not an empty day)"
+        pause; return
+    fi
+    read -rp "  Date (YYYY-MM-DD, blank = today) or range (A..B): " d
+    local ARGS=()
+    if [[ "$d" == *..* ]]; then ARGS=(--from "${d%%..*}" --to "${d##*..}");
+    elif [ -n "$d" ]; then ARGS=(--date "$d"); fi
+    "$PY" "$TOOL" "${ARGS[@]}"
+    pause
+}
+
+# Stop / TP sweep — R surface over recorded excursions (S3)
+mi_r_stop_sweep() {
+    echo; echo "  Bounds, not points: a cell matters only when its PESSIMISTIC"
+    echo "  net beats the recorded book. Reads the S3 warehouse from control."
+    _r_tool stop_sweep.py
+}
+
+# Exit replay — trail fit on real premium paths (S3, the expensive one)
+mi_r_exit_replay() {
+    echo; echo "  Rebuilds each trade's premium path from the quote_series"
+    echo "  batches and replays trail/stop/TP ladders. Expensive by design —"
+    echo "  run it when a specific exit question is being asked."
+    _r_tool exit_replay.py
+}
+
 mi_sensor_strategy_notes() {
     echo; echo "  Source: derived_store.db -> strategy_note"
     echo "  One row per strategy EVALUATION - fired AND declined."
