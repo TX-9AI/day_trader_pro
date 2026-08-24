@@ -530,6 +530,55 @@ mi_feed_maintenance_window_fleet_up_nothing_on() {
         read -rp "Enter to continue..." _
 }
 
+# Pre-open rehearsal (decide outside RTH, place nothing) - currently ON
+# r108 (2026-08-24) — MIRRORS THE MAINTENANCE TOGGLE ABOVE, with the sense
+# inverted: the flag file turns the rehearsal OFF, so a box that has never been
+# touched rehearses. See devtools.sh's _REHEARSAL_MARK block for why.
+mi_rehearsal_toggle() {
+    echo; \
+        if _rehearsal_off; then \
+          echo "The pre-open rehearsal is currently OFF."; \
+          echo "With it off, the trading path is not executed until 09:30 - so a"; \
+          echo "build that cannot reach a decision is discovered AT THE BELL."; \
+          echo "That is what happened on 2026-08-24: MarketState() raised on every"; \
+          echo "tick from 09:30:01 for fourteen minutes, on a build that had been"; \
+          echo "sitting on the boxes and looking healthy since 07:40."; \
+          read -rp "Turn the rehearsal back ON? [y/N]: " GO; \
+          if [ "$GO" = "y" ]; then \
+            _RO=$($PY fleet.py run "rm -f ~/options-trader/data/REHEARSAL_OFF; echo REHEARSAL=\$([ -f ~/options-trader/data/REHEARSAL_OFF ] && echo OFF || echo ON)" --all | tee /dev/tty); \
+            _NOFF=$(printf "%s" "$_RO" | grep -c "REHEARSAL=OFF" || true); \
+            if [ "$_NOFF" -eq 0 ]; then \
+              rm -f "$_REHEARSAL_MARK"; \
+              echo; echo "Every box reports ON. The menu line is green because the FLEET is, not because you asked."; \
+            else \
+              echo; echo "!! $_NOFF box(es) still report OFF. The marker STAYS SET and the menu"; \
+              echo "!! line STAYS RED - it would be lying otherwise. Re-run this option."; \
+            fi; \
+          fi; \
+        else \
+          echo "The rehearsal runs the FULL deciding path outside RTH - market state,"; \
+          echo "every strategy, scoring - against live inputs, and PLACES NOTHING."; \
+          echo "Orders are refused at the two choke points by entries_open(), which"; \
+          echo "requires is_rth() AND is_orb_complete(); the gates are evaluated but"; \
+          echo "never authorise. It is not paper-only: it behaves identically LIVE."; \
+          echo; \
+          echo "Turn it OFF only if you want the trading path dormant until 09:30."; \
+          echo "!! With it off, a never-called path is found at the bell. The menu"; \
+          echo "!! line stays RED while it is off, for exactly that reason."; \
+          read -rp "Turn the rehearsal OFF? [y/N]: " GO; \
+          if [ "$GO" = "y" ]; then \
+            $PY fleet.py run "mkdir -p ~/options-trader/data && touch ~/options-trader/data/REHEARSAL_OFF; echo REHEARSAL=\$([ -f ~/options-trader/data/REHEARSAL_OFF ] && echo OFF || echo ON)" --all; \
+            mkdir -p "$SCRIPT_DIR/data" && touch "$_REHEARSAL_MARK"; \
+            echo; echo "Read the per-box REHEARSAL= lines above - every one must say OFF."; \
+            echo "A box that missed it is STILL rehearsing, which is harmless but is"; \
+            echo "not what you just asked for."; \
+            echo "The menu line is RED from the next draw - _menu_label is called inside"; \
+            echo "the render loop, so it re-evaluates on every refresh, not once."; \
+          fi; \
+        fi; \
+        read -rp "Enter to continue..." _
+}
+
 # ── S3 WAREHOUSE (added 2026-08-16, WH.11 — ADDITIVE, nothing replaced) ─────
 # These sit ALONGSIDE the local reports, they do not replace them. The whole
 # point of this stage is to run both sources and diff the OUTPUTS; a menu item

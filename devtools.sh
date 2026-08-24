@@ -333,6 +333,23 @@ _RST=$'\033[0m'
 # menu down rather than one option.
 _MAINT_MARK="$SCRIPT_DIR/data/FLEET_MAINTENANCE"
 _maint_on() { [ -f "$_MAINT_MARK" ]; }
+
+# ── REHEARSAL INDICATOR (r108, 2026-08-24) ───────────────────────────────────
+# Same shape as the maintenance marker above and for the same reasons: the flag
+# that MATTERS lives on each BOX (data/REHEARSAL_OFF, read live by main.py's
+# pre-RTH branch); control keeps its own marker only so the menu draws instantly
+# and while boxes are stopped.
+# ⚠️ INVERTED SENSE, DELIBERATELY. The file's PRESENCE turns the rehearsal OFF.
+# A flag that must be created to ENABLE a safety-adjacent behaviour is a flag
+# that a fresh box, a rebuilt box or a forgotten step leaves in the OFF state
+# silently — and the rehearsal's whole purpose is to run when nobody remembered
+# to check. Absent = on = the default that catches things.
+# ⚠️ AND THE MENU LINE GOES RED WHEN IT IS OFF, not when it is on. Maintenance
+# is red while ACTIVE because an active window means no tape. This is red while
+# INACTIVE because a fleet with no rehearsal is a fleet that will discover a
+# broken build at 09:30:01, which is the exact morning this was written after.
+_REHEARSAL_MARK="$SCRIPT_DIR/data/FLEET_REHEARSAL_OFF"
+_rehearsal_off() { [ -f "$_REHEARSAL_MARK" ]; }
 _colorize() {
   if [ -t 1 ]; then
     sed -E -e "s/^(=+)$/${_BLUE}\1${_RST}/" \

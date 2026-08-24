@@ -90,6 +90,7 @@ MENU=(
   "ITEM|Verify control IAM role sees the fleet (read-only; no start/stop)|mi_verify_control_iam_role_sees_the_fleet_read"
   "ITEM|Blind-alert DRILL on the fleet (sends REAL Telegram, marked DRILL)|mi_blind_alert_drill_on_the_fleet_sends_real_te"
   "ITEM|Feed maintenance window (fleet up, nothing on the wire) - currently OFF|mi_feed_maintenance_window_fleet_up_nothing_on"
+  "ITEM|Pre-open rehearsal (decide outside RTH, place nothing) - currently ON|mi_rehearsal_toggle"
   "SECTION|S3 WAREHOUSE (read-only; runs ALONGSIDE the local reports)"
   "ITEM|S3 SWEEP — hygiene (dups / culled symbols; lists first)|mi_s3_sweep"
   "ITEM|Warehouse inventory & cost|mi_warehouse_inventory_cost"
@@ -117,6 +118,12 @@ _menu_label() {
         printf '%s' "${_RED}*** FEED MAINTENANCE IS ACTIVE - no tape is being collected ***${_RST}"
       else
         printf '%s' "Feed maintenance window (fleet up, nothing on the wire) - currently OFF"
+      fi ;;
+    "Pre-open rehearsal"*)
+      if _rehearsal_off; then
+        printf '%s' "${_RED}🚩 PRE-OPEN REHEARSAL IS OFF - a broken build surfaces at 09:30, not 07:40 🚩${_RST}"
+      else
+        printf '%s' "Pre-open rehearsal (decide outside RTH, place nothing) - currently ON"
       fi ;;
     *) printf '%s' "$1" ;;
   esac

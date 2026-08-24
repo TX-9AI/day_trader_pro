@@ -1,0 +1,56 @@
+[START     ] EOD conductor v2 — 2026-08-24
+[START     ] 15 box(es): AMD, AMZN, AVGO, CRM, CVX, GOOGL, META, MU, NFLX, NVDA, PLTR, QQQ, SPX, TSLA, UNH
+[QUIESCE   ] stopping other writers — the conductor owns the close
+[STOP      ] stopping optionsbot on 15 box(es) — feed and machine STAY UP
+[SETTLE    ] 45s for the bots to flush their stores
+[DRAIN     ] draining + verifying 15 box(es) against S3
+[VERIFY    ] AMD    OK         short=0 local=36338 s3=36402
+[VERIFY    ] AMZN   OK         short=0 local=37242 s3=37308
+[VERIFY    ] AVGO   OK         short=0 local=45833 s3=45898
+[VERIFY    ] CRM    OK         short=0 local=30168 s3=30234
+[VERIFY    ] CVX    OK         short=0 local=19470 s3=19538
+[VERIFY    ] GOOGL  OK         short=0 local=40674 s3=40741
+[VERIFY    ] META   OK         short=0 local=17068 s3=17137
+[VERIFY    ] MU     OK         short=0 local=47193 s3=47261
+[VERIFY    ] NFLX   OK         short=0 local=27784 s3=27854
+[VERIFY    ] NVDA   OK         short=0 local=41721 s3=41790
+[VERIFY    ] PLTR   OK         short=0 local=47923 s3=47994
+[VERIFY    ] QQQ    OK         short=0 local=44568 s3=44639
+[VERIFY    ] SPX    OK         short=0 local=51871 s3=51943
+[VERIFY    ] TSLA   OK         short=0 local=30845 s3=30917
+[VERIFY    ] UNH    OK         short=0 local=33935 s3=34009
+[TAKEDOWN  ] stopping 15 verified box(es)
+[notify] missing DTP_TELEGRAM_TOKEN/DTP_TELEGRAM_CHAT_ID; cannot send.
+VERTIGO — P&L from the warehouse  (2026-08-24)
+
+──────────────
+Net: +$0.00   0 closed  (0W/0L, 0%)
+_No trades found in the warehouse for this window._
+[REPORTS   ] starting the analysis run (reads S3; boxes are off)
+[START      ] EOD analysis — 2026-08-24
+[START      ] boxes are DOWN; every read below is control-side or S3
+[PNL        ] net=+0.00 closed=0 open=0
+[READ    ] trades: 0 object(s) -> 0 unique trade(s)
+[CONSOLIDATE] ⚠️  fleet_trades_2026-08-24.json written but EMPTY — no trades for 2026-08-24
+[DAILY_BARS ] daily bars rebuilt from the 1m tape
+[DAILY_BARS ] ✅ 29 symbol(s) rebuilt from 1m tape
+[LABEL      ] price-action session label
+[LABEL      ] ⚠️  auto_label.py rc=1
+[EXCURSION  ] MFE/MAE report
+[EXCURSION  ] ⚠️  rc=1 No trades/2026-08-24/*_trades.db and no fleet_trades_2026-08-24.json/.csv — nothing collected for that day yet.
+[COVERAGE   ] warehouse coverage
+[COVERAGE   ] ✅ coverage checked
+[R_LEDGER   ] R baseline from the warehouse (headline → Telegram)
+  SOURCE: s3://vertigo-warehouse-tx9ai/raw [trades 2026-08-24..2026-08-24] — 0 object(s) listed, 0 read  (a real, empty result — not a missing path)
+r_ledger: zero closed unrelaxed rows in this window — the baseline does not exist yet
+
+[R_LEDGER   ] ✅ no closed trades in the warehouse
+[EDGE_SCAN  ] skipped — runs Fridays only (its bar needs ~10 sessions; a nightly NOT-YET is noise)
+[DONE       ] 3 warning(s):
+[DONE       ]   · CONSOLIDATE: fleet_trades_2026-08-24.json written but EMPTY — no trades for 2026-08-24
+[DONE       ]   · LABEL: auto_label.py rc=1
+[DONE       ]   · EXCURSION: rc=1 No trades/2026-08-24/*_trades.db and no fleet_trades_2026-08-24.json/.csv — nothing collected for that day yet.
+[notify] missing DTP_TELEGRAM_TOKEN/DTP_TELEGRAM_CHAT_ID; cannot send.
+[DONE      ] 15 verified and stopped · 0 HELD UP
+[DONE      ] all 15 box(es) verified against S3 and stopped
+[REARM     ] re-arming s3-push.timer + candle-logger.timer
