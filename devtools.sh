@@ -344,10 +344,12 @@ _maint_on() { [ -f "$_MAINT_MARK" ]; }
 # that a fresh box, a rebuilt box or a forgotten step leaves in the OFF state
 # silently — and the rehearsal's whole purpose is to run when nobody remembered
 # to check. Absent = on = the default that catches things.
-# ⚠️ AND THE MENU LINE GOES RED WHEN IT IS OFF, not when it is on. Maintenance
-# is red while ACTIVE because an active window means no tape. This is red while
-# INACTIVE because a fleet with no rehearsal is a fleet that will discover a
-# broken build at 09:30:01, which is the exact morning this was written after.
+# ⚠️ RED MEANS THE REHEARSAL IS RUNNING — the same polarity as maintenance at
+# 67, where red means the window is ACTIVE. r108 shipped this inverted, on the
+# reasoning that a fleet with no early warning is the dangerous state; the
+# operator's ask was "a go-red toggle just like 67", and the unusual mode is
+# the red one. It also defaults to the truth: marker absent = rehearsal running
+# = red, which is exactly the state of a box nobody has touched.
 _REHEARSAL_MARK="$SCRIPT_DIR/data/FLEET_REHEARSAL_OFF"
 _rehearsal_off() { [ -f "$_REHEARSAL_MARK" ]; }
 _colorize() {

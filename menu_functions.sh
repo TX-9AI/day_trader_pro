@@ -549,7 +549,8 @@ mi_rehearsal_toggle() {
             _NOFF=$(printf "%s" "$_RO" | grep -c "REHEARSAL=OFF" || true); \
             if [ "$_NOFF" -eq 0 ]; then \
               rm -f "$_REHEARSAL_MARK"; \
-              echo; echo "Every box reports ON. The menu line is green because the FLEET is, not because you asked."; \
+              echo; echo "Every box reports ON. The line is RED because the rehearsal is RUNNING -"; \
+              echo "that is the state you cannot afford to forget when you go live."; \
             else \
               echo; echo "!! $_NOFF box(es) still report OFF. The marker STAYS SET and the menu"; \
               echo "!! line STAYS RED - it would be lying otherwise. Re-run this option."; \
@@ -572,8 +573,8 @@ mi_rehearsal_toggle() {
             echo; echo "Read the per-box REHEARSAL= lines above - every one must say OFF."; \
             echo "A box that missed it is STILL rehearsing, which is harmless but is"; \
             echo "not what you just asked for."; \
-            echo "The menu line is RED from the next draw - _menu_label is called inside"; \
-            echo "the render loop, so it re-evaluates on every refresh, not once."; \
+            echo "The menu line goes PLAIN from the next draw - red means the rehearsal"; \
+            echo "is RUNNING, the same way 67 is red while maintenance is ACTIVE."; \
           fi; \
         fi; \
         read -rp "Enter to continue..." _
