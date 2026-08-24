@@ -1,5 +1,12 @@
 #!/usr/bin/env bash
-# day_trader_pro/devtools.sh — v1.54
+# day_trader_pro/devtools.sh — v1.55
+# v1.55 (2026-08-24) — OPTION 19 WAS EATING ITS OWN ANSWER. manifold_health
+# exits 1 when the board is not GREEN (its job); fleet.py treated non-zero as a
+# failed box and DISCARDED STDOUT, so all 15 printed rc=1 with no output while
+# having computed a correct board. Fixed in BOTH places: option 19 now uses the
+# venv interpreter with 2>&1 and || true, and fleet.py cmd_run prints stdout
+# even on a non-zero rc — a dozen sqlite3 items were one missing table from the
+# same silence.
 # v1.54 (2026-08-23) — THE CONDUCTOR VERIFY WAS TIMING OUT AT 22 SECONDS.
 # ssh_util.ssh_run uses SSH_CONNECT_TIMEOUT(12)+10, and --verify walks 200+
 # prefixes against S3 — minutes of work. NVDA returned NO_ANSWER because the

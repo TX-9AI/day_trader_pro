@@ -648,7 +648,19 @@ mi_manifold_health_board() {
     echo; echo "  Per-stream bulbs from tools/manifold_health.py."
     echo "  GREEN fresh · AMBER stale · RED missing · WHITE idle (outside RTH)"
     SC=$(ask_scope)
-    $PY fleet.py run "cd $INSTALL_DIR; python3 tools/manifold_health.py" $SC
+    # 🔴 `|| true` IS LOad-BEARING. manifold_health exits 1 whenever the board
+    # is not GREEN — which is its JOB — and the fleet runner treats non-zero as
+    # a failed box and DISCARDS STDOUT. Measured 2026-08-24 07:35: all 15 boxes
+    # printed `rc=1` with NO OUTPUT, and the board they had computed was thrown
+    # away. The tool was working perfectly; the menu was eating the answer.
+    # ⚠️ THIS IS THE 2026-07-29 RULE IN A NEW PLACE: a fleet command must exit 0
+    # REGARDLESS OF FINDINGS, or a legitimate red result is indistinguishable
+    # from a crash. A health board is the worst possible place for that, because
+    # "not green" is the exact case it exists to report.
+    # ⚠️ AND `2>&1` — without it a traceback vanishes and rc=1 says nothing about
+    # why. venv python for the same reason as everywhere else: bare python3
+    # resolves outside the repo venv.
+    $PY fleet.py run "cd $INSTALL_DIR && venv/bin/python tools/manifold_health.py 2>&1 || true" $SC
     pause
 }
 

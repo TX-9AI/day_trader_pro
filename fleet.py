@@ -192,6 +192,20 @@ def cmd_run(command, only=None, include_all=False):
             print((out.rstrip() or "(no output)"))
         else:
             fails += 1
+            # 🔴 STDOUT SURVIVES A NON-ZERO EXIT. It did not until 2026-08-24,
+            # and the cost was total: every box ran manifold_health, computed a
+            # full board, exited 1 BECAUSE THE BOARD WAS NOT GREEN — which is
+            # the tool's job — and the runner printed `🚨 rc=1` and nothing
+            # else. Fifteen correct reports discarded, and the operator was
+            # left reading a fleet-wide failure that had not happened.
+            # ⚠️ THE STANDING RULE SAID "MAKE COMMANDS EXIT 0", and that is
+            # still right for the caller. But it puts the burden on every
+            # command author forever, and a dozen sqlite3 menu items are one
+            # missing table away from the same silence. **A non-zero rc means
+            # "it failed", never "it said nothing" — so print what it said and
+            # let the operator judge.**
+            if out.rstrip():
+                print(out.rstrip())
             print(f"🚨 rc={rc} {err.strip()[:200]}")
     for s, ip, st in skipped:
         print(f"── {s} ({ip or '-'}) · skipped ({st})")
