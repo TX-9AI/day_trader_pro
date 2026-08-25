@@ -882,6 +882,26 @@ mi_sensor_strategy_notes() {
     pause
 }
 
+# 🔴 r126b — THE PLAN BOARD. Ticks across, variables down — the operator's own
+# picture of it: "a table with a column of ticks and rows of variables it is
+# checking". Reads plan_tick (the spine: what fires it, what kills it, what it
+# pays) joined to plan_check (long format: one row per VARIABLE per plan).
+# ⚠️ DECLINES ARE THE POINT. A plan that never fired is the counterfactual arm
+# the fit needs most, and it is exactly what strategy_note cannot express —
+# that table records only that a strategy was ASKED.
+mi_sensor_plan_board() {
+    echo; echo "  Source: derived_store.db -> plan_tick + plan_check"
+    echo "  Every plan, every cycle: verdict, R, and each variable it checked."
+    echo "  ⚠️ A plan is not a trade. TAKE means the plan qualified, not that"
+    echo "     anything was bought — the engine is OBSERVE-ONLY."
+    read -rp "  Date (YYYY-MM-DD, blank = today): " d
+    [ -z "$d" ] && d=$(TZ=America/New_York date +%F)
+    _et_bounds "$d" || { pause; return 0; }
+    SC=$(ask_scope)
+    $PY fleet.py run "cd $INSTALL_DIR; sqlite3 -header -column data/derived_store.db \"SELECT strategy, verdict, COUNT(*) n, ROUND(MIN(r_now),2) r_lo, ROUND(MAX(r_now),2) r_hi, ROUND(AVG(underlying),2) px FROM plan_tick WHERE ts_epoch >= $ET_FROM AND ts_epoch < $ET_TO GROUP BY strategy, verdict ORDER BY strategy, verdict;\" 2>&1; echo; echo 'WHICH CHECK FAILED, AND HOW OFTEN:'; sqlite3 -header -column data/derived_store.db \"SELECT strategy, check_name, verdict, COUNT(*) n, ROUND(MIN(value),2) lo, ROUND(MAX(value),2) hi FROM plan_check WHERE ts_epoch >= $ET_FROM AND ts_epoch < $ET_TO GROUP BY strategy, check_name, verdict ORDER BY strategy, check_name, verdict;\" 2>&1; echo ok" $SC
+    pause
+}
+
 # Plan ledger: intent and its outcome    (one/all/some)
 mi_sensor_plan_ledger() {
     echo; echo "  Source: derived_store.db -> plan_ledger"
