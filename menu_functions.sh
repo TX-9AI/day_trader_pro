@@ -633,6 +633,27 @@ mi_debug_log_toggle() {
     read -rp "Enter to continue..." _
 }
 
+# Disk usage — top consumers per box (one/all/some)
+# Added 2026-08-25 after SPX filled its 6.7G root mid-bake and the failure read
+# as "fatal: unable to write loose object file" — a git error for a disk
+# problem. Three guesses were spent on the repo, /var and the journal before
+# anyone measured the ROOT FILESYSTEM, which is where the answer was: /usr
+# 2.4G, /swapfile 2.1G, /home 1.2G. This is that measurement, one keystroke.
+# ⚠️ `du -x` STAYS ON ONE FILESYSTEM. Without it the walk descends into /proc,
+# /sys and every snap loopback mount and the numbers become nonsense.
+# ⚠️ EXITS 0 REGARDLESS. `2>/dev/null` swallows the permission noise from
+# directories even root skips, and the pipeline's status comes from head — so a
+# box with an unreadable path still reports what it CAN see rather than having
+# its output discarded by the runner (the 2026-07-29 grep -c lesson).
+mi_disk_usage() {
+    echo
+    SC=$(ask_scope)
+    echo "Root filesystem usage, then the top consumers:"
+    echo
+    $PY fleet.py run 'df -h / | tail -1 | awk "{print \"DISK \"\$5\" used, \"\$4\" free of \"\$2}"; sudo du -xsh /* 2>/dev/null | sort -rh | head -6' $SC
+    pause
+}
+
 # ── S3 WAREHOUSE (added 2026-08-16, WH.11 — ADDITIVE, nothing replaced) ─────
 # These sit ALONGSIDE the local reports, they do not replace them. The whole
 # point of this stage is to run both sources and diff the OUTPUTS; a menu item
