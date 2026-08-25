@@ -33,7 +33,7 @@ MENU=(
   "ITEM|Hotfix launcher (repo synch & flush)|mi_hotfix_launcher_repo_synch_flush"
   "SECTION|SENSORS (derived stores; read-only, one/all/some)"
   "ITEM|Manifold health board|mi_manifold_health_board"
-  "ITEM|Strategy notes        (what each engine SAW)|mi_sensor_strategy_notes"
+  "ITEM|Strategy notes        (what each engine SAW - signals, not trades)|mi_sensor_strategy_notes"
   "ITEM|Plan ledger           (intent + terminal reason)|mi_sensor_plan_ledger"
   "ITEM|Exit counterfactual   (flow vs the stop)|mi_sensor_exit_counterfactual"
   "ITEM|Fire snapshot         (derived vector at entry)|mi_sensor_fire_snapshot"

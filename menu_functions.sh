@@ -819,13 +819,36 @@ mi_r_exit_replay() {
     _r_tool exit_replay.py
 }
 
+# 🔴 r124 (2026-08-25) — THE COLUMN IS `signalled`, NOT `fired`.
+# Operator, reading this report: "Those have not fired at all." He was right,
+# and the header was telling him otherwise. Traced to ONE LINE in main.py:
+#     w.writer.write(name, ctx, fired=signal is not None)
+# `fired` means THE STRATEGY RETURNED A SIGNAL OBJECT. Nothing about dispatch,
+# the pairing gate, the position check, or an order. So NFLX's TrendCS2nd|499
+# is 499 ticks on which TC.6 produced a signal and was refused downstream every
+# single time — and CRM's CondorLeg2nd|406|0|406 is a live second-leg plan
+# re-signalling on 406 consecutive ticks with a position already open.
+# ⚠️ THE OLD HEADER READ "fired AND declined", WHICH SCANS AS TRADED-VS-NOT.
+# The gap between "signalled" and "traded" is exactly where every dispatch gate
+# lives — the space the operator is trying to see into — and the report was
+# collapsing it silently. Same failure class as the repo's own named enemy:
+# output that renders cleanly while meaning something other than it appears.
+# ⚠️ AND THE COUNTS ARE TICK-INFLATED. A persisted setup is re-read every tick,
+# so ONE event counts hundreds of times (recorded 2026-08-11 about the
+# predecessor: "liq_map.recent_sweep PERSISTS once set"). `signalled` is a
+# count of TICKS, never of trades. The header now says so.
 mi_sensor_strategy_notes() {
     echo; echo "  Source: derived_store.db -> strategy_note"
-    echo "  One row per strategy EVALUATION - fired AND declined."
+    echo "  One row per strategy EVALUATION."
+    echo "  ⚠️ signalled = the strategy RETURNED A SIGNAL on that tick."
+    echo "     It is NOT a trade: dispatch, the pairing gate, the position"
+    echo "     check and the entry gate all sit downstream. And a persisted"
+    echo "     setup re-signals every tick, so one event counts many times."
+    echo "     For trades taken, read trades.db - not this table."
     read -rp "  Date (YYYY-MM-DD, blank = today): " d
     [ -z "$d" ] && d=$(date +%F)
     SC=$(ask_scope)
-    $PY fleet.py run "cd $INSTALL_DIR; sqlite3 data/derived_store.db \"SELECT strategy, SUM(fired) AS fired, COUNT(*)-SUM(fired) AS declined, COUNT(*) AS looks FROM strategy_note WHERE date(ts_epoch,'unixepoch','localtime')='$d' GROUP BY strategy ORDER BY looks DESC;\" 2>&1; echo ok" $SC
+    $PY fleet.py run "cd $INSTALL_DIR; sqlite3 data/derived_store.db \"SELECT strategy, SUM(fired) AS signalled, COUNT(*)-SUM(fired) AS quiet, COUNT(*) AS looks FROM strategy_note WHERE date(ts_epoch,'unixepoch','localtime')='$d' GROUP BY strategy ORDER BY looks DESC;\" 2>&1; echo ok" $SC
     pause
 }
 
