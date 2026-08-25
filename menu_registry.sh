@@ -91,6 +91,7 @@ MENU=(
   "ITEM|Blind-alert DRILL on the fleet (sends REAL Telegram, marked DRILL)|mi_blind_alert_drill_on_the_fleet_sends_real_te"
   "ITEM|Feed maintenance window (fleet up, nothing on the wire) - currently OFF|mi_feed_maintenance_window_fleet_up_nothing_on"
   "ITEM|Pre-open rehearsal — ask the fleet, then turn it on/off|mi_rehearsal_toggle"
+  "ITEM|Debug logging — ask the fleet, then turn it on/off|mi_debug_log_toggle"
   "SECTION|S3 WAREHOUSE (read-only; runs ALONGSIDE the local reports)"
   "ITEM|S3 SWEEP — hygiene (dups / culled symbols; lists first)|mi_s3_sweep"
   "ITEM|Warehouse inventory & cost|mi_warehouse_inventory_cost"

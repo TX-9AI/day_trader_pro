@@ -593,6 +593,46 @@ mi_rehearsal_toggle() {
     read -rp "Enter to continue..." _
 }
 
+# Debug logging — ask the fleet, then turn it on/off
+# Same shape as the rehearsal above: ASK, then offer. No state on control.
+# The flag lives on each BOX at data/DEBUG_LOG and main.py applies it at import
+# AND on every tick, so it overrides however a box came to be in DEBUG — an
+# edited config, a systemd Environment=, a library that called basicConfig —
+# and removing it genuinely restores config.LOG_LEVEL.
+mi_debug_log_toggle() {
+    echo
+    echo "Asking the fleet for the CURRENT log level..."
+    echo
+    _DS=$($PY fleet.py run "cd $INSTALL_DIR; echo LOG=\$([ -f data/DEBUG_LOG ] && echo DEBUG || grep -m1 '^LOG_LEVEL' config.py | sed 's/.*\"\\(.*\\)\".*/\\1/')" --all)
+    printf '%s\n' "$_DS"
+    _DBG=$(printf '%s' "$_DS" | grep -c "LOG=DEBUG" || true)
+    _NRM=$(printf '%s' "$_DS" | grep -cE "LOG=(INFO|WARNING|ERROR)" || true)
+    echo
+    echo "  DEBUG: $_DBG     normal: $_NRM"
+    if [ "$_DBG" -gt 0 ] && [ "$_NRM" -gt 0 ]; then
+      echo "  ${_RED}🐞 THE FLEET DISAGREES WITH ITSELF - some boxes are verbose, some are not.${_RST}"
+    fi
+    echo
+    echo "  DEBUG is not free: 2026-08-24 ran ~300k lines a box, most of it raw"
+    echo "  DXFeed payloads, and it BURIES the decision lines a postmortem needs."
+    echo "  Turn it on to chase something; turn it off when you are done."
+    echo
+    read -rp "Set debug logging [on/off/enter=leave as is]: " _WANT
+    case "$_WANT" in
+      on|ON|y|Y)
+        $PY fleet.py run "mkdir -p $INSTALL_DIR/data && touch $INSTALL_DIR/data/DEBUG_LOG; echo LOG=\$([ -f $INSTALL_DIR/data/DEBUG_LOG ] && echo DEBUG || echo normal)" --all
+        echo; echo "Every line above must read DEBUG. Applies on the next tick - no restart."
+        ;;
+      off|OFF|n|N)
+        $PY fleet.py run "rm -f $INSTALL_DIR/data/DEBUG_LOG; echo LOG=\$([ -f $INSTALL_DIR/data/DEBUG_LOG ] && echo DEBUG || echo normal)" --all
+        echo; echo "Every line above must read normal. The bot forces config.LOG_LEVEL on"
+        echo "the next tick, whatever had put the box in DEBUG."
+        ;;
+      *) echo; echo "Left unchanged." ;;
+    esac
+    read -rp "Enter to continue..." _
+}
+
 # ── S3 WAREHOUSE (added 2026-08-16, WH.11 — ADDITIVE, nothing replaced) ─────
 # These sit ALONGSIDE the local reports, they do not replace them. The whole
 # point of this stage is to run both sources and diff the OUTPUTS; a menu item
