@@ -530,54 +530,67 @@ mi_feed_maintenance_window_fleet_up_nothing_on() {
         read -rp "Enter to continue..." _
 }
 
-# Pre-open rehearsal (decide outside RTH, place nothing) - currently ON
-# r108 (2026-08-24) — MIRRORS THE MAINTENANCE TOGGLE ABOVE, with the sense
-# inverted: the flag file turns the rehearsal OFF, so a box that has never been
-# touched rehearses. See devtools.sh's _REHEARSAL_MARK block for why.
+# Pre-open rehearsal — ask the fleet, then turn it on/off
+# The flag itself still lives on each BOX at data/REHEARSAL_OFF, read LIVE by
+# main.py every pass (no restart, survives a bake). Its PRESENCE disables, so a
+# fresh or rebuilt box rehearses — the default catches things.
 mi_rehearsal_toggle() {
-    echo; \
-        if _rehearsal_off; then \
-          echo "The pre-open rehearsal is currently OFF."; \
-          echo "With it off, the trading path is not executed until 09:30 - so a"; \
-          echo "build that cannot reach a decision is discovered AT THE BELL."; \
-          echo "That is what happened on 2026-08-24: MarketState() raised on every"; \
-          echo "tick from 09:30:01 for fourteen minutes, on a build that had been"; \
-          echo "sitting on the boxes and looking healthy since 07:40."; \
-          read -rp "Turn the rehearsal back ON? [y/N]: " GO; \
-          if [ "$GO" = "y" ]; then \
-            _RO=$($PY fleet.py run "rm -f ~/options-trader/data/REHEARSAL_OFF; echo REHEARSAL=\$([ -f ~/options-trader/data/REHEARSAL_OFF ] && echo OFF || echo ON)" --all | tee /dev/tty); \
-            _NOFF=$(printf "%s" "$_RO" | grep -c "REHEARSAL=OFF" || true); \
-            if [ "$_NOFF" -eq 0 ]; then \
-              rm -f "$_REHEARSAL_MARK"; \
-              echo; echo "Every box reports ON. The line is RED because the rehearsal is RUNNING -"; \
-              echo "that is the state you cannot afford to forget when you go live."; \
-            else \
-              echo; echo "!! $_NOFF box(es) still report OFF. The marker STAYS SET and the menu"; \
-              echo "!! line STAYS RED - it would be lying otherwise. Re-run this option."; \
-            fi; \
-          fi; \
-        else \
-          echo "The rehearsal runs the FULL deciding path outside RTH - market state,"; \
-          echo "every strategy, scoring - against live inputs, and PLACES NOTHING."; \
-          echo "Orders are refused at the two choke points by entries_open(), which"; \
-          echo "requires is_rth() AND is_orb_complete(); the gates are evaluated but"; \
-          echo "never authorise. It is not paper-only: it behaves identically LIVE."; \
-          echo; \
-          echo "Turn it OFF only if you want the trading path dormant until 09:30."; \
-          echo "!! With it off, a never-called path is found at the bell. The menu"; \
-          echo "!! line stays RED while it is off, for exactly that reason."; \
-          read -rp "Turn the rehearsal OFF? [y/N]: " GO; \
-          if [ "$GO" = "y" ]; then \
-            $PY fleet.py run "mkdir -p ~/options-trader/data && touch ~/options-trader/data/REHEARSAL_OFF; echo REHEARSAL=\$([ -f ~/options-trader/data/REHEARSAL_OFF ] && echo OFF || echo ON)" --all; \
-            mkdir -p "$SCRIPT_DIR/data" && touch "$_REHEARSAL_MARK"; \
-            echo; echo "Read the per-box REHEARSAL= lines above - every one must say OFF."; \
-            echo "A box that missed it is STILL rehearsing, which is harmless but is"; \
-            echo "not what you just asked for."; \
-            echo "The menu line goes PLAIN from the next draw - red means the rehearsal"; \
-            echo "is RUNNING, the same way 67 is red while maintenance is ACTIVE."; \
-          fi; \
-        fi; \
-        read -rp "Enter to continue..." _
+    # r110 — ASK THE FLEET, THEN OFFER. No marker, no colour, no state on
+    # control at all.
+    #
+    # 🔴 THREE REVISIONS WERE SPENT KEEPING A COPY HONEST. r108 mirrored item
+    # 67: a marker file on CONTROL standing in for a flag that lives on the
+    # BOXES, so the menu could be drawn instantly. 67's own comment admits the
+    # weakness — "the marker is a HINT, not the truth" — and 67 at least has a
+    # separate option that verifies against the boxes. 68 had none, and the
+    # first time the two disagreed the row cheerfully reported the opposite of
+    # reality: fifteen boxes OFF, the line saying ON, because control had never
+    # been told. r109 then corrected the COLOUR of a label that was reading the
+    # wrong machine, which fixed nothing.
+    #
+    # ⚠️ THE FAULT WAS A SECOND SOURCE OF TRUTH FOR A FACT THAT ALREADY EXISTS.
+    # The boxes know. Nothing else needs to, and anything else that thinks it
+    # does will eventually be wrong. So this option holds no state: it asks,
+    # prints what came back, and only then offers to change it.
+    #
+    # ⚠️ THE COST, STATED: there is no at-a-glance row any more. You must select
+    # 68 to learn the state. A menu line cannot poll fifteen machines on every
+    # draw — that is real, and it is why 67 is built the way it is — so the
+    # choice was between a line that is sometimes wrong and no line at all.
+    # A line that is wrong is worse than a line that is absent.
+    echo
+    echo "Asking the fleet for the CURRENT rehearsal state..."
+    echo
+    _RS=$($PY fleet.py run "cd $INSTALL_DIR; echo REHEARSAL=\$([ -f data/REHEARSAL_OFF ] && echo OFF || echo ON)" --all)
+    printf '%s\n' "$_RS"
+    _ON=$(printf '%s' "$_RS" | grep -c "REHEARSAL=ON" || true)
+    _OFF=$(printf '%s' "$_RS" | grep -c "REHEARSAL=OFF" || true)
+    echo
+    echo "  ON: $_ON     OFF: $_OFF"
+    if [ "$_ON" -gt 0 ] && [ "$_OFF" -gt 0 ]; then
+      echo "  ${_RED}🚩 THE FLEET DISAGREES WITH ITSELF - some boxes rehearse, some do not.${_RST}"
+      echo "  Whichever way you answer below applies to ALL of them and settles it."
+    fi
+    echo
+    echo "  ON  = the trading path runs outside RTH against live inputs and"
+    echo "        PLACES NOTHING (entries_open() refuses; is_rth() AND"
+    echo "        is_orb_complete() are both required, in paper AND live)."
+    echo "  OFF = the trading path is dormant until 09:30, so a build that"
+    echo "        cannot reach a decision is discovered AT THE BELL."
+    echo
+    read -rp "Set the rehearsal [on/off/enter=leave as is]: " _WANT
+    case "$_WANT" in
+      on|ON|y|Y)
+        $PY fleet.py run "rm -f $INSTALL_DIR/data/REHEARSAL_OFF; echo REHEARSAL=\$([ -f $INSTALL_DIR/data/REHEARSAL_OFF ] && echo OFF || echo ON)" --all
+        echo; echo "Every line above must read ON. Read them - this option asserts nothing."
+        ;;
+      off|OFF|n|N)
+        $PY fleet.py run "mkdir -p $INSTALL_DIR/data && touch $INSTALL_DIR/data/REHEARSAL_OFF; echo REHEARSAL=\$([ -f $INSTALL_DIR/data/REHEARSAL_OFF ] && echo OFF || echo ON)" --all
+        echo; echo "Every line above must read OFF. Read them - this option asserts nothing."
+        ;;
+      *) echo; echo "Left unchanged." ;;
+    esac
+    read -rp "Enter to continue..." _
 }
 
 # ── S3 WAREHOUSE (added 2026-08-16, WH.11 — ADDITIVE, nothing replaced) ─────

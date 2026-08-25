@@ -334,24 +334,10 @@ _RST=$'\033[0m'
 _MAINT_MARK="$SCRIPT_DIR/data/FLEET_MAINTENANCE"
 _maint_on() { [ -f "$_MAINT_MARK" ]; }
 
-# ── REHEARSAL INDICATOR (r108, 2026-08-24) ───────────────────────────────────
-# Same shape as the maintenance marker above and for the same reasons: the flag
-# that MATTERS lives on each BOX (data/REHEARSAL_OFF, read live by main.py's
-# pre-RTH branch); control keeps its own marker only so the menu draws instantly
-# and while boxes are stopped.
-# ⚠️ INVERTED SENSE, DELIBERATELY. The file's PRESENCE turns the rehearsal OFF.
-# A flag that must be created to ENABLE a safety-adjacent behaviour is a flag
-# that a fresh box, a rebuilt box or a forgotten step leaves in the OFF state
-# silently — and the rehearsal's whole purpose is to run when nobody remembered
-# to check. Absent = on = the default that catches things.
-# ⚠️ RED MEANS THE REHEARSAL IS RUNNING — the same polarity as maintenance at
-# 67, where red means the window is ACTIVE. r108 shipped this inverted, on the
-# reasoning that a fleet with no early warning is the dangerous state; the
-# operator's ask was "a go-red toggle just like 67", and the unusual mode is
-# the red one. It also defaults to the truth: marker absent = rehearsal running
-# = red, which is exactly the state of a box nobody has touched.
-_REHEARSAL_MARK="$SCRIPT_DIR/data/FLEET_REHEARSAL_OFF"
-_rehearsal_off() { [ -f "$_REHEARSAL_MARK" ]; }
+# ── r110 — NO REHEARSAL MARKER. Deleted with the label it fed: item 68 asks the
+# BOXES when you select it. A marker on control is a second source of truth for
+# a fact the boxes already hold, and the first time the two disagreed the menu
+# reported the opposite of reality. 67 keeps its marker; it has a verifier.
 _colorize() {
   if [ -t 1 ]; then
     sed -E -e "s/^(=+)$/${_BLUE}\1${_RST}/" \
