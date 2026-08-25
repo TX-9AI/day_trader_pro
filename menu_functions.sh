@@ -837,6 +837,35 @@ mi_r_exit_replay() {
 # so ONE event counts hundreds of times (recorded 2026-08-11 about the
 # predecessor: "liq_map.recent_sweep PERSISTS once set"). `signalled` is a
 # count of TICKS, never of trades. The header now says so.
+
+# ── ET DAY BOUNDS, COMPUTED ON CONTROL ────────────────────────────────────────
+# 🔴 r125 (2026-08-25) — THE REPORTS WERE BUCKETING BY THE BOX'S DAY, AND THE
+# BOXES RUN UTC. `date(ts,'unixepoch','localtime')` reads localtime as UTC on
+# the fleet, so everything after 20:00 ET filed under TOMORROW. Operator, who
+# had been living with it: "Any time I run a report for 'today' after the
+# session ends it fails." That is this, exactly — and it means last night's
+# whole evening of work was filed under 08-25 while we read it as 08-24.
+# ⚠️ NOT AN OFFSET. The first fix written here was `'-4 hours'`, which is EDT
+# and silently becomes wrong in November — the same DST trap that argues
+# against setting the boxes to Eastern at all. `date` on control consults the
+# tz database, so these bounds are correct on both sides of a DST change and
+# on the two days a year when an ET day is 23 or 25 hours long.
+# ⚠️ AND IT FILTERS RAW EPOCH. No conversion happens on the box, so the query
+# is immune to whatever timezone any individual box is set to.
+_et_bounds() {
+    # ⚠️ THE NEXT DAY IS COMPUTED AS A DATE, THEN CONVERTED. Writing
+    # `date -d "$1 00:00:00 +1 day"` looks right and is not: GNU date parses
+    # the `+1` as a TIMEZONE OFFSET, not an increment, and returns a 19-hour
+    # "day". Caught by asserting the span, which is why the span is asserted.
+    _nxt=$(date -d "$1 +1 day" +%F 2>/dev/null)
+    ET_FROM=$(TZ=America/New_York date -d "$1 00:00:00" +%s 2>/dev/null)
+    ET_TO=$(TZ=America/New_York date -d "$_nxt 00:00:00" +%s 2>/dev/null)
+    if [ -z "$ET_FROM" ] || [ -z "$ET_TO" ]; then
+        echo "  bad date: $1 (expected YYYY-MM-DD)"; return 1
+    fi
+    return 0
+}
+
 mi_sensor_strategy_notes() {
     echo; echo "  Source: derived_store.db -> strategy_note"
     echo "  One row per strategy EVALUATION."
@@ -846,9 +875,10 @@ mi_sensor_strategy_notes() {
     echo "     setup re-signals every tick, so one event counts many times."
     echo "     For trades taken, read trades.db - not this table."
     read -rp "  Date (YYYY-MM-DD, blank = today): " d
-    [ -z "$d" ] && d=$(date +%F)
+    [ -z "$d" ] && d=$(TZ=America/New_York date +%F)
+    _et_bounds "$d" || { pause; return 0; }
     SC=$(ask_scope)
-    $PY fleet.py run "cd $INSTALL_DIR; sqlite3 data/derived_store.db \"SELECT strategy, SUM(fired) AS signalled, COUNT(*)-SUM(fired) AS quiet, COUNT(*) AS looks FROM strategy_note WHERE date(ts_epoch,'unixepoch','localtime')='$d' GROUP BY strategy ORDER BY looks DESC;\" 2>&1; echo ok" $SC
+    $PY fleet.py run "cd $INSTALL_DIR; sqlite3 data/derived_store.db \"SELECT strategy, SUM(fired) AS signalled, COUNT(*)-SUM(fired) AS quiet, COUNT(*) AS looks FROM strategy_note WHERE ts_epoch >= $ET_FROM AND ts_epoch < $ET_TO GROUP BY strategy ORDER BY looks DESC;\" 2>&1; echo ok" $SC
     pause
 }
 
@@ -859,9 +889,10 @@ mi_sensor_plan_ledger() {
     echo "  WIPED_BY_RESTART is its own category - the cost of deploying"
     echo "  mid-session, which cost four boxes their setups on 2026-08-21."
     read -rp "  Date (YYYY-MM-DD, blank = today): " d
-    [ -z "$d" ] && d=$(date +%F)
+    [ -z "$d" ] && d=$(TZ=America/New_York date +%F)
+    _et_bounds "$d" || { pause; return 0; }
     SC=$(ask_scope)
-    $PY fleet.py run "cd $INSTALL_DIR; sqlite3 -header -column data/derived_store.db \"SELECT strategy, state, COALESCE(terminal_reason,'(live)') AS reason, COUNT(*) AS n FROM plan_ledger WHERE date(created_ts,'unixepoch','localtime')='$d' GROUP BY strategy, state, reason ORDER BY n DESC;\" 2>&1; echo ok" $SC
+    $PY fleet.py run "cd $INSTALL_DIR; sqlite3 -header -column data/derived_store.db \"SELECT strategy, state, COALESCE(terminal_reason,'(live)') AS reason, COUNT(*) AS n FROM plan_ledger WHERE created_ts >= $ET_FROM AND created_ts < $ET_TO GROUP BY strategy, state, reason ORDER BY n DESC;\" 2>&1; echo ok" $SC
     pause
 }
 
@@ -882,7 +913,7 @@ mi_sensor_fire_snapshot() {
     echo "  Everything derived at the INSTANT a trade fired. Pre-r61 trades"
     echo "  have no row - that is honest, they genuinely had none."
     SC=$(ask_scope)
-    $PY fleet.py run "cd $INSTALL_DIR; sqlite3 data/derived_store.db \"SELECT trade_id, datetime(fired_ts,'unixepoch','localtime') AS fired, substr(payload,1,160) FROM fire_snapshot ORDER BY fired_ts DESC LIMIT 10;\" 2>&1; echo ok" $SC
+    $PY fleet.py run "cd $INSTALL_DIR; sqlite3 data/derived_store.db \"SELECT trade_id, datetime(fired_ts,'unixepoch') AS fired_utc, substr(payload,1,160) FROM fire_snapshot ORDER BY fired_ts DESC LIMIT 10;\" 2>&1; echo ok" $SC
     pause
 }
 
