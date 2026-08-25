@@ -54,3 +54,117 @@ r_ledger: zero closed unrelaxed rows in this window — the baseline does not ex
 [DONE      ] 15 verified and stopped · 0 HELD UP
 [DONE      ] all 15 box(es) verified against S3 and stopped
 [REARM     ] re-arming s3-push.timer + candle-logger.timer
+[START     ] EOD conductor v2 — 2026-08-25
+[START     ] 15 box(es): AMD, AMZN, AVGO, CRM, CVX, GOOGL, META, MU, NFLX, NVDA, PLTR, QQQ, SPX, TSLA, UNH
+[QUIESCE   ] stopping other writers — the conductor owns the close
+[STOP      ] stopping optionsbot on 15 box(es) — feed and machine STAY UP
+[SETTLE    ] 45s for the bots to flush their stores
+[DRAIN     ] draining + verifying 15 box(es) against S3
+[VERIFY    ] AMD    OK         short=0 local=43001 s3=43082
+[VERIFY    ] AMZN   SHORT      short=1 local=42289 s3=42371
+[VERIFY    ] AVGO   OK         short=0 local=51295 s3=51376
+[VERIFY    ] CRM    SHORT      short=1 local=35132 s3=35215
+[VERIFY    ] CVX    SHORT      short=1 local=24631 s3=24715
+[VERIFY    ] GOOGL  SHORT      short=1 local=45351 s3=45431
+[VERIFY    ] META   OK         short=0 local=23711 s3=23797
+[VERIFY    ] MU     OK         short=0 local=53845 s3=53929
+[VERIFY    ] NFLX   SHORT      short=1 local=32726 s3=32800
+[VERIFY    ] NVDA   OK         short=0 local=48315 s3=48402
+[VERIFY    ] PLTR   SHORT      short=1 local=53093 s3=53180
+[VERIFY    ] QQQ    OK         short=0 local=51212 s3=51300
+[VERIFY    ] SPX    OK         short=0 local=58270 s3=58379
+[VERIFY    ] TSLA   SHORT      short=1 local=36550 s3=36639
+[VERIFY    ] UNH    OK         short=0 local=40561 s3=40653
+[TAKEDOWN  ] stopping 8 verified box(es)
+[HELD      ] AMZN — verdict=SHORT short=1 — LEFT RUNNING
+[HELD      ] CRM — verdict=SHORT short=1 — LEFT RUNNING
+[HELD      ] CVX — verdict=SHORT short=1 — LEFT RUNNING
+[HELD      ] GOOGL — verdict=SHORT short=1 — LEFT RUNNING
+[HELD      ] NFLX — verdict=SHORT short=1 — LEFT RUNNING
+[HELD      ] PLTR — verdict=SHORT short=1 — LEFT RUNNING
+[HELD      ] TSLA — verdict=SHORT short=1 — LEFT RUNNING
+[notify] missing DTP_TELEGRAM_TOKEN/DTP_TELEGRAM_CHAT_ID; cannot send.
+VERTIGO — P&L from the warehouse  (2026-08-25)
+
+By symbol
+AVGO     +$400.00  (2t)
+NVDA      +$69.00  (1t)
+NFLX      +$23.00  (1t)
+AMZN      +$13.00  (1t)
+GOOGL     -$14.00  (1t)
+CRM       -$29.00  (2t)
+UNH      -$132.00  (1t)
+MU       -$158.00  (2t)
+QQQ      -$211.50  (2t)
+META     -$214.00  (1t)
+PLTR     -$322.00  (4t)
+CVX      -$401.00  (12t)
+TSLA   -$1,008.00  (7t)
+
+──────────────
+Net: -$1,984.50   37 closed  (9W/28L, 24%)
+[REPORTS   ] starting the analysis run (reads S3; boxes are off)
+[START      ] EOD analysis — 2026-08-25
+[START      ] boxes are DOWN; every read below is control-side or S3
+[PNL        ] net=-1984.50 closed=37 open=0
+[READ    ] trades: 368 object(s) -> 37 unique trade(s)
+[CONSOLIDATE] ✅ fleet_trades_2026-08-25.json — 37 trade(s)
+[DAILY_BARS ] daily bars rebuilt from the 1m tape
+[DAILY_BARS ] ✅ 29 symbol(s) rebuilt from 1m tape
+[LABEL      ] price-action session label
+[LABEL      ] ⚠️  auto_label.py rc=1
+[EXCURSION  ] MFE/MAE report
+[EXCURSION  ] ⚠️  rc=1 No trades/2026-08-25/*_trades.db and no fleet_trades_2026-08-25.json/.csv — nothing collected for that day yet.
+[COVERAGE   ] warehouse coverage
+[COVERAGE   ] ✅ coverage checked
+[R_LEDGER   ] R baseline from the warehouse (headline → Telegram)
+[notify] missing DTP_TELEGRAM_TOKEN/DTP_TELEGRAM_CHAT_ID; cannot send.
+  SOURCE: s3://vertigo-warehouse-tx9ai/raw [trades 2026-08-25..2026-08-25] — 368 object(s) listed, 368 read
+==============================================================================
+  R LEDGER — dollars only. R = avg win / |avg loss|. breakeven WR = 1/(1+R)
+==============================================================================
+  BOOK   n=25  net=-$1,584  R=   0.63  expectancy/trade=-$63  capture=  -3.69  giveback=+$871
+
+  strategy × side                      n  win%       R     avgW     avgL      exp  capture
+  ----------------------------------------------------------------------------
+  IronCondorStrategy · put             3   33%     —        +$1     -$20     -$13    -0.59  THIN
+  ORBStrategy · call                   8   25%     —      +$142    -$199    -$114    -4.93  THIN
+  ORBStrategy · put                    6   33%     —      +$204    -$251     -$99   -10.39  THIN
+  TrendCreditSpread · call             5   60%     —       +$53     -$48     +$12     1.11  THIN
+  TrendCreditSpread · put              3   33%     —       +$23     -$61     -$33     0.29  THIN
+
+  BY EXIT REASON — where the R actually gets made or given back
+  exit_reason                      n  win%        net  capture   giveback
+  ----------------------------------------------------------------------
+  orb_trail_stop pnl=32.4%         1  100%      +$336     0.49      +$345
+  orb_trail_stop pnl=14.3%         1  100%      +$216     0.44      +$279
+  hard_close_15:45_ET              7   71%      +$158     1.54       -$86
+  orb_trail_stop pnl=8.6%          1  100%       +$73     0.40      +$108
+  orb_trail_stop pnl=5.7%          1  100%       +$69     0.23      +$225
+  condor_stop pnl=-19.2% (lone 1   1    0%       -$30    -1.00        +$0
+  tcs_breach: close 352.10 beyon   1    0%       -$51    -1.00        +$0
+  tcs_breach: close 352.00 beyon   1    0%       -$71    -1.00        +$0
+  tcs_breach: close 175.85 beyon   1    0%       -$83    -1.00        +$0
+  orb_structure_stop: 1m close 3   1    0%      -$105    -0.43        +$0
+  orb_structure_stop: 1m close 3   1    0%      -$123   -24.50        +$0
+  orb_structure_stop: 1m close 3   1    0%      -$132    -1.94        +$0
+  orb_structure_stop: 1m close 3   1    0%      -$153    -1.20        +$0
+  orb_structure_stop: 1m close 5   1    0%      -$214        —        +$0
+  orb_structure_stop: 1m close 9   1    0%      -$231    -5.92        +$0
+  orb_structure_stop: 1m close 3   1    0%      -$236    -3.93        +$0
+  orb_structure_stop: 1m close 3   1    0%      -$270    -5.14        +$0
+  orb_structure_stop: 1m close 1   1    0%      -$310        —        +$0
+  hard_stop_25% pnl=-28.1%         1    0%      -$428   -45.00        +$0
+
+  ⚠️ Every number above is descriptive. Nothing here sizes or gates
+     anything until it clears edge_scan's pre-registered bar (WA §31).
+
+[R_LEDGER   ] ✅ BOOK   n=25  net=-$1,584  R=   0.63  expectancy/trade=-$63  capture=  -3.69  giveback=+$871
+[EDGE_SCAN  ] skipped — runs Fridays only (its bar needs ~10 sessions; a nightly NOT-YET is noise)
+[DONE       ] 2 warning(s):
+[DONE       ]   · LABEL: auto_label.py rc=1
+[DONE       ]   · EXCURSION: rc=1 No trades/2026-08-25/*_trades.db and no fleet_trades_2026-08-25.json/.csv — nothing collected for that day yet.
+[notify] missing DTP_TELEGRAM_TOKEN/DTP_TELEGRAM_CHAT_ID; cannot send.
+[DONE      ] 8 verified and stopped · 7 HELD UP
+[notify] missing DTP_TELEGRAM_TOKEN/DTP_TELEGRAM_CHAT_ID; cannot send.
+[REARM     ] re-arming s3-push.timer + candle-logger.timer
