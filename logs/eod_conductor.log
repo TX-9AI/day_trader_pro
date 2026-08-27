@@ -168,3 +168,195 @@ Net: -$1,984.50   37 closed  (9W/28L, 24%)
 [DONE      ] 8 verified and stopped · 7 HELD UP
 [notify] missing DTP_TELEGRAM_TOKEN/DTP_TELEGRAM_CHAT_ID; cannot send.
 [REARM     ] re-arming s3-push.timer + candle-logger.timer
+[START     ] EOD conductor v2 — 2026-08-26
+[START     ] 15 box(es): AMD, AMZN, AVGO, CRM, CVX, GOOGL, META, MU, NFLX, NVDA, PLTR, QQQ, SPX, TSLA, UNH
+[QUIESCE   ] stopping other writers — the conductor owns the close
+[STOP      ] stopping optionsbot on 15 box(es) — feed and machine STAY UP
+[SETTLE    ] 45s for the bots to flush their stores
+[DRAIN     ] draining + verifying 15 box(es) against S3
+[VERIFY    ] AMD    OK         short=0 local=49999 s3=50111
+[VERIFY    ] AMZN   SHORT      short=1 local=49289 s3=49400
+[VERIFY    ] AVGO   OK         short=0 local=58373 s3=58487
+[VERIFY    ] CRM    SHORT      short=2 local=40018 s3=40126
+[VERIFY    ] CVX    SHORT      short=1 local=31254 s3=31366
+[VERIFY    ] GOOGL  SHORT      short=1 local=52448 s3=52555
+[VERIFY    ] META   OK         short=0 local=30613 s3=30728
+[VERIFY    ] MU     OK         short=0 local=59785 s3=59901
+[VERIFY    ] NFLX   SHORT      short=1 local=39679 s3=39782
+[VERIFY    ] NVDA   SHORT      short=1 local=53484 s3=53594
+[VERIFY    ] PLTR   SHORT      short=2 local=58487 s3=58600
+[VERIFY    ] QQQ    OK         short=0 local=57844 s3=57963
+[VERIFY    ] SPX    OK         short=0 local=64833 s3=64974
+[VERIFY    ] TSLA   SHORT      short=1 local=43587 s3=43709
+[VERIFY    ] UNH    SHORT      short=1 local=46203 s3=46328
+[TAKEDOWN  ] stopping 6 verified box(es)
+[HELD      ] AMZN — verdict=SHORT short=1 — LEFT RUNNING
+[HELD      ] CRM — verdict=SHORT short=2 — LEFT RUNNING
+[HELD      ] CVX — verdict=SHORT short=1 — LEFT RUNNING
+[HELD      ] GOOGL — verdict=SHORT short=1 — LEFT RUNNING
+[HELD      ] NFLX — verdict=SHORT short=1 — LEFT RUNNING
+[HELD      ] NVDA — verdict=SHORT short=1 — LEFT RUNNING
+[HELD      ] PLTR — verdict=SHORT short=2 — LEFT RUNNING
+[HELD      ] TSLA — verdict=SHORT short=1 — LEFT RUNNING
+[HELD      ] UNH — verdict=SHORT short=1 — LEFT RUNNING
+[notify] missing DTP_TELEGRAM_TOKEN/DTP_TELEGRAM_CHAT_ID; cannot send.
+VERTIGO — P&L from the warehouse  (2026-08-26)
+
+By symbol
+PLTR      +$59.00  (1t)
+CRM       +$37.00  (1t)
+NVDA      +$24.00  (1t)
+MU         +$0.00  (1t)
+QQQ       -$12.00  (1t)
+UNH      -$112.00  (1t)
+
+──────────────
+Net: -$4.00   6 closed  (3W/3L, 50%)
+[REPORTS   ] starting the analysis run (reads S3; boxes are off)
+[START      ] EOD analysis — 2026-08-26
+[START      ] boxes are DOWN; every read below is control-side or S3
+[PNL        ] net=-4.00 closed=6 open=0
+[READ    ] trades: 190 object(s) -> 6 unique trade(s)
+[CONSOLIDATE] ✅ fleet_trades_2026-08-26.json — 6 trade(s)
+[DAILY_BARS ] daily bars rebuilt from the 1m tape
+[DAILY_BARS ] ✅ 29 symbol(s) rebuilt from 1m tape
+[LABEL      ] price-action session label
+[LABEL      ] ⚠️  auto_label.py rc=1
+[EXCURSION  ] MFE/MAE report
+[EXCURSION  ] ⚠️  rc=1 No trades/2026-08-26/*_trades.db and no fleet_trades_2026-08-26.json/.csv — nothing collected for that day yet.
+[COVERAGE   ] warehouse coverage
+[COVERAGE   ] ✅ coverage checked
+[R_LEDGER   ] R baseline from the warehouse (headline → Telegram)
+[notify] missing DTP_TELEGRAM_TOKEN/DTP_TELEGRAM_CHAT_ID; cannot send.
+  SOURCE: s3://vertigo-warehouse-tx9ai/raw [trades 2026-08-26..2026-08-26] — 190 object(s) listed, 190 read
+==============================================================================
+  R LEDGER — dollars only. R = avg win / |avg loss|. breakeven WR = 1/(1+R)
+==============================================================================
+  BOOK   n=6  net=-$4  R=   0.97  expectancy/trade=-$1  capture=  -1.00  giveback=+$0
+
+  strategy × side                      n  win%       R     avgW     avgL      exp  capture
+  ----------------------------------------------------------------------------
+  IronCondorStrategy · call            1  100%     —       +$24        —     +$24        —  THIN
+  IronCondorStrategy · put             1  100%     —       +$37        —     +$37        —  THIN
+  TrendCreditSpread · put              4   25%     —       +$59     -$41     -$16    -1.00  THIN
+
+  BY EXIT REASON — where the R actually gets made or given back
+  exit_reason                      n  win%        net  capture   giveback
+  ----------------------------------------------------------------------
+  hard_close_15:45_ET              3  100%      +$120        —        +$0
+  tcs_breach: close 937.65 beyon   1    0%        +$0        —        +$0
+  tcs_breach: close 710.89 beyon   1    0%       -$12    -1.00        +$0
+  tcs_breach: close 400.83 beyon   1    0%      -$112    -1.00        +$0
+
+  ⚠️ Every number above is descriptive. Nothing here sizes or gates
+     anything until it clears edge_scan's pre-registered bar (WA §31).
+
+[R_LEDGER   ] ✅ BOOK   n=6  net=-$4  R=   0.97  expectancy/trade=-$1  capture=  -1.00  giveback=+$0
+[EDGE_SCAN  ] skipped — runs Fridays only (its bar needs ~10 sessions; a nightly NOT-YET is noise)
+[DONE       ] 2 warning(s):
+[DONE       ]   · LABEL: auto_label.py rc=1
+[DONE       ]   · EXCURSION: rc=1 No trades/2026-08-26/*_trades.db and no fleet_trades_2026-08-26.json/.csv — nothing collected for that day yet.
+[notify] missing DTP_TELEGRAM_TOKEN/DTP_TELEGRAM_CHAT_ID; cannot send.
+[DONE      ] 6 verified and stopped · 9 HELD UP
+[notify] missing DTP_TELEGRAM_TOKEN/DTP_TELEGRAM_CHAT_ID; cannot send.
+[REARM     ] re-arming s3-push.timer + candle-logger.timer
+[START     ] EOD conductor v2 — 2026-08-27
+[START     ] 15 box(es): AMD, AMZN, AVGO, CRM, CVX, GOOGL, META, MU, NFLX, NVDA, PLTR, QQQ, SPX, TSLA, UNH
+[QUIESCE   ] stopping other writers — the conductor owns the close
+[STOP      ] stopping optionsbot on 15 box(es) — feed and machine STAY UP
+[SETTLE    ] 45s for the bots to flush their stores
+[DRAIN     ] draining + verifying 15 box(es) against S3
+[VERIFY    ] AMD    SHORT      short=1 local=56443 s3=56590
+[VERIFY    ] AMZN   SHORT      short=1 local=56329 s3=56474
+[VERIFY    ] AVGO   SHORT      short=1 local=63017 s3=63162
+[VERIFY    ] CRM    SHORT      short=3 local=47463 s3=47607
+[VERIFY    ] CVX    SHORT      short=3 local=36176 s3=36324
+[VERIFY    ] GOOGL  SHORT      short=2 local=58860 s3=59005
+[VERIFY    ] META   SHORT      short=1 local=37119 s3=37273
+[VERIFY    ] MU     SHORT      short=2 local=61577 s3=61830
+[VERIFY    ] NFLX   SHORT      short=2 local=44722 s3=44857
+[VERIFY    ] NVDA   SHORT      short=2 local=58294 s3=58523
+[VERIFY    ] PLTR   SHORT      short=2 local=65979 s3=66128
+[VERIFY    ] QQQ    SHORT      short=1 local=59417 s3=59696
+[VERIFY    ] SPX    SHORT      short=1 local=70369 s3=70553
+[VERIFY    ] TSLA   SHORT      short=1 local=50965 s3=51131
+[VERIFY    ] UNH    SHORT      short=3 local=51291 s3=51457
+[VERIFY    ]   CVX: shortfall is COUNTER DRIFT — objects are present; taking down and flagging for --reconcile
+[TAKEDOWN  ] stopping 1 verified box(es)
+[HELD      ] AMD — verdict=SHORT short=1 — LEFT RUNNING
+[HELD      ] AMZN — verdict=SHORT short=1 — LEFT RUNNING
+[HELD      ] AVGO — verdict=SHORT short=1 — LEFT RUNNING
+[HELD      ] CRM — verdict=SHORT short=3 — LEFT RUNNING
+[HELD      ] GOOGL — verdict=SHORT short=2 — LEFT RUNNING
+[HELD      ] META — verdict=SHORT short=1 — LEFT RUNNING
+[HELD      ] MU — verdict=SHORT short=2 — LEFT RUNNING
+[HELD      ] NFLX — verdict=SHORT short=2 — LEFT RUNNING
+[HELD      ] NVDA — verdict=SHORT short=2 — LEFT RUNNING
+[HELD      ] PLTR — verdict=SHORT short=2 — LEFT RUNNING
+[HELD      ] QQQ — verdict=SHORT short=1 — LEFT RUNNING
+[HELD      ] SPX — verdict=SHORT short=1 — LEFT RUNNING
+[HELD      ] TSLA — verdict=SHORT short=1 — LEFT RUNNING
+[HELD      ] UNH — verdict=SHORT short=3 — LEFT RUNNING
+[notify] missing DTP_TELEGRAM_TOKEN/DTP_TELEGRAM_CHAT_ID; cannot send.
+VERTIGO — P&L from the warehouse  (2026-08-27)
+
+By symbol
+NFLX      +$12.00  (1t)
+UNH       -$20.00  (1t)
+SPX       -$20.00  (2t)
+AVGO      -$45.00  (1t)
+MU        -$46.00  (1t)
+NVDA     -$142.00  (1t)
+CVX      -$328.00  (17t)
+
+──────────────
+Net: -$589.00   24 closed  (3W/21L, 12%)
+[REPORTS   ] starting the analysis run (reads S3; boxes are off)
+[START      ] EOD analysis — 2026-08-27
+[START      ] boxes are DOWN; every read below is control-side or S3
+[PNL        ] net=-589.00 closed=24 open=0
+[READ    ] trades: 233 object(s) -> 24 unique trade(s)
+[CONSOLIDATE] ✅ fleet_trades_2026-08-27.json — 24 trade(s)
+[DAILY_BARS ] daily bars rebuilt from the 1m tape
+[DAILY_BARS ] ✅ 29 symbol(s) rebuilt from 1m tape
+[LABEL      ] price-action session label
+[LABEL      ] ⚠️  auto_label.py rc=1
+[EXCURSION  ] MFE/MAE report
+[EXCURSION  ] ⚠️  rc=1 No trades/2026-08-27/*_trades.db and no fleet_trades_2026-08-27.json/.csv — nothing collected for that day yet.
+[COVERAGE   ] warehouse coverage
+[COVERAGE   ] ✅ coverage checked
+[R_LEDGER   ] R baseline from the warehouse (headline → Telegram)
+[notify] missing DTP_TELEGRAM_TOKEN/DTP_TELEGRAM_CHAT_ID; cannot send.
+  SOURCE: s3://vertigo-warehouse-tx9ai/raw [trades 2026-08-27..2026-08-27] — 233 object(s) listed, 233 read
+==============================================================================
+  R LEDGER — dollars only. R = avg win / |avg loss|. breakeven WR = 1/(1+R)
+==============================================================================
+  BOOK   n=7  net=-$261  R=   1.25  expectancy/trade=-$37  capture=  -0.68  giveback=+$0
+
+  strategy × side                      n  win%       R     avgW     avgL      exp  capture
+  ----------------------------------------------------------------------------
+  IronCondorStrategy · call            2   50%     —      +$250    -$270     -$10    -1.00  THIN
+  IronCondorStrategy · put             1  100%     —       +$12        —     +$12        —  THIN
+  TrendCreditSpread · call             2    0%     —          —     -$33     -$33    -0.54  THIN
+  TrendCreditSpread · put              2    0%     —          —     -$93     -$93    -0.67  THIN
+
+  BY EXIT REASON — where the R actually gets made or given back
+  exit_reason                      n  win%        net  capture   giveback
+  ----------------------------------------------------------------------
+  nickel_close pnl=96.2%           1  100%      +$250        —        +$0
+  hard_close_15:45_ET              4   25%       -$99    -0.47        +$0
+  tcs_breach: close 225.47 beyon   1    0%      -$142    -1.00        +$0
+  condor_stop pnl=-112.5% (lone    1    0%      -$270    -1.00        +$0
+
+  ⚠️ Every number above is descriptive. Nothing here sizes or gates
+     anything until it clears edge_scan's pre-registered bar (WA §31).
+
+[R_LEDGER   ] ✅ BOOK   n=7  net=-$261  R=   1.25  expectancy/trade=-$37  capture=  -0.68  giveback=+$0
+[EDGE_SCAN  ] skipped — runs Fridays only (its bar needs ~10 sessions; a nightly NOT-YET is noise)
+[DONE       ] 2 warning(s):
+[DONE       ]   · LABEL: auto_label.py rc=1
+[DONE       ]   · EXCURSION: rc=1 No trades/2026-08-27/*_trades.db and no fleet_trades_2026-08-27.json/.csv — nothing collected for that day yet.
+[notify] missing DTP_TELEGRAM_TOKEN/DTP_TELEGRAM_CHAT_ID; cannot send.
+[DONE      ] 1 verified and stopped · 14 HELD UP
+[notify] missing DTP_TELEGRAM_TOKEN/DTP_TELEGRAM_CHAT_ID; cannot send.
+[REARM     ] re-arming s3-push.timer + candle-logger.timer

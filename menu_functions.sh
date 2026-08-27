@@ -1,3 +1,11 @@
+# ── v1.38 (2026-08-27) — OPTION 60 ASKS WHICH SYMBOLS (one / some / all) ─────
+# The OHLC backfill handler only ever asked for a BATCH SIZE, so a two-symbol
+# gap woke five boxes. Operator: *"It wants to do them in groups of 5. We're not
+# doing that. I just want those 2 only."* `eod_backfill.py --only` has existed
+# all along (line 495); the menu never passed it. ENTER still means ALL; a list
+# means exactly those, and the batch now DEFAULTS TO THE COUNT NAMED rather
+# than padding to five. Accepts "CVX,UNH", "CVX, UNH" or "cvx unh".
+#
 # ── v1.37 (2026-08-22) — THE OBSOLETE VALIDATION SECTION IS DELETED ──────────
 # Six handlers went with it: the Layer-1 confluence replay (today / pick-a-date
 # / view report / view diary / backfill gaps) and the A2 co-occurrence tool.
@@ -410,8 +418,43 @@ mi_pnl_from_warehouse() {
 }
 
 # Backfill missing OHLC (auto-batched)
+# 🔴 v1.38 — ASKS WHICH SYMBOLS. Operator, 2026-08-27: *"It wants to do them in
+# groups of 5. We're not doing that. I just want those 2 only."* The handler
+# only ever offered a BATCH SIZE, so a two-symbol gap woke five boxes. He had to
+# be handed the raw `eod_backfill.py --only CVX,UNH --batch 2` line instead.
+# ⚠️ `--only` HAS ALWAYS EXISTED (eod_backfill.py:495, "comma-separated symbols
+# to limit to") — the menu simply never passed it.
+# ⚠️ THE BATCH DEFAULTS TO THE NUMBER OF SYMBOLS NAMED, so picking two runs them
+# as one batch of two rather than padding to five.
 mi_backfill_missing_ohlc_auto_batched() {
-    echo; read -rp "Backfill date (YYYY-MM-DD, ENTER=today): " D; D="${D:-$(date +%F)}"; read -rp "Batch size (ENTER=5): " B; B="${B:-5}"; echo; $PY eod_backfill.py --date "$D" --batch "$B" --dry-run; echo; read -rp "Proceed with LIVE backfill (wakes/stops boxes)? [y/N]: " GO; [ "$GO" = "y" ] && $PY eod_backfill.py --date "$D" --batch "$B"; pause
+    echo
+    read -rp "Backfill date (YYYY-MM-DD, ENTER=today): " D; D="${D:-$(date +%F)}"
+    echo
+    echo "  Which boxes?"
+    echo "    ENTER  = ALL symbols missing candles for that date"
+    echo "    a list = only these, e.g.  CVX,UNH   or   CVX, UNH   or   cvx unh"
+    read -rp "Symbols: " SY
+    # normalise: strip spaces, split on commas or whitespace, upper-case
+    SY="$(echo "$SY" | tr 'a-z' 'A-Z' | tr -s ', \t' ',' | sed 's/^,//; s/,$//')"
+    if [ -n "$SY" ]; then
+        ONLY="--only $SY"
+        # one batch, sized to what was asked for — never pad to five
+        DEF_B="$(echo "$SY" | tr ',' '\n' | grep -c .)"
+        echo "  -> $DEF_B symbol(s): $SY"
+    else
+        ONLY=""
+        DEF_B=5
+        echo "  -> ALL missing symbols"
+    fi
+    read -rp "Batch size (ENTER=$DEF_B): " B; B="${B:-$DEF_B}"
+    echo
+    $PY eod_backfill.py --date "$D" $ONLY --batch "$B" --dry-run
+    echo
+    # ⚠️ THE LIVE RUN WAKES AND STOPS BOXES — that is why the dry run always
+    # prints first and the confirm is explicit.
+    read -rp "Proceed with LIVE backfill (wakes/stops boxes)? [y/N]: " GO
+    [ "$GO" = "y" ] && $PY eod_backfill.py --date "$D" $ONLY --batch "$B"
+    pause
 }
 
 # EOD conductor - full gated EOD (dry-run preview -> confirm -> run)
