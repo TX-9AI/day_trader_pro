@@ -1,7 +1,23 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/eod_conductor_v2.py — v2.0.1
+day_trader_pro/eod_conductor_v2.py — v2.1
 STOP TRADING → FILL THE BUCKET → VERIFY IT LANDED → TAKE THEM DOWN.
+
+v2.1    2026-08-27  THE RETENTION PURGE IS A CONDUCTOR PHASE. It was called
+from warehouse/self_close.py, which fires at 16:45 — but this conductor stops
+the boxes by ~16:08, so on any NORMAL night that timer fired into a stopped
+machine and THE PURGE NEVER RAN. It executed only on nights the conductor had
+already failed. Two months of "dry runs" were therefore also two months of no
+runs at all: feed_store.db reached 1.5-1.8 GB per box, the 6.7 GiB roots hit
+100%, and the fleet went blind MID-SESSION on 2026-08-27. `purge_verified()`
+now runs inside takedown(), AFTER the verified list is built and BEFORE
+ec2ops.stop() — the operator's words: "immediately after the s3 drain is
+confirmed & BEFORE the go down command." It runs on `ok` ONLY, so a HELD box is
+never purged and no day is deleted while it exists only locally. It reports the
+row count PER BOX and shouts if a run comes back dry, because the original
+failure was a log line that never changed. It never blocks the halt, and it does
+NOT vacuum — that stalls the shutdown for minutes and is a manual operation.
+Pinned by tests/check_conductor_purge.py (C2/C3 mutation-proven).
 
 v2.0.1  2026-08-23  AUDIT F7: the COUNTER-DRIFT exception in takedown() was
 DEAD CODE. drain_and_verify filtered the box's output with
@@ -236,6 +252,63 @@ def drain_and_verify(symbols, dry: bool) -> dict:
 
 
 # ── STEP 4 — TAKE DOWN, PER BOX, ONLY ON ITS OWN VERIFICATION. ──────────────
+def purge_verified(ok: list, dry: bool) -> dict:
+    """Retention purge on the boxes that VERIFIED, before they are stopped.
+
+    🔴 OPERATOR, 2026-08-27: *"It needs to be immediately after the s3 drain is
+    confirmed & BEFORE the go down command."*
+
+    ⚠️ WHY IT HAS TO LIVE HERE AND NOT IN `self_close`. The purge WAS called
+    from `warehouse/self_close.py`, which fires at **16:45** — but the conductor
+    stops the boxes by ~**16:08**, so on any normal night the 16:45 timer fires
+    into a stopped machine and the purge NEVER RUNS. It ran only on nights the
+    conductor failed. That is why two months of dry runs also happened to be two
+    months of no runs at all, and why the fleet reached 100% disk and went blind
+    mid-session on 2026-08-27.
+    ⚠️ THIS IS THE OPERATOR'S STANDING RULE, RESTATED: anything that must happen
+    before the boxes go down is a CONDUCTOR PHASE, never a separate timer and
+    never a manual step.
+
+    ⚠️ ORDERING IS THE SAFETY PROPERTY. It runs on `ok` — the list `takedown()`
+    just built from boxes whose data is CONFIRMED IN S3 — so nothing is ever
+    deleted from a box whose day is still only local. A HELD box is not purged;
+    it keeps everything until its next wake proves the push.
+
+    ⚠️ AND IT NEVER BLOCKS THE HALT. A purge failure is logged and stepped over;
+    the box still comes down, because a box left running all night costs money
+    and a large file does not.
+
+    ⚠️ NO VACUUM. It rewrites the whole database and would stall the halt for
+    minutes. With the purge actually running, SQLite reuses freed pages and the
+    store reaches steady state. VACUUM stays a manual, occasional operation —
+    and when it is run it needs `SQLITE_TMPDIR` pointed at the data directory,
+    because `/tmp` is a 476M tmpfs and a 1.8G rewrite cannot fit in it (learned
+    the hard way on MU, NVDA and QQQ the same day).
+    """
+    out = {}
+    if not ok:
+        return out
+    if dry:
+        _log("PURGE", f"[dry] would purge {len(ok)} verified box(es) "
+                      f"before takedown")
+        return out
+    _log("PURGE", f"retention purge on {len(ok)} verified box(es)")
+    cmd = (f"cd {INSTALL_DIR} && python3 warehouse/retention_purge.py "
+           f"--apply 2>&1 | head -3")
+    for sym, ip, _st in fleet.get_fleet(list(ok)):
+        rc, text, err = ssh_util.ssh_run(ip, cmd, timeout=VERIFY_TIMEOUT_S)
+        line = (text or err or "").strip().replace("\n", " | ")
+        out[sym] = line
+        # ⚠️ SAY WHAT WAS REMOVED, PER BOX. The two-month failure was a log line
+        # that never changed; a per-box row count is the thing that would have
+        # made "WOULD remove" visible on night one.
+        _log("PURGE", f"  {sym}: {line[:120] or 'no output'}")
+        if "WOULD remove" in line:
+            _log("PURGE", f"  ⚠️ {sym}: PURGE RAN DRY — nothing was deleted. "
+                          f"The store will keep growing.")
+    return out
+
+
 def takedown(results: dict, dry: bool, enabled: bool) -> tuple:
     """Stop the instances that verified. Leave the rest UP, and say why.
 
@@ -275,6 +348,11 @@ def takedown(results: dict, dry: bool, enabled: bool) -> tuple:
         _log("TAKEDOWN", f"[dry] would stop {len(ok)} verified box(es); "
                          f"would HOLD {len(held)}")
         return ok, held
+
+    # ── 🔴 PURGE BEFORE THE HALT, ON THE VERIFIED LIST ONLY ─────────────
+    # Operator, 2026-08-27: *"immediately after the s3 drain is confirmed &
+    # BEFORE the go down command."* `ok` is exactly that list.
+    purge_verified(ok, dry)
 
     if ok:
         # ⚠️ STOP BY INSTANCE ID, NOT BY SSH. A box whose sshd is wedged still
