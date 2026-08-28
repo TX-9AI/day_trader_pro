@@ -1,3 +1,10 @@
+# ── v1.39 (2026-08-28) — NEW SENSORS ITEM "DECISIONS NOW" (r170) ────────────
+# The per-tick plan record had readers only for AGGREGATES (PLAN BOARD counts
+# verdicts; the ledger counts outcomes); nothing answered "what is every bot
+# about to do RIGHT NOW". mi_sensor_decisions_now runs the box's own
+# `query.py --decisions` across the chosen scope — one formatter, on the box,
+# shared with anyone standing in a shell there. Registry gains the item under
+# SENSORS after PLAN BOARD; numbers assign at render as ever.
 # ── v1.38 (2026-08-27) — OPTION 60 ASKS WHICH SYMBOLS (one / some / all) ─────
 # The OHLC backfill handler only ever asked for a BATCH SIZE, so a two-symbol
 # gap woke five boxes. Operator: *"It wants to do them in groups of 5. We're not
@@ -942,6 +949,24 @@ mi_sensor_plan_board() {
     _et_bounds "$d" || { pause; return 0; }
     SC=$(ask_scope)
     $PY fleet.py run "cd $INSTALL_DIR; sqlite3 -header -column data/derived_store.db \"SELECT strategy, verdict, COUNT(*) n, ROUND(MIN(r_now),2) r_lo, ROUND(MAX(r_now),2) r_hi, ROUND(AVG(underlying),2) px FROM plan_tick WHERE ts_epoch >= $ET_FROM AND ts_epoch < $ET_TO GROUP BY strategy, verdict ORDER BY strategy, verdict;\" 2>&1; echo; echo 'WHICH CHECK FAILED, AND HOW OFTEN:'; sqlite3 -header -column data/derived_store.db \"SELECT strategy, check_name, verdict, COUNT(*) n, ROUND(MIN(value),2) lo, ROUND(MAX(value),2) hi FROM plan_check WHERE ts_epoch >= $ET_FROM AND ts_epoch < $ET_TO GROUP BY strategy, check_name, verdict ORDER BY strategy, check_name, verdict;\" 2>&1; echo ok" $SC
+    pause
+}
+
+# DECISIONS NOW: enter on / exit on, the live snapshot   (one/all/some)
+# r170 (2026-08-28). Operator: "I need a reader outfitted in devtools and have
+# query.py snapshot active trade decisions 'enter on' and 'exit on' for active
+# plans." The FORMATTER LIVES ON THE BOX (otv4 query.py v4.2 --decisions) so
+# this reader and a shell on the box always show the same thing; this item is
+# fleet transport only. ENTER ON = the newest plan_tick row per strategy (the
+# PREPARED trade and what it waits on, or the fault); EXIT ON = the newest
+# <Strategy>/manage row per open position ("if this or this, out"); rows older
+# than 5 minutes are flagged STALE by the box itself.
+mi_sensor_decisions_now() {
+    echo; echo "  Source: on-box query.py --decisions (plan_tick incl. /manage rows)"
+    echo "  What every plan would do on the NEXT tick, as of the last one."
+    echo "  ⚠️ A plan is not a trade: HOLD 'PREPARED' means armed, not filled."
+    SC=$(ask_scope)
+    $PY fleet.py run "cd $INSTALL_DIR; python query.py --decisions 2>&1; echo ok" $SC
     pause
 }
 

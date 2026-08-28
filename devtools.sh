@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
-# day_trader_pro/devtools.sh — v1.55
+# day_trader_pro/devtools.sh — v1.56
+# v1.56 (2026-08-28) — SENSORS gains "DECISIONS NOW (enter on / exit on, live
+# snapshot)" — see menu_functions.sh v1.39 / menu_registry.sh. The item is
+# fleet transport for the box's own `query.py --decisions` (otv4 r170), so the
+# reader and a shell on the box always show the same thing.
 # v1.55 (2026-08-24) — OPTION 19 WAS EATING ITS OWN ANSWER. manifold_health
 # exits 1 when the board is not GREEN (its job); fleet.py treated non-zero as a
 # failed box and DISCARDED STDOUT, so all 15 printed rc=1 with no output while

@@ -35,6 +35,7 @@ MENU=(
   "ITEM|Manifold health board|mi_manifold_health_board"
   "ITEM|Strategy notes        (what each engine SAW - signals, not trades)|mi_sensor_strategy_notes"
   "ITEM|PLAN BOARD            (every plan, every check, per tick)|mi_sensor_plan_board"
+  "ITEM|DECISIONS NOW         (enter on / exit on, live snapshot)|mi_sensor_decisions_now"
   "ITEM|Plan ledger           (intent + terminal reason)|mi_sensor_plan_ledger"
   "ITEM|Exit counterfactual   (flow vs the stop)|mi_sensor_exit_counterfactual"
   "ITEM|Fire snapshot         (derived vector at entry)|mi_sensor_fire_snapshot"
