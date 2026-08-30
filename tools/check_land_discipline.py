@@ -1,5 +1,24 @@
 #!/usr/bin/env python3
-# day_trader_pro/tools/check_land_discipline.py — v1.0
+# day_trader_pro/tools/check_land_discipline.py — v1.1
+# v1.1 (2026-08-30) — otv4 r194 / dtp r232. GENESIS ROWS MAY NOT CONTAIN A BARE
+#   HTML TAG. Operator: "something broke & the new additions are nesting now."
+#   🔴 TWO ROWS CONTAINED THE LITERAL STRING <table> — r184's
+#   raw/derived_<table>/ and r191's raw/<table>/dt=/sym=/. GitHub renders raw
+#   HTML inside table cells, so each one OPENED AN HTML TABLE that never
+#   closed: r184 swallowed r185-r191, and r191 swallowed r192. The ledger's
+#   own rows became children of the rows above them.
+#   🔑 BOTH WERE MINE AND THE PROSE WAS CORRECT. Angle-bracket placeholders
+#   are this project's idiom — <date>, <SYM>, <prefix>, <Strategy>. Only
+#   SOME of them collide with a real element name, so the failure is
+#   invisible in the source and shows only on the rendered page, which nobody
+#   re-reads after landing.
+#   ⚠️ THE SCAN COVERS EVERY ROW AND RUNS EVEN IN HOOK MODE. A ledger that is
+#   already broken stays broken silently otherwise, and the row's own number
+#   is not needed to see that the PAGE is malformed.
+#   ⚠️ NON-HTML PLACEHOLDERS STAY LEGAL. Flagging <date> would make this cry
+#   wolf on the repo's own idiom, and a check that cries wolf trains you to
+#   skip red runs. Only names GitHub actually renders are refused; the fix is
+#   a backtick.
 # v1.0 (2026-08-29) — r183. Operator's instruction after r182 landed: "when
 #   you're landing files, have a check that the Genesis line is added, the
 #   write map is updated and the file map is updated ... Also check that each
@@ -70,8 +89,29 @@ DATE = r"\d{4}-\d{2}-\d{2}"
 #   md      "**v1.21 · 2026-08-28 · r181 — ...**"
 CHANGELOG = re.compile(r"(?:^|[\s*#|])" + VER + r"\s*[\s·(\[—-]\s*(" + DATE + r")")
 
+# Names GitHub renders as an element inside a table cell. Kept DELIBERATELY
+# SHORT: this repo writes <date>, <SYM>, <prefix>, <Strategy> constantly and
+# none of those is HTML. Only a collision with a real element name breaks the
+# page, so only those are refused.
+HTML_TAGS = re.compile(r"<\s*/?\s*([a-zA-Z][a-zA-Z0-9]*)\s*/?\s*>")
+HTML_ELEMENTS = {
+    "table", "thead", "tbody", "tfoot", "tr", "td", "th", "caption", "colgroup",
+    "col", "div", "span", "p", "ul", "ol", "li", "dl", "dt", "dd", "pre", "code",
+    "blockquote", "a", "img", "br", "hr", "em", "strong", "b", "i", "u", "s",
+    "sub", "sup", "kbd", "samp", "var", "details", "summary", "figure", "form",
+    "input", "button", "select", "option", "label", "iframe", "script", "style",
+    "h1", "h2", "h3", "h4", "h5", "h6",
+}
+
 HEAD_LINES = 12        # a title line lives at the very top or it is not a title
-BODY_LINES = 400       # changelog entries sit near the top; do not scan a whole file
+# 🔴 A CHANGELOG ENTRY LIVES IN THE HEADER BLOCK AND NOWHERE ELSE. v1.0
+# scanned the first 400 lines, which swept in this file's OWN selftest
+# fixtures — they write a `v1.1 (2026-02-01)` line because they are testing
+# changelog parsing — and then refused a real v1.1 bump as "already existed
+# at HEAD". A scanner whose window is a LINE COUNT reads code as
+# documentation. The header ends at the first line that is neither shebang,
+# comment, docstring nor blank.
+BODY_LINES = 400       # hard ceiling only; _header_end() is the real bound
 
 
 def sh(args, cwd, check=False):
@@ -99,10 +139,41 @@ def title_version(text: str, rel: str):
     return None
 
 
-def changelog_versions(text: str):
-    """Every (version, date) pair in header order — newest first by convention."""
+def _header_end(lines) -> int:
+    """Index of the first line past the header block.
+
+    The header is the leading run of shebang, comment, docstring and blank
+    lines. Everything after it is code, and code is not a changelog however
+    much a fixture string may look like one.
+    """
+    in_doc = False
+    marks = ('"""', "'''")
+    for i, ln in enumerate(lines[:BODY_LINES]):
+        st = ln.strip()
+        if i == 0 and st.startswith('#!'):
+            continue
+        if st.startswith(marks):
+            in_doc = not (len(st) > 3 and st.endswith(marks))
+            continue
+        if in_doc or st.startswith('#') or not st:
+            continue
+        return i
+    return min(len(lines), BODY_LINES)
+
+
+def changelog_versions(text: str, rel: str = ""):
+    """Every (version, date) pair in header order — newest first by convention.
+
+    {W} THE WINDOW DEPENDS ON THE FILE KIND, and getting that wrong broke both
+    ways in one rehearsal. A CODE file keeps its changelog in the header block,
+    so scanning past it swept in this file's own selftest fixtures. A MARKDOWN
+    doc keeps its changelog at the FOOT (BACKLOG's PART 4), so bounding it to
+    the header found nothing at all. Code: header only. Docs: the whole file.
+    """
     out = []
-    for ln in text.splitlines()[:BODY_LINES]:
+    _lines = text.splitlines()
+    _end = len(_lines) if rel.endswith(".md") else _header_end(_lines)
+    for ln in _lines[:_end]:
         m = CHANGELOG.search(ln)
         if m:
             out.append((m.group(1), m.group(2)))
@@ -141,6 +212,27 @@ def check(repo, rev, ref, problems, notes, hook=False):
 
     # ── A. GENESIS ────────────────────────────────────────────────────────
     gpath = os.path.join(repo, "docs", "GENESIS.md")
+    if os.path.exists(gpath):
+        # v1.1 — always, hook mode included. See the header.
+        _bad = []
+        for _ln in open(gpath, encoding="utf-8").read().splitlines():
+            if not _ln.startswith("| **r"):
+                continue
+            # ⚠️ STRIP CODE SPANS FIRST. Backticking the placeholder IS the
+            # fix, and GitHub does not render HTML inside a code span. A guard
+            # that still flags the repaired row is one the repair can never
+            # satisfy — caught in rehearsal when the fix and the check
+            # deadlocked on the same line.
+            _clean = re.sub(r"`[^`]*`", "", _ln)
+            for _t in HTML_TAGS.findall(_clean):
+                if _t.lower() in HTML_ELEMENTS:
+                    _bad.append((_ln.split("|")[1].strip().strip("*"), _t))
+        if _bad:
+            problems.append(
+                "GENESIS: %d row(s) carry a bare HTML tag, which GitHub renders "
+                "as an ELEMENT and nests every later row inside it — %s. Wrap "
+                "the placeholder in backticks."
+                % (len(_bad), ", ".join("%s: <%s>" % (r, t) for r, t in _bad[:6])))
     if not os.path.exists(gpath):
         notes.append("GENESIS   SKIP  — docs/GENESIS.md not present in this repo")
     elif not rev:
@@ -228,7 +320,7 @@ def check(repo, rev, ref, problems, notes, hook=False):
             problems.append("BUMP %s: title still v%s. WORKING_AGREEMENT §5 — "
                             "every edited file bumps its header." % (rel, nv))
         # D2 — a dated changelog entry names the NEW version
-        entries = changelog_versions(new)
+        entries = changelog_versions(new, rel)
         if not any(v == nv for v, _ in entries):
             problems.append("CHANGELOG %s: no dated entry for v%s. A version "
                             "with no entry is a version nobody can read."
@@ -241,7 +333,7 @@ def check(repo, rev, ref, problems, notes, hook=False):
                             "says v%s. The two must agree." % (rel, nv, top))
         # D4 — the new entry is not a copy of an older date
         if old is not None:
-            for v, d in changelog_versions(old):
+            for v, d in changelog_versions(old, rel):
                 if v == nv:
                     problems.append("CHANGELOG %s: v%s already existed at %s "
                                     "(dated %s) — the entry was not written for "
