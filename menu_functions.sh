@@ -1,3 +1,10 @@
+# day_trader_pro/menu_functions.sh — v1.41
+# ── v1.41 (2026-08-29) — ITEM 56 IS WAREHOUSE-SOURCED AND EPOCH-FLOORED ──
+# (r187 / dtp r228, backlog S3.5). The old prompt offered "Since date (ENTER =
+# all)", and "all" pooled July's v3 records with v4's in one table. trade_report
+# v1.9 floors at the 2026-08-25 engine epoch by default and prints what it
+# excluded; the prompt now offers DAY ONE, a custom date, or ALL HISTORY as an
+# explicit choice, and says which is which. Source is reports/warehouse.
 # day_trader_pro/menu_functions.sh — v1.40
 # ⚠️ THE TITLE LINE IS NEW, AND IT IS NOT COSMETIC. This file carried its
 # version ONLY in the changelog banner below, so the standing two-places rule
@@ -320,7 +327,20 @@ mi_excursion_report_mfe_mae_reports_excursions() {
 # itself is part of the day_trader_pro sweep still owed (125 live lines across
 # 12 files, incl. fit_report.py and warehouse_reader.py).
 mi_trade_breakdown_cross_day() {
-    echo; read -rp "Since date (YYYY-MM-DD, ENTER=all): " SD; if [ -n "$SD" ]; then $PY trade_report.py --since "$SD"; else $PY trade_report.py; fi; pause
+    echo
+    echo "  Cross-day breakdown from the S3-sourced bundles in reports/warehouse."
+    echo "  Default window is DAY ONE (2026-08-25) — anything earlier is the OLD"
+    echo "  engines and pooling it mixes two systems in one table."
+    echo "    ENTER  = day one onward (the honest default)"
+    echo "    a date = from that date (flagged if it predates day one)"
+    echo "    all    = every session ever, v3 records included"
+    read -rp "  Since [ENTER / YYYY-MM-DD / all]: " SD
+    case "$SD" in
+        "")    $PY trade_report.py ;;
+        all|ALL) $PY trade_report.py --all-history ;;
+        *)     $PY trade_report.py --since "$SD" ;;
+    esac
+    pause
 }
 
 # FIT REPORT — everything for fitting in ONE text file (1 day or a range)

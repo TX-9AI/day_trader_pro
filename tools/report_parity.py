@@ -1,5 +1,16 @@
 #!/usr/bin/env python3
-# day_trader_pro/tools/report_parity.py — v1.4
+# day_trader_pro/tools/report_parity.py — v1.5
+# v1.5 (2026-08-29) — r187 / dtp r228. PASS --all-history TO REPORT 41 ON
+#      BOTH SIDES. trade_report v1.9 applies a 2026-08-25 engine-epoch floor
+#      by default. Symmetric filtering would not have broken the COMPARISON
+#      — both sides drop the same dates — but it WOULD have broken the CLAIM
+#      three lines above the call, which prints "comparing over N shared
+#      date(s): X .. Y". A tool that announces its window and then silently
+#      reports on a narrower one is the defect class this file exists to
+#      catch: four instrumentation faults preceded its first trustworthy
+#      result and every one printed something plausible. Parity asks whether
+#      two SOURCES agree — a question about the warehouse, not about which
+#      engine wrote the rows — so the whole span is the right window here.
 # v1.4 (2026-08-16) — IT COULD NOT TELL "DIVERGED" FROM "DID NOT RUN". Found by
 #      driving menu item 67 in an environment with no S3 credentials: every step
 #      errored, and the tool printed "❌ NOT AT PARITY — investigate the diffs
@@ -237,10 +248,13 @@ def compare_breakdown(keep):
     outdir = _tf.mkdtemp(prefix="parity_out_")
     pl = os.path.join(outdir, "local.json")
     pw = os.path.join(outdir, "warehouse.json")
+    # --all-history on BOTH sides: the shared-date span printed above is the
+    # window this comparison claims to cover, and trade_report v1.9 would
+    # otherwise floor both at the engine epoch and quietly narrow it.
     ok_l = run([PY, "trade_report.py", "--bundles-dir", fair_dir,
-                "--out", pl], "41 local")
+                "--all-history", "--out", pl], "41 local")
     ok_w = run([PY, "trade_report.py", "--bundles-dir", WAREHOUSE_DIR,
-                "--out", pw], "41 warehouse")
+                "--all-history", "--out", pw], "41 warehouse")
     if not (ok_l and ok_w):
         return None
 

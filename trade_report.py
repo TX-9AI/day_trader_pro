@@ -1,4 +1,32 @@
-# day_trader_pro/trade_report.py — v1.8
+# day_trader_pro/trade_report.py — v1.9
+# v1.9 (2026-08-29) — r187 / dtp r228. THREE CHANGES, backlog S3.5.
+#   (1) THE DEFAULT SOURCE IS THE WAREHOUSE. The old default globbed
+#       reports/fleet_trades_*.json at the repo root — a directory NOTHING
+#       WRITES ANY MORE. eod_analysis v1.2 builds its bundle into
+#       reports/warehouse/, and install_eod_v2.sh disabled dtp-harvest.timer,
+#       so whatever sits at the root is a frozen snapshot of a pipeline that
+#       stopped running (backlog C.12). A default pointing at a folder nobody
+#       fills does not fail — it QUIETLY REPORTS OLD NUMBERS, which is worse.
+#       --bundles-dir still overrides, and report_parity passes both sides
+#       explicitly so it is unaffected.
+#   (2) 🔴 AN ENGINE EPOCH, DEFAULTING TO 2026-08-25. Operator, that day:
+#       "today is day one and anything prior to today was the old engines."
+#       Every bundle in the warehouse reaches back to July, so an unqualified
+#       cross-day run POOLS TWO DIFFERENT TRADING SYSTEMS in one table with
+#       nothing marking the boundary. That has already produced one wrong
+#       conclusion quoted as evidence. The floor is now the default and
+#       --all-history is the explicit override.
+#       ⚠️ IT IS LOUD, NOT SILENT. The count of excluded pre-epoch
+#       trades prints on every run. A filter you cannot see is how you end up
+#       arguing about a number that was never in the sample.
+#   (3) BY SETUP GRADE IS REMOVED. Every v4 write path hardcodes
+#       setup_grade="UNGRADED" (entry_engine:212, main:2135, condor_roll:789,
+#       base_strategy:127) and nothing writes setup_score at all — r152
+#       deleted the scorer because it SELECTED LOSERS (A-grade -$8,244 vs
+#       B-grade +$1,893 over 619 trades). The section had exactly one bucket.
+#       ⚠️ The COLUMN stays (check_conviction_removed S6 pins it) and the
+#       field still rides on every row; only the dimension is gone, replaced
+#       by one line of fact so its absence is stated rather than mysterious.
 # v1.8 (2026-08-16) — --out, so a caller can name the JSON exactly. The parity
 #   tool had been picking the newest trade_report_<stamp>.json by MTIME, which
 #   is a guess: it read a stale full-fleet run instead of the restricted one it
@@ -122,6 +150,17 @@ except Exception:                                     # standalone
     REPORTS_DIR = os.path.expanduser("~/day_trader_pro/reports")
 
 BUNDLE_GLOB = os.path.join(REPORTS_DIR, "fleet_trades_*.json")
+
+# v1.9 — the warehouse-sourced bundles eod_analysis writes nightly. This is
+# the DEFAULT now; BUNDLE_GLOB survives only as the explicit legacy path.
+WAREHOUSE_DIR = os.path.join(REPORTS_DIR, "warehouse")
+
+# 🔴 DAY ONE. Operator, 2026-08-25: "today is day one and anything prior to
+# today was the old engines. Those are not gonna be included in any study that
+# we do." Overridable by env for a deliberate archaeology run, but the DEFAULT
+# must be the honest one — a contaminated pool is the one mistake this report
+# has already been used to make.
+ENGINE_EPOCH = os.environ.get("DTP_ENGINE_EPOCH", "2026-08-25")
 
 try:
     from zoneinfo import ZoneInfo
@@ -470,18 +509,50 @@ def main(argv: List[str]) -> int:
     ap.add_argument("--out", default=None,
                     help="write the JSON here instead of the stamped default")
     ap.add_argument("--bundles-dir", default=None,
-                    help="read bundles from here instead of reports/ "
-                         "(e.g. reports/warehouse for the S3-sourced copies)")
+                    help=f"read bundles from here (default {WAREHOUSE_DIR}); "
+                         f"pass {REPORTS_DIR} for the legacy root bundles")
+    ap.add_argument("--all-history", action="store_true",
+                    help=f"drop the {ENGINE_EPOCH} engine epoch and pool every "
+                         f"session, INCLUDING pre-v4 records")
     g = ap.add_mutually_exclusive_group()
     g.add_argument("--live", action="store_true")
     g.add_argument("--paper", action="store_true")
     args = ap.parse_args(argv[1:])
     mode = "live" if args.live else ("paper" if args.paper else "all")
 
-    trades, used, raw = load_trades(args.since, None if mode == "all" else mode,
-                                    bundles_dir=args.bundles_dir)
+    src_dir = args.bundles_dir or WAREHOUSE_DIR
+    # ⚠️ THE FLOOR IS RESOLVED HERE AND PRINTED, NEVER APPLIED QUIETLY.
+    if args.all_history:
+        since, floor_note = args.since, "NO EPOCH FLOOR (--all-history)"
+    elif args.since:
+        since = args.since
+        floor_note = (f"--since {args.since}" +
+                      ("   🔴 EARLIER THAN THE ENGINE EPOCH " + ENGINE_EPOCH +
+                       " — THIS POOL MIXES v3 AND v4 RECORDS"
+                       if args.since < ENGINE_EPOCH else ""))
+    else:
+        since, floor_note = ENGINE_EPOCH, f"engine epoch {ENGINE_EPOCH} (default)"
+
+    trades, used, raw = load_trades(since, None if mode == "all" else mode,
+                                    bundles_dir=src_dir)
+    # How much the floor removed, so the filter is visible rather than inferred.
+    _all, _allday, _ = load_trades(None, None if mode == "all" else mode,
+                                   bundles_dir=src_dir)
+    dropped = len(_all) - len(trades)
+
+    print(f"SOURCE: {src_dir}/fleet_trades_*.json")
+    print(f"WINDOW: {floor_note}")
+    if dropped:
+        # 🔴 SAY IT EVERY RUN. A filter you cannot see is how you end up
+        # arguing about a number that was never in the sample.
+        print(f"        {dropped} closed trade(s) EXCLUDED as pre-epoch "
+              f"(--all-history to include them)")
     if not trades:
-        print(f"No closed trades found in {BUNDLE_GLOB}")
+        if _all:
+            print(f"No closed trades on/after {since} in {src_dir} — but "
+                  f"{len(_all)} exist before it. Pre-epoch data only.")
+        else:
+            print(f"No closed trades found in {src_dir}/fleet_trades_*.json")
         return 2
 
     print(f"{raw} row(s) across bundles -> {len(trades)} unique trade(s) "
@@ -503,7 +574,6 @@ def main(argv: List[str]) -> int:
     dims = {
         "by_strategy":      bucket(trades, "strategy"),
         "by_setup_type":    bucket(trades, "setup_type"),
-        "by_setup_grade":   bucket(trades, "setup_grade"),
         "by_exit_reason":   bucket(trades, "exit_reason"),
         "by_symbol":        bucket(trades, "_sym"),
         "by_hour_et":       bucket(trades, "_hour_et"),
@@ -545,7 +615,6 @@ def main(argv: List[str]) -> int:
     findings = {"min_n_applied": args.min_n}
     for label, d in [("strategy", dims["by_strategy"]),
                      ("setup_type", dims["by_setup_type"]),
-                     ("setup_grade", dims["by_setup_grade"]),
                      ("exit_reason", dims["by_exit_reason"]),
                      ("symbol", dims["by_symbol"]), ("hour_et", dims["by_hour_et"]),
                      ("day_of_week", dims["by_day_of_week"]),
@@ -569,7 +638,9 @@ def main(argv: List[str]) -> int:
     show("BY STRATEGY", dims["by_strategy"], args.min_n)
     show("BY SYMBOL", dims["by_symbol"], args.min_n)
     show("BY SETUP TYPE", dims["by_setup_type"], args.min_n)
-    show("BY SETUP GRADE", dims["by_setup_grade"], args.min_n)
+    # v1.9 — the dimension is gone; the FACT is stated once. An absent
+    # section with no explanation reads as an oversight and gets re-added.
+    print("\n  (no BY SETUP GRADE section: every v4 row is UNGRADED by\n   construction — r152 deleted the scorer, which had selected losers.)")
     show("BY EXIT REASON", dims["by_exit_reason"], args.min_n)
     show("BY SESSION PHASE (ET)", dims["by_session_phase"], args.min_n)
     show("BY HOUR (ET)", dims["by_hour_et"], args.min_n)
@@ -646,8 +717,11 @@ def main(argv: List[str]) -> int:
         os.makedirs(REPORTS_DIR, exist_ok=True)
         stamp = used[-1][0] if used else datetime.now().strftime("%Y-%m-%d")
         tag = "warehouse_" if args.bundles_dir else ""
-        payload["source"] = ("warehouse:" + args.bundles_dir
-                             if args.bundles_dir else "local")
+        payload["source"] = ("warehouse:" + src_dir
+                             if src_dir == WAREHOUSE_DIR
+                             else "bundles:" + src_dir)
+        payload["engine_epoch"] = None if args.all_history else since
+        payload["pre_epoch_excluded"] = dropped
         out = (args.out if args.out
                else os.path.join(REPORTS_DIR, f"trade_report_{tag}{stamp}.json"))
         os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)

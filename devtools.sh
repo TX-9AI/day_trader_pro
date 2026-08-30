@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
-# day_trader_pro/devtools.sh — v1.57
+# day_trader_pro/devtools.sh — v1.58
+# v1.58 (2026-08-29) — TRADE BREAKDOWN (56) reads reports/warehouse and floors
+#   at the 2026-08-25 engine epoch by default, with ALL HISTORY as an explicit
+#   menu choice — see trade_report.py v1.9 and menu_functions.sh v1.41. The
+#   banner reads its version from THIS line.
 # v1.57 (2026-08-29) — FIT READINESS (57) reads the S3 warehouse instead of a
 #   box-local derived store that does not exist on this machine, so the item
 #   produces a number here for the first time — see fit_readiness.py v1.1,
