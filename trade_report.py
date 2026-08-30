@@ -1,4 +1,33 @@
-# day_trader_pro/trade_report.py — v1.9
+# day_trader_pro/trade_report.py — v1.10
+# v1.10 (2026-08-29) — r190 / dtp r231. THE DEDUP SHIM IS GONE, AND WHAT
+#   REPLACES IT IS A DETECTOR (backlog S3.6).
+#   🔑 IT WAS NEVER A DESIGN FEATURE. Its own v1.1 changelog (2026-07-22)
+#   says so: before consolidate_trades v1.2 added a date filter on 07-28,
+#   harvest scp'd each box's ENTIRE trades.db and consolidate did a bare
+#   SELECT *, so every fleet_trades_<date>.json held that box's FULL HISTORY
+#   and pooling N bundles counted each trade up to N times. The dedup existed
+#   solely to survive those cumulative archives sitting in the glob. r187
+#   moved the default source to reports/warehouse, where every bundle is
+#   built by warehouse_reader.build() from ONE dt= partition and is already
+#   collapsed by latest_per_trade(). There is nothing left to de-duplicate.
+#   🔴 AND KEEPING IT WAS THE ACTUAL DEFECT, NOT MERELY DEAD CODE. TWO
+#   DEDUP RULES RAN ON THE SAME DATA WITH DIFFERENT TIE-BREAKS:
+#   warehouse_reader.latest_per_trade() keeps the newest `pushed_at_utc`;
+#   this file kept the MOST-FILLED row (`_filled()`, a count of non-empty
+#   columns). They have agreed so far because the newest state also happened
+#   to be the most-filled one. **That is luck.** A trade whose final CDC row
+#   nulls a column would have been silently resolved differently by each,
+#   and nothing anywhere compared them — report parity could not catch it,
+#   because parity runs BOTH sides through this same rule.
+#   ⚠️ SO IT IS NOT DELETED, IT IS INVERTED. Silently collapsing a
+#   duplicate now hides the only two conditions that can still produce one:
+#   a legacy CUMULATIVE bundle in an explicit --bundles-dir, or two bundles
+#   for the same date. Both are real problems and both used to be absorbed
+#   without a word. Duplicates are now FIRST-WINS by sorted filename
+#   (deterministic, not arbitrary) and REPORTED BY trade_id AND BY FILE.
+#   ⚠️ `_filled()` is removed entirely rather than left unused. An
+#   orphaned tie-break helper is exactly what gets re-wired by the next
+#   person who needs 'a way to pick between two rows'.
 # v1.9 (2026-08-29) — r187 / dtp r228. THREE CHANGES, backlog S3.5.
 #   (1) THE DEFAULT SOURCE IS THE WAREHOUSE. The old default globbed
 #       reports/fleet_trades_*.json at the repo root — a directory NOTHING
@@ -280,14 +309,18 @@ def session_phase(et: Optional[datetime]) -> str:
 
 
 # ── loading ──────────────────────────────────────────────────────────────────
-def load_trades(since, mode, bundles_dir=None) -> Tuple[List[dict], List[tuple], int]:
-    """`bundles_dir` lets this run against warehouse-sourced bundles.
+def load_trades(since, mode, bundles_dir=None):
+    """Closed trades pooled from the bundles in `bundles_dir` (default: S3-sourced).
 
-    Added for WH.11: the point is to run this report from BOTH sources and diff
-    the OUTPUTS, which bundle-level equivalence does not establish on its own.
-    Default is unchanged, so the local path behaves exactly as before.
+    -> (trades, by_day, raw_rows, duplicates). `duplicates` is a list of
+    (trade_id, first_file, later_file) and SHOULD ALWAYS BE EMPTY: each bundle
+    is one dt= partition already collapsed by warehouse_reader.latest_per_trade.
+    A non-empty list means a legacy cumulative bundle is in the glob, or two
+    bundles cover the same date — both worth knowing, neither worth absorbing.
     """
     seen: Dict[str, dict] = {}
+    origin: Dict[str, str] = {}
+    dupes = []
     raw = 0
     pattern = (os.path.join(bundles_dir, "fleet_trades_*.json")
                if bundles_dir else BUNDLE_GLOB)
@@ -305,12 +338,17 @@ def load_trades(since, mode, bundles_dir=None) -> Tuple[List[dict], List[tuple],
         elif mode == "paper":
             rows = [r for r in rows if _truthy(r.get("paper_trade"))]
         raw += len(rows)
+        base = os.path.basename(path)
         for r in rows:
             tid = str(r.get("trade_id") or "") or \
                   f"{r.get('box')}|{r.get('entry_time')}|{r.get('strike')}"
-            prev = seen.get(tid)
-            if prev is None or _filled(r) > _filled(prev):
-                seen[tid] = r
+            if tid in seen:
+                # FIRST WINS, by sorted filename, so the result is deterministic
+                # rather than dependent on which row happened to look fuller.
+                dupes.append((tid, origin[tid], base))
+                continue
+            seen[tid] = r
+            origin[tid] = base
 
     trades = list(seen.values())
     by_day: Dict[str, int] = defaultdict(int)
@@ -326,11 +364,7 @@ def load_trades(since, mode, bundles_dir=None) -> Tuple[List[dict], List[tuple],
     if since:
         trades = [r for r in trades if r["_date"] >= since]
         by_day = {d: n for d, n in by_day.items() if d >= since}
-    return trades, sorted(by_day.items()), raw
-
-
-def _filled(r) -> int:
-    return sum(1 for v in r.values() if v not in (None, ""))
+    return trades, sorted(by_day.items()), raw, dupes
 
 
 # ── aggregation ──────────────────────────────────────────────────────────────
@@ -533,11 +567,11 @@ def main(argv: List[str]) -> int:
     else:
         since, floor_note = ENGINE_EPOCH, f"engine epoch {ENGINE_EPOCH} (default)"
 
-    trades, used, raw = load_trades(since, None if mode == "all" else mode,
-                                    bundles_dir=src_dir)
+    trades, used, raw, dupes = load_trades(since, None if mode == "all" else mode,
+                                           bundles_dir=src_dir)
     # How much the floor removed, so the filter is visible rather than inferred.
-    _all, _allday, _ = load_trades(None, None if mode == "all" else mode,
-                                   bundles_dir=src_dir)
+    _all, _allday, _, _ = load_trades(None, None if mode == "all" else mode,
+                                      bundles_dir=src_dir)
     dropped = len(_all) - len(trades)
 
     print(f"SOURCE: {src_dir}/fleet_trades_*.json")
@@ -555,8 +589,21 @@ def main(argv: List[str]) -> int:
             print(f"No closed trades found in {src_dir}/fleet_trades_*.json")
         return 2
 
-    print(f"{raw} row(s) across bundles -> {len(trades)} unique trade(s) "
-          f"(de-duplicated by trade_id)")
+    print(f"{raw} row(s) across bundles -> {len(trades)} unique trade(s)")
+    if dupes:
+        # 🔴 LOUD, AND NAMED. Each bundle is one already-collapsed dt=
+        # partition, so a repeated trade_id means a legacy CUMULATIVE bundle is
+        # in this glob or two bundles cover the same date. v1.9 and earlier
+        # absorbed both without a word.
+        print(f"\n  🔴 {len(dupes)} DUPLICATE trade_id(s) ACROSS BUNDLES. Each "
+              f"bundle should be ONE already-collapsed session, so this means")
+        print(f"     either a legacy CUMULATIVE bundle is in {src_dir}, or two "
+              f"bundles cover the same date. First occurrence wins (sorted by")
+        print("     filename); the counts below EXCLUDE the repeats.")
+        for tid, first, later in dupes[:8]:
+            print(f"       {tid:<28} kept from {first}, also in {later}")
+        if len(dupes) > 8:
+            print(f"       ... and {len(dupes) - 8} more")
     print(f"{len(used)} session(s), dated from entry_time:")
     for d, n in used:
         print(f"   {d}   {n:>5} closed trades")
