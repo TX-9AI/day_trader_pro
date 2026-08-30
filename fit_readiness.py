@@ -1,7 +1,33 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/fit_readiness.py  v1.0
+day_trader_pro/fit_readiness.py  v1.1
 Per setup type: what fired, what was declined, and whether it is FITTABLE yet.
+
+v1.1  2026-08-29  r184 / dtp r226 — THE WAREHOUSE IS THE SOURCE (backlog S3.2).
+  🔴 THIS REPORT HAS NEVER PRODUCED A NUMBER ON CONTROL, AND THE REASON WAS
+  A PATH. `--db` defaulted to `~/options-trader/data/derived_store.db` — a
+  BOX path. WORKING_AGREEMENT 3 is explicit that `~/options-trader` does not
+  exist on the control server, so devtools item 57 has always printed "No
+  derived store at ..." unless somebody hand-scp'd a copy, which nobody did.
+  It failed loudly, which is why it was never mistaken for a flat result —
+  and also why it sat unnoticed as a menu item that could not work.
+  Now: `warehouse_reader.load_derived()` for each of the three tables,
+  defaulting to S3. `--db` survives as the EXPLICIT local escape hatch, for
+  running this on a box against the live store.
+  ⚠️ THE ET-DAY BOUND IS A CORRECTNESS FIX, NOT A PORT ARTIFACT. v1.0 built
+  its window with `datetime.strptime(date).timestamp()`, which is NAIVE
+  LOCAL time. The control box runs UTC, so "2026-08-25" meant 20:00 ET on
+  the 24th and the window was four hours out of place — the operator's own
+  long-standing symptom, "any time I run a report for today after the
+  session ends it fails". Both paths now bound on the ET trading day: the
+  local path by explicit ET epochs, the warehouse path by each row's own
+  timestamp converted to ET.
+  🔑 ONE AGGREGATOR, TWO SOURCES. `collect()` consumes plain dicts and knows
+  nothing about where they came from; only the two loaders differ. A second
+  aggregation path is a second set of numbers that agree until they do not.
+  ⚠️ AND THE SOURCE LINE ALWAYS PRINTS. An unreachable bucket and a session
+  with no evaluations must never render the same, which is the failure this
+  project has now paid for twice.
 
 v1.0  2026-08-25  Replaces `fit_report.py`, which is obsolete — see below.
 
@@ -36,10 +62,11 @@ support fitting one. The operator's standing split: setting a baseline where
 none exists is judgment, correctness is a defect, and re-tuning a working dial
 is not wanted. This tool serves the first two and refuses the third.
 
-Run:  python3 fit_readiness.py                      # today
+Run:  python3 fit_readiness.py                      # today, from S3
       python3 fit_readiness.py --date 2026-08-24
       python3 fit_readiness.py --from A --to B      # a range
       python3 fit_readiness.py --setup ORBStrategy  # one section
+      python3 fit_readiness.py --db data/derived_store.db   # ON A BOX
 """
 
 from __future__ import annotations
@@ -54,6 +81,8 @@ from datetime import datetime, timedelta
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+
+import warehouse_reader as wr    # noqa: E402  (needs HERE on sys.path first)
 
 # ⚠️ THE BAR IS DELIBERATELY CRUDE AND STATED OUT LOUD. These are not tuned
 # numbers — they are the point at which a human should LOOK, not a verdict.
@@ -92,66 +121,102 @@ def _dates(a) -> list:
     return [datetime.now().strftime("%Y-%m-%d")]
 
 
-def collect(dc, dates: list) -> dict:
-    """Per strategy: fired/declined rows, rung histogram, derived vectors."""
+TABLES = ("strategy_note", "gate_disposition", "plan_ledger")
+
+
+def _rows_sqlite(db, dates):
+    """The three tables from a local derived_store.db. -> (src, notes)."""
+    src = {t: [] for t in TABLES}
+    notes = []
+    dc = _connect(db)
+    if dc is None:
+        notes.append("SOURCE: %s — 🔴 NO DERIVED STORE AT THAT PATH" % db)
+        return None, notes
+    dc.row_factory = sqlite3.Row
+    lo, hi = wr.et_bounds(dates[0], dates[-1])
+    for t in TABLES:
+        col = wr.DERIVED_TS_COL.get(t, wr.DEFAULT_TS_COL)
+        try:
+            src[t] = [dict(r) for r in dc.execute(
+                "SELECT * FROM %s WHERE %s >= ? AND %s < ?" % (t, col, col),
+                (lo, hi))]
+            notes.append("SOURCE: %s [%s] — %d row(s)" % (db, t, len(src[t])))
+        except sqlite3.Error as exc:
+            # ⚠️ A MISSING TABLE IS NOT AN EMPTY ONE. Say which, by name.
+            notes.append("SOURCE: %s [%s] — 🔴 UNREADABLE: %s" % (db, t, exc))
+    return src, notes
+
+
+def _rows_warehouse(dates):
+    """The three tables from S3. -> (src, notes). Boxes are never touched."""
+    src, notes, s3 = {}, [], None
+    try:
+        s3 = wr._client()
+    except Exception as exc:                                    # noqa: BLE001
+        notes.append("🔴 COULD NOT OPEN AN S3 CLIENT: %s: %s"
+                     % (type(exc).__name__, exc))
+        return None, notes
+    for t in TABLES:
+        rows, meta = wr.load_derived(t, dates, s3=s3)
+        src[t] = rows
+        notes.append(meta.banner())
+    return src, notes
+
+
+def collect(src: dict, dates: list) -> dict:
+    """Per strategy: fired/declined rows, rung histogram, derived vectors.
+
+    🔑 IT TAKES PLAIN DICTS AND KNOWS NOTHING ABOUT THE SOURCE. Both
+    loaders hand it the same shape, so the local and warehouse runs cannot
+    drift into two different sets of numbers — the failure that took four
+    instrumentation defects to find the last time two paths computed the
+    "same" report.
+    """
     out = defaultdict(lambda: {
         "fired": [], "declined": [], "rungs": Counter(),
         "plans": Counter(), "vec_fired": defaultdict(list),
         "vec_declined": defaultdict(list)})
-    if dc is None:
+    if not src:
         return out
 
-    lo = datetime.strptime(dates[0], "%Y-%m-%d").timestamp()
-    hi = datetime.strptime(dates[-1], "%Y-%m-%d").timestamp() + 86400
-
-    # ── the two populations, from ONE table ─────────────────────────────
     # ⚠️ `strategy_note` HOLDS BOTH SIDES BY DESIGN: one row per strategy
     # EVALUATION, fired and declined alike, each carrying the derived vector
     # that was true at the moment the engine looked. That is what makes the
     # comparison possible at all — the skipped trades have snapshots too.
-    try:
-        cur = dc.execute(
-            "SELECT strategy, fired, outcome, payload FROM strategy_note"
-            " WHERE ts_epoch >= ? AND ts_epoch < ?", (lo, hi))
-        for strat, fired, outcome, payload in cur.fetchall():
-            rec = out[strat]
-            try:
-                p = json.loads(payload) if payload else {}
-            except Exception:                                   # noqa: BLE001
-                p = {}
-            side = "fired" if fired else "declined"
-            rec[side].append(p)
-            bucket = rec["vec_fired"] if fired else rec["vec_declined"]
-            for k, v in p.items():
-                fv = _f(v)
-                if fv is not None:
-                    bucket[k].append(fv)
-            if not fired and outcome:
-                rec["rungs"][str(outcome)[:48]] += 1
-    except sqlite3.Error:
-        pass
+    for r in src.get("strategy_note") or []:
+        strat = r.get("strategy")
+        if not strat:
+            continue
+        rec = out[strat]
+        try:
+            p = json.loads(r.get("payload") or "{}")
+        except Exception:                                       # noqa: BLE001
+            p = {}
+        if not isinstance(p, dict):
+            p = {}
+        fired = bool(r.get("fired"))
+        rec["fired" if fired else "declined"].append(p)
+        bucket = rec["vec_fired"] if fired else rec["vec_declined"]
+        for k, v in p.items():
+            fv = _f(v)
+            if fv is not None:
+                bucket[k].append(fv)
+        if not fired and r.get("outcome"):
+            rec["rungs"][str(r["outcome"])[:48]] += 1
 
-    # ── which rung refused, from the gate reporter ──────────────────────
-    try:
-        cur = dc.execute(
-            "SELECT strategy, gate, COUNT(*) FROM gate_disposition"
-            " WHERE ts_epoch >= ? AND ts_epoch < ? AND event != 'CLEARED'"
-            " GROUP BY strategy, gate", (lo, hi))
-        for strat, gate, n in cur.fetchall():
-            out[strat]["rungs"][gate] += n
-    except sqlite3.Error:
-        pass
+    # which rung refused, from the gate reporter
+    for r in src.get("gate_disposition") or []:
+        if str(r.get("event") or "") == "CLEARED":
+            continue
+        strat, gate = r.get("strategy"), r.get("gate")
+        if strat and gate:
+            out[strat]["rungs"][gate] += 1
 
-    # ── intent that never became a trade ────────────────────────────────
-    try:
-        cur = dc.execute(
-            "SELECT strategy, COALESCE(terminal_reason,'(live)'), COUNT(*)"
-            " FROM plan_ledger WHERE created_ts >= ? AND created_ts < ?"
-            " GROUP BY strategy, terminal_reason", (lo, hi))
-        for strat, reason, n in cur.fetchall():
-            out[strat]["plans"][reason] += n
-    except sqlite3.Error:
-        pass
+    # intent that never became a trade
+    for r in src.get("plan_ledger") or []:
+        strat = r.get("strategy")
+        if strat:
+            out[strat]["plans"][r.get("terminal_reason") or "(live)"] += 1
     return out
 
 
@@ -262,22 +327,28 @@ def main(argv=None) -> int:
     ap.add_argument("--from", dest="frm")
     ap.add_argument("--to", dest="to")
     ap.add_argument("--setup", help="filter to one setup type")
-    ap.add_argument("--db", default=os.path.expanduser(
-        "~/options-trader/data/derived_store.db"))
+    ap.add_argument("--db", default=None,
+                    help="EXPLICIT local escape hatch: read this "
+                         "derived_store.db instead of S3. Default is the "
+                         "warehouse, which is the only source that works on "
+                         "control.")
     a = ap.parse_args(argv[1:] if argv else None)
 
     dates = _dates(a)
-    dc = _connect(a.db)
-    if dc is None:
-        # ⚠️ SAY WHICH, NEVER RENDER AN EMPTY REPORT. "no derived store here"
-        # and "no evaluations that day" are different facts and an empty
-        # section conflates them.
-        print(f"No derived store at {a.db}.")
-        print("On control this reads a PULLED copy; on a box it reads the "
-              "live one. Point --db at the store you mean.")
+    src, notes = (_rows_sqlite(a.db, dates) if a.db else _rows_warehouse(dates))
+    for n in notes:
+        print("  " + n)
+    print()
+    if src is None:
+        # ⚠️ SAY WHICH, NEVER RENDER AN EMPTY REPORT. "the source could not be
+        # read" and "no evaluations that day" are different facts, and an empty
+        # section conflates them into the answer you were hoping for.
+        print("  Nothing was read, so there is no report — the lines above "
+              "say why.")
+        print("  On control the default (S3) is the working source; --db is "
+              "for running this ON A BOX.")
         return 1
-    data = collect(dc, dates)
-    print(render(data, dates, a.setup))
+    print(render(collect(src, dates), dates, a.setup))
     return 0
 
 

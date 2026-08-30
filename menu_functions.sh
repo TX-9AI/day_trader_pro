@@ -1,3 +1,17 @@
+# day_trader_pro/menu_functions.sh — v1.40
+# ⚠️ THE TITLE LINE IS NEW, AND IT IS NOT COSMETIC. This file carried its
+# version ONLY in the changelog banner below, so the standing two-places rule
+# (title line AND newest dated entry, agreeing) had nothing to check against
+# here — and tools/check_land_discipline.py, which anchors on the filename to
+# avoid matching a quoted example, could not see this file at all. One line
+# brings it under the gate.
+# ── v1.40 (2026-08-29) — ITEM 57 READS THE WAREHOUSE (r184 / dtp r226) ───
+# FIT READINESS asked for a "Derived store path" defaulting to
+# ~/options-trader/data/derived_store.db — a BOX path that does not exist on
+# control (WORKING_AGREEMENT 3), so the item printed "No derived store at ..."
+# every time it was run here. The prompt is GONE: fit_readiness v1.1 defaults
+# to S3, which is the only source that works on this machine. --db survives on
+# the command line for running the report ON A BOX.
 # ── v1.39 (2026-08-28) — NEW SENSORS ITEM "DECISIONS NOW" (r170) ────────────
 # The per-tick plan record had readers only for AGGREGATES (PLAN BOARD counts
 # verdicts; the ledger counts outcomes); nothing answered "what is every bot
@@ -325,16 +339,19 @@ mi_fit_readiness() {
     # nothing about where it should be.
     echo
     echo "  Fit readiness — per setup type, TAKEN vs SKIPPED, with the"
-    echo "  derived vector on both sides. Reads the derived store."
+    echo "  derived vector on both sides. Reads the S3 warehouse; boxes stay off."
+    echo "  A SOURCE line prints per stream — an unreachable bucket and a"
+    echo "  session with no evaluations never render the same."
     read -rp "  Date (YYYY-MM-DD, ENTER=today), or START of a range: " D1
     read -rp "  END of range (ENTER = single day): " D2
     read -rp "  One setup only (ENTER = all): " SU
-    read -rp "  Derived store path (ENTER = ~/options-trader/data/derived_store.db): " DB
     ARGS=""
     if [ -n "$D1" ] && [ -n "$D2" ]; then ARGS="--from $D1 --to $D2"
     elif [ -n "$D1" ];               then ARGS="--date $D1"; fi
     [ -n "$SU" ] && ARGS="$ARGS --setup $SU"
-    [ -n "$DB" ] && ARGS="$ARGS --db $DB"
+    # NO --db PROMPT. On control the answer is always the warehouse; the old
+    # prompt offered a box path that is not on this machine and the item could
+    # not produce a number. --db stays on the command line for use ON A BOX.
     $PY fit_readiness.py $ARGS
     pause
 }

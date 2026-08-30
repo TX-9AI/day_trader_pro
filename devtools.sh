@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
-# day_trader_pro/devtools.sh — v1.56
+# day_trader_pro/devtools.sh — v1.57
+# v1.57 (2026-08-29) — FIT READINESS (57) reads the S3 warehouse instead of a
+#   box-local derived store that does not exist on this machine, so the item
+#   produces a number here for the first time — see fit_readiness.py v1.1,
+#   warehouse_reader.py v1.7 and menu_functions.sh v1.40. The banner reads its
+#   version from THIS line, so the bump is what keeps the menu honest.
 # v1.56 (2026-08-28) — SENSORS gains "DECISIONS NOW (enter on / exit on, live
 # snapshot)" — see menu_functions.sh v1.39 / menu_registry.sh. The item is
 # fleet transport for the box's own `query.py --decisions` (otv4 r170), so the

@@ -1,5 +1,27 @@
 #!/usr/bin/env python3
-# day_trader_pro/warehouse_reader.py — v1.6
+# day_trader_pro/warehouse_reader.py — v1.7
+# v1.7 (2026-08-29) — r184 / dtp r226. DERIVED-TABLE READER (backlog S3.2).
+#      `load_derived()` returns the latest state of one derived_store table
+#      from raw/derived_<table>/, CDC-collapsed latest-per-(symbol,_rid) by
+#      pushed_at_utc — the same contract as the trade reader one level up.
+#      Built so `fit_readiness.py` can run on control at all: its --db
+#      pointed at ~/options-trader/data/derived_store.db, a BOX path that
+#      does not exist on the control server (WORKING_AGREEMENT 3), so menu
+#      57 has never produced a number there.
+#      🔴 `dt=` ON A DERIVED PREFIX IS THE PUSH DAY, NOT THE ROW'S DAY, AND
+#      READING ONE PARTITION PER REQUESTED DATE WOULD SILENTLY UNDER-REPORT.
+#      push_derived files every CHANGED row under `datetime.now(ET).date()`
+#      at push time — so a plan created Monday and updated Wednesday ships
+#      into Wednesday's partition, and the FIRST push after any gap files a
+#      whole table's history under that one day. This scans a forward window
+#      of partitions and then files every row by ITS OWN timestamp converted
+#      to the ET trading day. Partition selection and row attribution are
+#      two different questions, and conflating them is how a join returns
+#      nothing and looks like a flat day.
+#      ⚠️ EMPTY AND UNREACHABLE STAY DIFFERENT FACTS. `read_prefix` raises
+#      on a credential or network failure and returns [] for a partition
+#      that simply holds nothing; both would print as "0 rows". Every load
+#      returns a `WhMeta` whose banner names which, and the caller prints it.
 # v1.6 (2026-08-16) — 🔴 SORT ORDER. The parity run showed report 40 differing
 #      at one figure out of 421 — but the located lines revealed the reports
 #      hold the SAME rows in a DIFFERENT ORDER, not different values
@@ -103,7 +125,7 @@ import json
 import os
 import sys
 from collections import OrderedDict
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import boto3
@@ -162,6 +184,125 @@ def read_prefix(s3, datatype, date):
         except Exception as exc:
             _log("WARN", f"unreadable object {k}: {exc}")
     return out
+
+
+class WhMeta:
+    """What a warehouse read actually did. Never let empty look like broken.
+
+    ⚠️ THIS EXISTS BECAUSE THE CONFLATION HAS COST THIS PROJECT TWICE IN ONE
+    WEEK. A report that prints "0 evaluations" for a flat session and "0
+    evaluations" for an expired credential is a report that cannot be acted
+    on, and the second case looks exactly like the answer you were hoping
+    for. The banner always prints, on success and failure alike.
+    """
+
+    def __init__(self, what):
+        self.what = what
+        self.partitions = 0      # dt= prefixes actually scanned
+        self.objects = 0         # envelopes read
+        self.rows = 0            # rows after CDC collapse
+        self.kept = 0            # rows inside the requested ET window
+        self.error = ""
+
+    def banner(self) -> str:
+        head = "SOURCE: s3://%s/%s [%s]" % (BUCKET, PREFIX, self.what)
+        if self.error:
+            return "%s — 🔴 COULD NOT READ THE WAREHOUSE: %s" % (head, self.error)
+        tail = ("%d partition(s), %d object(s), %d row(s) after collapse, "
+                "%d in window" % (self.partitions, self.objects,
+                                  self.rows, self.kept))
+        if self.objects == 0:
+            tail += "  (a real, empty result — not a missing path)"
+        return "%s — %s" % (head, tail)
+
+
+def et_day(ts) -> str:
+    """A unix epoch -> the ET TRADING DAY it belongs to.
+
+    ⚠️ THE PREDICATE IS AN EXCHANGE FACT, NOT A DISPLAY CHOICE. Every
+    ts_epoch in the derived store is UTC seconds and the control box runs
+    UTC, so a naive `datetime.fromtimestamp(ts).date()` rolls the day at
+    20:00 ET — the long-standing symptom that a report for "today" run
+    after the close comes back wrong. Convert explicitly; never lean on the
+    ambient clock.
+    """
+    try:
+        return (datetime.fromtimestamp(float(ts), tz=timezone.utc)
+                .astimezone(_ET).date().isoformat())
+    except (TypeError, ValueError, OSError, OverflowError):
+        return ""
+
+
+def et_bounds(d0: str, d1: str) -> tuple:
+    """[start, end) epoch seconds spanning the ET days d0..d1 inclusive."""
+    a = datetime.strptime(d0, "%Y-%m-%d").replace(tzinfo=_ET)
+    b = datetime.strptime(d1, "%Y-%m-%d").replace(tzinfo=_ET) + timedelta(days=1)
+    return a.timestamp(), b.timestamp()
+
+
+# A row is dated by the column that says when the THING happened. A plan is
+# dated by when it was FORMED, not when it last changed state, or a plan that
+# transitions on the next session would be counted twice or on the wrong day.
+DERIVED_TS_COL = {"plan_ledger": "created_ts"}
+DEFAULT_TS_COL = "ts_epoch"
+
+# How many days PAST the requested window to scan for late-pushed rows. Three
+# covers a weekend plus one night the pusher did not run. Raising it costs
+# LIST calls, never correctness; lowering it can silently drop rows.
+DERIVED_FORWARD_DAYS = int(os.environ.get("DTP_DERIVED_FORWARD_DAYS", "3"))
+
+
+def load_derived(table, dates, s3=None, forward=None):
+    """Latest state of one derived_store table for the ET days `dates`.
+
+    -> (rows, WhMeta). Rows are plain dicts exactly as the box wrote them,
+    collapsed latest-per-(symbol, _rid) by `pushed_at_utc`, then filtered to
+    the requested ET days by each row's own timestamp column.
+    """
+    meta = WhMeta("derived_%s %s..%s" % (table, dates[0], dates[-1]))
+    s3 = s3 or _client()
+    fwd = DERIVED_FORWARD_DAYS if forward is None else forward
+
+    scan = set(dates)
+    last = datetime.strptime(dates[-1], "%Y-%m-%d")
+    for i in range(1, fwd + 1):
+        scan.add((last + timedelta(days=i)).date().isoformat())
+
+    best = {}
+    for d in sorted(scan):
+        try:
+            objs = read_prefix(s3, "derived_%s" % table, d)
+        except Exception as exc:                                # noqa: BLE001
+            # ⚠️ FAIL THE WHOLE LOAD, DO NOT SKIP THE PARTITION. A partial
+            # read that reports success is the shape of every bad number this
+            # project has chased.
+            meta.error = "%s: %s" % (type(exc).__name__, exc)
+            return [], meta
+        meta.partitions += 1
+        for sym, env in objs:
+            meta.objects += 1
+            stamp = str(env.get("pushed_at_utc") or "")
+            sym = env.get("symbol") or sym
+            for r in (env.get("record") or []):
+                if not isinstance(r, dict):
+                    continue
+                key = (sym, r.get("_rid"))
+                if key not in best or stamp >= best[key][0]:
+                    best[key] = (stamp, sym, r)
+
+    want = set(dates)
+    col = DERIVED_TS_COL.get(table, DEFAULT_TS_COL)
+    out = []
+    for _stamp, sym, r in best.values():
+        meta.rows += 1
+        if et_day(r.get(col)) in want:
+            # These tables all carry `symbol`, but a row that somehow lacks it
+            # still needs a box, and the sym= partition is the warehouse's
+            # answer to "which box wrote this".
+            r.setdefault("symbol", sym)
+            out.append(r)
+    meta.kept = len(out)
+    return out, meta
 
 
 def latest_per_trade(objects):
