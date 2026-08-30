@@ -1,7 +1,41 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/eod_analysis.py  v1.1
+day_trader_pro/eod_analysis.py  v1.2
 The reports. Runs AFTER the boxes are down, reads the warehouse.
+
+v1.2  2026-08-29  r186 / dtp r227 — EXCURSION READS THE BUNDLE CONSOLIDATE
+      JUST BUILT (backlog S3.3). 🔴 THIS PHASE HAS BEEN FAILING EVERY NIGHT
+      SINCE THE v2 EOD INSTALL, AND THE CHAIN ITSELF IS WHAT BROKE IT.
+      `_consolidate` was pointed at S3 and writes to `reports/warehouse/`;
+      one phase later `_excursion` still shelled `excursion_report.py --date
+      <date>` with NO `--bundles-dir`, which takes the per-box-DB path and
+      reads `trades/<date>/*_trades_<date>.db`. `install_eod_v2.sh` DISABLES
+      `dtp-harvest.timer` — deliberately, because the conductor drains to S3
+      and a second copy on control has no consumer — so that folder is not
+      populated any more. The report then falls back to a ROOT
+      `reports/fleet_trades_<date>.json`, which `_consolidate` no longer
+      writes either. Both sources gone, so `load_day` returns None and
+      excursion_report exits 1.
+      ⚠️ IT FAILED LOUDLY, WHICH IS THE ONLY GOOD NEWS: the phase is
+      warn-never-stop, so every night it logged `EXCURSION rc=1 No
+      trades/<date>/*_trades.db and no fleet_trades_<date>.json` and the
+      chain carried on. Not a laundered green — a real warning that nothing
+      chased down. Now it passes `--bundles-dir` pointing at
+      `warehouse_reader.WAREHOUSE_OUT`, the exact directory `_consolidate`
+      wrote to seconds earlier.
+      ⚠️ AND IT CHECKS THE BUNDLE EXISTS FIRST, BY NAME. If CONSOLIDATE
+      produced nothing, the warning now says so and names the missing file
+      instead of reporting an excursion failure for a consolidate problem.
+      Two phases, two causes, two messages.
+      ⚠️ THE OUTPUT FILENAME CHANGES, DELIBERATELY: a `--bundles-dir` run
+      lands at `reports/excursions_<date>_bundle_warehouse.txt`, because
+      excursion_report v3.4 refuses to let two sources collide on one path.
+      `tools/report_parity.py` writes that same name during a parity run;
+      both are deterministic from the same bundle and parity regenerates
+      before it reads, so the overwrite is safe — but it is two owners of
+      one filename and it is recorded here rather than discovered later.
+      ABSOLUTE PATH, never relative: a relative `--bundles-dir` has bitten
+      this project before.
 
 v1.1  2026-08-23  TWO R-SUITE PHASES, conductor-driven, no new timers.
   · R_LEDGER — nightly. Shells to the otv4 checkout's tests/r_ledger.py
@@ -196,13 +230,30 @@ def run(date: str, dry: bool) -> int:
 
     def _excursion():
         import subprocess
-        r = subprocess.run([sys.executable, "excursion_report.py", "--date", date],
+        import warehouse_reader as _wr
+        # The bundle CONSOLIDATE wrote seconds ago, by absolute path.
+        bundles = _wr.WAREHOUSE_OUT
+        bundle = os.path.join(bundles, f"fleet_trades_{date}.json")
+        if not os.path.exists(bundle):
+            # ⚠️ NAME THE ACTUAL CAUSE. "excursion failed" for a missing
+            # consolidate output sends the reader to the wrong phase, and this
+            # chain is warn-never-stop so a mislabelled warning is all anyone
+            # will ever see of it.
+            _warn(warns, "EXCURSION",
+                  f"no bundle at {bundle} — CONSOLIDATE produced nothing for "
+                  f"{date}, so there is nothing to report on. This is a "
+                  f"CONSOLIDATE problem, not an excursion problem.")
+            return
+        r = subprocess.run([sys.executable, "excursion_report.py",
+                            "--date", date, "--bundles-dir", bundles],
                            cwd=_here, capture_output=True, text=True, timeout=600)
         if r.returncode != 0:
             _warn(warns, "EXCURSION", f"rc={r.returncode} "
                                       f"{(r.stderr or '').strip()[:120]}")
         else:
-            _log("EXCURSION", "✅ excursion report written")
+            tag = os.path.basename(os.path.normpath(bundles))
+            _log("EXCURSION", f"✅ excursion report written FROM THE WAREHOUSE "
+                              f"→ reports/excursions_{date}_bundle_{tag}.txt")
 
     def _coverage():
         import subprocess

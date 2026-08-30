@@ -1,7 +1,27 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/excursion_report.py — v3.4 — MFE/MAE distributions from the
-fleet's auto-collected per-symbol trade DBs.
+day_trader_pro/excursion_report.py — v3.5 — MFE/MAE distributions from the
+fleet's trade records, per-box DBs or a bundle.
+
+v3.5 — 2026-08-29 — r186 / dtp r227. 🔴 THE PROVENANCE LINE WAS DESTROYED BY
+       `os.path.basename`, AND A DELIBERATE WAREHOUSE RUN WAS LABELLED
+       "DEGRADED". Found by a fixture while wiring S3.3, not by reading.
+       v3.2 appends `  [SOURCE: WAREHOUSE via <dir>]` to `src`; `build_report`
+       then renders `src if "(" in src else os.path.basename(src)`, and that
+       whole string has no "(" — so basename split it on "/" and printed
+       **`source: warehouse]`**. The tag existed, was correct, and never
+       reached the page.
+       🔴 AND THE SECOND HALF IS WORSE THAN COSMETIC. The same `"(" not in
+       src` test drives `SOURCE DEGRADED: per-box DBs absent — this is the
+       single-day consolidated fallback`. Once `eod_analysis` v1.2 points the
+       nightly at `--bundles-dir`, that is the INTENDED source, not a
+       fallback — so every night's report would have opened by calling its
+       own canonical input degraded. A warning that fires when nothing is
+       wrong is how the operator learns to skip the one that matters.
+       Both now key on whether `--bundles-dir` was EXPLICIT (the `[SOURCE:`
+       marker) rather than on the absence of a bracket: the tag prints whole,
+       and an explicit bundle run says CHOSEN with the one real caveat
+       (`--since` needs the DBs) instead of DEGRADED.
 
 v3.1 — 2026-08-13 — `insurance_stop` WAS REPORTED NOWHERE. It is the MIDDLE
        tier of continuation's three-stop precedence — BOS protected_level owns
@@ -518,10 +538,23 @@ def build_report(rows, day, src, skipped, mode, hints=None,
     w = out.append
     w(f"EXCURSION REPORT — {day} [{mode}] — {len(rows)} trade(s) with telemetry")
     # (window note is appended by main via the source line below)
-    w(f"source: {src if '(' in src else os.path.basename(src)}"
+    # v3.5 — three cases, not two. `chosen` is an EXPLICIT --bundles-dir run
+    # (v3.2 stamps `[SOURCE:` into src); `"(" in src` is the per-box-DB read
+    # (its src reads "N DBs across M session(s)"); anything else is a genuine
+    # fallback to whatever bundle happened to be lying beside the report.
+    chosen = "[SOURCE:" in src
+    from_dbs = "(" in src and not chosen
+    w(f"source: {src if (from_dbs or chosen) else os.path.basename(src)}"
       + (f"   ({skipped} closed row(s) skipped: no telemetry — pre-v3.8)"
          if skipped else ""))
-    if "(" not in src:
+    if chosen:
+        # ⚠️ NOT DEGRADED. This is the source the caller asked for. The only
+        # real consequence is the one --since already refuses on, and saying it
+        # here keeps the caveat without the false alarm.
+        w("SOURCE CHOSEN: a bundle was named explicitly. A bundle holds ONE "
+          "session, so cumulative (--since) is not available from it; "
+          "everything below covers that day.")
+    elif not from_dbs:
         w("SOURCE DEGRADED: per-box DBs absent — this is the single-day "
           "consolidated fallback, so cumulative (--since) is not available "
           "from it. Numbers below cover ONE session.")
