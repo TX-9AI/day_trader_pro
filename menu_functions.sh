@@ -1,3 +1,11 @@
+# day_trader_pro/menu_functions.sh — v1.42
+# ── v1.42 (2026-08-29) — R LEDGER ITEM; EXCURSION HANDLERS RETIRED ──────
+# r189 / dtp r230. NEW `mi_r_ledger`, one `_r_tool` call — the R baseline could
+# only be seen inside the nightly conductor's Telegram headline until now.
+# The two excursion handlers are DELETED here as well as unlisted in the
+# registry: an orphaned handler is a function nobody calls and everybody keeps,
+# and `menu_extract --check` reports functions with no item so the drift would
+# have shown up as noise on every run.
 # day_trader_pro/menu_functions.sh — v1.41
 # ── v1.41 (2026-08-29) — ITEM 56 IS WAREHOUSE-SOURCED AND EPOCH-FLOORED ──
 # (r187 / dtp r228, backlog S3.5). The old prompt offered "Since date (ENTER =
@@ -308,13 +316,6 @@ mi_re_run_consolidation_fleet_trades_date_json() {
 }
 
 # Excursion report (MFE/MAE) -> reports/excursions_<date>.txt
-mi_excursion_report_mfe_mae_reports_excursions() {
-    echo; read -rp "Day (YYYY-MM-DD, ENTER=today): " D; D="${D:-$(date +%F)}"; \
-        read -rp "Cumulative since (YYYY-MM-DD, ENTER=that day only): " S; \
-        read -rp "Live rows? [y/N]: " LV; \
-        ARGS="--date $D"; [ -n "$S" ] && ARGS="$ARGS --since $S"; [ "$LV" = "y" ] && ARGS="$ARGS --live"; \
-        $PY excursion_report.py $ARGS; pause
-}
 
 # Trade breakdown (cross-day: strategy/grade/setup)
 # ⚠️ LABEL AND HANDLER RENAMED r203 (2026-08-25). The old name promised a
@@ -783,14 +784,6 @@ mi_warehouse_explain_date() {
 }
 
 # Excursion report FROM THE WAREHOUSE (forces the bundle source)
-mi_warehouse_excursion_report() {
-    echo; read -rp "Date (YYYY-MM-DD): " WD
-    if [ -n "$WD" ]; then
-      $PY warehouse_reader.py --date "$WD" && \
-      $PY excursion_report.py --date "$WD" --bundles-dir "$SCRIPT_DIR/reports/warehouse"
-    fi
-    pause
-}
 
 # Trade breakdown FROM THE WAREHOUSE (cross-day)
 mi_warehouse_trade_report() {
@@ -899,6 +892,16 @@ mi_r_stop_sweep() {
 }
 
 # Exit replay — trail fit on real premium paths (S3, the expensive one)
+mi_r_ledger() {
+    echo; echo "  R, expectancy, capture and giveback — per strategy, per side,"
+    echo "  per exit reason — plus the SELECTION vs EXTENSION split: what never"
+    echo "  went favourable at all, versus what went favourable and gave it back."
+    echo "  Those have opposite fixes and one net number hides both."
+    echo "  Rows with no excursion telemetry are counted SEPARATELY — unmeasured"
+    echo "  is not the same fact as never-favourable."
+    _r_tool r_ledger.py
+}
+
 mi_r_exit_replay() {
     echo; echo "  Rebuilds each trade's premium path from the quote_series"
     echo "  batches and replays trail/stop/TP ladders. Expensive by design —"

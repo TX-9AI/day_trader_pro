@@ -1,4 +1,22 @@
 #!/usr/bin/env bash
+# day_trader_pro/menu_registry.sh — v1.2
+# v1.2 (2026-08-29) — r189 / dtp r230. THE EXCURSION REPORT IS RETIRED AND THE
+#   R LEDGER TAKES ITS PLACE. Operator concurred with the r188 recommendation.
+#   BOTH excursion items go — the local one and its FROM THE WAREHOUSE twin —
+#   because they are one script and retiring a report means retiring it from
+#   both sources, not moving it to the other one.
+#   🔴 THE SCRIPT ITSELF IS NOT DELETED. `excursion_report.py` still has one
+#   caller, `tools/report_parity.py`, and the nightly `eod_analysis` phase
+#   r186 just repointed. Deleting it would break a tool whose own fate is a
+#   separate question (RPT.3). A retired MENU ITEM and a deleted FILE are
+#   different decisions and collapsing them is how a working caller breaks.
+#   NEW: R ledger — R, expectancy, capture, giveback, and the never-favourable
+#   split that was the excursion report's one unique measurement. It already
+#   ran nightly inside the conductor and could not be asked for on demand
+#   (RPT.2); `_r_tool` takes it with no new plumbing.
+#   ALSO: the S3 WAREHOUSE section no longer says "runs ALONGSIDE the local
+#   reports" (C.16). After r184-r188 there is no local report left to run
+#   alongside — same stale-framing class the R SUITE qualifier had.
 # day_trader_pro/menu_registry.sh — v1.1
 # v1.1 (2026-08-29) — r188 / dtp r229. TRADES DATA and R SUITE ARE ONE SECTION.
 #   Operator: "TRADES DATA should be merged with R SUITE", and "the control
@@ -92,11 +110,11 @@ MENU=(
   "ITEM|PULL <- GitHub  (FORCE; GitHub is source of truth)|mi_pull_github_force_github_is_source_of_truth"
   "SECTION|TRADES DATA & R SUITE"
   "ITEM|Re-run consolidation -> fleet_trades_<date>.json (+ .csv)|mi_re_run_consolidation_fleet_trades_date_json"
-  "ITEM|Excursion report (MFE/MAE) -> reports/excursions_<date>.txt|mi_excursion_report_mfe_mae_reports_excursions"
   "ITEM|Trade breakdown (cross-day, warehouse, day one onward)|mi_trade_breakdown_cross_day"
   "ITEM|FIT READINESS — per setup: taken vs skipped, is it fittable yet|mi_fit_readiness"
   "ITEM|Stop / TP sweep       (R surface over excursions)|mi_r_stop_sweep"
   "ITEM|Exit replay           (trail fit on real premium paths)|mi_r_exit_replay"
+  "ITEM|R LEDGER              (R, expectancy, capture + selection vs extension)|mi_r_ledger"
   "SECTION|EOD CONDUCTOR, BACKFILL & LIVE P&L"
   "ITEM|Live P&L standings (reads the BOXES; must be up)|mi_live_p_l_standings_read_only"
   "ITEM|P&L from WAREHOUSE (day or range; boxes off)|mi_pnl_from_warehouse"
@@ -114,7 +132,7 @@ MENU=(
   "ITEM|Pre-open rehearsal — ask the fleet, then turn it on/off|mi_rehearsal_toggle"
   "ITEM|Debug logging — ask the fleet, then turn it on/off|mi_debug_log_toggle"
   "ITEM|Disk usage — top consumers per box (one/all/some)|mi_disk_usage"
-  "SECTION|S3 WAREHOUSE (read-only; runs ALONGSIDE the local reports)"
+  "SECTION|S3 WAREHOUSE (inventory, hygiene, rebuilds and parity)"
   "ITEM|S3 SWEEP — hygiene (dups / culled symbols; lists first)|mi_s3_sweep"
   "ITEM|Warehouse inventory & cost|mi_warehouse_inventory_cost"
   "ITEM|Warehouse inventory & cost (+ noncurrent versions)|mi_warehouse_inventory_versions"
@@ -122,7 +140,6 @@ MENU=(
   "ITEM|Compare S3 vs local - one date|mi_warehouse_compare_date"
   "ITEM|Compare S3 vs local - EVERY in-coverage date|mi_warehouse_compare_all"
   "ITEM|Explain a date's divergence (lists trade_ids)|mi_warehouse_explain_date"
-  "ITEM|Excursion report FROM THE WAREHOUSE|mi_warehouse_excursion_report"
   "ITEM|Trade breakdown FROM THE WAREHOUSE (cross-day)|mi_warehouse_trade_report"
   "ITEM|REPORT PARITY - run 40 & 41 both sources, diff OUTPUTS|mi_warehouse_report_parity"
 )

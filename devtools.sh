@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
-# day_trader_pro/devtools.sh — v1.59
+# day_trader_pro/devtools.sh — v1.60
+# v1.60 (2026-08-29) — the Excursion report items (local and warehouse) are
+#   RETIRED and R LEDGER replaces them, carrying the never-favourable split
+#   that was the only measurement unique to them; S3 WAREHOUSE loses its
+#   "runs ALONGSIDE the local reports" qualifier. See menu_registry.sh v1.2,
+#   menu_functions.sh v1.42 and otv4 tests/r_ledger.py v1.2. Numbers shift
+#   again — free by construction, fatal to any prose citing one.
 # v1.59 (2026-08-29) — TRADES DATA and R SUITE merged into one section and the
 #   "(control-side, reads S3 — boxes untouched)" qualifier dropped — see
 #   menu_registry.sh v1.1. EVERY MENU NUMBER AFTER THE FLEET SECTION SHIFTS,
