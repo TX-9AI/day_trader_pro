@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
-# day_trader_pro/devtools.sh — v1.58
+# day_trader_pro/devtools.sh — v1.59
+# v1.59 (2026-08-29) — TRADES DATA and R SUITE merged into one section and the
+#   "(control-side, reads S3 — boxes untouched)" qualifier dropped — see
+#   menu_registry.sh v1.1. EVERY MENU NUMBER AFTER THE FLEET SECTION SHIFTS,
+#   which is a non-event by construction (numbers are assigned at render time
+#   and stored nowhere) but IS a live hazard for any prose that cites one.
+#   The banner reads its version from THIS line.
 # v1.58 (2026-08-29) — TRADE BREAKDOWN (56) reads reports/warehouse and floors
 #   at the 2026-08-25 engine epoch by default, with ALL HISTORY as an explicit
 #   menu choice — see trade_report.py v1.9 and menu_functions.sh v1.41. The
