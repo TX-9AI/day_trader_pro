@@ -1,4 +1,11 @@
-# day_trader_pro/trade_report.py — v1.10
+# day_trader_pro/trade_report.py — v1.11
+# v1.11 (2026-08-31) — r202. --rows / --rows-only: ONE LINE PER TRADE.
+#   Every report in the suite aggregated and none listed a trade, so "what
+#   did the fleet actually do today" had no answer short of reading the
+#   bundle JSON by hand. 43 chars for Termius on a phone: sym, time,
+#   strategy, contracts, entry, exit, pnl. ⚠️ Exit reason is deliberately
+#   absent — it has its own section, and the operator ruled that symbol and
+#   contracts earn the space instead.
 # v1.10 (2026-08-29) — r190 / dtp r231. THE DEDUP SHIM IS GONE, AND WHAT
 #   REPLACES IT IS A DETECTOR (backlog S3.6).
 #   🔑 IT WAS NEVER A DESIGN FEATURE. Its own v1.1 changelog (2026-07-22)
@@ -534,12 +541,66 @@ def show(title: str, d: Dict[str, dict], min_n: int, width: int = 26) -> None:
               f"{a['net']:>11.2f}{a['avg']:>9.2f}{h}{flag}")
 
 
+# ── r202 — THE TRADES THEMSELVES ──────────────────────────────────────────
+# 🔴 EVERY REPORT IN THIS SUITE AGGREGATES, AND NONE OF THEM LISTS A TRADE.
+# `trade_report` groups by strategy, symbol, setup type, exit reason, phase,
+# hour and weekday; `r_ledger` groups by R bucket; `fit_readiness` groups by
+# setup. On 2026-08-31 the operator asked what the fleet actually did and there
+# was no answer short of reading the bundle JSON by hand.
+# ⚠️ WIDTH IS THE CONSTRAINT, not taste. This is read over Termius on a phone,
+# so the row is 43 characters. Exit reason is deliberately ABSENT — it has its
+# own section below, and the operator ruled that symbol and contracts earn the
+# space instead.
+# 🔑 CONTRACTS IS NOT DECORATION. `SPX 6.95 -> 7.45` reads as a modest winner;
+# `x50` is what makes it $2,500 and what the r201 budget would clip to 7. A
+# per-trade view without size cannot answer the question it gets opened for.
+_STRAT_ABBR = {
+    "ORBStrategy": "ORB", "RunawayContinuation": "RUN",
+    "GEXPinButterfly": "BFLY", "SweepCreditSpread": "SWP",
+    "TrendCreditSpread": "TCS", "IronCondorStrategy": "CNDR",
+    "SweepReversal": "SWPR", "ContinuationStrategy": "CONT",
+}
+
+
+def _abbr(name: str) -> str:
+    """Short strategy tag. ⚠️ An UNKNOWN name is truncated, never dropped — a
+    blank column would silently hide a strategy nobody had added here."""
+    n = str(name or "?")
+    return _STRAT_ABBR.get(n, n[:4].upper())
+
+
+def rows_table(trades) -> None:
+    """One line per trade, entry order. 43 characters."""
+    if not trades:
+        print("\n  (no trades in this window)")
+        return
+    print(f"\nTRADES TAKEN  ({len(trades)})")
+    print(f"  {'sym':<4} {'time':<5} {'strat':<5} {'n':<3} "
+          f"{'entry':>6} {'exit':>6} {'pnl':>8}")
+    for t in sorted(trades, key=lambda x: str(_dt(x.get("entry_time")) or "")):
+        _e = to_et(t.get("entry_time"))
+        # ⚠️ TIME ONLY, NOT THE DATE. The window is stated in the header, and a
+        # date on every row would spend 11 of the 43 characters repeating it.
+        hhmm = str(_e)[11:16] if _e and len(str(_e)) >= 16 else "  -  "
+        print(f"  {str(t.get('symbol') or '?')[:4]:<4} {hhmm:<5} "
+              f"{_abbr(t.get('strategy')):<5} "
+              f"{int(_f(t.get('contracts')) or 0):<3} "
+              f"{_f(t.get('entry_premium')) or 0:>6.2f} "
+              f"{_f(t.get('exit_premium')) or 0:>6.2f} "
+              f"{_f(t.get('pnl_usd')) or 0:>8.0f}")
+
+
 def main(argv: List[str]) -> int:
     ap = argparse.ArgumentParser(description="cross-day trade breakdown")
     ap.add_argument("--since", help="only sessions on/after YYYY-MM-DD")
     ap.add_argument("--min-n", type=int, default=8,
                     help="thin-bucket flag AND best/worst sample floor (default 8)")
     ap.add_argument("--no-json", action="store_true", help="display only")
+    ap.add_argument("--rows", action="store_true",
+                    help="list every trade, one line each, before the "
+                         "aggregates (43 chars wide)")
+    ap.add_argument("--rows-only", action="store_true",
+                    help="the trade list and nothing else")
     ap.add_argument("--out", default=None,
                     help="write the JSON here instead of the stamped default")
     ap.add_argument("--bundles-dir", default=None,
@@ -681,6 +742,14 @@ def main(argv: List[str]) -> int:
           f"worst {overall['worst']:+.2f}")
     if overall["median_hold_min"] is not None:
         print(f"  median hold {overall['median_hold_min']} min")
+
+    # r202 — the rows come FIRST. The aggregates answer "how did the
+    # strategies do"; the list answers "what did it actually take", which is
+    # the question somebody opening this on a phone is usually asking.
+    if args.rows or args.rows_only:
+        rows_table(trades)
+    if args.rows_only:
+        return 0
 
     show("BY STRATEGY", dims["by_strategy"], args.min_n)
     show("BY SYMBOL", dims["by_symbol"], args.min_n)

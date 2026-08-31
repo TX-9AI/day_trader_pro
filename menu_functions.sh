@@ -1,4 +1,10 @@
-# day_trader_pro/menu_functions.sh — v1.42
+# day_trader_pro/menu_functions.sh — v1.43
+# — v1.43 (2026-08-31) — r202. NEW `mi_trades_taken`: one line per trade,
+# 43 chars for a phone. Every other report in this suite aggregates and none
+# listed a trade, so "what did the fleet actually do today" had no answer
+# short of reading the bundle JSON by hand. Exit reason is deliberately
+# absent — BY EXIT REASON in the breakdown covers it, and symbol and
+# contracts earn the space instead (operator ruling).
 # ── v1.42 (2026-08-29) — R LEDGER ITEM; EXCURSION HANDLERS RETIRED ──────
 # r189 / dtp r230. NEW `mi_r_ledger`, one `_r_tool` call — the R baseline could
 # only be seen inside the nightly conductor's Telegram headline until now.
@@ -327,6 +333,21 @@ mi_re_run_consolidation_fleet_trades_date_json() {
 # — and this rename does NOT fix that. It stops the MENU lying; the report
 # itself is part of the day_trader_pro sweep still owed (125 live lines across
 # 12 files, incl. fit_report.py and warehouse_reader.py).
+mi_trades_taken() {
+    # r202 — the trades themselves. Every other report in this suite
+    # aggregates; this is the only one that lists a row per trade.
+    # ⚠️ 43 characters wide, for Termius on a phone. Exit reason is
+    # deliberately absent — BY EXIT REASON in option 53 covers it.
+    local SD
+    read -rp "  Since [ENTER = day one / YYYY-MM-DD / all]: " SD
+    case "$SD" in
+        "")      $PY trade_report.py --rows-only --no-json ;;
+        all|ALL) $PY trade_report.py --rows-only --no-json --all-history ;;
+        *)       $PY trade_report.py --rows-only --no-json --since "$SD" ;;
+    esac
+    pause
+}
+
 mi_trade_breakdown_cross_day() {
     echo
     echo "  Cross-day breakdown from the S3-sourced bundles in reports/warehouse."

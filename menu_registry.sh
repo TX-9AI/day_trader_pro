@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# day_trader_pro/menu_registry.sh — v1.2
+# day_trader_pro/menu_registry.sh — v1.3
+# v1.3 (2026-08-31) — r202. NEW ITEM "TRADES TAKEN" beside the cross-day
+#   breakdown: one line per trade, phone width.
 # v1.2 (2026-08-29) — r189 / dtp r230. THE EXCURSION REPORT IS RETIRED AND THE
 #   R LEDGER TAKES ITS PLACE. Operator concurred with the r188 recommendation.
 #   BOTH excursion items go — the local one and its FROM THE WAREHOUSE twin —
@@ -111,6 +113,7 @@ MENU=(
   "SECTION|TRADES DATA & R SUITE"
   "ITEM|Re-run consolidation -> fleet_trades_<date>.json (+ .csv)|mi_re_run_consolidation_fleet_trades_date_json"
   "ITEM|Trade breakdown (cross-day, warehouse, day one onward)|mi_trade_breakdown_cross_day"
+  "ITEM|TRADES TAKEN  (one line per trade, phone width)|mi_trades_taken"
   "ITEM|FIT READINESS — per setup: taken vs skipped, is it fittable yet|mi_fit_readiness"
   "ITEM|Stop / TP sweep       (R surface over excursions)|mi_r_stop_sweep"
   "ITEM|Exit replay           (trail fit on real premium paths)|mi_r_exit_replay"
