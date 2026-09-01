@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# day_trader_pro/menu_registry.sh — v1.5
+# day_trader_pro/menu_registry.sh — v1.6
+# — v1.6 (2026-09-01) — r241. Butterfly PIN STUDY: which condition refuses,
+# pin_em_fraction by hour WITHIN each day, and |charm| by hour beside it.
 # — v1.5 (2026-09-01) — r238. Two S3 items added: WAREHOUSE MAP, which
 # regenerates docs/WAREHOUSE_MAP.md from the bucket, and BUTTERFLY REACH, a
 # one-day probe that proves the fetch-to-local-cache path and leaves only its
@@ -150,6 +152,7 @@ MENU=(
   "ITEM|Warehouse inventory & cost (asks about noncurrent versions)|mi_warehouse_inventory_cost"
   "ITEM|Warehouse MAP -> docs/WAREHOUSE_MAP.md (regenerates from the bucket)|mi_warehouse_map"
   "ITEM|Butterfly reach, one day (fast probe; cache self-deletes)|mi_bfly_reach_probe"
+  "ITEM|Butterfly PIN STUDY - gate/reach/charm over a range|mi_bfly_pin_study"
   "ITEM|Rebuild a day's bundle FROM S3 -> reports/warehouse/|mi_warehouse_rebuild_bundle"
   "ITEM|Compare S3 vs local - one date|mi_warehouse_compare_date"
   "ITEM|Compare S3 vs local - EVERY in-coverage date|mi_warehouse_compare_all"

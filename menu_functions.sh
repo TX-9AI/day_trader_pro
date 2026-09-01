@@ -1,4 +1,5 @@
-# day_trader_pro/menu_functions.sh — v1.46
+# day_trader_pro/menu_functions.sh — v1.47
+# — v1.47 (2026-09-01) — r241. New item: Butterfly PIN STUDY.
 # — v1.46 (2026-09-01) — r238. Two S3 items: WAREHOUSE MAP (regenerates
 # docs/WAREHOUSE_MAP.md from the bucket via warehouse_cost.scan_current — the
 # walker that already exists) and BUTTERFLY REACH, a one-day probe that proves
@@ -454,6 +455,16 @@ mi_bfly_reach_probe() {
     # every exit path; only the report is left, in reports/.
     echo; read -rp "  Date (YYYY-MM-DD, ENTER=today): " D
     if [ -n "$D" ]; then $PY tools/bfly_reach_probe.py --date "$D"; else $PY tools/bfly_reach_probe.py; fi
+    pause
+}
+
+mi_bfly_pin_study() {
+    # r241 — EXPLORATORY. Bins nothing into pass/fail and fits nothing; it
+    # shows the distributions the carried constants sit in. Time-of-day is
+    # bucketed WITHIN each date, because comparing one day's morning against
+    # another day's noon attributes a day difference to the clock.
+    echo; read -rp "  START (YYYY-MM-DD): " A; read -rp "  END   (YYYY-MM-DD): " B
+    [ -n "$A" ] && [ -n "$B" ] && $PY tools/bfly_pin_study.py --from "$A" --to "$B"
     pause
 }
 
