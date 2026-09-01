@@ -360,3 +360,130 @@ Net: -$589.00   24 closed  (3W/21L, 12%)
 [DONE      ] 1 verified and stopped · 14 HELD UP
 [notify] missing DTP_TELEGRAM_TOKEN/DTP_TELEGRAM_CHAT_ID; cannot send.
 [REARM     ] re-arming s3-push.timer + candle-logger.timer
+[START     ] EOD conductor v2 — 2026-08-28
+[START     ] 15 box(es): AMD, AMZN, AVGO, CRM, CVX, GOOGL, META, MU, NFLX, NVDA, PLTR, QQQ, SPX, TSLA, UNH
+[QUIESCE   ] stopping other writers — the conductor owns the close
+[STOP      ] stopping optionsbot on 15 box(es) — feed and machine STAY UP
+[SETTLE    ] 45s for the bots to flush their stores
+[DRAIN     ] draining + verifying 15 box(es) against S3
+[VERIFY    ] AMD    SHORT      short=1 local=63235 s3=63429
+[VERIFY    ] AMZN   SHORT      short=1 local=63766 s3=63957
+[VERIFY    ] AVGO   SHORT      short=1 local=70426 s3=70618
+[VERIFY    ] CRM    SHORT      short=3 local=54136 s3=54329
+[VERIFY    ] CVX    SHORT      short=3 local=42706 s3=42905
+[VERIFY    ] GOOGL  SHORT      short=2 local=66367 s3=66565
+[VERIFY    ] META   SHORT      short=1 local=43870 s3=44069
+[VERIFY    ] MU     SHORT      short=2 local=68020 s3=68317
+[VERIFY    ] NFLX   SHORT      short=2 local=51557 s3=51738
+[VERIFY    ] NVDA   SHORT      short=2 local=65467 s3=65751
+[VERIFY    ] PLTR   SHORT      short=2 local=72842 s3=73037
+[VERIFY    ] QQQ    SHORT      short=1 local=66089 s3=66413
+[VERIFY    ] SPX    SHORT      short=1 local=77016 s3=77245
+[VERIFY    ] TSLA   SHORT      short=1 local=57892 s3=58102
+[VERIFY    ] UNH    SHORT      short=3 local=57666 s3=57876
+[VERIFY    ]   AMD: shortfall is COUNTER DRIFT — objects are present; taking down and flagging for --reconcile
+[VERIFY    ]   AMZN: shortfall is COUNTER DRIFT — objects are present; taking down and flagging for --reconcile
+[VERIFY    ]   AVGO: shortfall is COUNTER DRIFT — objects are present; taking down and flagging for --reconcile
+[VERIFY    ]   CVX: shortfall is COUNTER DRIFT — objects are present; taking down and flagging for --reconcile
+[VERIFY    ]   META: shortfall is COUNTER DRIFT — objects are present; taking down and flagging for --reconcile
+[VERIFY    ]   MU: shortfall is COUNTER DRIFT — objects are present; taking down and flagging for --reconcile
+[VERIFY    ]   QQQ: shortfall is COUNTER DRIFT — objects are present; taking down and flagging for --reconcile
+[VERIFY    ]   SPX: shortfall is COUNTER DRIFT — objects are present; taking down and flagging for --reconcile
+[VERIFY    ]   TSLA: shortfall is COUNTER DRIFT — objects are present; taking down and flagging for --reconcile
+[PURGE     ] retention purge on 9 verified box(es)
+[PURGE     ]   AMD: [retention] removed 3,121,724 row(s) | [retention]    quote_series                 2,655,934 | [retention]    prints    
+[PURGE     ]   AMZN: [retention] removed 1,277,973 row(s) | [retention]    quote_series                   958,214 | [retention]    prints    
+[PURGE     ]   AVGO: [retention] removed 1,561,574 row(s) | [retention]    quote_series                 1,162,261 | [retention]    prints    
+[PURGE     ]   CVX: [retention] removed 574,348 row(s) | [retention]    quote_series                   416,691 | [retention]    prints      
+[PURGE     ]   META: [retention] removed 1,933,168 row(s) | [retention]    quote_series                 1,609,207 | [retention]    prints    
+[PURGE     ]   MU: [retention] removed 3,811,597 row(s) | [retention]    quote_series                 3,216,777 | [retention]    prints    
+[PURGE     ]   QQQ: [retention] removed 4,490,020 row(s) | [retention]    quote_series                 4,075,750 | [retention]    prints    
+[PURGE     ]   SPX: [retention] removed 4,371,071 row(s) | [retention]    quote_series                 4,104,925 | [retention]    greeks_ser
+[PURGE     ]   TSLA: [retention] removed 2,871,952 row(s) | [retention]    quote_series                 2,356,458 | [retention]    prints    
+[TAKEDOWN  ] stopping 9 verified box(es)
+[HELD      ] CRM — verdict=SHORT short=3 — LEFT RUNNING
+[HELD      ] GOOGL — verdict=SHORT short=2 — LEFT RUNNING
+[HELD      ] NFLX — verdict=SHORT short=2 — LEFT RUNNING
+[HELD      ] NVDA — verdict=SHORT short=2 — LEFT RUNNING
+[HELD      ] PLTR — verdict=SHORT short=2 — LEFT RUNNING
+[HELD      ] UNH — verdict=SHORT short=3 — LEFT RUNNING
+[notify] missing DTP_TELEGRAM_TOKEN/DTP_TELEGRAM_CHAT_ID; cannot send.
+VERTIGO — P&L from the warehouse  (2026-08-28)
+
+By symbol
+NVDA     +$950.00  (3t)
+AMZN     +$396.50  (8t)
+GOOGL     +$30.50  (9t)
+META      -$26.50  (7t)
+AMD      -$416.50  (2t)
+SPX      -$910.50  (7t)
+QQQ      -$948.50  (8t)
+UNH    -$1,552.50  (9t)
+MU     -$2,003.00  (8t)
+CRM    -$3,531.00  (9t)
+
+──────────────
+Net: -$8,011.50   70 closed  (21W/49L, 30%)
+[REPORTS   ] starting the analysis run (reads S3; boxes are off)
+[START      ] EOD analysis — 2026-08-28
+[START      ] boxes are DOWN; every read below is control-side or S3
+[PNL        ] net=-8011.50 closed=70 open=0
+[READ    ] trades: 187 object(s) -> 70 unique trade(s)
+[CONSOLIDATE] ✅ fleet_trades_2026-08-28.json — 70 trade(s)
+[DAILY_BARS ] daily bars rebuilt from the 1m tape
+[DAILY_BARS ] ✅ 29 symbol(s) rebuilt from 1m tape
+[LABEL      ] price-action session label
+[LABEL      ] ⚠️  auto_label.py rc=1
+[EXCURSION  ] MFE/MAE report
+[EXCURSION  ] ⚠️  rc=1 No trades/2026-08-28/*_trades.db and no fleet_trades_2026-08-28.json/.csv — nothing collected for that day yet.
+[COVERAGE   ] warehouse coverage
+[COVERAGE   ] ✅ coverage checked
+[R_LEDGER   ] R baseline from the warehouse (headline → Telegram)
+  SOURCE: s3://vertigo-warehouse-tx9ai/raw [trades 2026-08-28..2026-08-28] — 187 object(s) listed, 187 read
+r_ledger: zero closed unrelaxed rows in this window — the baseline does not exist yet
+
+[R_LEDGER   ] ✅ no closed trades in the warehouse
+[EDGE_SCAN  ] weekly edge scan (Fridays; silent unless the bar clears)
+  SOURCE: s3://vertigo-warehouse-tx9ai/raw [trades 2026-07-17..2026-08-28] — 6948 object(s) listed, 6948 read
+  SOURCE: s3://vertigo-warehouse-tx9ai/raw [derived_fire_snapshot 2026-07-17..2026-08-28] — 88 object(s) listed, 88 read
+  SOURCE: s3://vertigo-warehouse-tx9ai/raw [derived_plan_ledger 2026-07-17..2026-08-28] — 894 object(s) listed, 894 read
+
+[EDGE_SCAN  ] ⚠️  rc=1
+[DONE       ] 3 warning(s):
+[DONE       ]   · LABEL: auto_label.py rc=1
+[DONE       ]   · EXCURSION: rc=1 No trades/2026-08-28/*_trades.db and no fleet_trades_2026-08-28.json/.csv — nothing collected for that day yet.
+[DONE       ]   · EDGE_SCAN: rc=1
+[notify] missing DTP_TELEGRAM_TOKEN/DTP_TELEGRAM_CHAT_ID; cannot send.
+[DONE      ] 9 verified and stopped · 6 HELD UP
+[notify] missing DTP_TELEGRAM_TOKEN/DTP_TELEGRAM_CHAT_ID; cannot send.
+[REARM     ] re-arming s3-push.timer + candle-logger.timer
+[START     ] EOD conductor v2 — 2026-08-31
+[START     ] 15 box(es): AMD, AMZN, AVGO, CRM, CVX, GOOGL, META, MU, NFLX, NVDA, PLTR, QQQ, SPX, TSLA, UNH
+[QUIESCE   ] stopping other writers — the conductor owns the close
+[STOP      ] stopping optionsbot on 15 box(es) — feed and machine STAY UP
+[SETTLE    ] 45s for the bots to flush their stores
+[DRAIN     ] draining + verifying 15 box(es) against S3
+[VERIFY    ] AMD    OK         short=0 local=69831 s3=70056
+[VERIFY    ] AMZN   OK         short=0 local=70465 s3=70688
+[VERIFY    ] AVGO   OK         short=0 local=74943 s3=75166
+[VERIFY    ] CRM    OK         short=0 local=58774 s3=59003
+[VERIFY    ] CVX    OK         short=0 local=49369 s3=49602
+[VERIFY    ] GOOGL  OK         short=0 local=73097 s3=73331
+[VERIFY    ] META   OK         short=0 local=50509 s3=50742
+[VERIFY    ] MU     OK         short=0 local=72602 s3=72934
+[VERIFY    ] NFLX   OK         short=0 local=56152 s3=56386
+[VERIFY    ] NVDA   OK         short=0 local=72223 s3=72549
+[VERIFY    ] PLTR   OK         short=0 local=79534 s3=79769
+[VERIFY    ] QQQ    OK         short=0 local=72790 s3=73148
+[VERIFY    ] SPX    OK         short=0 local=83808 s3=84070
+[VERIFY    ] TSLA   OK         short=0 local=62587 s3=62832
+[VERIFY    ] UNH    OK         short=0 local=64391 s3=64637
+[PURGE     ] retention purge on 15 verified box(es)
+[PURGE     ]   AMD: [retention] removed 8,214,351 row(s) | [retention]    quote_series                 6,896,290 | [retention]    prints    
+[PURGE     ]   AMZN: [retention] removed 4,471,215 row(s) | [retention]    quote_series                 3,257,987 | [retention]    prints    
+[PURGE     ]   AVGO: [retention] removed 4,947,029 row(s) | [retention]    quote_series                 3,761,730 | [retention]    prints    
+[PURGE     ]   CRM: [retention] removed 4,197,131 row(s) | [retention]    quote_series                 3,161,408 | [retention]    prints    
+[PURGE     ]   CVX: [retention] removed 1,637,596 row(s) | [retention]    quote_series                 1,206,400 | [retention]    prints    
+[PURGE     ]   GOOGL: [retention] removed 4,684,983 row(s) | [retention]    quote_series                 3,496,535 | [retention]    prints    
+[PURGE     ]   META: [retention] removed 8,639,888 row(s) | [retention]    quote_series                 7,181,372 | [retention]    prints    
+[PURGE     ]   MU: [retention] removed 13,414,322 row(s) | [retention]    quote_series                 11,284,247 | [retention]    prints  
