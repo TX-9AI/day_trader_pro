@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
-# day_trader_pro/menu_registry.sh — v1.3
+# day_trader_pro/menu_registry.sh — v1.4
+# v1.4 (2026-09-01) — r206. NEW ITEM "ORB budget & spot (every running box)".
+#   The two Warehouse inventory rows merge into one that prompts for the
+#   version pass. ⚠️ ITEM NUMBERS SHIFT AGAIN — second renumber in two days,
+#   which is why items are cited by LABEL and never by number.
 # v1.3 (2026-08-31) — r202. NEW ITEM "TRADES TAKEN" beside the cross-day
 #   breakdown: one line per trade, phone width.
 # v1.2 (2026-08-29) — r189 / dtp r230. THE EXCURSION REPORT IS RETIRED AND THE
@@ -128,6 +132,7 @@ MENU=(
   "ITEM|OHLC 21-day fetch from yfinance (prompts symbol, default ^VIX)|mi_ohlc_21_day_fetch_from_yfinance_prompts_symb"
   "ITEM|Rotate fleet tokens/secrets (pushes to running boxes)|mi_rotate_fleet_tokens_secrets_pushes_to_runnin"
   "ITEM|Audit fleet credentials (read-only; shows which vars are set, no values)|mi_audit_fleet_credentials_read_only_shows_whic"
+  "ITEM|ORB budget & spot (every running box)|mi_orb_budget_fleet"
   "ITEM|Verify fleet credentials WORK (TT SDK, Telegram, GitHub)|mi_verify_fleet_credentials_work_tt_sdk_telegra"
   "ITEM|Verify control IAM role sees the fleet (read-only; no start/stop)|mi_verify_control_iam_role_sees_the_fleet_read"
   "ITEM|Blind-alert DRILL on the fleet (sends REAL Telegram, marked DRILL)|mi_blind_alert_drill_on_the_fleet_sends_real_te"
@@ -137,8 +142,7 @@ MENU=(
   "ITEM|Disk usage — top consumers per box (one/all/some)|mi_disk_usage"
   "SECTION|S3 WAREHOUSE (inventory, hygiene, rebuilds and parity)"
   "ITEM|S3 SWEEP — hygiene (dups / culled symbols; lists first)|mi_s3_sweep"
-  "ITEM|Warehouse inventory & cost|mi_warehouse_inventory_cost"
-  "ITEM|Warehouse inventory & cost (+ noncurrent versions)|mi_warehouse_inventory_versions"
+  "ITEM|Warehouse inventory & cost (asks about noncurrent versions)|mi_warehouse_inventory_cost"
   "ITEM|Rebuild a day's bundle FROM S3 -> reports/warehouse/|mi_warehouse_rebuild_bundle"
   "ITEM|Compare S3 vs local - one date|mi_warehouse_compare_date"
   "ITEM|Compare S3 vs local - EVERY in-coverage date|mi_warehouse_compare_all"

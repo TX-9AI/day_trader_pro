@@ -1,4 +1,10 @@
-# day_trader_pro/menu_functions.sh — v1.43
+# day_trader_pro/menu_functions.sh — v1.44
+# — v1.44 (2026-09-01) — r206. NEW `mi_orb_budget_fleet`: spot and the ORB
+# budget on every running box, with (DEFAULT) called out for any box nobody
+# configured. Calls tests/orb_budget_fleet.py rather than inlining a second
+# copy of the box program. ALSO: the two warehouse inventory items merge into
+# one that prompts for the version pass — same script, one flag apart, and the
+# split's justification ended at warehouse_cost v1.2.
 # — v1.43 (2026-08-31) — r202. NEW `mi_trades_taken`: one line per trade,
 # 43 chars for a phone. Every other report in this suite aggregates and none
 # listed a trade, so "what did the fleet actually do today" had no answer
@@ -165,6 +171,27 @@ mi_pull_trades_db_one_all_some() {
 # Pull OHLC for a day       (one/all/some)
 mi_pull_ohlc_for_a_day_one_all_some() {
     echo; SC=$(ask_scope); read -rp "Day (YYYY-MM-DD, ENTER=today): " D; D="${D:-$(date +%F)}"; $PY fleet.py pull ohlc --day "$D" $SC; pause
+}
+
+# ORB budget & spot (every running box)
+mi_orb_budget_fleet() {
+    # r206 — WHAT EACH BOX WILL ACTUALLY SIZE AN ORB WITH.
+    # 🔑 THIS CALLS THE SCRIPT, IT DOES NOT REIMPLEMENT IT. tests/
+    # orb_budget_fleet.py is the one implementation, staged and proven against
+    # the live fleet before this item existed. A menu item that inlined its own
+    # copy of the box program would drift from it, and the menu is the copy
+    # people trust.
+    # ⚠️ THE FIGURES COME FROM THE SYSTEMD UNIT, not from a bare import.
+    # v1.0 of that script imported `config` over ssh and got its DEFAULTS —
+    # INSTRUMENT read QQQ on all fifteen boxes and the budget read 200 instead
+    # of 1050. The spots were right, which made the table look plausible while
+    # every env-derived column was fiction. The script now reads the
+    # `Environment=` lines the way configure.sh and rotate_env_remote.sh do.
+    # ⚠️ `(DEFAULT - not set)` is the point of the report: an unconfigured box
+    # sizes off one trade's risk and will trade a 1-lot on an index name.
+    echo; SC=$(ask_scope)
+    $PY tests/orb_budget_fleet.py $SC
+    pause
 }
 
 # Service status (bot + candle-feed)
@@ -770,13 +797,34 @@ mi_disk_usage() {
 
 # Warehouse inventory & cost
 mi_warehouse_inventory_cost() {
-    echo; $PY warehouse_cost.py; pause
+    # r206 — ONE ITEM, NOT TWO. These were the same script one flag apart, and
+    # the reason for the split stopped existing at warehouse_cost v1.2: the
+    # main report is now computed and PRINTED FIRST and the version pass is
+    # strictly additive, degrading to a warning that names the missing
+    # `s3:ListBucketVersions` permission. Before that, an AccessDenied in the
+    # second pass threw away a completed whole-bucket scan.
+    # ⚠️ THE COST IS REAL AND STAYS IN THE PROMPT. ~130k objects is 130+
+    # paginated calls, and --versions is a SECOND full pass.
+    # 🔑 THE PROMPT ALSO CARRIES THE FACT. Versioning is ON with no lifecycle
+    # rule, so noncurrent versions accumulate with nobody deciding. That used
+    # to be visible in the second row's label; a bare [y/N] would delete it
+    # from the menu entirely.
+    echo
+    echo "  Noncurrent versions accumulate: versioning is ON and there is no"
+    echo "  lifecycle rule, so old versions pile up unbilled to any decision."
+    echo "  Counting them is a SECOND full pass over ~130k objects."
+    read -rp "  Include noncurrent versions? [y/N]: " _WV
+    case "$_WV" in
+        y|Y|yes|YES) $PY warehouse_cost.py --versions ;;
+        *)           $PY warehouse_cost.py ;;
+    esac
+    pause
 }
 
-# Warehouse inventory & cost (+ noncurrent versions)
-mi_warehouse_inventory_versions() {
-    echo; $PY warehouse_cost.py --versions; pause
-}
+# r206 — `mi_warehouse_inventory_versions` RETIRED. It was
+# `warehouse_cost.py --versions`; the base item now prompts for it. Recorded
+# rather than silently deleted: an absent handler with no explanation reads as
+# an oversight and gets re-added.
 
 # Rebuild a day's bundle FROM S3 -> reports/warehouse/
 mi_warehouse_rebuild_bundle() {
