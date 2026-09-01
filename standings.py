@@ -1,4 +1,18 @@
-# day_trader_pro/standings.py — v1.1
+# day_trader_pro/standings.py — v1.2
+# v1.2 (2026-09-01) — dtp r237. 🔴 HOTFIX: r236 BROKE THE LIVE PATH IT WAS
+#   WRITTEN FOR. `_query` gained `off` and `today_et`; the MOCK call site was
+#   updated and the REAL one was not, so menu 59 raised TypeError on the first
+#   box and the whole report died — `_query() missing 2 required positional
+#   arguments`.
+#   ⚠️ AND THE TEST COULD NOT HAVE CAUGHT IT. tests/test_standings_rows.py
+#   runs under `config.set_mock(True)`, so every case took the `_mock_query`
+#   branch and the live branch was never executed. Eight green checks over a
+#   report that could not run — the same shape as r195's standing offer,
+#   where the checks exercised `resting_orders` directly and never drove
+#   `_place_single_leg` in paper.
+#   THE FIX IS THE TEST, NOT ONLY THE LINE: S9 now stubs `ssh_util.ssh_run`
+#   and runs `run()` with MOCK_AWS FALSE, so the real `_query` executes and
+#   parses a real tab-separated payload. Born red against r236.
 # v1.1 (2026-09-01) — dtp r236. THE ROLLUP SHOWS THE TRADES, NOT JUST THE
 #   TOTALS. Operator, 2026-09-01: "it correctly lists open positions on x, y &
 #   z — great, so show me what they are (time entered, symbol, strategy,
@@ -255,7 +269,7 @@ def run(send=False):
         elif not ip:
             data, err = None, "no private IP"
         else:
-            data, err = _query(ip)
+            data, err = _query(ip, off, today_et)
 
         rows.append((sym, data, err))
         if data is None:

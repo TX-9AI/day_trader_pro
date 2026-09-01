@@ -1,5 +1,15 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/test_standings_rows.py — v1.0
+# day_trader_pro/tests/test_standings_rows.py — v1.1
+# v1.1 (2026-09-01) — dtp r237. 🔴 S9 ADDED: THE LIVE PATH IS EXECUTED.
+#   Every case in v1.0 ran under `config.set_mock(True)`, so all eight took the
+#   `_mock_query` branch and the REAL `_query` was never called. r236 changed
+#   `_query`'s signature, updated the mock call site and missed the live one,
+#   and this file stayed green over a report that raised TypeError on its first
+#   box. A test that only exercises the simulated path certifies the simulated
+#   path.
+#   ⚠️ SAME SHAPE AS r195's STANDING OFFER, where the checks drove
+#   `resting_orders` directly and never went through `_place_single_leg` in
+#   paper — so the whole mechanism was unreachable behind a green board.
 # v1.0 (2026-09-01) — dtp r236. THE ROLLUP'S ROWS, AND THE TWO SIGNS.
 #
 # Operator, 2026-09-01: show what the open positions ARE, and the day's closed
@@ -138,6 +148,46 @@ def main():
     check("S8 the mock fleet is stable across calls (crc32, not hash())",
           a["net"] == b["net"] and a["closed"] == b["closed"],
           f"{a['net']} vs {b['net']}")
+
+    # ── S9 — THE LIVE PATH, WITH THE SSH CALL STUBBED ───────────────────
+    # 🔑 MOCK_AWS FALSE, so `run()` takes the `_query` branch and the real
+    # parser sees a real tab-separated payload. This is the check that would
+    # have caught r236: the arity mismatch is a TypeError the moment the
+    # branch executes, and no amount of mock coverage reaches it.
+    import instance_registry as _ir
+    import ssh_util as _ssh
+    _tab = chr(9)
+
+    def _fake(ip, cmd, timeout=None):
+        rows = [
+            _tab.join(["O", f"{_today} 13:05:00", "CVX", "GEXPinButterfly",
+                       "0.42", "0.55", "12", "", "0"]),
+            _tab.join(["C", f"{_today} 10:00:00", "CVX", "ORBStrategy",
+                       "1.20", "1.05", "4", "-60.0", "0"]),
+        ]
+        return 0, "\n".join(rows) + "\n", ""
+
+    _today = datetime.now(ZoneInfo("US/Eastern")).strftime("%Y-%m-%d")
+    _real_mock, _real_ssh = config.MOCK_AWS, _ssh.ssh_run
+    try:
+        config.MOCK_AWS = False
+        _ssh.ssh_run = _fake
+        _ir.discover = lambda u=None: (
+            {"CVX": {"state": "running", "private_ip": "10.0.0.9"}}, None)
+        buf2 = io.StringIO()
+        with contextlib.redirect_stdout(buf2):
+            S.run(send=False)
+        live_out = buf2.getvalue()
+        live_err = ""
+    except Exception as exc:                                    # noqa: BLE001
+        live_out, live_err = "", f"{type(exc).__name__}: {exc}"
+    finally:
+        config.MOCK_AWS = _real_mock
+        _ssh.ssh_run = _real_ssh
+    check("S9 the LIVE (non-mock) path runs and parses a real payload",
+          not live_err and "OPEN POSITIONS" in live_out
+          and "CLOSED TODAY" in live_out and "BFLY" in live_out,
+          live_err or live_out.replace("\n", " | ")[:90])
 
     print()
     if _fails:

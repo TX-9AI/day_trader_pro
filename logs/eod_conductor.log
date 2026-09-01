@@ -487,3 +487,146 @@ r_ledger: zero closed unrelaxed rows in this window — the baseline does not ex
 [PURGE     ]   GOOGL: [retention] removed 4,684,983 row(s) | [retention]    quote_series                 3,496,535 | [retention]    prints    
 [PURGE     ]   META: [retention] removed 8,639,888 row(s) | [retention]    quote_series                 7,181,372 | [retention]    prints    
 [PURGE     ]   MU: [retention] removed 13,414,322 row(s) | [retention]    quote_series                 11,284,247 | [retention]    prints  
+[START     ] EOD conductor v2 — 2026-09-01
+[START     ] 15 box(es): AMD, AMZN, AVGO, CRM, CVX, GOOGL, META, MU, NFLX, NVDA, PLTR, QQQ, SPX, TSLA, UNH
+[QUIESCE   ] stopping other writers — the conductor owns the close
+[STOP      ] stopping optionsbot on 15 box(es) — feed and machine STAY UP
+[SETTLE    ] 45s for the bots to flush their stores
+[DRAIN     ] draining + verifying 15 box(es) against S3
+[VERIFY    ] AMD    OK         short=0 local=76852 s3=77119
+[VERIFY    ] AMZN   OK         short=0 local=77431 s3=77696
+[VERIFY    ] AVGO   OK         short=0 local=79897 s3=80163
+[VERIFY    ] CRM    OK         short=0 local=65888 s3=66158
+[VERIFY    ] CVX    OK         short=0 local=56461 s3=56736
+[VERIFY    ] GOOGL  OK         short=0 local=80115 s3=80391
+[VERIFY    ] META   OK         short=0 local=57134 s3=57408
+[VERIFY    ] MU     OK         short=0 local=79359 s3=79732
+[VERIFY    ] NFLX   OK         short=0 local=61325 s3=61602
+[VERIFY    ] NVDA   OK         short=0 local=79225 s3=79593
+[VERIFY    ] PLTR   OK         short=0 local=86777 s3=87053
+[VERIFY    ] QQQ    OK         short=0 local=79754 s3=80153
+[VERIFY    ] SPX    OK         short=0 local=90803 s3=91109
+[VERIFY    ] TSLA   OK         short=0 local=69564 s3=69851
+[VERIFY    ] UNH    OK         short=0 local=71318 s3=71605
+[PURGE     ] retention purge on 15 verified box(es)
+[PURGE     ]   AMD: [retention] removed 5,157 row(s) | [retention]    candles/1m                       2,230 | [retention]    greeks_series 
+[PURGE     ]   AMZN: [retention] removed 3,595 row(s) | [retention]    candles/1m                       2,294 | [retention]    greeks_series 
+[PURGE     ]   AVGO: [retention] removed 4,121 row(s) | [retention]    candles/1m                       2,443 | [retention]    greeks_series 
+[PURGE     ]   CRM: [retention] removed 4,786 row(s) | [retention]    candles/1m                       2,326 | [retention]    greeks_series 
+[PURGE     ]   CVX: [retention] removed 2,592 row(s) | [retention]    candles/1m                       1,578 | [retention]    greeks_series 
+[PURGE     ]   GOOGL: [retention] removed 5,520 row(s) | [retention]    candles/1m                       2,372 | [retention]    greeks_series 
+[PURGE     ]   META: [retention] removed 5,220 row(s) | [retention]    candles/1m                       2,304 | [retention]    greeks_series 
+[PURGE     ]   MU: [retention] removed 7,297 row(s) | [retention]    candles/1m                       2,526 | [retention]    greeks_series 
+[PURGE     ]   NFLX: [retention] removed 4,273 row(s) | [retention]    candles/1m                       2,114 | [retention]    greeks_series 
+[PURGE     ]   NVDA: [retention] removed 11,413 row(s) | [retention]    prints                           3,121 | [retention]    last_trade   
+[PURGE     ]   PLTR: [retention] removed 5,233 row(s) | [retention]    candles/1m                       2,092 | [retention]    greeks_series 
+[PURGE     ]   QQQ: [retention] removed 5,498 row(s) | [retention]    candles/1m                       2,332 | [retention]    greeks_series 
+[PURGE     ]   SPX: [retention] removed 5,787 row(s) | [retention]    greeks_series                    2,094 | [retention]    quote_series  
+[PURGE     ]   TSLA: [retention] removed 4,703 row(s) | [retention]    candles/1m                       2,385 | [retention]    greeks_series 
+[PURGE     ]   UNH: [retention] removed 2,761 row(s) | [retention]    candles/1m                       1,642 | [retention]    greeks_series 
+[TAKEDOWN  ] stopping 15 verified box(es)
+[notify] missing DTP_TELEGRAM_TOKEN/DTP_TELEGRAM_CHAT_ID; cannot send.
+VERTIGO — P&L from the warehouse  (2026-09-01)
+
+By symbol
+SPX    +$1,022.50  (4t)
+META     +$547.50  (3t)
+QQQ      +$319.00  (9t)
+AVGO     +$183.00  (3t)
+UNH      +$166.50  (2t)
+MU       +$143.00  (3t)
+NFLX      +$55.00  (4t)
+AMZN     -$137.00  (2t)
+NVDA     -$140.00  (1t)
+CVX      -$156.00  (1t)
+PLTR     -$163.50  (1t)
+TSLA     -$266.00  (2t)
+CRM      -$489.50  (4t)
+GOOGL    -$610.50  (6t)
+AMD      -$928.50  (5t)
+
+──────────────
+Net: -$454.50   50 closed  (11W/39L, 22%)
+[REPORTS   ] starting the analysis run (reads S3; boxes are off)
+[START      ] EOD analysis — 2026-09-01
+[START      ] boxes are DOWN; every read below is control-side or S3
+[PNL        ] net=-454.50 closed=50 open=0
+[READ    ] trades: 283 object(s) -> 50 unique trade(s)
+[CONSOLIDATE] ✅ fleet_trades_2026-09-01.json — 50 trade(s)
+[DAILY_BARS ] daily bars rebuilt from the 1m tape
+[DAILY_BARS ] ✅ 0 symbol(s) rebuilt from 1m tape
+[LABEL      ] price-action session label
+[LABEL      ] ⚠️  auto_label.py rc=1
+[EXCURSION  ] MFE/MAE report
+[EXCURSION  ] ✅ excursion report written FROM THE WAREHOUSE → reports/excursions_2026-09-01_bundle_warehouse.txt
+[COVERAGE   ] warehouse coverage
+[COVERAGE   ] ✅ coverage checked
+[R_LEDGER   ] R baseline from the warehouse (headline → Telegram)
+[notify] missing DTP_TELEGRAM_TOKEN/DTP_TELEGRAM_CHAT_ID; cannot send.
+  SOURCE: s3://vertigo-warehouse-tx9ai/raw [trades 2026-09-01..2026-09-01] — 283 object(s) listed, 283 read
+==============================================================================
+  R LEDGER — dollars only. R = avg win / |avg loss|. breakeven WR = 1/(1+R)
+==============================================================================
+  BOOK   n=26  net=-$1,473  R=   1.59  expectancy/trade=-$57  capture=  -1.33  giveback=+$1,283
+
+  strategy × side                      n  win%       R     avgW     avgL      exp  capture
+  ----------------------------------------------------------------------------
+  ORBStrategy · call                  15   33%    2.69    +$257     -$95     +$22    -0.84
+  ORBStrategy · put                   10   10%    0.28     +$56    -$202    -$176    -2.32
+  TrendCreditSpread · call             1    0%     —          —     -$40     -$40        —  THIN
+
+  BY EXIT REASON — where the R actually gets made or given back
+  exit_reason                      n  win%        net  capture   giveback
+  ----------------------------------------------------------------------
+  orb_fvg_trail_stop pnl=178.6%    1  100%      +$688     0.65      +$362
+  orb_trail_stop pnl=20.7%         1  100%      +$324     0.60      +$216
+  hard_close_15:45_ET              1  100%      +$188     0.24      +$590
+  orb_structure_stop: 1m close 4   1  100%       +$56     1.00        +$0
+  orb_trail_stop pnl=5.5%          1  100%       +$40     0.26      +$115
+  orb_structure_stop: 1m close 3   1    0%        +$0        —        +$0
+  orb_structure_stop: 1m close 3   2    0%        -$5        —        +$0
+  orb_structure_stop: 1m close 3   1    0%       -$28    -0.67        +$0
+  orb_structure_stop: 1m close 4   2    0%       -$35        —        +$0
+  breach: 1m close 7630.12 throu   1    0%       -$40        —        +$0
+  hard_stop_25% pnl=-25.9%         1    0%       -$45        —        +$0
+  hard_stop_25% pnl=-26.3%         1    0%       -$82        —        +$0
+  orb_structure_stop: 1m close 3   2   50%       -$89    -0.08        -$0
+  hard_stop_25% pnl=-26.7%         1    0%       -$92        —        +$0
+  orb_structure_stop: 1m close 3   1    0%      -$128    -5.33        +$0
+  hard_stop_25% pnl=-28.2%         1    0%      -$138    -4.06        +$0
+  hard_stop_25% pnl=-25.0%         1    0%      -$157    -8.75        +$0
+  orb_structure_stop: 1m close 2   2    0%      -$185    -1.57        +$0
+  orb_trail_stop pnl=-5.1%         1    0%      -$194    -0.20        +$0
+  orb_structure_stop: 1m close 3   1    0%      -$300    -0.34        +$0
+  orb_structure_stop: 1m close 7   1    0%      -$516        —        +$0
+  hard_stop_25% pnl=-28.0%         1    0%      -$735    -1.62        +$0
+
+  TWO POPULATIONS — SELECTION vs EXTENSION
+  A trade that never went favourable cannot be fixed by an exit rule.
+  A trade that went favourable and gave it back cannot be fixed by a
+  better entry. The split says which conversation to have.
+     cut  NEVER FAVOURABLE            WAS FAVOURABLE                
+  --------------------------------------------------------------------------
+     0%  n=10   net=-$802     win=  0%   n=15   net=-$630     win= 40% 
+     2%  n=12   net=-$887     win=  8%   n=13   net=-$545     win= 38%   <- base
+     5%  n=13   net=-$1,045   win=  8%   n=12   net=-$388     win= 42% 
+
+  NO TELEMETRY: n=1 net=-$40 — rows with no excursion columns.
+     These are UNMEASURED, not never-favourable. Folding them in would turn
+     missing instrumentation into a selection finding.
+
+  AT THE 2% CUT: selection population -$887, extension population -$545 (giveback on its winners +$1,283).
+     The larger drag is SELECTION.
+     ⚠️ Descriptive. This sizes and gates nothing (WA §31).
+
+  ⚠️ Every number above is descriptive. Nothing here sizes or gates
+     anything until it clears edge_scan's pre-registered bar (WA §31).
+
+[R_LEDGER   ] ✅ BOOK   n=26  net=-$1,473  R=   1.59  expectancy/trade=-$57  capture=  -1.33  giveback=+$1,283
+[EDGE_SCAN  ] skipped — runs Fridays only (its bar needs ~10 sessions; a nightly NOT-YET is noise)
+[DONE       ] 1 warning(s):
+[DONE       ]   · LABEL: auto_label.py rc=1
+[notify] missing DTP_TELEGRAM_TOKEN/DTP_TELEGRAM_CHAT_ID; cannot send.
+[DONE      ] 15 verified and stopped · 0 HELD UP
+[DONE      ] all 15 box(es) verified against S3 and stopped
+[REARM     ] re-arming s3-push.timer + candle-logger.timer
