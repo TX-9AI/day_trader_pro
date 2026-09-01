@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-# day_trader_pro/tools/warehouse_map.py — v1.0
+# day_trader_pro/tools/warehouse_map.py — v1.1
+# v1.1 (2026-09-01) — dtp r239. 🔴 v1.0's MEANING TABLE WAS WRITTEN FROM MEMORY
+#   AND 12 OF 25 PREFIXES WERE WRONG. The operator ran it and the generator
+#   printed the whole list back. Every entry now cites the FUNCTION that writes
+#   it, which is what forces the read: an entry cannot be added without opening
+#   the pusher. Corrected against s3_push.py's twelve-stage drain and the
+#   2026-09-01 scan.
 # v1.0 (2026-09-01) — dtp r238. THE BUCKET'S LAYOUT, GENERATED FROM THE BUCKET.
 #
 # Operator, 2026-09-01: map the files and folders of the bucket and store it in
@@ -44,30 +50,98 @@ GB = 1024 ** 3
 # What each prefix HOLDS. The counts come from the bucket; this says what the
 # rows mean, which a listing cannot. A prefix absent from here is reported as
 # UNDOCUMENTED rather than skipped — that is the point of the check.
+# ─────────────────────────────────────────────────────────────────────────────
+# 🔴 EVERY ROW CITES THE FUNCTION THAT WRITES IT, AND THAT IS NOT DECORATION.
+# v1.0 of this table was written from MEMORY and twelve of twenty-five prefixes
+# were wrong. Seven were one mistake repeated: the derived tables live under
+# `raw/derived_<table>/`, not `raw/<table>/` — `warehouse_reader.load_derived`
+# says `read_prefix(s3, "derived_%s" % table, d)` and I had READ that line in
+# the same session before writing the table anyway. The other five —
+# `raw/eod`, `raw/liquidity_ledger`, `raw/ohlc`, `raw/orb_range`,
+# `raw/signal_journal` — I simply never enumerated: I listed three constants
+# (SERIES_TABLES, DERIVED_TABLES, DERIVED_SERIES_TABLES) and treated that as
+# the whole pusher, while `push_file`, `push_jsonl_tree`, `push_whole_files`
+# and `push_candles` each build their own keys.
+# ⚠️ WORKING_AGREEMENT §0.1: anything readable from the repo is READ before it
+# is used, and guessing costs the operator a round trip that he is the one
+# running. The writer citation is what forces the read — an entry cannot be
+# added without opening the function that produces the objects.
+# ⚠️ SOURCE OF TRUTH: options_trader_v4 warehouse/s3_push.py, the `stages` list
+# in the drain (twelve stages), verified against the 2026-09-01 bucket scan.
+# ─────────────────────────────────────────────────────────────────────────────
 MEANING = {
-    "raw/trades":            "closed + open trade rows, per box (the book)",
-    "raw/candles":           "OHLC per tenor; SYM_EXT holds non-RTH bars",
-    "raw/chain_snapshots":   "option chain marks at fire time",
-    "raw/greeks_series":     "per-contract greeks, full fidelity",
-    "raw/quote_series":      "per-contract bid/ask/sizes",
-    "raw/prints":            "TimeAndSale, with the venue's aggressor tag",
-    "raw/last_trade":        "Trade events",
-    "raw/session_summary":   "Summary events (prev-day close, etc.)",
-    "raw/theo_series":       "TheoPrice — writer retained, unsubscribed at r118",
-    "raw/underlying_series": "Underlying — published nothing on either symbol space",
-    "raw/fork_series":       "pitchfork state per tenor, with reject reasons",
-    "raw/indicator_series":  "ADX / ATR / EMA / VWAP accumulators",
-    "raw/surface_series":    "charm, vanna, GEX",
-    "raw/fire_snapshot":     "the derived vector at every fill",
-    "raw/strategy_note":     "one row per strategy EVALUATION",
-    "raw/plan_ledger":       "plan lifecycle — intent, terminal state, trade join",
-    "raw/plan_tick":         "the spine: one row per plan per tick",
-    "raw/plan_check":        "long format: one row per VARIABLE per plan per tick",
-    "raw/gate_disposition":  "which rung refused a strategy, edge-triggered",
-    "raw/character_ledger":  "tape character state with duration",
-    "raw/level_ledger":      "liquidity levels, operator lifecycle",
-    "raw/exit_counterfactual": "flow exits that WOULD have fired; acts on nothing",
-    "raw/shadow":            "sweep-precursor velocity primitives",
+    # ── the book ────────────────────────────────────────────────────────
+    "raw/trades": ("push_trades <- trades.db",
+                   "closed + open trade rows, per box"),
+    "raw/circuit_breaker": ("push_table <- trades.db:circuit_breaker_events",
+                            "breaker trips"),
+    # ── whole files, shipped as they sit on the box ─────────────────────
+    "raw/eod": ("push_whole_files <- ~/eod",
+                "end-of-day artifacts written by the EOD chain"),
+    "raw/ohlc": ("push_whole_files <- ~/options-trader/data/OHLC/*.csv",
+                 "CSV OHLC exports; NOT the same stream as raw/candles"),
+    "raw/liquidity_ledger": ("push_whole_files <- "
+                             "~/options-trader/data/liquidity_ledger/*.json",
+                             "the liquidity map as the box wrote it"),
+    # ── databases, high-water or CDC ────────────────────────────────────
+    "raw/candles": ("push_candles <- feed_store.db",
+                    "OHLC per tenor; sym=<SYM>_EXT holds non-RTH bars"),
+    "raw/chain_snapshots": ("push_file (DATATYPE 'chain_snapshot' + 's')",
+                            "option chain marks at fire time"),
+    # ── SERIES_TABLES: feed_store.db, high-water on ts ──────────────────
+    "raw/greeks_series": ("push_series", "per-contract greeks, full fidelity"),
+    "raw/quote_series": ("push_series", "per-contract bid/ask/sizes"),
+    "raw/prints": ("push_series", "TimeAndSale, with the venue's aggressor tag"),
+    "raw/last_trade": ("push_series", "Trade events"),
+    "raw/session_summary": ("push_series", "Summary events (prev-day close)"),
+    "raw/theo_series": ("push_series",
+                        "TheoPrice — writer retained, unsubscribed at r118"),
+    "raw/underlying_series": ("push_series",
+                              "Underlying — published nothing on either "
+                              "symbol space"),
+    # ── DERIVED_SERIES_TABLES: derived_store.db, append-only on ts_epoch ─
+    "raw/fork_series": ("push_series ns=dseries",
+                        "pitchfork state per tenor, with reject reasons"),
+    "raw/indicator_series": ("push_series ns=dseries",
+                             "ADX / ATR / EMA / VWAP accumulators"),
+    "raw/surface_series": ("push_series ns=dseries", "charm, vanna, GEX"),
+    # ── DERIVED_TABLES: derived_store.db lifecycle, CDC by rowid ────────
+    # ⚠️ THESE CARRY THE `derived_` PREFIX IN THE KEY. That is the mistake v1.0
+    # made seven times over.
+    "raw/derived_fire_snapshot": ("push_derived",
+                                  "the derived vector at every fill"),
+    "raw/derived_strategy_note": ("push_derived",
+                                  "one row per strategy EVALUATION"),
+    "raw/derived_plan_ledger": ("push_derived",
+                                "plan lifecycle — intent, terminal state, "
+                                "trade join"),
+    "raw/derived_plan_tick": ("push_derived",
+                              "the spine: one row per plan per tick"),
+    "raw/derived_plan_check": ("push_derived",
+                               "long format: one row per VARIABLE per plan "
+                               "per tick"),
+    "raw/derived_gate_disposition": ("push_derived",
+                                     "which rung refused a strategy, "
+                                     "edge-triggered"),
+    "raw/derived_character_ledger": ("push_derived",
+                                     "tape character state with duration"),
+    "raw/derived_level_ledger": ("push_derived",
+                                 "liquidity levels, operator lifecycle"),
+    "raw/derived_exit_counterfactual": ("push_derived",
+                                        "flow exits that WOULD have fired; "
+                                        "acts on nothing"),
+    # ── JSONL trees ─────────────────────────────────────────────────────
+    "raw/shadow": ("push_jsonl_tree <- ~/options-trader/data/shadow",
+                   "sweep-precursor velocity primitives"),
+    "raw/signal_journal": ("push_jsonl_tree <- "
+                           "~/options-trader/data/signal_journal",
+                           "per-event signal journal"),
+    # ── retired, kept because raw/ never deletes ────────────────────────
+    "raw/orb_range": ("RETIRED — s3_push v1.8, 2026-08-16",
+                      "stopped growing; nothing consumed it and the range "
+                      "recomputes from candles"),
+    "raw/orb_state": ("RETIRED — s3_push v1.8, 2026-08-16",
+                      "captured ZERO objects in thirty days"),
 }
 
 
@@ -109,20 +183,27 @@ def render(rows, total) -> str:
         f"**Totals:** {total['objects']:,} objects · "
         f"{total['bytes'] / GB:.2f} GB",
         "",
-        "| prefix | objects | GB | days | first | last | holds |",
-        "|---|---:|---:|---:|---|---|---|",
+        "| prefix | objects | GB | days | first | last | written by | holds |",
+        "|---|---:|---:|---:|---|---|---|---|",
     ]
     for name, n, b, nd, first, last in rows:
-        holds = MEANING.get(name, "**UNDOCUMENTED — add it to MEANING**")
+        writer, holds = MEANING.get(
+            name, ("**NO WRITER TRACED**", "**UNDOCUMENTED — trace it first**"))
         out.append(f"| `{name}` | {n:,} | {b / GB:.3f} | {nd} | {first} | "
-                   f"{last} | {holds} |")
+                   f"{last} | `{writer}` | {holds} |")
     known = set(MEANING)
     seen = {r[0] for r in rows}
     missing = sorted(known - seen)
     if missing:
-        out += ["", "**Documented but ABSENT from the bucket** — a stream that "
-                "never wrote, or one that was retired:", ""]
-        out += [f"- `{m}` — {MEANING[m]}" for m in missing]
+        out += ["", "**Documented but ABSENT from the bucket.** Each of these "
+                "has a live writer in `s3_push.py` (or a recorded retirement) "
+                "and has produced NO objects. That is a finding, not a gap in "
+                "this file: `push_derived` skips a table that is absent on the "
+                "box, so a stream configured to push and never seen here has "
+                "either no table or no rows — and nothing says which without "
+                "looking.", ""]
+        out += [f"- `{m}` — {MEANING[m][1]}  (writer: `{MEANING[m][0]}`)"
+            for m in missing]
     out.append("")
     return "\n".join(out)
 
