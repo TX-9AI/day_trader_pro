@@ -1,5 +1,15 @@
 #!/usr/bin/env python3
-# day_trader_pro/warehouse_reader.py — v1.7
+# day_trader_pro/warehouse_reader.py — v1.8
+# v1.8 (2026-09-01) — r240. PROGRESS ON THE SHARED FETCH PATH. Operator:
+#   "the S3 options in devtools need a progress meter, some of them run
+#   long" — 53.5s for one date, measured. fit_readiness, pnl_s3,
+#   warehouse_coverage and eod_analysis all pull through `read_prefix` and
+#   none had a meter; wiring it here covers every consumer rather than four
+#   retrofits that drift. STDERR ONLY — report_parity diffs these reports'
+#   OUTPUT, so a meter on stdout would land inside the comparison.
+#   🔴 THE METER MAKES THE WAIT VISIBLE, NOT SMALLER: this function still
+#   materialises the whole partition (RPT.10). warehouse_cache is the
+#   streaming path.
 # v1.7 (2026-08-29) — r184 / dtp r226. DERIVED-TABLE READER (backlog S3.2).
 #      `load_derived()` returns the latest state of one derived_store table
 #      from raw/derived_<table>/, CDC-collapsed latest-per-(symbol,_rid) by
@@ -169,20 +179,37 @@ def _sym_of(key):
 
 
 def read_prefix(s3, datatype, date):
-    """Every object under raw/<datatype>/dt=<date>/, as (sym, envelope)."""
+    """Every object under raw/<datatype>/dt=<date>/, as (sym, envelope).
+
+    ⚠️ r240 — PROGRESS IS REPORTED HERE because this is the shared fetch path:
+    fit_readiness, pnl_s3, warehouse_coverage and eod_analysis all pull through
+    it and NONE of them had a meter. Operator, 2026-09-01: "the S3 options in
+    devtools need a progress meter, some of them run long" — the butterfly
+    probe measured 53.5s for a single date.
+    ⚠️ STDERR ONLY. `report_parity.py` diffs these reports' OUTPUT, so a meter
+    on stdout would land inside the comparison.
+    🔴 THIS FUNCTION STILL MATERIALISES THE WHOLE PARTITION (RPT.10) — the
+    meter makes the wait visible, it does not make it smaller. `warehouse_cache`
+    is the streaming path; this one is unchanged on purpose so the reports that
+    depend on its return shape keep working.
+    """
+    from progress import Ticker
     out = []
     prefix = f"{PREFIX}/{datatype}/dt={date}/"
     pg = s3.get_paginator("list_objects_v2")
     keys = []
     for page in pg.paginate(Bucket=BUCKET, Prefix=prefix):
         for o in page.get("Contents", []) or []:
-            keys.append(o["Key"])
-    for k in keys:
+            keys.append((o["Key"], int(o.get("Size", 0) or 0)))
+    tk = Ticker(f"{datatype} {date}", total=len(keys))
+    for k, size in keys:
         try:
             body = s3.get_object(Bucket=BUCKET, Key=k)["Body"].read()
             out.append((_sym_of(k), json.loads(body)))
         except Exception as exc:
             _log("WARN", f"unreadable object {k}: {exc}")
+        tk.step(1, size)
+    tk.done()
     return out
 
 

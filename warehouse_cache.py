@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-# day_trader_pro/warehouse_cache.py — v1.0
+# day_trader_pro/warehouse_cache.py — v1.1
+# v1.1 (2026-09-01) — r240. Progress via progress.Ticker. The total is
+#   counted across ALL requested dates before any fetch, so a multi-day read
+#   shows one honest percentage instead of restarting at 0% each day and
+#   looking stuck once per date.
 # v1.0 (2026-09-01) — dtp r238. FETCH ONCE, QUERY MANY, LEAVE NOTHING BEHIND.
 #
 # 🔴 WHY THIS EXISTS. Menu 55 (fit readiness) was OOM-KILLED on a 2026-08-24
@@ -190,14 +194,22 @@ class WarehouseCache:
                           f'(symbol TEXT, {ddl})')
         ins = (f'INSERT INTO "{table}" (symbol, {ddl}) '
                f'VALUES ({",".join("?" * (len(cols) + 1))})')
+        from progress import Ticker
         n = 0
         pg = s3.get_paginator("list_objects_v2")
+        # ⚠️ THE TOTAL IS COUNTED FIRST, ACROSS ALL DATES, so a multi-day read
+        # shows one honest percentage instead of restarting at 0% each day and
+        # looking stuck. Listing is cheap relative to the GETs.
+        plan = []
         for d in dates:
-            prefix = f"{WR.PREFIX}/{dt}/dt={d}/"
-            keys = []
-            for page in pg.paginate(Bucket=WR.BUCKET, Prefix=prefix):
+            for page in pg.paginate(Bucket=WR.BUCKET,
+                                    Prefix=f"{WR.PREFIX}/{dt}/dt={d}/"):
                 for o in page.get("Contents", []) or []:
-                    keys.append((o["Key"], int(o.get("Size", 0) or 0)))
+                    plan.append((o["Key"], int(o.get("Size", 0) or 0)))
+        tk = Ticker(f"{dt} {dates[0]}..{dates[-1]}", total=len(plan))
+        for d in dates:
+            pfx = f"{WR.PREFIX}/{dt}/dt={d}/"
+            keys = [(k, sz) for k, sz in plan if k.startswith(pfx)]
             for key, size in keys:
                 try:
                     body = s3.get_object(Bucket=WR.BUCKET, Key=key)["Body"].read()
@@ -219,7 +231,9 @@ class WarehouseCache:
                     self.conn.executemany(ins, batch)
                     n += len(batch)
                 del env, body, batch          # explicit: nothing carries over
+                tk.step(1, size)
             self.conn.commit()
+        tk.done(f"{n:,} rows")
         self.rows += n
         return n
 
