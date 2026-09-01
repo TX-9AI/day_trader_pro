@@ -1,4 +1,9 @@
-# day_trader_pro/menu_functions.sh — v1.44
+# day_trader_pro/menu_functions.sh — v1.45
+# — v1.45 (2026-09-01) — r236. THE LIVE P&L ITEM NO LONGER ASKS ABOUT
+# TELEGRAM. Operator: "get rid of the telegram prompt. I'm already in the
+# terminal & that's where I want to see it." A prompt whose answer is always
+# the same is a keystroke tax, not a choice. `standings.py --send` survives
+# on the CLI for any non-interactive caller; the menu never passes it.
 # — v1.44 (2026-09-01) — r206. NEW `mi_orb_budget_fleet`: spot and the ORB
 # budget on every running box, with (DEFAULT) called out for any box nobody
 # configured. Calls tests/orb_budget_fleet.py rather than inlining a second
@@ -433,7 +438,12 @@ mi_fit_readiness() {
 # A2 co-occurrence + HTF drift  (read-only; auto-finds replay logs)
 # Live P&L standings (read-only)
 mi_live_p_l_standings_read_only() {
-    echo; read -rp "Push to Telegram too? [y/N]: " S; if [ "$S" = "y" ]; then $PY standings.py --send; else $PY standings.py; fi; pause
+    # r236 — NO TELEGRAM PROMPT. Operator, 2026-09-01: "get rid of the telegram
+    # prompt. I'm already in the terminal & that's where I want to see it."
+    # `--send` survives on the CLI for any non-interactive caller; the menu
+    # never asks, because a prompt whose answer is always the same is a
+    # keystroke tax, not a choice.
+    echo; $PY standings.py; pause
 }
 
 # S3 SWEEP — warehouse hygiene (lists first; --apply required)

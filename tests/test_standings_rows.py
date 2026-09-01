@@ -1,0 +1,151 @@
+#!/usr/bin/env python3
+# day_trader_pro/tests/test_standings_rows.py — v1.0
+# v1.0 (2026-09-01) — dtp r236. THE ROLLUP'S ROWS, AND THE TWO SIGNS.
+#
+# Operator, 2026-09-01: show what the open positions ARE, and the day's closed
+# trades below them, ordered by time.
+#
+# 🔴 THE CHECK THAT CARRIES THE WEIGHT IS S2. A credit vertical's
+#   `current_premium` is the spread's CURRENT VALUE and the position profits as
+#   that FALLS, so its P&L is (credit - now) — the mirror of a debit's
+#   (now - cost). otv4's query.py:268 applies the debit formula to everything,
+#   so its Unrealized line is sign-inverted on every credit spread (filed
+#   RPT.6). Copying that to make the two reports agree would have been agreeing
+#   on the wrong number.
+#
+# Run: python3 tests/test_standings_rows.py
+
+import os
+import sys
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, _root)
+
+_fails = []
+
+
+def check(name, ok, detail=""):
+    print(("  PASS  " if ok else "  FAIL  ") + name + (f"   [{detail}]" if detail else ""))
+    if not ok:
+        _fails.append(name)
+
+
+def main():
+    import config
+    config.set_mock(True)
+    import standings as S
+
+    # ⚠️ DEGRADE TO A NAMED FAILURE, NEVER AN AttributeError. r192: "the
+    # checker crashed" and "the invariant is violated" must not look alike —
+    # at r235 this file died on `S.open_pnl` missing and printed a traceback
+    # with ZERO failing lines, which reads to a grep as a clean run.
+    _missing = [n for n in ("open_pnl", "_et_offset", "_sql", "_abbr")
+                if not hasattr(S, n)]
+    if _missing:
+        for n in _missing:
+            check(f"S0 standings.{n} exists", False, "not implemented")
+        print()
+        print(f"FAILED {len(_fails)}: standings is pre-r236 "
+              f"(missing {', '.join(_missing)})")
+        return 1
+
+    # ── S1 — a DEBIT gains when the mark rises ──────────────────────────
+    # ⚠️ TOLERANCE, NOT EQUALITY. (0.55-0.42)*12*100 is 156.00000000000009 in
+    # binary floating point; an exact-match assertion here fails on the
+    # arithmetic rather than on the rule, which is a red that teaches you to
+    # skip reds.
+    _d = S.open_pnl("0.42", "0.55", "12", "0")
+    check("S1 a debit's open P&L is (now - cost)",
+          _d is not None and abs(_d - (0.55 - 0.42) * 12 * 100) < 1e-6, str(_d))
+
+    # ── S2 — a CREDIT gains when the mark FALLS ─────────────────────────
+    credit_win = S.open_pnl("1.30", "0.90", "5", "1.30")
+    credit_lose = S.open_pnl("1.30", "1.70", "5", "1.30")
+    check("S2 a credit vertical's open P&L is (credit - now), not the mirror",
+          credit_win > 0 and credit_lose < 0
+          and abs(credit_win - (1.30 - 0.90) * 5 * 100) < 1e-6,
+          f"tighter={credit_win} wider={credit_lose}")
+
+    # ── S3 — an unmarked position is UNMEASURED, never zero ─────────────
+    check("S3 no live mark yields None, not a fabricated 0.00",
+          S.open_pnl("0.42", "0", "12", "0") is None
+          and S.open_pnl("0.42", None, "12", "0") is None)
+
+    # ── S4 — the session offset follows the tz database ─────────────────
+    # 🔴 v1.0 HARDCODED '-4 hours'. That is EDT: right for eight months of the
+    # year and silently wrong for four, and the failure is a report filtering
+    # on the wrong day rather than one that errors. r125 caught the identical
+    # bug in the otv4 sensor reports.
+    _ET = ZoneInfo("US/Eastern")
+    real = S.datetime
+    try:
+        class _Sept:
+            @staticmethod
+            def now(tz=None): return datetime(2026, 9, 1, 12, 0, tzinfo=tz or _ET)
+        S.datetime = _Sept
+        edt = S._et_offset()
+        class _Dec:
+            @staticmethod
+            def now(tz=None): return datetime(2026, 12, 1, 12, 0, tzinfo=tz or _ET)
+        S.datetime = _Dec
+        est = S._et_offset()
+    finally:
+        S.datetime = real
+    check("S4 the offset is -4 in September and -5 in December",
+          edt == "-4 hours" and est == "-5 hours", f"Sep={edt!r} Dec={est!r}")
+
+    # ── S5 — closed trades order chronologically ACROSS boxes ───────────
+    # ⚠️ THE POINT IS CROSS-BOX. Each box's own rows arrive sorted; interleaving
+    # fifteen of them is what makes the list readable, and it is why the
+    # Telegram exit alerts cannot be the source — they arrive by delivery order.
+    import instance_registry, io, contextlib
+    syms = ["QQQ", "SPX", "AMD", "NFLX", "CVX"]
+    instance_registry.discover = lambda u=None: (
+        {s: {"state": "running", "private_ip": "10.0.0.1"} for s in syms}, None)
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        S.run(send=False)
+    out = buf.getvalue().splitlines()
+    try:
+        i = next(n for n, l in enumerate(out) if l.startswith("CLOSED TODAY"))
+        times = [l.split()[0] for l in out[i + 2:] if l.startswith("  ")]
+    except StopIteration:
+        times = []
+    check("S5 closed trades render in time order across the whole fleet",
+          times and times == sorted(times), str(times))
+
+    # ── S6 — the report fits a phone ────────────────────────────────────
+    check("S6 no line exceeds 43 characters (Termius on mobile)",
+          max((len(l) for l in out), default=0) <= 43,
+          f"widest {max((len(l) for l in out), default=0)}")
+
+    # ── S7 — the menu no longer asks about Telegram ─────────────────────
+    # Shape of the CALL, not a mention (§20): the changelog names the prompt
+    # while explaining its removal.
+    mf = open(os.path.join(_root, "menu_functions.sh"), encoding="utf-8").read()
+    body = mf[mf.index("mi_live_p_l_standings_read_only()"):]
+    body = body[:body.index("\n}")]
+    live = "\n".join(l for l in body.splitlines() if not l.strip().startswith("#"))
+    check("S7 the live P&L menu item runs standings with no prompt",
+          "read -rp" not in live and "--send" not in live
+          and "standings.py" in live, live.strip()[:60])
+
+    # ── S8 — the mock is deterministic ──────────────────────────────────
+    a, _ = S._mock_query("QQQ", "2026-09-01")
+    b, _ = S._mock_query("QQQ", "2026-09-01")
+    check("S8 the mock fleet is stable across calls (crc32, not hash())",
+          a["net"] == b["net"] and a["closed"] == b["closed"],
+          f"{a['net']} vs {b['net']}")
+
+    print()
+    if _fails:
+        print(f"FAILED {len(_fails)}: " + ", ".join(_fails))
+        return 1
+    print("test_standings_rows: ALL PASS")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
