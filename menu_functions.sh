@@ -1,4 +1,8 @@
-# day_trader_pro/menu_functions.sh — v1.45
+# day_trader_pro/menu_functions.sh — v1.46
+# — v1.46 (2026-09-01) — r238. Two S3 items: WAREHOUSE MAP (regenerates
+# docs/WAREHOUSE_MAP.md from the bucket via warehouse_cost.scan_current — the
+# walker that already exists) and BUTTERFLY REACH, a one-day probe that proves
+# the fetch-to-local-cache path and leaves only its report behind.
 # — v1.45 (2026-09-01) — r236. THE LIVE P&L ITEM NO LONGER ASKS ABOUT
 # TELEGRAM. Operator: "get rid of the telegram prompt. I'm already in the
 # terminal & that's where I want to see it." A prompt whose answer is always
@@ -437,6 +441,22 @@ mi_fit_readiness() {
 # Backfill missing days      (fills diary gaps that have tape)
 # A2 co-occurrence + HTF drift  (read-only; auto-finds replay logs)
 # Live P&L standings (read-only)
+mi_warehouse_map() {
+    # r238 — GENERATED, NEVER HAND-KEPT. r33 records what a hand-maintained map
+    # does: v3's FILE_MAP said in its own header "it is a snapshot, and it will
+    # drift", and it did. A bucket that grows a prefix per new stream is the
+    # same shape.
+    echo; $PY tools/warehouse_map.py; pause
+}
+
+mi_bfly_reach_probe() {
+    # r238 — ONE DAY, so it returns in seconds. The scratch copy is deleted on
+    # every exit path; only the report is left, in reports/.
+    echo; read -rp "  Date (YYYY-MM-DD, ENTER=today): " D
+    if [ -n "$D" ]; then $PY tools/bfly_reach_probe.py --date "$D"; else $PY tools/bfly_reach_probe.py; fi
+    pause
+}
+
 mi_live_p_l_standings_read_only() {
     # r236 — NO TELEGRAM PROMPT. Operator, 2026-09-01: "get rid of the telegram
     # prompt. I'm already in the terminal & that's where I want to see it."

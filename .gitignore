@@ -41,3 +41,8 @@ data/selection_log.jsonl
 # control-local, never fleet-synced
 trades.db
 MANIFEST.txt
+
+# dtp r238 — warehouse_cache scratch. Disk-backed and self-deleting, but a
+# crashed process between mkdtemp and its handler could leave one behind, and
+# a multi-GB cache must never be committable.
+var/

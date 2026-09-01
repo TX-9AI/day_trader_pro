@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
-# day_trader_pro/menu_registry.sh — v1.4
+# day_trader_pro/menu_registry.sh — v1.5
+# — v1.5 (2026-09-01) — r238. Two S3 items added: WAREHOUSE MAP, which
+# regenerates docs/WAREHOUSE_MAP.md from the bucket, and BUTTERFLY REACH, a
+# one-day probe that proves the fetch-to-local-cache path and leaves only its
+# report behind. Item numbers shift, which is why items are cited by LABEL
+# and never by number (C.15).
 # v1.4 (2026-09-01) — r206. NEW ITEM "ORB budget & spot (every running box)".
 #   The two Warehouse inventory rows merge into one that prompts for the
 #   version pass. ⚠️ ITEM NUMBERS SHIFT AGAIN — second renumber in two days,
@@ -143,6 +148,8 @@ MENU=(
   "SECTION|S3 WAREHOUSE (inventory, hygiene, rebuilds and parity)"
   "ITEM|S3 SWEEP — hygiene (dups / culled symbols; lists first)|mi_s3_sweep"
   "ITEM|Warehouse inventory & cost (asks about noncurrent versions)|mi_warehouse_inventory_cost"
+  "ITEM|Warehouse MAP -> docs/WAREHOUSE_MAP.md (regenerates from the bucket)|mi_warehouse_map"
+  "ITEM|Butterfly reach, one day (fast probe; cache self-deletes)|mi_bfly_reach_probe"
   "ITEM|Rebuild a day's bundle FROM S3 -> reports/warehouse/|mi_warehouse_rebuild_bundle"
   "ITEM|Compare S3 vs local - one date|mi_warehouse_compare_date"
   "ITEM|Compare S3 vs local - EVERY in-coverage date|mi_warehouse_compare_all"
