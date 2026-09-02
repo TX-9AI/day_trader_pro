@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/test_warehouse_cache.py — v1.0
+# day_trader_pro/tests/test_warehouse_cache.py — v1.1
+# v1.1 (2026-09-01) — r242. C7/C7b/C8: query() refuses an oversized result
+#   and names the way out, iter() and GROUP BY both work, and an empty date
+#   range is refused by name. The cache OOM'd on the ANALYSIS side after the
+#   streaming fetch had worked — a streaming cache with an unbounded read is
+#   not a streaming cache.
 # v1.0 (2026-09-01) — dtp r238. THE CACHE CLEANS UP, ALWAYS.
 #
 # 🔴 THE LEAK THIS EXISTS TO PREVENT IS ALREADY IN THE REPO. `tools/report_parity.py`
@@ -112,6 +117,43 @@ def main():
                encoding="utf-8").read()
     check("C6 the probe writes via report_path and closes in a finally",
           "report_path(" in src and "finally:" in src and "cache.close()" in src)
+
+    # ── C7 — query() REFUSES a result it cannot hold ────────────────────
+    # 🔴 THE CACHE OOM'D ANYWAY, ON THE ANALYSIS SIDE. It streamed 7.8M rows to
+    # disk exactly as designed and then `bfly_pin_study` fetchall'd them back
+    # into Python. Six minutes of S3 reads thrown away at the last step. A
+    # streaming cache with an unbounded read is not a streaming cache.
+    with WC.WarehouseCache("t") as c:
+        c.conn.execute("CREATE TABLE big (a)")
+        c.conn.executemany("INSERT INTO big VALUES (?)",
+                           [(i,) for i in range(3000)])
+        try:
+            c.query("SELECT a FROM big", max_rows=100)
+            refused = False
+        except MemoryError as exc:
+            refused = "GROUP BY" in str(exc) and ".iter()" in str(exc)
+        check("C7 query() refuses an oversized result and names the way out",
+              refused)
+
+        # ⚠️ AND THE WAY OUT ACTUALLY WORKS — a check that only proves the
+        # refusal would leave the caller with no path.
+        n = sum(1 for _ in c.iter("SELECT a FROM big"))
+        agg = c.query("SELECT COUNT(*) n FROM big")[0]["n"]
+        check("C7b iter() streams it and GROUP BY aggregates it",
+              n == 3000 and agg == 3000, f"iter={n} agg={agg}")
+
+    # ── C8 — an empty date list is refused, not an IndexError ───────────
+    # A reversed range produced one and it surfaced four frames below the
+    # caller, inside the library.
+    with WC.WarehouseCache("t") as c:
+        try:
+            c.load("x", [], ["a"])
+            ok = False
+        except ValueError as exc:
+            ok = "END" in str(exc)
+        except IndexError:
+            ok = False
+        check("C8 load() names an empty date range instead of IndexError", ok)
 
     print()
     if _fails:

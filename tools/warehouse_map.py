@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-# day_trader_pro/tools/warehouse_map.py — v1.1
+# day_trader_pro/tools/warehouse_map.py — v1.2
+# v1.2 (2026-09-01) — r242. CLI ONLY; the menu item is removed. Operator:
+#   "don't keep adding more shit to devtools. We run those as separate
+#   studies from the CLI." The menu is the operating loop, not a tool drawer.
 # v1.1 (2026-09-01) — dtp r239. 🔴 v1.0's MEANING TABLE WAS WRITTEN FROM MEMORY
 #   AND 12 OF 25 PREFIXES WERE WRONG. The operator ran it and the generator
 #   printed the whole list back. Every entry now cites the FUNCTION that writes
@@ -27,6 +30,11 @@
 #
 # Run:  python3 tools/warehouse_map.py            # rewrite docs/WAREHOUSE_MAP.md
 #       python3 tools/warehouse_map.py --check    # rc=1 if the bucket moved
+# ⚠️ CLI ONLY — NO MENU ITEM (r242). Operator: "we run those as separate
+#   studies from the CLI." The devtools menu is the operating loop; this is
+#   a reference regenerator run occasionally.
+#   Run:  python3 tools/warehouse_map.py            # rewrite the doc
+#         python3 tools/warehouse_map.py --check    # rc=1 if it drifted
 """Generate (or verify) the warehouse layout reference."""
 
 from __future__ import annotations

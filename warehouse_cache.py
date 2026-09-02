@@ -1,5 +1,15 @@
 #!/usr/bin/env python3
-# day_trader_pro/warehouse_cache.py — v1.1
+# day_trader_pro/warehouse_cache.py — v1.2
+# v1.2 (2026-09-01) — r242. 🔴 `query()` WAS fetchall AND THE CACHE OOM'D
+#   ANYWAY — on the analysis side, after the streaming fetch had worked. It
+#   now REFUSES a result above MAX_ROWS and names the two ways out (GROUP BY,
+#   or .iter()), rather than dying four frames later in the caller. Adds
+#   iter(), index() and et_offset_hours() so aggregating in SQL is the easy
+#   path rather than the disciplined one.
+#   ⚠️ AND load() REFUSES AN EMPTY DATE LIST. A reversed range (END before
+#   START) raised IndexError on `dates[-1]` four frames below the caller; a
+#   library that depends on every caller validating for it is a guard that
+#   works only when someone remembers it.
 # v1.1 (2026-09-01) — r240. Progress via progress.Ticker. The total is
 #   counted across ALL requested dates before any fetch, so a multi-day read
 #   shows one honest percentage instead of restarting at 0% each day and
@@ -53,6 +63,10 @@ import signal
 import sqlite3
 import sys
 import tempfile
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+_ET = ZoneInfo("US/Eastern")
 
 import config
 import warehouse_reader as WR
@@ -177,6 +191,14 @@ class WarehouseCache:
 
     # ── fill ───────────────────────────────────────────────────────────
     def load(self, table: str, dates, columns, s3=None, datatype=None) -> int:
+        # ⚠️ AN EMPTY DATE LIST IS A LEGITIMATE INPUT, NOT A CRASH SITE. A
+        # reversed range (END before START) produced one, and this raised
+        # IndexError on `dates[-1]` four frames below the caller. A library
+        # that depends on every caller validating for it is a guard that works
+        # only when someone remembers it.
+        if not dates:
+            raise ValueError("no dates requested — check that END is not "
+                             "earlier than START")
         """Stream `raw/<datatype>/dt=<d>/` for each date, keeping `columns`.
 
         🔑 ONE OBJECT IS PARSED AT A TIME AND DISCARDED. Nothing accumulates in
@@ -237,8 +259,57 @@ class WarehouseCache:
         self.rows += n
         return n
 
-    def query(self, sql, args=()):
-        return self.conn.execute(sql, args).fetchall()
+    # ── read ───────────────────────────────────────────────────────────
+    # 🔴 r242 — `query()` IS fetchall AND THAT IS HOW THIS OOM'D ANYWAY.
+    # The cache streamed 7.8M surface_series rows to disk exactly as designed,
+    # and then `bfly_pin_study` called `query("SELECT ts_epoch, charm ...")`,
+    # materialising every one of them as a Python object in a single list. The
+    # OOM moved from the FETCH to the ANALYSIS and I did not see it because I
+    # was looking at the half I had fixed. Six minutes of S3 reads thrown away
+    # at the last step.
+    # 🔑 THE RULE THIS ENFORCES: AGGREGATE IN SQL, RETURN ROWS YOU CAN COUNT.
+    # sqlite will happily group 7.8M rows into seven buckets; Python will not
+    # hold 7.8M dicts. `query()` now REFUSES a result set above `max_rows`
+    # rather than dying four frames later, and names the two ways out.
+    MAX_ROWS = 200_000
+
+    def query(self, sql, args=(), max_rows=None):
+        """Fetch a BOUNDED result. Raises rather than exhausting memory."""
+        cap = self.MAX_ROWS if max_rows is None else max_rows
+        cur = self.conn.execute(sql, args)
+        rows = cur.fetchmany(cap + 1)
+        if len(rows) > cap:
+            raise MemoryError(
+                f"query returned more than {cap:,} rows. Aggregate in SQL "
+                f"(GROUP BY) or stream with .iter() — materialising a large "
+                f"result is what the cache exists to avoid.\n  {sql[:120]}")
+        return rows
+
+    def iter(self, sql, args=(), chunk=10_000):
+        """Stream a result set. Nothing accumulates."""
+        cur = self.conn.execute(sql, args)
+        while True:
+            batch = cur.fetchmany(chunk)
+            if not batch:
+                return
+            for r in batch:
+                yield r
+
+    def index(self, table, *cols):
+        """Index the cache for aggregation. Cheap and worth it every time."""
+        name = "ix_%s_%s" % (table, "_".join(cols))
+        self.conn.execute(f'CREATE INDEX IF NOT EXISTS "{name}" '
+                          f'ON "{table}" ({",".join(cols)})')
+        self.conn.commit()
+
+    def et_offset_hours(self):
+        """The ET offset as an sqlite modifier, for GROUP BY on ts_epoch.
+
+        ⚠️ NOT A HARDCODED '-4 hours'. That is EDT — right for eight months and
+        silently wrong for four — and it has already been found and fixed twice
+        in this codebase (r125's sensors, dtp r236's standings)."""
+        off = datetime.now(_ET).utcoffset()
+        return f"{int(off.total_seconds() // 3600)} hours"
 
 
 def report_path(name: str) -> str:

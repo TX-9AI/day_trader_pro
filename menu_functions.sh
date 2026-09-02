@@ -1,4 +1,7 @@
-# day_trader_pro/menu_functions.sh — v1.47
+# day_trader_pro/menu_functions.sh — v1.48
+# — v1.48 (2026-09-01) — r242. The three study/reference items added at r238
+# and r241 are removed; the tools stay in tools/ and are run from the CLI.
+# The menu is the operating loop, not a tool drawer. See menu_registry v1.7.
 # — v1.47 (2026-09-01) — r241. New item: Butterfly PIN STUDY.
 # — v1.46 (2026-09-01) — r238. Two S3 items: WAREHOUSE MAP (regenerates
 # docs/WAREHOUSE_MAP.md from the bucket via warehouse_cost.scan_current — the
@@ -442,31 +445,6 @@ mi_fit_readiness() {
 # Backfill missing days      (fills diary gaps that have tape)
 # A2 co-occurrence + HTF drift  (read-only; auto-finds replay logs)
 # Live P&L standings (read-only)
-mi_warehouse_map() {
-    # r238 — GENERATED, NEVER HAND-KEPT. r33 records what a hand-maintained map
-    # does: v3's FILE_MAP said in its own header "it is a snapshot, and it will
-    # drift", and it did. A bucket that grows a prefix per new stream is the
-    # same shape.
-    echo; $PY tools/warehouse_map.py; pause
-}
-
-mi_bfly_reach_probe() {
-    # r238 — ONE DAY, so it returns in seconds. The scratch copy is deleted on
-    # every exit path; only the report is left, in reports/.
-    echo; read -rp "  Date (YYYY-MM-DD, ENTER=today): " D
-    if [ -n "$D" ]; then $PY tools/bfly_reach_probe.py --date "$D"; else $PY tools/bfly_reach_probe.py; fi
-    pause
-}
-
-mi_bfly_pin_study() {
-    # r241 — EXPLORATORY. Bins nothing into pass/fail and fits nothing; it
-    # shows the distributions the carried constants sit in. Time-of-day is
-    # bucketed WITHIN each date, because comparing one day's morning against
-    # another day's noon attributes a day difference to the clock.
-    echo; read -rp "  START (YYYY-MM-DD): " A; read -rp "  END   (YYYY-MM-DD): " B
-    [ -n "$A" ] && [ -n "$B" ] && $PY tools/bfly_pin_study.py --from "$A" --to "$B"
-    pause
-}
 
 mi_live_p_l_standings_read_only() {
     # r236 — NO TELEGRAM PROMPT. Operator, 2026-09-01: "get rid of the telegram

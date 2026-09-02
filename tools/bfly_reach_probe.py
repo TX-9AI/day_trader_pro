@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-# day_trader_pro/tools/bfly_reach_probe.py — v1.0
+# day_trader_pro/tools/bfly_reach_probe.py — v1.1
+# v1.1 (2026-09-01) — r242. CLI only; the menu item is removed.
 # v1.0 (2026-09-01) — dtp r238. THE SMALL ONE, TO TEST THE THEORY.
 #
 # Operator, 2026-09-01: "write a small report based on some of the data sets
@@ -22,6 +23,8 @@
 # SIGTERM — and the report is written to reports/ and left there. See
 # warehouse_cache.py: `tools/report_parity.py` calls mkdtemp twice and removes
 # neither, which is exactly the leak this avoids.
+# ⚠️ CLI ONLY — NO MENU ITEM (r242).
+#   Run:  python3 tools/bfly_reach_probe.py --date 2026-09-01
 """Butterfly reach distribution for one ET day. Fast, and self-cleaning."""
 
 from __future__ import annotations

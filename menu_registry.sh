@@ -1,5 +1,17 @@
 #!/usr/bin/env bash
-# day_trader_pro/menu_registry.sh — v1.6
+# day_trader_pro/menu_registry.sh — v1.7
+# — v1.7 (2026-09-01) — r242. 🔴 THE THREE ITEMS r238/r241 ADDED ARE REMOVED.
+# Operator, 2026-09-01: "don't keep adding more shit to devtools. We run those
+# as separate studies from the CLI."
+# 🔑 THE LINE: THIS MENU IS THE OPERATING LOOP, NOT A TOOL DRAWER. Items here
+# are things run to fly the fleet — status, deploys, EOD, warehouse hygiene.
+# A STUDY is run once to answer a question and then argued about; it belongs
+# on the CLI where it can take real arguments, be piped, and be re-run with a
+# different range without a prompt in between. Same ruling as LAND.1, where
+# land.sh got no menu item: "installer scripts should call it, not me manually
+# running it."
+# ⚠️ EVERY ITEM COSTS THE OPERATOR A SCAN OF AN 84-LINE MENU on a phone, so
+# an item that earns its place must be one he reaches for repeatedly.
 # — v1.6 (2026-09-01) — r241. Butterfly PIN STUDY: which condition refuses,
 # pin_em_fraction by hour WITHIN each day, and |charm| by hour beside it.
 # — v1.5 (2026-09-01) — r238. Two S3 items added: WAREHOUSE MAP, which
@@ -150,9 +162,6 @@ MENU=(
   "SECTION|S3 WAREHOUSE (inventory, hygiene, rebuilds and parity)"
   "ITEM|S3 SWEEP — hygiene (dups / culled symbols; lists first)|mi_s3_sweep"
   "ITEM|Warehouse inventory & cost (asks about noncurrent versions)|mi_warehouse_inventory_cost"
-  "ITEM|Warehouse MAP -> docs/WAREHOUSE_MAP.md (regenerates from the bucket)|mi_warehouse_map"
-  "ITEM|Butterfly reach, one day (fast probe; cache self-deletes)|mi_bfly_reach_probe"
-  "ITEM|Butterfly PIN STUDY - gate/reach/charm over a range|mi_bfly_pin_study"
   "ITEM|Rebuild a day's bundle FROM S3 -> reports/warehouse/|mi_warehouse_rebuild_bundle"
   "ITEM|Compare S3 vs local - one date|mi_warehouse_compare_date"
   "ITEM|Compare S3 vs local - EVERY in-coverage date|mi_warehouse_compare_all"
