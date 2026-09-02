@@ -1,5 +1,16 @@
 #!/usr/bin/env python3
-"""day_trader_pro/tests/screen_sweep_forensics.py — v1.4
+"""day_trader_pro/tests/screen_sweep_forensics.py — v1.5
+v1.5  2026-09-02 — dtp r256. 🔴 `entry_time` IS UTC AND I PARSED IT AS ET.
+      A four-hour error on every fill timestamp. `at_entry` then walked back
+      past the start of the session and returned the SAME stale evaluation for
+      every trade — panel 3 reported min = median = max = 0.61 across 17
+      trades while the source held 1,704 distinct values, and its own
+      diagnostic correctly called it a JOIN FAULT. Panels 1, 2 and 7 share
+      that join and were contaminated identically; panel 1's `short_anchor`
+      came from it, so penetration was measured against a level that may not
+      have been the level. Panels 4, 5 and 6 never touch it and are unaffected.
+      ⚠️ trade_logger states it THREE TIMES and every dtp report converts with
+      an offset. It was written down and I did not read it.
 v1.4  2026-09-02 — dtp r255. 🔴 THE JOIN IGNORED `direction`. plan_check's
       PRIMARY KEY is (ts_epoch, symbol, strategy, direction, check_name), so a
       symbol evaluating BOTH a call and a put spread on one tick writes two
@@ -118,11 +129,28 @@ WANT = ("short_anchor", "side_of_pool", "rejection", "pierce_depth",
         "age", "sweep", "contract", "atr_pct")
 
 
+UTC = ZoneInfo("UTC")
+
+
 def _et(ts_str):
-    """trades.entry_time / exit_time are TEXT. Parsed, never assumed epoch."""
+    """trades.entry_time / exit_time are TEXT **IN UTC**.
+
+    🔴 v1.4 ATTACHED **ET** TZINFO TO A UTC STRING — a four-hour error on
+    every timestamp, and it did not fail loudly. `at_entry` walked back four
+    hours past the fill, off the front of the session, and returned the same
+    stale evaluation for every trade: panel 3 printed min = median = max =
+    0.61 across 17 trades while the source held 1,704 DISTINCT values, and
+    panels 1, 2 and 7 were contaminated the same way because they share this
+    join. Panel 1's `short_anchor` came from it too, so penetration was
+    measured against a level that may not have been the level.
+    ⚠️ trade_logger says so in THREE places — "entry_time is stored UTC; the
+    session..." (line 588) and "the same UTC base as entry_time, never a local
+    or ET clock" (line 795) — and every report in dtp converts it with an
+    offset. It was written down and I did not read it.
+    """
     for f in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
         try:
-            return datetime.strptime(str(ts_str)[:19], f).replace(tzinfo=ET)
+            return datetime.strptime(str(ts_str)[:19], f).replace(tzinfo=UTC)
         except (ValueError, TypeError):
             continue
     return None

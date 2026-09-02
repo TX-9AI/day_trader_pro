@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/test_sweep_forensics.py — v1.1
+# day_trader_pro/tests/test_sweep_forensics.py — v1.2
+# v1.2 (2026-09-02) — dtp r256. The fixture built candle epochs in ET while
+#   `entry_time` is stored UTC — the same error the code had, so the tests
+#   agreed with the bug and passed. Correcting the parser turned them red,
+#   which is the fixture working. Epochs are UTC now.
 # v1.1 (2026-09-02) — dtp r254. F5/F5b/F6: the lone stop has TWO branches and
 #   the report must say which one fired. `condor_stop` is a routing artefact,
 #   the rule is 15% OF RISK, and the fallback is 15% OF CREDIT — three cents
@@ -32,8 +36,18 @@ def check(name, ok, detail=""):
         _fails.append(name)
 
 
+# 🔴 THE FIXTURE CARRIED THE SAME WRONG ASSUMPTION THE CODE DID. It built
+# candle epochs in ET while `entry_time` is a UTC string, and both were wrong
+# in the same direction — so the tests passed while the report was four hours
+# off. When r256 corrected the parser these went red, which is the fixture
+# doing its job: a test that agrees with the bug cannot catch it, and a test
+# built on the SAME clock as the code under test agrees by construction.
+UTC = ZoneInfo("UTC")
+
+
 def _ep(h, m, s=0):
-    return datetime(2026, 8, 31, h, m, s, tzinfo=ET).timestamp()
+    """UTC, to match `trades.entry_time`, which trade_logger stores in UTC."""
+    return datetime(2026, 8, 31, h, m, s, tzinfo=UTC).timestamp()
 
 
 def _run(store, args):
@@ -204,6 +218,35 @@ def main():
     check("F6 the [no width] tier is not truncated away",
           "condor_stop [no width]" in out6,
           [l for l in out6.splitlines() if "condor_stop" in l][:1])
+
+    # ── F7 — THE FILL TIMESTAMP IS UTC ──────────────────────────────────
+    # 🔴 v1.4 PARSED `entry_time` AS ET AND WAS FOUR HOURS EARLY ON EVERY
+    # TRADE. `at_entry` then walked off the front of the session and returned
+    # one stale evaluation for all of them: panel 3 printed a single constant
+    # across 17 trades while the source held 1,704 distinct values. This plants
+    # TWO evaluations four hours apart and requires the LATER one — the only
+    # one at or before a UTC-parsed fill — to be the one joined.
+    two = [{"ts_epoch": _ep(8, 0), "strategy": "SweepCreditSpread",
+            "check_name": "side_of_pool", "value": -9.99, "direction": "call"},
+           {"ts_epoch": _ep(11, 59), "strategy": "SweepCreditSpread",
+            "check_name": "side_of_pool", "value": -1.11, "direction": "call"},
+           {"ts_epoch": _ep(11, 59), "strategy": "SweepCreditSpread",
+            "check_name": "short_anchor", "value": A, "direction": "call"}]
+    out7 = _run(_store([_trade("u", A, A + 2.5, -40, "condor_stop")],
+                       two, flat), base)
+    # ⚠️ MATCHED ON THE VALUE, NOT THE COLUMN SPACING. The first draft asserted
+    # "median   1.11" with the padding of one particular table width — a check
+    # pinned to formatting rather than to the claim (§24).
+    _sop = [l for l in out7.splitlines() if "points from the swept pool" in l]
+    check("F7 entry_time is read as UTC, so the join lands in the session",
+          bool(_sop) and "1.11" in _sop[0] and "9.99" not in _sop[0],
+          [l for l in out7.splitlines() if "points from" in l][:1])
+
+    # ⚠️ AND THE DIAGNOSTIC MUST STILL FIRE when the join really is stale —
+    # it is the only reason the fault was visible at all.
+    check("F7b the join-fault diagnostic is still present",
+          "JOIN fault in this report" in out7
+          or "DISTINCT values" in out7)
 
     print()
     if _fails:
