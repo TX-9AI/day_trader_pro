@@ -1,7 +1,20 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/fit_readiness.py  v1.1
+day_trader_pro/fit_readiness.py  v1.2
 Per setup type: what fired, what was declined, and whether it is FITTABLE yet.
+
+v1.2  2026-09-02  dtp r245 — 🔴 OOM-KILLED TWICE ON THE SAME RANGE, FROM
+  TWO INDEPENDENT CAUSES, AND I FIXED THE WRONG ONE FIRST.
+  (1) `collect()` retained EVERY PAYLOAD DICT in `fired`/`declined`, and both
+  are consumed only by `len()` — several GB held to produce two integers. They
+  are counters now, and the derived vectors are `array('d')` rather than lists:
+  8 bytes a value against ~32 for a boxed float, quantiles still exact.
+  (2) `load_derived` materialised all three tables. They stream through
+  warehouse_cache now, projected to the columns actually read, with the CDC
+  collapse preserved as GROUP BY _rid.
+  ⚠️ r240 ADDED A PROGRESS METER HERE AND I SAID AT THE TIME IT MAKES THE WAIT
+  VISIBLE, NOT SMALLER. It did exactly that and the operator was killed again.
+  A meter on a known memory fault is instrumentation standing in for a fix.
 
 v1.1  2026-08-29  r184 / dtp r226 — THE WAREHOUSE IS THE SOURCE (backlog S3.2).
   🔴 THIS REPORT HAS NEVER PRODUCED A NUMBER ON CONTROL, AND THE REASON WAS
@@ -76,6 +89,7 @@ import json
 import os
 import sqlite3
 import sys
+from array import array
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 
@@ -147,19 +161,52 @@ def _rows_sqlite(db, dates):
     return src, notes
 
 
-def _rows_warehouse(dates):
-    """The three tables from S3. -> (src, notes). Boxes are never touched."""
-    src, notes, s3 = {}, [], None
-    try:
-        s3 = wr._client()
-    except Exception as exc:                                    # noqa: BLE001
-        notes.append("🔴 COULD NOT OPEN AN S3 CLIENT: %s: %s"
-                     % (type(exc).__name__, exc))
-        return None, notes
+_NEED = {
+    "strategy_note":    ["_rid", "strategy", "fired", "outcome", "payload"],
+    "gate_disposition": ["_rid", "strategy", "gate", "event"],
+    "plan_ledger":      ["_rid", "strategy", "terminal_reason"],
+}
+
+
+def _rows_warehouse(dates, cache):
+    """The three tables from S3, STREAMED through a local cache.
+
+    🔴 r245 — THIS RETURNED THREE FULLY MATERIALISED LISTS. `load_derived`
+    downloads every object in a partition, parses it, holds a dict spanning the
+    whole range plus a forward window and builds a second list. The operator
+    was OOM-killed on 2026-08-24..09-01 TWICE — once before the meter existed
+    and once after, because r240's meter made the wait visible, not smaller.
+    Each table now streams into a projected sqlite table and `collect()`
+    receives an ITERATOR: one object is parsed at a time and released.
+
+    ⚠️ THE CDC COLLAPSE IS PRESERVED, IN SQL. `load_derived` keeps one row per
+    `_rid`; dropping it would double-count any record pushed twice and inflate
+    every number in the report. `GROUP BY _rid` does the same job without
+    holding the range in a dict.
+    ⚠️ AND THE PER-TABLE SOURCE BANNER SURVIVES. An unreachable bucket and a
+    session with no evaluations must never render the same — this report's own
+    stated contract, and a rewrite is exactly when that gets lost.
+    """
+    notes, src = [], {}
     for t in TABLES:
-        rows, meta = wr.load_derived(t, dates, s3=s3)
-        src[t] = rows
-        notes.append(meta.banner())
+        try:
+            n = cache.load(t, dates, _NEED[t])
+        except Exception as exc:                                # noqa: BLE001
+            notes.append(f"SOURCE: s3 [{t}] — 🔴 UNREADABLE: "
+                         f"{type(exc).__name__}: {exc}")
+            src[t] = []
+            continue
+        uniq = cache.query(f'SELECT COUNT(*) c FROM'
+                           f' (SELECT 1 FROM "{t}" GROUP BY _rid)')[0]["c"]
+        notes.append(f"SOURCE: s3 [{t}] — {n:,} row(s), "
+                     f"{uniq:,} after collapse by _rid")
+        # ⚠️ PLAIN DICTS, NOT sqlite3.Row. `collect()`'s own docstring says it
+        # "takes plain dicts and knows nothing about the source", and that is
+        # what keeps the local and warehouse runs from drifting into two
+        # different sets of numbers. A Row has no `.get`, so handing one over
+        # would both break it and quietly violate that contract.
+        src[t] = (dict(r) for r in
+                  cache.iter(f'SELECT * FROM "{t}" GROUP BY _rid'))
     return src, notes
 
 
@@ -172,10 +219,21 @@ def collect(src: dict, dates: list) -> dict:
     instrumentation defects to find the last time two paths computed the
     "same" report.
     """
+    # 🔴 r245 — THIS FUNCTION WAS THE OOM, NOT THE FETCH. `fired` and
+    # `declined` held EVERY PAYLOAD DICT — and both are consumed only by
+    # `len()`, in `verdict()` and in `render()`. A payload with thirty keys is
+    # roughly 3-4 KB as a Python dict; a million evaluations over a nine-day
+    # range is several GB retained to produce two integers.
+    # ⚠️ AND THE VECTORS ARE `array('d')`, NOT LISTS. Only p10/median/p90 are
+    # ever read off them, but the quantiles must stay EXACT, so sampling is
+    # wrong — an array of doubles is 8 bytes per value against ~32 for a
+    # boxed float in a list, so the same numbers cost a quarter as much.
+    # 🔑 r242's LESSON, APPLIED WHERE IT BELONGS: I fixed the fetch yesterday
+    # and left the analysis, and the operator hit the same kill twice.
     out = defaultdict(lambda: {
-        "fired": [], "declined": [], "rungs": Counter(),
-        "plans": Counter(), "vec_fired": defaultdict(list),
-        "vec_declined": defaultdict(list)})
+        "fired": 0, "declined": 0, "rungs": Counter(),
+        "plans": Counter(), "vec_fired": defaultdict(lambda: array("d")),
+        "vec_declined": defaultdict(lambda: array("d"))})
     if not src:
         return out
 
@@ -195,7 +253,7 @@ def collect(src: dict, dates: list) -> dict:
         if not isinstance(p, dict):
             p = {}
         fired = bool(r.get("fired"))
-        rec["fired" if fired else "declined"].append(p)
+        rec["fired" if fired else "declined"] += 1
         bucket = rec["vec_fired"] if fired else rec["vec_declined"]
         for k, v in p.items():
             fv = _f(v)
@@ -234,7 +292,7 @@ def _spread(vals: list) -> str:
 
 def verdict(rec: dict) -> tuple:
     """(READY|NOT READY, reason). Coverage, not volume."""
-    nf, nd = len(rec["fired"]), len(rec["declined"])
+    nf, nd = rec["fired"], rec["declined"]
     if nf < MIN_FIRED:
         return "NOT READY", f"only {nf} fired (need ~{MIN_FIRED} for outcomes)"
     if nd < MIN_DECLINED:
@@ -282,8 +340,8 @@ def render(data: dict, dates: list, only=None) -> str:
         L.append("─" * 74)
         L.append(f"    {v}: {why}")
         L.append("")
-        L.append(f"    fired    {len(rec['fired']):>6}")
-        L.append(f"    declined {len(rec['declined']):>6}")
+        L.append(f"    fired    {rec['fired']:>6}")
+        L.append(f"    declined {rec['declined']:>6}")
 
         if rec["rungs"]:
             total = sum(rec["rungs"].values())
@@ -335,7 +393,16 @@ def main(argv=None) -> int:
     a = ap.parse_args(argv[1:] if argv else None)
 
     dates = _dates(a)
-    src, notes = (_rows_sqlite(a.db, dates) if a.db else _rows_warehouse(dates))
+    # ⚠️ THE CACHE MUST OUTLIVE THE ITERATORS. `collect()` consumes generators
+    # backed by the cache's sqlite connection; closing it before collect() runs
+    # would empty the report SILENTLY rather than erroring.
+    _cache = None
+    if a.db:
+        src, notes = _rows_sqlite(a.db, dates)
+    else:
+        import warehouse_cache as _wc
+        _cache = _wc.WarehouseCache("fitready")
+        src, notes = _rows_warehouse(dates, _cache)
     for n in notes:
         print("  " + n)
     print()
@@ -348,7 +415,11 @@ def main(argv=None) -> int:
         print("  On control the default (S3) is the working source; --db is "
               "for running this ON A BOX.")
         return 1
-    print(render(collect(src, dates), dates, a.setup))
+    try:
+        print(render(collect(src, dates), dates, a.setup))
+    finally:
+        if _cache is not None:
+            _cache.close()
     return 0
 
 
