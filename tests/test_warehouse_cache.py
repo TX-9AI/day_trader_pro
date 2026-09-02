@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/test_warehouse_cache.py — v1.1
+# day_trader_pro/tests/test_warehouse_cache.py — v1.2
+# v1.2 (2026-09-02) — dtp r246. C9/C9b: `record` is a DICT for raw/trades and
+#   a LIST for the derived tables, and assuming a list gave a silent zero.
 # v1.1 (2026-09-01) — r242. C7/C7b/C8: query() refuses an oversized result
 #   and names the way out, iter() and GROUP BY both work, and an empty date
 #   range is refused by name. The cache OOM'd on the ANALYSIS side after the
@@ -16,6 +18,7 @@
 #   matter: an exception and an outright SIGTERM. A cleanup that only runs when
 #   nothing went wrong is a cleanup that runs when it is not needed.
 
+import io
 import os
 import signal
 import subprocess
@@ -154,6 +157,59 @@ def main():
         except IndexError:
             ok = False
         check("C8 load() names an empty date range instead of IndexError", ok)
+
+    # ── C9 — `record` MAY BE A DICT OR A LIST ───────────────────────────
+    # 🔴 THE SILENT ZERO. The derived tables push a LIST of rows per object;
+    # `trade_envelope` pushes ONE TRADE as a DICT. Iterating a dict yields its
+    # KEYS, so the isinstance filter dropped every row: entry_report fetched
+    # 1,595 objects, 5 MB, inserted 0 ROWS, and reported "no closed trades with
+    # excursion telemetry in range" — a defect wearing the costume of a
+    # finding, which is the worst shape a bug takes in this project.
+    # ⚠️ WHAT EXPOSED IT WAS THE ROW COUNT IN THE TICKER. 1,595 objects and 0
+    # rows cannot both be right; without that number on screen it would have
+    # stood as an answer about the data.
+    import json as _json
+    import warehouse_reader as _WR
+
+    class _B:
+        def __init__(s, b): s.b = b
+        def read(s): return s.b
+
+    class _P:
+        def __init__(s, st): s.st = st
+        def paginate(s, Bucket=None, Prefix=None):
+            yield {"Contents": [{"Key": k, "Size": len(v)}
+                                for k, v in s.st.items() if k.startswith(Prefix)]}
+
+    class _S3:
+        def __init__(s, st): s.st = st
+        def get_paginator(s, _): return _P(s.st)
+        def get_object(s, Bucket=None, Key=None): return {"Body": _B(s.st[Key])}
+
+    store = {
+        "raw/trades/dt=2026-08-31/sym=QQQ/a.json": _json.dumps(
+            {"symbol": "QQQ", "record": {"trade_id": "t1"}}).encode(),
+        "raw/derived_x/dt=2026-08-31/sym=QQQ/c.json": _json.dumps(
+            {"symbol": "QQQ", "record": [{"trade_id": "d1"},
+                                         {"trade_id": "d2"}]}).encode(),
+    }
+    _real = _WR._client
+    _WR._client = lambda *a, **k: _S3(store)
+    WC.WR._client = lambda *a, **k: _S3(store)
+    try:
+        import contextlib as _c
+        with WC.WarehouseCache("t") as c:
+            with _c.redirect_stderr(io.StringIO()):
+                n_dict = c.load("trades", ["2026-08-31"], ["trade_id"],
+                                datatype="trades")
+                n_list = c.load("x", ["2026-08-31"], ["trade_id"])
+            check("C9 a dict-shaped record loads as one row",
+                  n_dict == 1, f"got {n_dict}")
+            check("C9b a list-shaped record still loads every row",
+                  n_list == 2, f"got {n_list}")
+    finally:
+        _WR._client = _real
+        WC.WR._client = _real
 
     print()
     if _fails:

@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-# day_trader_pro/warehouse_cache.py — v1.2
+# day_trader_pro/warehouse_cache.py — v1.3
+# v1.3 (2026-09-02) — dtp r246. 🔴 `record` IS A DICT FOR SOME STREAMS AND A
+#   LIST FOR OTHERS, and assuming a list gave a SILENT ZERO: raw/trades
+#   pushes ONE TRADE PER OBJECT as a dict, so entry_report fetched 1,595
+#   objects and inserted 0 rows, then said "no closed trades with excursion
+#   telemetry in range" — a defect wearing the costume of a finding.
 # v1.2 (2026-09-01) — r242. 🔴 `query()` WAS fetchall AND THE CACHE OOM'D
 #   ANYWAY — on the analysis side, after the streaming fetch had worked. It
 #   now REFUSES a result above MAX_ROWS and names the two ways out (GROUP BY,
@@ -246,9 +251,26 @@ class WarehouseCache:
                 self.bytes_seen += size
                 env = json.loads(body)
                 sym = env.get("symbol") or WR._sym_of(key)
+                # 🔴 r246 — `record` IS NOT ALWAYS A LIST, AND ASSUMING IT WAS
+                # PRODUCED A SILENT ZERO. The derived tables push a LIST of
+                # rows per object; `trade_envelope` (s3_push.py:596) pushes ONE
+                # TRADE as a DICT — one object per trade. Iterating a dict
+                # yields its KEYS, so `isinstance(r, dict)` was False for every
+                # one and the batch came out empty: entry_report fetched 1,595
+                # objects, 5 MB, and inserted 0 ROWS, then reported "no closed
+                # trades with excursion telemetry in range" — which reads as a
+                # finding about the data rather than a defect in the reader.
+                # ⚠️ THE WORST KIND OF BUG THIS PROJECT HAS: an empty result
+                # that looks like an answer. The row count in the ticker is
+                # what exposed it — 1,595 objects and 0 rows cannot both be
+                # right, and without that number on screen it would have stood.
+                rec = env.get("record")
+                if isinstance(rec, dict):
+                    rec = [rec]
+                elif not isinstance(rec, list):
+                    rec = []
                 batch = [tuple([sym] + [r.get(c) for c in cols])
-                         for r in (env.get("record") or [])
-                         if isinstance(r, dict)]
+                         for r in rec if isinstance(r, dict)]
                 if batch:
                     self.conn.executemany(ins, batch)
                     n += len(batch)
