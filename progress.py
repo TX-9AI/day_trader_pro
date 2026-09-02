@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-# day_trader_pro/progress.py — v1.0
+# day_trader_pro/progress.py — v1.1
+# v1.1 (2026-09-01) — dtp r244. Adds `Bar`, a phase progress bar for the
+#   ANALYSIS half. The fetch had a meter and the generation did not, so a long
+#   query and a hang looked identical — the operator asked "what's it doing
+#   now?" watching exactly that.
 # v1.0 (2026-09-01) — dtp r240. ONE TICKER, ON THE FETCH PATH.
 #
 # Operator, 2026-09-01: "The S3 options in devtools need a progress meter. Some
@@ -37,6 +41,59 @@ _OFF = os.environ.get("DTP_NO_PROGRESS", "") not in ("", "0")
 def _fmt(sec: float) -> str:
     sec = int(max(0, sec))
     return f"{sec // 60}m{sec % 60:02d}s" if sec >= 60 else f"{sec}s"
+
+
+class Bar:
+    """A phase progress bar for work that is NOT an S3 fetch.
+
+    🔑 r244 — THE FETCH HAD A METER AND THE ANALYSIS DID NOT. The operator
+    watched `bfly_pin_study` sit silent for minutes after both loads finished
+    and asked "what's it doing now?" — there was no way to tell a long query
+    from a hang. Reports now bar their generation phase as well as their pull.
+
+    ⚠️ STDERR, like `Ticker`, and for the same reason: report_parity diffs
+    these reports' OUTPUT, so a bar on stdout would land in the comparison.
+    ⚠️ ALWAYS CLOSES WITH A NEWLINE, so the next line is not written over the
+    bar and lost.
+    """
+
+    WIDTH = 28
+
+    def __init__(self, label: str, total: int, every: float = 0.2):
+        self.label, self.total, self.every = label, max(1, int(total)), every
+        self.n, self.t0, self._last, self._painted = 0, time.time(), 0.0, False
+
+    def step(self, n: int = 1, note: str = ""):
+        self.n += n
+        now = time.time()
+        if _OFF or (now - self._last) < self.every:
+            return
+        self._last = now
+        self._paint(note)
+
+    def _paint(self, note=""):
+        frac = min(1.0, self.n / self.total)
+        full = int(self.WIDTH * frac)
+        bar = "#" * full + "-" * (self.WIDTH - full)
+        el = time.time() - self.t0
+        eta = ""
+        if frac > 0.02 and self.n > 3:
+            eta = f"  eta {_fmt(el / frac - el)}"
+        msg = (f"  {self.label} [{bar}] {frac * 100:3.0f}%{eta}"
+               f"{('  ' + note) if note else ''}")
+        sys.stderr.write("\r" + msg.ljust(78))
+        sys.stderr.flush()
+        self._painted = True
+
+    def done(self, note: str = ""):
+        if _OFF:
+            return
+        if self._painted:
+            sys.stderr.write("\r" + " " * 78 + "\r")
+        el = time.time() - self.t0
+        sys.stderr.write(f"  {self.label}: done in {_fmt(el)}"
+                         f"{('  ' + note) if note else ''}\n")
+        sys.stderr.flush()
 
 
 class Ticker:
