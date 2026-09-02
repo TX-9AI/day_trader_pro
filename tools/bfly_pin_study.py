@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-# day_trader_pro/tools/bfly_pin_study.py — v1.1
+# day_trader_pro/tools/bfly_pin_study.py — v1.2
+# v1.2 (2026-09-01) — r243. 🔴 PANEL 2's med/p90 WERE POOLED ACROSS THE RANGE.
+#   The panel is titled "within each day" and its n/min/max/in-band came from
+#   GROUP BY d,b — but `_pct` filtered by BUCKET ONLY, so both days printed
+#   IDENTICAL medians to the decimal (12:00 1.37, 13:00 1.72, 14:00 2.17,
+#   15:00 2.51 on 08-31 AND 09-01). Exactly the cross-day confound the panel
+#   exists to remove. `_pct` now takes the day. Proven by the run, not by
+#   reading: two different days cannot share four medians to two decimals.
 # v1.1 (2026-09-01) — r242. 🔴 OOM-KILLED ON THE FIRST REAL RUN, AFTER BOTH
 #   S3 LOADS SUCCEEDED. The cache streamed 907,167 plan_check and 7,794,684
 #   surface_series rows to disk exactly as designed — and then every panel
@@ -103,15 +110,25 @@ def _grp(off):
     return f"strftime('%H:00', datetime(ts_epoch, 'unixepoch', '{off}'))"
 
 
-def _pct(cache, table, grp, bucket, off, q, strat, col="value"):
+def _pct(cache, table, grp, bucket, off, q, strat, col="value", day=None,
+         check=None):
     """One quantile inside one bucket, by OFFSET — exact, and it returns ONE
     row. sqlite has no median; pulling the column into Python to sort it is
     what OOM'd the first cut on 7.8M rows."""
+    # 🔴 THE `day` ARGUMENT WAS MISSING AND THE FIRST RUN PROVED IT. Panel 2 is
+    # titled "within each day", its count/min/max/in-band came from GROUP BY
+    # d,b — and med/p90 came from here, filtered by BUCKET ONLY. So both days
+    # printed IDENTICAL medians to the decimal (12:00 med 1.37 on 08-31 and on
+    # 09-01, 13:00 1.72, 14:00 2.17, 15:00 2.51). Pooled across the range,
+    # which is exactly the cross-day confound the panel exists to remove.
     where = f"{grp} = ?"
     args = [bucket]
+    if day is not None:
+        where += f" AND {_day(off)} = ?"
+        args.append(day)
     if strat:
         where += " AND strategy = ? AND check_name = ?"
-        args += [strat, "pin_em_fraction"]
+        args += [strat, check or "pin_em_fraction"]
     n = cache.query(f'SELECT COUNT(*) n FROM "{table}" WHERE {where}'
                     f' AND {col} IS NOT NULL', tuple(args))[0]["n"]
     if not n:
@@ -219,8 +236,10 @@ def main(argv):
                 w(f"  {cur_day}")
                 w(f"    {'hour':<8} {'n':>7} {'min':>7} {'med':>7} {'p90':>7} "
                   f"{'max':>8} {'in band':>8}")
-            med = _pct(cache, "plan_check", grp, r["b"], off, 0.50, STRAT)
-            p90 = _pct(cache, "plan_check", grp, r["b"], off, 0.90, STRAT)
+            med = _pct(cache, "plan_check", grp, r["b"], off, 0.50, STRAT,
+                       day=r["d"])
+            p90 = _pct(cache, "plan_check", grp, r["b"], off, 0.90, STRAT,
+                       day=r["d"])
             w(f"    {r['b']:<8} {r['n']:>7,} {r['lo']:>7.2f} "
               f"{(med if med is not None else float('nan')):>7.2f} "
               f"{(p90 if p90 is not None else float('nan')):>7.2f} "
