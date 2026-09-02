@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/test_sweep_forensics.py — v1.0
+# day_trader_pro/tests/test_sweep_forensics.py — v1.1
+# v1.1 (2026-09-02) — dtp r254. F5/F5b/F6: the lone stop has TWO branches and
+#   the report must say which one fired. `condor_stop` is a routing artefact,
+#   the rule is 15% OF RISK, and the fallback is 15% OF CREDIT — three cents
+#   on a $0.20 credit. F6 guards the tier marker the v1.1 truncation ate.
 # v1.0 (2026-09-02) — dtp r252.
 #
 # 🔴 F2 IS THE CHECK THAT CARRIES THE WEIGHT. A CALL spread is breached UPWARD
@@ -165,6 +169,41 @@ def main():
     out4 = _run(_store([_trade("d", A, A + 2.5, -150, "hard_stop_15%")], chk, []), base)
     check("F4 a trade with no candles is named, not scored zero",
           "NO 1m candles" in out4 and "excluded below, not counted as zero" in out4)
+
+    # ── F5 — THE STOP BRANCH IS IDENTIFIED, AND THE ROOM IS IN CENTS ────
+    # 🔴 THE REASON STRING SAYS `condor_stop` BECAUSE OF ROUTING, NOT RULE.
+    # The sweep maps to Structure.CONDOR_LEG (r99, to keep it out of the 15:40
+    # flatten) and inherits that branch's LABEL. The actual rule is
+    # exit_engine.py:1818 — entry + (spread_width - entry) x 15% OF RISK —
+    # with a FALLBACK at :1821 to entry x 1.15, which is 15% OF CREDIT, the
+    # inverted rule r155 replaced, and the engine warns "The trade will stop
+    # on noise." when it runs.
+    # ⚠️ THE ROOM IS PRINTED IN CENTS BECAUSE A PERCENTAGE HIDES IT: 15% of a
+    # $0.20 credit is THREE CENTS, and a credit vertical's own quote is two
+    # leg-spreads wide. That is the butterfly's 4.3-cent floor in a credit
+    # structure.
+    def _sw(w):
+        return _trade("w", A, A + 2.5, -40, "condor_stop pnl=-15.0%") | {
+            "entry_premium": 0.20, "credit_received": 0.20, "spread_width": w}
+
+    flat = [{"interval": "1m", "ts_epoch_ms": int(_ep(12, m) * 1000),
+             "high": 99.1, "low": 98.9, "close": 99.0} for m in range(20)]
+    out5 = _run(_store([_sw(0.0), _sw(0.0), _sw(5.0)], chk, flat), base)
+    check("F5 the fallback branch is counted separately from the risk branch",
+          "CREDIT-anchored FALLBACK" in out5 and "took the fallback" in out5,
+          [l for l in out5.splitlines() if "FALLBACK" in l][:1])
+    check("F5b the room is stated in CENTS, not percent",
+          "3.0 cents" in out5,
+          "15% of a $0.20 credit — the number a percentage hides")
+
+    # ── F6 — THE TIER MARKER SURVIVES THE GROUPING ──────────────────────
+    # v1.1 truncated the reason to its first token, so `[no width]` — the one
+    # field that names which branch ran — was discarded by the formatting.
+    tier = "condor_stop pnl=-15.0% [no width — credit-anchored fallback]"
+    out6 = _run(_store([_trade("t", A, A + 2.5, -40, tier)], chk, flat), base)
+    check("F6 the [no width] tier is not truncated away",
+          "condor_stop [no width]" in out6,
+          [l for l in out6.splitlines() if "condor_stop" in l][:1])
 
     print()
     if _fails:

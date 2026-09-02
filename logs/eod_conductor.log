@@ -630,3 +630,32 @@ Net: -$454.50   50 closed  (11W/39L, 22%)
 [DONE      ] 15 verified and stopped · 0 HELD UP
 [DONE      ] all 15 box(es) verified against S3 and stopped
 [REARM     ] re-arming s3-push.timer + candle-logger.timer
+[START     ] EOD conductor v2 — 2026-09-02
+[START     ] 15 box(es): AMD, AMZN, AVGO, CRM, CVX, GOOGL, META, MU, NFLX, NVDA, PLTR, QQQ, SPX, TSLA, UNH
+[QUIESCE   ] stopping other writers — the conductor owns the close
+[STOP      ] stopping optionsbot on 15 box(es) — feed and machine STAY UP
+[SETTLE    ] 45s for the bots to flush their stores
+[DRAIN     ] draining + verifying 15 box(es) against S3
+[VERIFY    ] AMD    OK         short=0 local=84273 s3=84573
+[VERIFY    ] AMZN   OK         short=0 local=84776 s3=85072
+[VERIFY    ] AVGO   OK         short=0 local=86800 s3=87096
+[VERIFY    ] CRM    OK         short=0 local=73069 s3=73370
+[VERIFY    ] CVX    OK         short=0 local=63805 s3=64109
+[VERIFY    ] GOOGL  OK         short=0 local=87621 s3=87926
+[VERIFY    ] META   OK         short=0 local=64714 s3=65018
+[VERIFY    ] MU     OK         short=0 local=86665 s3=87086
+[VERIFY    ] NFLX   OK         short=0 local=68647 s3=68954
+[VERIFY    ] NVDA   OK         short=0 local=86870 s3=87266
+[VERIFY    ] PLTR   OK         short=0 local=94277 s3=94581
+[VERIFY    ] QQQ    OK         short=0 local=86909 s3=87338
+[VERIFY    ] SPX    OK         short=0 local=97822 s3=98157
+[VERIFY    ] TSLA   OK         short=0 local=77124 s3=77442
+[VERIFY    ] UNH    OK         short=0 local=78335 s3=78653
+[PURGE     ] retention purge on 15 verified box(es)
+[PURGE     ]   AMD: [retention] removed 3,454 row(s) | [retention]    candles/1m                       2,004 | [retention]    greeks_series 
+[PURGE     ]   AMZN: [retention] removed 2,674 row(s) | [retention]    candles/1m                       2,140 | [retention]    greeks_series 
+[PURGE     ]   AVGO: [retention] removed 3,114 row(s) | [retention]    candles/1m                       2,292 | [retention]    greeks_series 
+[PURGE     ]   CRM: [retention] removed 2,818 row(s) | [retention]    candles/1m                       2,028 | [retention]    greeks_series 
+[PURGE     ]   CVX: [retention] removed 2,063 row(s) | [retention]    candles/1m                       1,569 | [retention]    greeks_series 
+[PURGE     ]   GOOGL: [retention] removed 2,854 row(s) | [retention]    candles/1m                       2,140 | [retention]    greeks_series 
+[PURGE     ]   META: [retention] removed 3,479 row(s) | [retention]    candles/1m                       2,093 | [retention]    greeks_series 

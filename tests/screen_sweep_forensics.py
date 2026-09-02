@@ -1,5 +1,21 @@
 #!/usr/bin/env python3
-"""day_trader_pro/tests/screen_sweep_forensics.py — v1.1
+"""day_trader_pro/tests/screen_sweep_forensics.py — v1.2
+v1.2  2026-09-02 — dtp r254. TRACED THE STOP. The exit reason string is built
+      at exit_engine.py:1832 and says `condor_stop` because the sweep maps to
+      Structure.CONDOR_LEG (r99, to keep it out of the 15:40 flatten) and
+      inherits that branch's LABEL. The word 'condor' is an artefact of the
+      routing, not a description of the rule — the operator was right to
+      reject it.
+      🔴 AND IT IS NOT A 15%% PREMIUM STOP. r155 replaced that. It is 15%% OF
+      RISK: stop = entry + (spread_width - entry) x LONE_STOP_PCT_OF_RISK.
+      BUT there is a FALLBACK at exit_engine.py:1821 — if `spread_width` is
+      missing or <= the credit, stop = entry x 1.15, which is 15%% OF CREDIT,
+      the inverted rule r155 replaced, and the engine warns 'The trade will
+      stop on noise.'
+      Panel 5 counts which branch each trade took and prints the room in
+      CENTS, because a percentage hides it: 15%% of a $0.20 credit is three
+      cents. Panel 4 no longer truncates the reason to its first token, which
+      is what discarded the '[no width]' tier marker in v1.1.
 v1.1  2026-09-02 — dtp r253. SCOPED PULLS. v1.0 fetched EVERY symbol and
       EVERY interval of candles for the range — 48,305 GETs for ~39 MB, a
       thirty-minute run that was pure round-trip latency, on a report that
@@ -286,19 +302,76 @@ def main(argv):
 
         w("4. WHAT ENDED THEM")
         w("-" * 68)
+        # 🔴 v1.1 TRUNCATED THE REASON TO ITS FIRST TOKEN AND THREW AWAY THE
+        # ANSWER. `_evaluate_condor_leg` appends a TIER MARKER when the lone
+        # stop falls back — "[no width — credit-anchored fallback]" — and the
+        # first token is just "condor_stop", so the branch that actually ran
+        # was discarded by the formatting. Group on the reason with its tier.
         by = {}
         for x in recs:
-            k = (x["reason"].split()[0] if x["reason"] else "(none)")[:22]
+            _r = x["reason"] or "(none)"
+            k = ("condor_stop [no width]" if "no width" in _r
+                 else _r.split()[0])[:26]
             d = by.setdefault(k, {"n": 0, "pnl": 0.0, "pen": []})
             d["n"] += 1
             d["pnl"] += x["pnl"]
             if x["pen"] is not None:
                 d["pen"].append(x["pen"])
-        w(f"  {'reason':<24} {'n':>4} {'net':>11} {'med penetration':>17}")
+        w(f"  {'reason':<26} {'n':>4} {'net':>11} {'med penetration':>17}")
         for k in sorted(by, key=lambda z: -by[z]["n"]):
             d = by[k]
             mp = f"{_med(d['pen']):+.2f}" if d["pen"] else "n/a"
-            w(f"  {k:<24} {d['n']:>4} {RP.money(d['pnl']):>11} {mp:>17}")
+            w(f"  {k:<26} {d['n']:>4} {RP.money(d['pnl']):>11} {mp:>17}")
+        w("")
+        w("5. THE STOP THAT ACTUALLY FIRED  (exit_engine.py:1795-1836)")
+        w("   lone stop = entry + (width - entry) x 15% OF RISK")
+        w("   fallback  = entry x 1.15, i.e. 15% OF CREDIT, if width is 0")
+        w("-" * 68)
+        # 🔴 THE FALLBACK IS THE INVERTED RULE r155 REPLACED, and the engine
+        # says so in its own warning: "The trade will stop on noise." It fires
+        # when `spread_width` is missing or zero. If these rows have no width,
+        # every one of them was stopped by a 15%-of-CREDIT floor — the
+        # butterfly's 4.3-cent problem in a credit structure — and the 3%
+        # success rate is not measuring the sweep's edge at all.
+        # ⚠️ THE ROOM IS SHOWN IN CENTS, not percent. A percentage hides
+        # exactly this: 15% of a $0.20 credit is THREE CENTS.
+        PCT = 0.15
+        wide, narrow = [], []
+        for r in rows:
+            e = r["entry_premium"] or 0
+            wdt = r["spread_width"] or 0
+            if not e:
+                continue
+            risk = wdt - e
+            if risk > 0:
+                wide.append((e, wdt, risk * PCT))
+            else:
+                narrow.append((e, wdt, e * PCT))
+        w(f"  spread_width present and > credit : {len(wide):>4}"
+          f"   -> risk-anchored stop")
+        w(f"  width MISSING or <= credit        : {len(narrow):>4}"
+          f"   -> CREDIT-anchored FALLBACK")
+        if narrow:
+            rm = sorted(x[2] for x in narrow)
+            cr = sorted(x[0] for x in narrow)
+            w("")
+            w(f"  🔴 {len(narrow)} trade(s) took the fallback.")
+            w(f"     median credit ${_med(cr):.2f}  ->  room of "
+              f"${_med(rm):.3f}  ({_med(rm)*100:.1f} cents)")
+            w(f"     tightest room ${rm[0]:.3f}   widest ${rm[-1]:.3f}")
+            w("     The engine logs 'The trade will stop on noise.' when this")
+            w("     branch runs. A credit vertical's own quote is TWO leg")
+            w("     spreads wide; if that exceeds the room, the stop is hit by")
+            w("     the mark and not by price.")
+        if wide:
+            rm = sorted(x[2] for x in wide)
+            w("")
+            w(f"  risk-anchored room: median ${_med(rm):.3f}  "
+              f"({_med(rm)*100:.1f} cents)   min ${rm[0]:.3f}")
+        w("")
+        w("  ⚠️ AND PANEL 1 SAYS PRICE NEVER REACHED THE STRIKE. A stop that")
+        w("     fires while the underlying sits points away from the short is")
+        w("     a stop on the MARK, not on the trade being wrong.")
         w("")
         w("⚠️ NO CONTROL GROUP AND NO FIT. 3 winners cannot anchor a")
         w("   comparison. This says what the failing population DID; whether")
