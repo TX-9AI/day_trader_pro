@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-# day_trader_pro/report_prompt.py — v1.0
+# day_trader_pro/report_prompt.py — v1.1
+# v1.1 (2026-09-02) — dtp r247. The menu LOOPS: the caller can take several
+#   cuts off one pull, because a 49-second S3 read should not be repeated to
+#   look at a second strategy. `q` quits, and quit is a SENTINEL rather than
+#   None — None already means ALL types, and reusing it would silently run an
+#   ALL-types report on the way out.
 # v1.0 (2026-09-01) — dtp r244. THE PROMPTS BOTH EXCURSION REPORTS SHARE.
 #
 # Operator, 2026-09-01: a custom report evaluating entries that prompts for
@@ -56,6 +61,13 @@ def ask_dates(argv_from=None, argv_to=None):
     return out
 
 
+# Sentinel: "the operator is done", distinct from None which means ALL types.
+# ⚠️ None ALREADY MEANS SOMETHING HERE. Reusing it for quit would silently run
+# an ALL-types report on the way out.
+_QUIT = object()
+QUIT = _QUIT
+
+
 def choose_type(counts, preselected=None):
     """A numbered menu of the trade types PRESENT, with their counts.
 
@@ -92,12 +104,19 @@ def choose_type(counts, preselected=None):
     # than anyone asked for and label it with the wrong type. Say so and stop —
     # `--type` is the non-interactive path and the message names it.
     try:
-        raw = input("  Select [0]: ").strip() or "0"
+        raw = input("  Select [0], or q to quit: ").strip() or "0"
     except EOFError:
         raise SystemExit("\n  no input available — pass --type NAME "
                          "(or --type ALL) when running non-interactively")
+    # ⚠️ QUIT IS AN OPTION, NOT AN ERROR. The caller loops on this so the
+    # operator can take several cuts off ONE pull — a 49-second S3 read should
+    # not be repeated to look at a second strategy — and there has to be a way
+    # out that is not Ctrl-C.
+    if raw.lower() in ("q", "quit", "exit"):
+        return _QUIT
     if not raw.isdigit() or int(raw) > len(counts):
-        raise SystemExit("  not a listed option")
+        print("  not a listed option")
+        return choose_type(counts)
     idx = int(raw)
     return None if idx == 0 else counts[idx - 1][0]
 

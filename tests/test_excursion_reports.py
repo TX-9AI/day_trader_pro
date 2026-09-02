@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/test_excursion_reports.py — v1.0
+# day_trader_pro/tests/test_excursion_reports.py — v1.1
+# v1.1 (2026-09-02) — dtp r247. E1b RE-DERIVED and E1d added. E1b required
+#   the fav-first / heat-first split AND ITS WIN RATE; r247 removed that panel
+#   as near-tautological — a winner's favourable peak IS essentially its exit
+#   — so E1b now REQUIRES THE PANEL TO CARRY NO WIN RATE, which stops a later
+#   edit quietly reintroducing a predictor claim the data cannot support.
+#   E1d pins that the S3 pull happens ONCE and the menu loops.
 # v1.0 (2026-09-01) — dtp r244. BOTH REPORTS RECOVER A PLANTED ANSWER.
 #
 # 🔴 E3 IS THE ONE THAT MATTERS. Credit verticals profit as the mark FALLS, so
@@ -119,8 +125,27 @@ def main():
     check("E1c and losers took more heat than winners",
           won_r and lost_r and lost_r[1] > won_r[1],
           f"won adv {won_r and won_r[1]}  lost adv {lost_r and lost_r[1]}")
-    check("E1b fav-first vs heat-first separates cleanly",
-          "fav first" in t and "100%" in t and "heat first" in t)
+    # 🔴 E1b USED TO REQUIRE THE fav-first / heat-first SPLIT AND ITS WIN
+    # RATE. r247 removed that panel because it was near-tautological — a
+    # winner's favourable peak IS essentially its exit — and the operator's
+    # real run made it obvious: 0% for fav-first against 56% for heat-first,
+    # a striking number that mostly restates the outcome. The check now
+    # REQUIRES THE PANEL TO CARRY NO WIN RATE, so a future edit cannot quietly
+    # reintroduce a predictor claim the data cannot support.
+    check("E1b the shape panel is descriptive and shows no win rate",
+          "THE SHAPE OF THE TRADE" in t and "bars to peak" in t
+          and "NO WIN RATE IS SHOWN" in t
+          and "fav first" not in t and "heat first" not in t)
+
+    # ── E1d — the menu loops off ONE pull ───────────────────────────────
+    # ⚠️ Operator: return to the numbered menu without re-running the report.
+    # The S3 read is 49 seconds; repeating it to look at a second strategy is
+    # the cost this removes.
+    src = open(os.path.join(_root, "tools", "entry_report.py"),
+               encoding="utf-8").read()
+    check("E1d the pull happens once and the menu loops",
+          "while True:" in src and "RP.QUIT" in src
+          and src.count("RP.load_trades") == 1)
 
     # ── E2 — the sample limit is stated BEFORE the numbers ─────────────
     # The operator's question was whether there is enough data yet; a report
