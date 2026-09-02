@@ -1,5 +1,28 @@
 #!/usr/bin/env python3
-"""day_trader_pro/tests/screen_sweep_forensics.py — v1.2
+"""day_trader_pro/tests/screen_sweep_forensics.py — v1.4
+v1.4  2026-09-02 — dtp r255. 🔴 THE JOIN IGNORED `direction`. plan_check's
+      PRIMARY KEY is (ts_epoch, symbol, strategy, direction, check_name), so a
+      symbol evaluating BOTH a call and a put spread on one tick writes two
+      rows at the same timestamp — and keying on (symbol, check_name)
+      collapsed them, returning whichever sorted last. A plausible source of
+      the constant 0.61 panel 3 reported across 17 trades, and a defect either
+      way. Direction is derived from the STRUCTURE (long above short = call
+      spread), the same rule panel 1 uses for penetration.
+v1.3  2026-09-02 — dtp r255. ARE WE DOING WHAT THE STRATEGY SAYS IT DOES?
+      Operator: the purpose of our credit spreads is to sell RICH as CLOSE
+      TO PRICE as possible at the CONFIRMATION OF A REVERSAL — are we
+      actually doing that? Panel 6 measures the first two against spot at
+      the fill, which lives ONLY in fire_snapshot.payload['price'] because
+      `trades` has no entry_underlying column. Distance is given in points,
+      as a percentage of spot and in ATR, because points alone are not
+      comparable across an $83 NFLX and a $7,700 SPX. Panel 7 reports the
+      reversal evidence the strategy itself recorded — rejection, age,
+      pierce_depth, and whether the sweep was a pitchfork TINE touch.
+      ⚠️ AND PANEL 3 NOW DISTINGUISHES A CONSTANT SOURCE FROM A BAD JOIN.
+      v1.2 printed min = median = max = 0.61 across 17 trades and I could
+      not say which it was; it now prints the distinct-value count of the
+      underlying evaluations, so the answer is in the output instead of in
+      a guess.
 v1.2  2026-09-02 — dtp r254. TRACED THE STOP. The exit reason string is built
       at exit_engine.py:1832 and says `condor_stop` because the sweep maps to
       Structure.CONDOR_LEG (r99, to keep it out of the 15:40 flatten) and
@@ -147,6 +170,12 @@ def main(argv):
                    syms=want_syms or None,
                    keep=lambda r: r.get("strategy") == STRAT)
         if want_syms:
+            # ⚠️ `price` INSIDE `payload` IS SPOT AT THE FILL, and it is the
+            # only place it exists — `trades` has no entry_underlying column
+            # (checked against the 82-column DDL). fire_snapshot joined 41/41
+            # on the sweep, so this is not a partial sample.
+            cache.load("fire_snapshot", dates,
+                       ["trade_id", "fired_ts", "payload"], syms=want_syms)
             cache.load("candles", dates,
                        ["interval", "ts_epoch_ms", "high", "low", "close"],
                        datatype="candles", syms=want_syms, part="interval=1m")
@@ -179,19 +208,52 @@ def main(argv):
         # ── the fire-tick checks, nearest evaluation at or before entry ──
         # ⚠️ NEAREST AT-OR-BEFORE, never nearest overall: an evaluation AFTER
         # the fill describes a different market than the one entered.
+        # 🔴 v1.3 IGNORED `direction`, AND plan_check's PRIMARY KEY INCLUDES IT
+        # (ts_epoch, symbol, strategy, direction, check_name — plan.py:308).
+        # A symbol evaluating BOTH a call and a put spread on the same tick
+        # writes TWO `side_of_pool` rows at the same timestamp, and keying on
+        # (symbol, check_name) collapsed them — the join then returned
+        # whichever happened to sort last. That is a plausible source of the
+        # constant 0.61 panel 3 reported across 17 trades, and it is a defect
+        # regardless of whether it turns out to be THE source.
         chk = {}
         for r in cache.iter(
-                'SELECT ts_epoch, symbol, check_name, value FROM "plan_check"'
-                ' WHERE strategy = ? AND value IS NOT NULL', (STRAT,)):
-            chk.setdefault((r["symbol"], r["check_name"]), []).append(
-                (float(r["ts_epoch"]), float(r["value"])))
+                'SELECT ts_epoch, symbol, check_name, value, direction'
+                '  FROM "plan_check" WHERE strategy = ? AND value IS NOT NULL',
+                (STRAT,)):
+            chk.setdefault(
+                (r["symbol"], (r["direction"] or "").lower(), r["check_name"]),
+                []).append((float(r["ts_epoch"]), float(r["value"])))
         for k in chk:
             chk[k].sort()
 
-        def at_entry(sym, name, ts):
-            seq = chk.get((sym, name)) or []
+        def at_entry(sym, name, ts, direction=""):
+            """Nearest evaluation AT OR BEFORE `ts`, for this direction.
+
+            ⚠️ FALLS BACK TO ANY DIRECTION and says nothing — the caller cannot
+            tell. That is deliberate for now: the direction string the strategy
+            writes has not been verified against the call/put derivation used
+            here, so a strict match could silently return None for every trade
+            and read as "not recorded". The fallback is the conservative
+            reading until the two are checked against each other.
+            """
+            for key in ((sym, (direction or "").lower(), name),):
+                seq = chk.get(key) or []
+                best = None
+                for t, v in seq:
+                    if t <= ts:
+                        best = v
+                    else:
+                        break
+                if best is not None:
+                    return best
+            merged = []
+            for (sy, _d, nm), seq in chk.items():
+                if sy == sym and nm == name:
+                    merged += seq
+            merged.sort()
             best = None
-            for t, v in seq:
+            for t, v in merged:
                 if t <= ts:
                     best = v
                 else:
@@ -207,10 +269,11 @@ def main(argv):
                 continue
             ets = e_dt.timestamp()
             xts = x_dt.timestamp() if x_dt else ets + 3600
-            anchor = at_entry(r["symbol"], "short_anchor", ets)
+            _dir = "call" if (r["long_strike"] or 0) > (r["short_strike"] or 0) else "put"
+            anchor = at_entry(r["symbol"], "short_anchor", ets, _dir)
             if anchor is None:
                 anchor = r["short_strike"]
-            side = at_entry(r["symbol"], "side_of_pool", ets)
+            side = at_entry(r["symbol"], "side_of_pool", ets, _dir)
             # ⚠️ DIRECTION FROM THE STRUCTURE, NOT FROM A GUESS. A CALL spread
             # is breached UPWARD (price rising through the short), a PUT spread
             # DOWNWARD. `long_strike` above `short_strike` means a call spread.
@@ -289,11 +352,31 @@ def main(argv):
         w("3. WHERE PRICE SAT WHEN IT FIRED  (side_of_pool = price - pool)")
         w("   the margin the trade was entered with, BEFORE the fill")
         w("-" * 68)
+        # 🔴 v1.2 REPORTED min = median = max = 0.61 ACROSS 17 TRADES. That is
+        # not a market fact, and until it is explained panel 3 is telling
+        # nobody anything. Two candidates: the value is constant in the
+        # strategy's own path, or this join is picking ONE evaluation
+        # repeatedly. So the panel now prints how many DISTINCT values exist
+        # in the window and how many evaluations were available — a constant
+        # in the SOURCE and a constant from the JOIN look different here.
+        _all_sop = [v for (_sy, _d, nm), seq in chk.items()
+                    if nm == "side_of_pool" for _t, v in seq]
         sd = [abs(x["side"]) for x in recs if x["side"] is not None]
         if sd:
             s = sorted(sd)
             w(f"  n={len(s)}   min {s[0]:.2f}   median {_med(s):.2f}   "
               f"max {s[-1]:.2f}   (points from the swept pool)")
+            w(f"  source rows: {len(_all_sop):,} evaluations, "
+              f"{len({round(v,4) for v in _all_sop}):,} DISTINCT values")
+            if len({round(v, 4) for v in _all_sop}) <= 2:
+                w("  🔴 THE SOURCE ITSELF IS CONSTANT — this is not a join")
+                w("     artefact. `side_of_pool` is `price_now - pool` and a")
+                w("     constant means the pool moved WITH price, or the same")
+                w("     evaluation is being rewritten. Chase it in the")
+                w("     strategy, not here.")
+            elif len({round(v, 4) for v in sd}) <= 2:
+                w("  🔴 THE SOURCE VARIES BUT THE JOINED VALUES DO NOT — that")
+                w("     is a JOIN fault in this report, not a finding.")
             w("  ⚠️ THIS IS KNOWABLE BEFORE THE FILL, unlike everything the")
             w("     entry-vector screen tested — which found nothing.")
         else:
@@ -372,6 +455,89 @@ def main(argv):
         w("  ⚠️ AND PANEL 1 SAYS PRICE NEVER REACHED THE STRIKE. A stop that")
         w("     fires while the underlying sits points away from the short is")
         w("     a stop on the MARK, not on the trade being wrong.")
+        w("")
+        w("6. ARE WE SELLING RICH, AND CLOSE TO PRICE?")
+        w("   the stated purpose: sell rich as close to price as possible")
+        w("   at the confirmation of a reversal")
+        w("-" * 68)
+        # 🔑 SPOT AT THE FILL COMES FROM `fire_snapshot.payload["price"]`.
+        # `trades` has no entry_underlying column — checked against the DDL —
+        # so this is the only record of where price actually was when the
+        # spread was sold. Distance is reported three ways because points
+        # alone are not comparable across a $83 NFLX and a $7,700 SPX.
+        import json as _json
+        snap = {}
+        for r in cache.iter('SELECT trade_id, payload FROM "fire_snapshot"'):
+            try:
+                snap[r["trade_id"]] = _json.loads(r["payload"] or "{}")
+            except Exception:                                   # noqa: BLE001
+                continue
+        near = []
+        for r in rows:
+            p = snap.get(r["trade_id"])
+            if not p:
+                continue
+            spot = p.get("price")
+            k = r["short_strike"]
+            wdt = r["spread_width"] or 0
+            cr = r["credit_received"] or r["entry_premium"] or 0
+            if not spot or not k or not wdt or not cr:
+                continue
+            atr = p.get("atr") or 0
+            near.append({"pts": abs(k - spot), "pct": abs(k - spot) / spot,
+                         "atr": (abs(k - spot) / atr) if atr else None,
+                         "rich": cr / wdt, "cr": cr, "w": wdt})
+        if not near:
+            w("  (no fill snapshot joined — cannot locate spot at entry)")
+        else:
+            d = sorted(x["pts"] for x in near)
+            pc = sorted(x["pct"] for x in near)
+            at = sorted(x["atr"] for x in near if x["atr"])
+            ri = sorted(x["rich"] for x in near)
+            w(f"  n={len(near)}   short strike vs SPOT AT THE FILL")
+            w(f"    distance   median {_med(d):>7.2f} pts   "
+              f"{_med(pc):>6.2%} of spot" +
+              (f"   {_med(at):>5.2f} ATR" if at else ""))
+            w(f"    range      {d[0]:.2f} to {d[-1]:.2f} pts")
+            w("")
+            w(f"  RICHNESS  credit / width")
+            w(f"    median {_med(ri):>6.1%}   min {ri[0]:>6.1%}   "
+              f"max {ri[-1]:>6.1%}")
+            w(f"    median credit ${_med([x['cr'] for x in near]):.2f} "
+              f"on ${_med([x['w'] for x in near]):.2f} of width")
+            w("")
+            # ⚠️ THE TWO HALVES OF THE STATED PURPOSE, JUDGED TOGETHER. Close
+            # AND rich is the trade. Far and cheap is the opposite of it, and
+            # a spread can be far and rich (paid for real risk) or close and
+            # cheap (badly priced) — which is why neither number decides alone.
+            far = sum(1 for x in near if x["atr"] and x["atr"] > 1.0)
+            if at:
+                w(f"    {far}/{len(at)} sold MORE THAN 1 ATR from price"
+                  f"  ({far/len(at):.0%})")
+            w("")
+            w("  ⚠️ 'CLOSE' AND 'RICH' ARE ONE TEST, NOT TWO. A spread sold")
+            w("     far from price for a large credit is being paid for real")
+            w("     risk; one sold far for a small credit is neither close")
+            w("     nor rich, and that is the failure mode to look for here.")
+        w("")
+        w("7. DID THE REVERSAL ACTUALLY CONFIRM?")
+        w("   the strategy's own evidence, at or before the fill")
+        w("-" * 68)
+        for nm, lab in (("rejection", "rejection depth"),
+                        ("age", "bars since the sweep"),
+                        ("pierce_depth", "pierce depth"),
+                        ("sweep", "2.0 = pitchfork TINE touch, 1.0 = pool")):
+            vals = [at_entry(r["symbol"], nm, _et(r["entry_time"]).timestamp(),
+                             "call" if (r["long_strike"] or 0) >
+                                       (r["short_strike"] or 0) else "put")
+                    for r in rows if _et(r["entry_time"])]
+            vals = [v for v in vals if v is not None]
+            if vals:
+                sv = sorted(vals)
+                w(f"  {lab:<34} n={len(sv):>3}  median {_med(sv):>8.4g}"
+                  f"   min {sv[0]:>8.4g}  max {sv[-1]:>8.4g}")
+            else:
+                w(f"  {lab:<34} not recorded at or before these fills")
         w("")
         w("⚠️ NO CONTROL GROUP AND NO FIT. 3 winners cannot anchor a")
         w("   comparison. This says what the failing population DID; whether")

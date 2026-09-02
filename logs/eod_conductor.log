@@ -659,3 +659,112 @@ Net: -$454.50   50 closed  (11W/39L, 22%)
 [PURGE     ]   CVX: [retention] removed 2,063 row(s) | [retention]    candles/1m                       1,569 | [retention]    greeks_series 
 [PURGE     ]   GOOGL: [retention] removed 2,854 row(s) | [retention]    candles/1m                       2,140 | [retention]    greeks_series 
 [PURGE     ]   META: [retention] removed 3,479 row(s) | [retention]    candles/1m                       2,093 | [retention]    greeks_series 
+[PURGE     ]   MU: [retention] removed 4,503 row(s) | [retention]    candles/1m                       2,521 | [retention]    greeks_series 
+[PURGE     ]   NFLX: [retention] removed 2,480 row(s) | [retention]    candles/1m                       1,970 | [retention]    greeks_series 
+[PURGE     ]   NVDA: [retention] removed 3,246 row(s) | [retention]    candles/1m                       2,564 | [retention]    greeks_series 
+[PURGE     ]   PLTR: [retention] removed 2,971 row(s) | [retention]    candles/1m                       2,085 | [retention]    greeks_series 
+[PURGE     ]   QQQ: [retention] removed 3,932 row(s) | [retention]    candles/1m                       2,214 | [retention]    greeks_series 
+[PURGE     ]   SPX: [retention] removed 5,037 row(s) | [retention]    greeks_series                    1,720 | [retention]    quote_series  
+[PURGE     ]   TSLA: [retention] removed 3,430 row(s) | [retention]    candles/1m                       2,316 | [retention]    greeks_series 
+[PURGE     ]   UNH: [retention] removed 2,373 row(s) | [retention]    candles/1m                       1,611 | [retention]    greeks_series 
+[TAKEDOWN  ] stopping 15 verified box(es)
+  trades 2026-09-02: 1/274 (0%)  0 MB                                           trades 2026-09-02: 15/274 (5%)  0 MB                                          trades 2026-09-02: 32/274 (12%)  0 MB  eta 8s                                 trades 2026-09-02: 45/274 (16%)  0 MB  eta 8s                                 trades 2026-09-02: 58/274 (21%)  0 MB  eta 7s                                 trades 2026-09-02: 71/274 (26%)  0 MB  eta 7s                                 trades 2026-09-02: 85/274 (31%)  0 MB  eta 6s                                 trades 2026-09-02: 99/274 (36%)  0 MB  eta 6s                                 trades 2026-09-02: 115/274 (42%)  0 MB  eta 5s                                trades 2026-09-02: 133/274 (49%)  0 MB  eta 5s                                trades 2026-09-02: 147/274 (54%)  0 MB  eta 4s                                trades 2026-09-02: 162/274 (59%)  1 MB  eta 3s                                trades 2026-09-02: 180/274 (66%)  1 MB  eta 3s                                trades 2026-09-02: 198/274 (72%)  1 MB  eta 2s                                trades 2026-09-02: 213/274 (78%)  1 MB  eta 2s                                trades 2026-09-02: 230/274 (84%)  1 MB  eta 1s                                trades 2026-09-02: 246/274 (90%)  1 MB  eta 0s                                trades 2026-09-02: 263/274 (96%)  1 MB  eta 0s                                                                                                              trades 2026-09-02: 274 object(s)  1 MB  in 9s
+[notify] missing DTP_TELEGRAM_TOKEN/DTP_TELEGRAM_CHAT_ID; cannot send.
+VERTIGO — P&L from the warehouse  (2026-09-02)
+
+By symbol
+SPX    +$4,338.50  (6t)
+NVDA   +$3,363.50  (25t)
+PLTR   +$1,683.50  (2t)
+CRM      +$994.50  (1t)
+QQQ      +$607.50  (3t)
+NFLX     +$363.00  (1t)
+GOOGL     +$72.00  (2t)
+AVGO       -$5.00  (2t)
+CVX      -$136.50  (1t)
+UNH      -$184.00  (1t)
+META     -$450.00  (28t)
+AMZN     -$975.50  (10t)
+TSLA   -$1,004.50  (12t)
+
+──────────────
+Net: +$8,667.00   94 closed  (50W/44L, 53%)
+[REPORTS   ] starting the analysis run (reads S3; boxes are off)
+[START      ] EOD analysis — 2026-09-02
+[START      ] boxes are DOWN; every read below is control-side or S3
+  trades 2026-09-02: 1/274 (0%)  0 MB                                           trades 2026-09-02: 17/274 (6%)  0 MB                                          trades 2026-09-02: 34/274 (12%)  0 MB  eta 7s                                 trades 2026-09-02: 48/274 (18%)  0 MB  eta 7s                                 trades 2026-09-02: 63/274 (23%)  0 MB  eta 6s                                 trades 2026-09-02: 75/274 (27%)  0 MB  eta 6s                                 trades 2026-09-02: 89/274 (32%)  0 MB  eta 6s                                 trades 2026-09-02: 105/274 (38%)  0 MB  eta 5s                                trades 2026-09-02: 122/274 (45%)  0 MB  eta 5s                                trades 2026-09-02: 137/274 (50%)  0 MB  eta 4s                                trades 2026-09-02: 152/274 (55%)  0 MB  eta 4s                                trades 2026-09-02: 168/274 (61%)  1 MB  eta 3s                                trades 2026-09-02: 184/274 (67%)  1 MB  eta 3s                                trades 2026-09-02: 196/274 (72%)  1 MB  eta 2s                                trades 2026-09-02: 210/274 (77%)  1 MB  eta 2s                                trades 2026-09-02: 227/274 (83%)  1 MB  eta 1s                                trades 2026-09-02: 244/274 (89%)  1 MB  eta 1s                                trades 2026-09-02: 262/274 (96%)  1 MB  eta 0s                                                                                                              trades 2026-09-02: 274 object(s)  1 MB  in 9s
+[PNL        ] net=+8667.00 closed=94 open=0
+  trades 2026-09-02: 1/274 (0%)  0 MB                                           trades 2026-09-02: 20/274 (7%)  0 MB                                          trades 2026-09-02: 39/274 (14%)  0 MB  eta 6s                                 trades 2026-09-02: 59/274 (22%)  0 MB  eta 5s                                 trades 2026-09-02: 78/274 (28%)  0 MB  eta 5s                                 trades 2026-09-02: 98/274 (36%)  0 MB  eta 4s                                 trades 2026-09-02: 118/274 (43%)  0 MB  eta 4s                                trades 2026-09-02: 138/274 (50%)  0 MB  eta 3s                                trades 2026-09-02: 158/274 (58%)  1 MB  eta 3s                                trades 2026-09-02: 178/274 (65%)  1 MB  eta 2s                                trades 2026-09-02: 197/274 (72%)  1 MB  eta 2s                                trades 2026-09-02: 215/274 (78%)  1 MB  eta 1s                                trades 2026-09-02: 235/274 (86%)  1 MB  eta 1s                                trades 2026-09-02: 254/274 (93%)  1 MB  eta 0s                                trades 2026-09-02: 273/274 (100%)  1 MB  eta 0s                                                                                                             trades 2026-09-02: 274 object(s)  1 MB  in 7s
+  circuit_breaker 2026-09-02: 0 object(s)  0 MB  in 0s
+  ohlc 2026-09-02: 1/15 (7%)  0 MB                                                                                                                            ohlc 2026-09-02: 15 object(s)  0 MB  in 0s
+[READ    ] trades: 274 object(s) -> 94 unique trade(s)
+[CONSOLIDATE] ✅ fleet_trades_2026-09-02.json — 94 trade(s)
+[DAILY_BARS ] daily bars rebuilt from the 1m tape
+[DAILY_BARS ] ✅ 0 symbol(s) rebuilt from 1m tape
+[LABEL      ] price-action session label
+[LABEL      ] ⚠️  auto_label.py rc=1
+[EXCURSION  ] MFE/MAE report
+[EXCURSION  ] ✅ excursion report written FROM THE WAREHOUSE → reports/excursions_2026-09-02_bundle_warehouse.txt
+[COVERAGE   ] warehouse coverage
+[COVERAGE   ] ✅ coverage checked
+[R_LEDGER   ] R baseline from the warehouse (headline → Telegram)
+[notify] missing DTP_TELEGRAM_TOKEN/DTP_TELEGRAM_CHAT_ID; cannot send.
+  SOURCE: s3://vertigo-warehouse-tx9ai/raw [trades 2026-09-02..2026-09-02] — 274 object(s) listed, 274 read
+==============================================================================
+  R LEDGER — dollars only. R = avg win / |avg loss|. breakeven WR = 1/(1+R)
+==============================================================================
+  BOOK   n=17  net=+$4,444  R=   7.40  expectancy/trade=+$261  capture=  -1.90  giveback=+$2,931
+
+  strategy × side                      n  win%       R     avgW     avgL      exp  capture
+  ----------------------------------------------------------------------------
+  GEXPinButterfly · call               3   33%     —      +$398    -$126     +$49    -3.66  THIN
+  GEXPinButterfly · put                1  100%     —      +$684        —    +$684     0.76  THIN
+  ORBStrategy · call                   9   44%     —      +$287     -$49    +$100    -0.71  THIN
+  ORBStrategy · put                    4   75%     —      +$941    -$113    +$677    -3.32  THIN
+
+  BY EXIT REASON — where the R actually gets made or given back
+  exit_reason                      n  win%        net  capture   giveback
+  ----------------------------------------------------------------------
+  orb_fvg_trail_stop pnl=142.1%    1  100%    +$1,796     0.78      +$500
+  hard_close_15:45_ET              2  100%    +$1,082     0.62      +$656
+  orb_trail_stop pnl=33.8%         1  100%      +$995     0.52      +$910
+  orb_trail_stop pnl=73.9%         1  100%      +$616     0.55      +$497
+  orb_trail_stop pnl=93.1%         1  100%      +$363     0.64      +$201
+  orb_trail_stop pnl=68.4%         1  100%      +$134     0.58       +$96
+  orb_trail_stop pnl=17.5%         1  100%       +$34     0.57       +$26
+  orb_trail_stop pnl=10.9%         1  100%       +$31     0.41       +$45
+  orb_structure_stop: 1m close 3   1    0%        -$2        —        +$0
+  orb_structure_stop: 1m close 3   1    0%        -$2    -0.00        +$0
+  hard_stop_25% pnl=-27.4%         1    0%       -$40    -4.71        +$0
+  hard_stop_25% pnl=-27.7%         1    0%       -$62    -2.58        +$0
+  orb_structure_stop: 1m close 1   1    0%      -$113   -15.00        +$0
+  stop_25% pnl=-26.0%              1    0%      -$125    -8.33        +$0
+  stop_24% pnl=-25.0%              1    0%      -$126    -3.11        +$0
+  orb_structure_stop: 1m close 2   1    0%      -$136        —        +$0
+
+  TWO POPULATIONS — SELECTION vs EXTENSION
+  A trade that never went favourable cannot be fixed by an exit rule.
+  A trade that went favourable and gave it back cannot be fixed by a
+  better entry. The split says which conversation to have.
+     cut  NEVER FAVOURABLE            WAS FAVOURABLE                
+  --------------------------------------------------------------------------
+     0%  n=2    net=-$139     win=  0%   n=15   net=+$4,583   win= 60% 
+     2%  n=3    net=-$251     win=  0%   n=14   net=+$4,696   win= 64%   <- base
+     5%  n=4    net=-$376     win=  0%   n=13   net=+$4,821   win= 69% 
+
+  NO TELEMETRY: n=0 net=+$0 — rows with no excursion columns.
+     These are UNMEASURED, not never-favourable. Folding them in would turn
+     missing instrumentation into a selection finding.
+     ⚠️ Descriptive. This sizes and gates nothing (WA §31).
+
+  ⚠️ Every number above is descriptive. Nothing here sizes or gates
+     anything until it clears edge_scan's pre-registered bar (WA §31).
+
+[R_LEDGER   ] ✅ BOOK   n=17  net=+$4,444  R=   7.40  expectancy/trade=+$261  capture=  -1.90  giveback=+$2,931
+[EDGE_SCAN  ] skipped — runs Fridays only (its bar needs ~10 sessions; a nightly NOT-YET is noise)
+[DONE       ] 1 warning(s):
+[DONE       ]   · LABEL: auto_label.py rc=1
+[notify] missing DTP_TELEGRAM_TOKEN/DTP_TELEGRAM_CHAT_ID; cannot send.
+[DONE      ] 15 verified and stopped · 0 HELD UP
+[DONE      ] all 15 box(es) verified against S3 and stopped
+[REARM     ] re-arming s3-push.timer + candle-logger.timer
