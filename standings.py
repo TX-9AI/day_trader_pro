@@ -1,4 +1,16 @@
-# day_trader_pro/standings.py — v1.4
+# day_trader_pro/standings.py — v1.5
+# v1.5 (2026-09-02) — dtp r250. 🔴 `exit_price` IS NOT A COLUMN. The trades
+#   table has 82 columns and the exit mark is `exit_premium`; I invented
+#   `exit_price` in r236 and it has been in every version since. Verified now
+#   against the DDL rather than recalled: every OTHER column the query uses
+#   — entry_time, exit_time, status, symbol, strategy, contracts,
+#   entry_premium, current_premium, credit_received, pnl_usd — is real.
+#   ⚠️ AND THE TEST COULD NEVER HAVE CAUGHT IT, because I built the fixture
+#   table FROM MY OWN QUERY'S ASSUMPTIONS: the CREATE TABLE in the test
+#   declared `exit_price REAL` because that is what my SQL wanted. A fixture
+#   written from the code under test mirrors its mistakes exactly. The test
+#   now builds its table from the REAL DDL in options_trader_v4 and checks
+#   every referenced column against it.
 # v1.4 (2026-09-02) — dtp r249. 🔴 `REMOTE_DB` IS "~/options-trader/trades.db"
 #   AND PYTHON DOES NOT EXPAND `~`. The sqlite3 CLI never had to — the REMOTE
 #   SHELL expanded it before sqlite3 saw the argument. r248 moved that same
@@ -136,7 +148,7 @@ def _sql(off: str) -> str:
         "UNION ALL "
         "SELECT 'C'||char(9)||COALESCE(datetime(exit_time,'" + off + "'),'')"
         "||char(9)||COALESCE(symbol,'')||char(9)||COALESCE(strategy,'')"
-        "||char(9)||COALESCE(entry_premium,0)||char(9)||COALESCE(exit_price,0)"
+        "||char(9)||COALESCE(entry_premium,0)||char(9)||COALESCE(exit_premium,0)"
         "||char(9)||COALESCE(contracts,0)||char(9)||COALESCE(pnl_usd,0)"
         "||char(9)||COALESCE(credit_received,0) "
         f"FROM trades WHERE status='closed' AND {closed_today} "

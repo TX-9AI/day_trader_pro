@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/test_standings_rows.py — v1.3
+# day_trader_pro/tests/test_standings_rows.py — v1.4
+# v1.4 (2026-09-02) — dtp r250. 🔴 THE FIXTURE WAS BUILT FROM MY OWN QUERY'S
+#   ASSUMPTIONS and therefore agreed with its mistakes: the CREATE TABLE here
+#   declared `exit_price REAL` because the SQL asked for it, and `exit_price`
+#   is not a column. It survived r236 through r249 with this file green. The
+#   table is now built from the REAL DDL, and S13 checks every column the
+#   query names against it.
 # v1.3 (2026-09-02) — dtp r249. S10 now passes the path AS A TILDE with a fake
 #   HOME, because REMOTE_DB is "~/..." and Python does not expand it — the
 #   shell had been doing that silently for months. S12 GENERATES a real
@@ -51,6 +57,49 @@ def check(name, ok, detail=""):
     print(("  PASS  " if ok else "  FAIL  ") + name + (f"   [{detail}]" if detail else ""))
     if not ok:
         _fails.append(name)
+
+
+def _schema_columns():
+    """(name, type) for every column of the REAL trades table.
+
+    🔴 READ FROM options_trader_v4's DDL, NOT WRITTEN HERE. A schema typed into
+    a test is a second copy that drifts, and worse, it is typed by the same
+    person who wrote the query — so it agrees with the query's mistakes. That
+    is exactly how `exit_price` survived from r236 to r249 with a green suite.
+    ⚠️ IF THE DDL CANNOT BE FOUND THIS FAILS LOUDLY rather than skipping. A
+    schema check that silently skips is worth less than none, because it
+    reports success.
+    """
+    import re
+    cands = [
+        os.path.expanduser("~/options-trader-v4/database/trade_logger.py"),
+        os.path.expanduser("~/options_trader_v4/database/trade_logger.py"),
+        os.path.join(_root, "..", "options-trader-v4", "database", "trade_logger.py"),
+        os.path.join(_root, "..", "options_trader_v4", "database", "trade_logger.py"),
+        os.environ.get("OTV4_TRADE_LOGGER", ""),
+    ]
+    src = None
+    for c in cands:
+        if c and os.path.exists(c):
+            src = open(c, encoding="utf-8").read()
+            break
+    if src is None:
+        raise SystemExit(
+            "  CANNOT FIND options_trader_v4/database/trade_logger.py. "
+            "The trades DDL is the source of truth for this check and "
+            "it must not be guessed. Set OTV4_TRADE_LOGGER to its path.")
+    lines = src.splitlines()
+    i = next(n for n, l in enumerate(lines)
+             if "CREATE TABLE IF NOT EXISTS trades (" in l)
+    out = []
+    for ln in lines[i + 1:]:
+        t = ln.strip()
+        if t.startswith(")"):
+            break
+        m = re.match(r"^([a-z_][a-z0-9_]*)\s+(TEXT|REAL|INTEGER|BLOB|NUMERIC)", t)
+        if m:
+            out.append((m.group(1), m.group(2)))
+    return out
 
 
 def main():
@@ -214,18 +263,32 @@ def main():
     import subprocess
     import tempfile
 
+    # 🔴 THE FIXTURE IS BUILT FROM THE REAL DDL, NOT FROM MY QUERY. The earlier
+    # version declared its own CREATE TABLE — including `exit_price REAL`,
+    # because that is what my SQL asked for. `exit_price` IS NOT A COLUMN; the
+    # trades table has 82 of them and the exit mark is `exit_premium`. I
+    # invented the name in r236 and every version since carried it, and the
+    # test could never have caught it because I wrote the schema FROM the code
+    # under test. A fixture derived from the thing it is testing mirrors that
+    # thing's mistakes exactly.
+    _ddl_cols = _schema_columns()
     _d = tempfile.mkdtemp()
     _db = os.path.join(_d, "trades.db")
     _c = _sq.connect(_db)
-    _c.execute("CREATE TABLE trades (symbol TEXT, strategy TEXT, entry_time TEXT,"
-               " exit_time TEXT, entry_premium REAL, current_premium REAL,"
-               " exit_price REAL, contracts INT, credit_received REAL,"
-               " pnl_usd REAL, status TEXT)")
-    _c.execute("INSERT INTO trades VALUES ('QQQ','ORBStrategy',"
-               "'2026-09-02 14:00:00',NULL,1.2,1.3,NULL,4,0,NULL,'open')")
-    _c.execute("INSERT INTO trades VALUES ('QQQ','SweepCreditSpread',"
-               "'2026-09-02 13:00:00','2026-09-02 13:30:00',1.30,0,0.90,5,"
-               "1.30,200,'closed')")
+    _c.execute("CREATE TABLE trades (%s)"
+               % ", ".join(f"{c} {t}" for c, t in _ddl_cols))
+    # ⚠️ NAMED COLUMNS, not positional — the real table has 82 and their order
+    # is not this test's business.
+    def _ins(**kw):
+        _c.execute("INSERT INTO trades (%s) VALUES (%s)"
+                   % (",".join(kw), ",".join("?" * len(kw))), tuple(kw.values()))
+    _ins(symbol="QQQ", strategy="ORBStrategy", status="open",
+         entry_time="2026-09-02 14:00:00", entry_premium=1.2,
+         current_premium=1.3, contracts=4, credit_received=0)
+    _ins(symbol="QQQ", strategy="SweepCreditSpread", status="closed",
+         entry_time="2026-09-02 13:00:00", exit_time="2026-09-02 13:30:00",
+         entry_premium=1.30, exit_premium=0.90, contracts=5,
+         credit_received=1.30, pnl_usd=200)
     _c.commit()
     _c.close()
 
@@ -313,6 +376,21 @@ def main():
     check("S12b and standings uses that same selection",
           "named[-1] if named else" in _src
           and 'not ln.startswith("Traceback")' in _src)
+
+    # ── S13 — EVERY COLUMN THE QUERY NAMES EXISTS IN THE REAL TABLE ─────
+    # 🔴 `exit_price` DID NOT, FROM r236 TO r249, THROUGH A GREEN SUITE. This
+    # is the check that would have caught it on the day it was written, and it
+    # compares against the DDL rather than against anything I typed.
+    import re as _re
+    _sqltxt = S._sql(S._et_offset())
+    _named = set(_re.findall(r"COALESCE\(([a-z_]+)", _sqltxt))
+    _named |= set(_re.findall(r"datetime\(([a-z_]+)", _sqltxt))
+    _named |= {"status"}
+    _named -= {"datetime"}          # a SQL function, not a column
+    _real = {c for c, _t in _ddl_cols}
+    _bogus = sorted(_named - _real)
+    check("S13 every column the query names exists in the trades DDL",
+          not _bogus, f"invented: {_bogus}" if _bogus else f"{len(_named)} checked")
 
     print()
     if _fails:
