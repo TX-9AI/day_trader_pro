@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/test_standings_rows.py — v1.2
+# day_trader_pro/tests/test_standings_rows.py — v1.3
+# v1.3 (2026-09-02) — dtp r249. S10 now passes the path AS A TILDE with a fake
+#   HOME, because REMOTE_DB is "~/..." and Python does not expand it — the
+#   shell had been doing that silently for months. S12 GENERATES a real
+#   traceback and requires the picked line to name the fault: it chose the
+#   caret at v1.1 and the traceback HEADER at r248, twice hiding the answer.
 # v1.2 (2026-09-02) — dtp r248. S10-S12: the query is EXECUTED through a real
 #   shell against a real sqlite, the payload is checked for metacharacters,
 #   the connection is proven read-only, and the error line is required to be
@@ -224,15 +229,35 @@ def main():
     _c.commit()
     _c.close()
 
+    # 🔴 THE PATH IS PASSED AS A TILDE, THE WAY THE BOX ACTUALLY HAS IT.
+    # `REMOTE_DB` is "~/options-trader/trades.db"; the sqlite3 CLI never had to
+    # expand that because the REMOTE SHELL did it, and r248 moved the string
+    # into a Python literal where nothing does. Every box failed to open a path
+    # that had worked for months. S10 now builds the command with a tilde and a
+    # fake HOME, so the expansion is exercised rather than assumed.
+    _home = tempfile.mkdtemp()
+    os.makedirs(os.path.join(_home, "options-trader"), exist_ok=True)
+    _real_db = os.path.join(_home, "options-trader", "trades.db")
+    os.replace(_db, _real_db)
+    _tilde = "~/options-trader/trades.db"
+
     _off = S._et_offset()
-    _prog = ("import sqlite3,base64,sys\n"
+    _prog = ("import sqlite3,base64,sys,os\n"
+             "p=os.path.expanduser(%r)\n"
              "q=base64.b64decode('%s').decode()\n"
-             "c=sqlite3.connect('file:%s?mode=ro',uri=True)\n"
-             "sys.stdout.write('\\n'.join(r[0] for r in c.execute(q)))\n"
-             % (_b64.b64encode(S._sql(_off).encode()).decode(), _db))
+             "try:\n"
+             "    c=sqlite3.connect('file:'+p+'?mode=ro',uri=True)\n"
+             "    sys.stdout.write('\\n'.join(r[0] for r in c.execute(q)))\n"
+             "except Exception as e:\n"
+             "    sys.stderr.write('DBError: %%s: %%s (path=%%s exists=%%s)'\n"
+             "                     %% (type(e).__name__, e, p, os.path.exists(p)))\n"
+             "    raise SystemExit(1)\n"
+             % (_tilde, _b64.b64encode(S._sql(_off).encode()).decode()))
     _payload = _b64.b64encode(_prog.encode()).decode()
     _cmd = "echo %s | base64 -d | python3 -" % _payload
-    _r = subprocess.run(["bash", "-c", _cmd], capture_output=True, text=True)
+    _env = dict(os.environ, HOME=_home)
+    _r = subprocess.run(["bash", "-c", _cmd], capture_output=True, text=True,
+                        env=_env)
     check("S10 the real command runs the real query through a real shell",
           _r.returncode == 0 and _r.stdout.count(chr(9)) >= 8,
           (_r.stderr or "").strip().splitlines()[:1] or f"rows={_r.stdout!r}"[:80])
@@ -249,7 +274,7 @@ def main():
     _rw = subprocess.run(
         ["bash", "-c", "echo %s | base64 -d | python3 -"
          % _b64.b64encode(_pw.encode()).decode()],
-        capture_output=True, text=True)
+        capture_output=True, text=True, env=_env)
     check("S11 the connection is read-only",
           _rw.returncode != 0 and "readonly" in (_rw.stderr or ""),
           "a report must never be able to write to trades.db")
@@ -260,9 +285,34 @@ def main():
     # diagnosis behind its own formatting, and that is what turned a
     # ten-minute fix into a morning.
     _src = open(os.path.join(_root, "standings.py"), encoding="utf-8").read()
-    check("S12 the failure line prefers the named error, never the last line",
-          '(named or lines or ["ssh failed"])[0]' in _src
-          and "splitlines() or [" not in _src)
+    # ── S12 — THE FAILURE LINE, RE-DERIVED TWICE NOW ────────────────────
+    # 🔴 THIS PICKED THE WRONG LINE TWICE RUNNING. v1.1 took [-1], which for a
+    # multi-line sqlite error is the CARET — fifteen boxes reported
+    # "error here ---^". r248 took the FIRST named line and matched
+    # "Traceback", which is the HEADER — fifteen boxes reported
+    # "Traceback (most recent call last):". Both times the report printed its
+    # own formatting instead of its own diagnosis.
+    # 🔑 THE MOST SPECIFIC LINE IS LAST IN A TRACEBACK AND FIRST IN A CLI
+    # ERROR, so taking the LAST line that NAMES a fault is correct for both.
+    # EXECUTED, not read: a real traceback is generated and put through it.
+    _pb = _prog.replace("os.path.expanduser(%r)" % _tilde,
+                        "os.path.expanduser('~/nope/trades.db')")
+    _rb = subprocess.run(
+        ["bash", "-c", "echo %s | base64 -d | python3 -"
+         % _b64.b64encode(_pb.encode()).decode()],
+        capture_output=True, text=True, env=_env)
+    _lines = [ln.strip() for ln in (_rb.stderr or "").splitlines() if ln.strip()]
+    _named = [ln for ln in _lines
+              if ("Error" in ln or "error:" in ln or "Exception" in ln)
+              and not ln.startswith("Traceback")]
+    _picked = (_named[-1] if _named else (_lines[-1] if _lines else ""))
+    check("S12 a real failure surfaces the fault, not the traceback header",
+          "unable to open database" in _picked
+          and "path=" in _picked and "exists=False" in _picked,
+          _picked[:100])
+    check("S12b and standings uses that same selection",
+          "named[-1] if named else" in _src
+          and 'not ln.startswith("Traceback")' in _src)
 
     print()
     if _fails:

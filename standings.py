@@ -1,4 +1,15 @@
-# day_trader_pro/standings.py — v1.3
+# day_trader_pro/standings.py — v1.4
+# v1.4 (2026-09-02) — dtp r249. 🔴 `REMOTE_DB` IS "~/options-trader/trades.db"
+#   AND PYTHON DOES NOT EXPAND `~`. The sqlite3 CLI never had to — the REMOTE
+#   SHELL expanded it before sqlite3 saw the argument. r248 moved that same
+#   string into a Python string literal, where nothing expands it, so every
+#   box failed to open a path that had worked for months because of something
+#   the shell was quietly doing for it. `os.path.expanduser` on the box.
+#   ⚠️ AND THE ERROR PICKER CHOSE THE WRONG LINE TWICE RUNNING: [-1] is the
+#   CARET of a sqlite error, and the first "named" line of a Python traceback
+#   is the HEADER. It now takes the LAST line that names a fault, which is
+#   correct for both shapes, and the remote program reports the resolved path
+#   and whether the file exists so the next failure diagnoses itself.
 # v1.3 (2026-09-02) — dtp r248. 🔴 ALL FIFTEEN BOXES RETURNED A PARSE CARET.
 #   r236 sent an 807-character query with nested quoting through ssh, a remote
 #   shell and into the sqlite3 CLI. The SQL is VALID against the sqlite
@@ -191,12 +202,31 @@ def _query(ip, off, today_et):
     # python3 is certainly present (the bot runs on it) and its sqlite3 module
     # needs no separator flag, no version floor and no quoting.
     # ⚠️ READ-ONLY BY URI: a report must never be able to write to the book.
+    # 🔴 r249 — `REMOTE_DB` IS "~/options-trader/trades.db" AND PYTHON DOES NOT
+    # EXPAND `~`. The sqlite3 CLI never had to: the REMOTE SHELL expanded the
+    # tilde before sqlite3 saw the argument. r248 moved that same string into a
+    # PYTHON STRING LITERAL, where nothing expands it, so every box failed with
+    # "unable to open database file" — a path that had worked for months
+    # because of something the shell was doing for it, silently.
+    # ⚠️ THE LESSON IS THE MOVE, NOT THE TILDE: a value that crosses from a
+    # shell context into a program context loses everything the shell was doing
+    # for it, and none of that is visible in the value itself.
+    # ⚠️ AND THE PROGRAM DIAGNOSES ITSELF NOW. A bare traceback told us the
+    # exception type and nothing about WHY, so it reports the resolved path and
+    # whether the file is there — the two facts needed to tell a bad path from
+    # a missing database from a permissions problem.
     prog = (
-        "import sqlite3,base64,sys\n"
+        "import sqlite3,base64,sys,os\n"
+        "p=os.path.expanduser(%r)\n"
         "q=base64.b64decode('%s').decode()\n"
-        "c=sqlite3.connect('file:%s?mode=ro',uri=True)\n"
-        "sys.stdout.write('\\n'.join(r[0] for r in c.execute(q)))\n"
-        % (base64.b64encode(_sql(off).encode()).decode(), REMOTE_DB))
+        "try:\n"
+        "    c=sqlite3.connect('file:'+p+'?mode=ro',uri=True)\n"
+        "    sys.stdout.write('\\n'.join(r[0] for r in c.execute(q)))\n"
+        "except Exception as e:\n"
+        "    sys.stderr.write('DBError: %%s: %%s (path=%%s exists=%%s)'\n"
+        "                     %% (type(e).__name__, e, p, os.path.exists(p)))\n"
+        "    raise SystemExit(1)\n"
+        % (REMOTE_DB, base64.b64encode(_sql(off).encode()).decode()))
     cmd = "echo %s | base64 -d | python3 -" % (
         base64.b64encode(prog.encode()).decode())
     rc, out, err = ssh_util.ssh_run(ip, cmd)
@@ -207,10 +237,22 @@ def _query(ip, off, today_et):
         # "                    error here ---^" and the report hid its own
         # diagnosis behind its own formatting. Prefer the line that names the
         # fault; fall back to the first non-empty line, never the last.
+        # 🔴 THIS PICKED THE WRONG LINE TWICE RUNNING. First it took [-1],
+        # which for a multi-line sqlite error is the CARET. Then r248 took the
+        # FIRST "named" line and matched on "Traceback" — which is the HEADER
+        # of a Python traceback, so fifteen boxes reported
+        # "Traceback (most recent call last):" and the actual exception, on
+        # the LAST line, was thrown away again.
+        # 🔑 THE INFORMATIVE LINE IS THE MOST SPECIFIC ONE, AND IT IS LAST IN A
+        # TRACEBACK AND FIRST IN A CLI ERROR — so take the LAST line that names
+        # an error, which is correct for both. "Traceback" is never a match:
+        # it names no fault.
         lines = [ln.strip() for ln in (err or "").splitlines() if ln.strip()]
         named = [ln for ln in lines
-                 if "Error" in ln or "error:" in ln or "Traceback" in ln]
-        return None, (named or lines or ["ssh failed"])[0][:160]
+                 if ("Error" in ln or "error:" in ln or "Exception" in ln)
+                 and not ln.startswith("Traceback")]
+        return None, (named[-1] if named else
+                      (lines[-1] if lines else "ssh failed"))[:160]
     opens, closed = [], []
     for line in (out or "").strip().splitlines():
         f = line.split("\t")
