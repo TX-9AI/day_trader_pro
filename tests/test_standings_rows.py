@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/test_standings_rows.py — v1.1
+# day_trader_pro/tests/test_standings_rows.py — v1.2
+# v1.2 (2026-09-02) — dtp r248. S10-S12: the query is EXECUTED through a real
+#   shell against a real sqlite, the payload is checked for metacharacters,
+#   the connection is proven read-only, and the error line is required to be
+#   the named fault rather than the last line. S9 stubbed ssh_run, so the SQL
+#   was never run at all and this file stayed green while all fifteen boxes
+#   returned a parse caret.
 # v1.1 (2026-09-01) — dtp r237. 🔴 S9 ADDED: THE LIVE PATH IS EXECUTED.
 #   Every case in v1.0 ran under `config.set_mock(True)`, so all eight took the
 #   `_mock_query` branch and the REAL `_query` was never called. r236 changed
@@ -188,6 +194,75 @@ def main():
           not live_err and "OPEN POSITIONS" in live_out
           and "CLOSED TODAY" in live_out and "BFLY" in live_out,
           live_err or live_out.replace("\n", " | ")[:90])
+
+    # ── S10 — THE QUERY IS EXECUTED, NOT JUST BUILT ─────────────────────
+    # 🔴 S9 STUBBED ssh_run, SO THE SQL WAS NEVER RUN BY SQLITE AT ALL. It
+    # proved the parser handled a canned payload; it could not and did not
+    # prove the query was valid or that the command survived transport. On
+    # 2026-09-02 ALL FIFTEEN BOXES returned a parse caret and this file was
+    # green. A test that stops at the boundary certifies everything up to the
+    # boundary — the same shape as r195's standing offer and r236's arity.
+    # 🔑 SO THIS BUILDS THE REAL COMMAND AND RUNS IT, against a temp trades.db,
+    # through an actual shell — which is where the fault was.
+    import base64 as _b64
+    import sqlite3 as _sq
+    import subprocess
+    import tempfile
+
+    _d = tempfile.mkdtemp()
+    _db = os.path.join(_d, "trades.db")
+    _c = _sq.connect(_db)
+    _c.execute("CREATE TABLE trades (symbol TEXT, strategy TEXT, entry_time TEXT,"
+               " exit_time TEXT, entry_premium REAL, current_premium REAL,"
+               " exit_price REAL, contracts INT, credit_received REAL,"
+               " pnl_usd REAL, status TEXT)")
+    _c.execute("INSERT INTO trades VALUES ('QQQ','ORBStrategy',"
+               "'2026-09-02 14:00:00',NULL,1.2,1.3,NULL,4,0,NULL,'open')")
+    _c.execute("INSERT INTO trades VALUES ('QQQ','SweepCreditSpread',"
+               "'2026-09-02 13:00:00','2026-09-02 13:30:00',1.30,0,0.90,5,"
+               "1.30,200,'closed')")
+    _c.commit()
+    _c.close()
+
+    _off = S._et_offset()
+    _prog = ("import sqlite3,base64,sys\n"
+             "q=base64.b64decode('%s').decode()\n"
+             "c=sqlite3.connect('file:%s?mode=ro',uri=True)\n"
+             "sys.stdout.write('\\n'.join(r[0] for r in c.execute(q)))\n"
+             % (_b64.b64encode(S._sql(_off).encode()).decode(), _db))
+    _payload = _b64.b64encode(_prog.encode()).decode()
+    _cmd = "echo %s | base64 -d | python3 -" % _payload
+    _r = subprocess.run(["bash", "-c", _cmd], capture_output=True, text=True)
+    check("S10 the real command runs the real query through a real shell",
+          _r.returncode == 0 and _r.stdout.count(chr(9)) >= 8,
+          (_r.stderr or "").strip().splitlines()[:1] or f"rows={_r.stdout!r}"[:80])
+
+    # ⚠️ AND THE PAYLOAD CARRIES NO SHELL METACHARACTERS. That is the property
+    # doing the work: escaping can be got wrong, having nothing to escape
+    # cannot.
+    check("S10b the transported payload has nothing to escape",
+          not any(ch in _payload for ch in "\"'`$\\|;&<>()"),
+          "base64 removes the quoting problem rather than managing it")
+
+    # ── S11 — THE REPORT MUST NOT BE ABLE TO WRITE TO THE BOOK ──────────
+    _pw = _prog.replace("c.execute(q)", "c.execute('DELETE FROM trades')")
+    _rw = subprocess.run(
+        ["bash", "-c", "echo %s | base64 -d | python3 -"
+         % _b64.b64encode(_pw.encode()).decode()],
+        capture_output=True, text=True)
+    check("S11 the connection is read-only",
+          _rw.returncode != 0 and "readonly" in (_rw.stderr or ""),
+          "a report must never be able to write to trades.db")
+
+    # ── S12 — an error surfaces its MESSAGE, not its caret ──────────────
+    # 🔴 `[-1]` OF A MULTI-LINE SQLITE ERROR IS THE CARET. All fifteen boxes
+    # reported "                    error here ---^" — the report hid its own
+    # diagnosis behind its own formatting, and that is what turned a
+    # ten-minute fix into a morning.
+    _src = open(os.path.join(_root, "standings.py"), encoding="utf-8").read()
+    check("S12 the failure line prefers the named error, never the last line",
+          '(named or lines or ["ssh failed"])[0]' in _src
+          and "splitlines() or [" not in _src)
 
     print()
     if _fails:

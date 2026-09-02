@@ -1,4 +1,15 @@
-# day_trader_pro/standings.py — v1.2
+# day_trader_pro/standings.py — v1.3
+# v1.3 (2026-09-02) — dtp r248. 🔴 ALL FIFTEEN BOXES RETURNED A PARSE CARET.
+#   r236 sent an 807-character query with nested quoting through ssh, a remote
+#   shell and into the sqlite3 CLI. The SQL is VALID against the sqlite
+#   library, so the fault was TRANSPORT. It now ships base64-encoded and runs
+#   under the box's python3: no metacharacters to escape, no CLI version to
+#   depend on — and C.26 says that CLI is not installed at all, a note I
+#   dismissed on 09-01 because the report was working, without checking that
+#   the working version and the one I was writing used the same mechanism.
+#   ⚠️ AND THE ERROR LINE WAS THE LEAST USEFUL ONE: [-1] of a multi-line
+#   sqlite error is the CARET, so the report printed 'error here ---^' fifteen
+#   times and hid its own diagnosis behind its own formatting.
 # v1.2 (2026-09-01) — dtp r237. 🔴 HOTFIX: r236 BROKE THE LIVE PATH IT WAS
 #   WRITTEN FOR. `_query` gained `off` and `today_et`; the MOCK call site was
 #   updated and the REAL one was not, so menu 59 raised TypeError on the first
@@ -61,6 +72,7 @@ CLI:
 """
 
 import argparse
+import base64
 import sys
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -162,10 +174,43 @@ def _query(ip, off, today_et):
     computed separately on the box. Two independent computations of one number
     is how a header comes to disagree with the list beneath it.
     """
-    cmd = f'sqlite3 -batch -separator "|" {REMOTE_DB} "{_sql(off)};"'
+    # 🔴 r248 — THE sqlite3 CLI IS GONE FROM THIS PATH. r236 sent an 807-char
+    # query with nested quoting through ssh, a remote shell and into a CLI
+    # whose version nobody had checked, and on 2026-09-02 ALL FIFTEEN BOXES
+    # came back with a parse caret. The SQL itself is VALID — executed against
+    # the sqlite LIBRARY it returns the right rows — so the fault was in
+    # TRANSPORT, not in the query.
+    # 🔑 BASE64 REMOVES THE QUOTING PROBLEM RATHER THAN MANAGING IT. The
+    # payload carries no shell metacharacters, so nothing between here and the
+    # box can mangle it; no amount of careful escaping is as reliable as having
+    # nothing to escape.
+    # ⚠️ AND IT RUNS UNDER THE BOX'S python3, NOT A CLI. C.26 recorded that
+    # sqlite3 is not installed on the boxes. I dismissed that note on
+    # 2026-09-01 because this report was working — without checking that the
+    # WORKING version and the version I was WRITING used the same mechanism.
+    # python3 is certainly present (the bot runs on it) and its sqlite3 module
+    # needs no separator flag, no version floor and no quoting.
+    # ⚠️ READ-ONLY BY URI: a report must never be able to write to the book.
+    prog = (
+        "import sqlite3,base64,sys\n"
+        "q=base64.b64decode('%s').decode()\n"
+        "c=sqlite3.connect('file:%s?mode=ro',uri=True)\n"
+        "sys.stdout.write('\\n'.join(r[0] for r in c.execute(q)))\n"
+        % (base64.b64encode(_sql(off).encode()).decode(), REMOTE_DB))
+    cmd = "echo %s | base64 -d | python3 -" % (
+        base64.b64encode(prog.encode()).decode())
     rc, out, err = ssh_util.ssh_run(ip, cmd)
     if rc != 0:
-        return None, (err.strip().splitlines() or ["ssh/sqlite failed"])[-1][:80]
+        # 🔴 THE ERROR LINE WAS THE LEAST USEFUL ONE. This took [-1] of stderr
+        # and 80 characters of it — and for a multi-line sqlite error the last
+        # line is the CARET, so all fifteen boxes reported
+        # "                    error here ---^" and the report hid its own
+        # diagnosis behind its own formatting. Prefer the line that names the
+        # fault; fall back to the first non-empty line, never the last.
+        lines = [ln.strip() for ln in (err or "").splitlines() if ln.strip()]
+        named = [ln for ln in lines
+                 if "Error" in ln or "error:" in ln or "Traceback" in ln]
+        return None, (named or lines or ["ssh failed"])[0][:160]
     opens, closed = [], []
     for line in (out or "").strip().splitlines():
         f = line.split("\t")
