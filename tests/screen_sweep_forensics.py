@@ -1,5 +1,16 @@
 #!/usr/bin/env python3
-"""day_trader_pro/tests/screen_sweep_forensics.py — v1.0
+"""day_trader_pro/tests/screen_sweep_forensics.py — v1.1
+v1.1  2026-09-02 — dtp r253. SCOPED PULLS. v1.0 fetched EVERY symbol and
+      EVERY interval of candles for the range — 48,305 GETs for ~39 MB, a
+      thirty-minute run that was pure round-trip latency, on a report that
+      needs 1m bars for the six or eight symbols with sweep trades. The
+      symbols come from `trades`, which this reads FIRST anyway, and the
+      bucket partitions on `sym=` and `interval=`. plan_check is filtered at
+      insert to this one strategy rather than writing 3.36M rows to read
+      eight check names out of them.
+      ⚠️ THE WAREHOUSE MAP ALREADY SAID THIS: signal_journal is 67% of all
+      objects and 0.4% of the bytes. Object count, not volume, is what costs
+      on this bucket — written down 2026-09-01 and not applied 2026-09-02.
 WHY IS THE SWEEP CREDIT SPREAD FAILING? PENETRATION AND ACCEPTANCE.
 
 v1.0  2026-09-02 — dtp r252. Read-only. Descriptive, not comparative.
@@ -105,11 +116,28 @@ def main(argv):
         cache.conn.execute(
             "CREATE INDEX IF NOT EXISTS ix_tr ON trades(strategy, status)")
         cache.conn.commit()
+        # 🔴 r253 — SCOPED. v1.0 pulled EVERY symbol and EVERY interval of
+        # candles for the range: 48,305 GETs for ~39 MB, a thirty-minute run
+        # that was pure round-trip latency. The report knows its symbols
+        # BEFORE it asks — it reads `trades` first — and the bucket partitions
+        # on `sym=` and `interval=`. Using that is the whole fix.
+        want_syms = sorted({r["symbol"] for r in cache.query(
+            'SELECT DISTINCT symbol FROM "trades" WHERE strategy = ?',
+            (STRAT,))})
+        # ⚠️ `keep` FILTERS AT INSERT: plan_check carries every strategy, and
+        # this report reads eight check names for ONE of them.
         cache.load("plan_check", dates,
-                   ["ts_epoch", "strategy", "check_name", "value", "direction"])
-        cache.load("candles", dates,
-                   ["interval", "ts_epoch_ms", "high", "low", "close"],
-                   datatype="candles")
+                   ["ts_epoch", "strategy", "check_name", "value", "direction"],
+                   syms=want_syms or None,
+                   keep=lambda r: r.get("strategy") == STRAT)
+        if want_syms:
+            cache.load("candles", dates,
+                       ["interval", "ts_epoch_ms", "high", "low", "close"],
+                       datatype="candles", syms=want_syms, part="interval=1m")
+        else:
+            cache.conn.execute('CREATE TABLE IF NOT EXISTS "candles"'
+                               ' (symbol TEXT, interval TEXT, ts_epoch_ms,'
+                               '  high, low, close)')
         cache.index("plan_check", "strategy", "check_name")
         cache.index("candles", "symbol", "interval")
 

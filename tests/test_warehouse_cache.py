@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/test_warehouse_cache.py — v1.2
+# day_trader_pro/tests/test_warehouse_cache.py — v1.3
+# v1.3 (2026-09-02) — dtp r253. C10: `load()` listed only to `dt=` and
+#   ignored the `sym=` and `interval=` partitions, so one report queued
+#   48,305 GETs for ~39 MB. Scoping is checked by COUNTING fetches.
 # v1.2 (2026-09-02) — dtp r246. C9/C9b: `record` is a DICT for raw/trades and
 #   a LIST for the derived tables, and assuming a list gave a silent zero.
 # v1.1 (2026-09-01) — r242. C7/C7b/C8: query() refuses an oversized result
@@ -210,6 +213,57 @@ def main():
     finally:
         _WR._client = _real
         WC.WR._client = _real
+
+    # ── C10 — THE PREFIX IS SCOPED, AND THAT IS THE WHOLE COST ──────────
+    # 🔴 48,305 GETs FOR ~39 MB. The sweep forensics report needed 1m bars for
+    # six symbols and fetched every symbol and every interval, because `load()`
+    # listed only down to `dt=`. 798 bytes an object — the run was pure round
+    # trips. The warehouse map already recorded that object count, not volume,
+    # is what costs on this bucket; it was written down and not applied.
+    store2 = {}
+    for _sy in ("QQQ", "SPX", "AMD", "NFLX"):
+        for _iv in ("1m", "5m", "1h"):
+            for _n in range(20):
+                store2[f"raw/candles/dt=2026-08-31/sym={_sy}/interval={_iv}/{_n}.json"] = \
+                    _json.dumps({"symbol": _sy, "record": [
+                        {"interval": _iv, "ts_epoch_ms": 1, "close": 1.0}]}).encode()
+
+    class _CountS3(_S3):
+        def __init__(s, st):
+            super().__init__(st)
+            s.gets = 0
+        def get_object(s, Bucket=None, Key=None):
+            s.gets += 1
+            return super().get_object(Bucket=Bucket, Key=Key)
+
+    def _load(**kw):
+        s3 = _CountS3(store2)
+        _WR._client = lambda *a, **k: s3
+        WC.WR._client = lambda *a, **k: s3
+        with WC.WarehouseCache("t") as c:
+            with contextlib.redirect_stderr(io.StringIO()):
+                n = c.load("candles", ["2026-08-31"],
+                           ["interval", "ts_epoch_ms", "close"],
+                           datatype="candles", **kw)
+        return s3.gets, n
+
+    try:
+        import contextlib
+        g_all, _ = _load()
+        g_sym, _ = _load(syms=["QQQ", "SPX"])
+        g_part, _ = _load(syms=["QQQ", "SPX"], part="interval=1m")
+        _, r_keep = _load(syms=["QQQ"], keep=lambda r: r.get("interval") == "1m")
+    finally:
+        _WR._client = _real
+        WC.WR._client = _real
+    check("C10 naming the symbols cuts the GETs",
+          g_sym < g_all, f"{g_all} -> {g_sym}")
+    check("C10b adding the partition cuts them again",
+          g_part < g_sym, f"{g_sym} -> {g_part}")
+    # ⚠️ `keep` REDUCES ROWS, NOT FETCHES. Saying so in the check stops anyone
+    # reaching for it to make a slow report fast — the object is already here.
+    check("C10c keep() filters rows without pretending to cut fetches",
+          r_keep == 20, f"rows={r_keep}")
 
     print()
     if _fails:

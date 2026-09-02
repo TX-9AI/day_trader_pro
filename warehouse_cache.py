@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-# day_trader_pro/warehouse_cache.py — v1.3
+# day_trader_pro/warehouse_cache.py — v1.4
+# v1.4 (2026-09-02) — dtp r253. 🔴 `load()` IGNORED EVERY PARTITION BELOW THE
+#   DATE. Keys are raw/<datatype>/dt=<day>/sym=<SYM>/[interval=<iv>/]file and
+#   this listed only down to dt=, so the sweep forensics report queued 48,305
+#   GETs for ~39 MB — 798 bytes an object, a thirty-minute run that was pure
+#   round-trip latency. `syms=` and `part=` scope the prefix; `keep=` filters
+#   rows at insert so a report does not write 3.3M rows to read eight.
 # v1.3 (2026-09-02) — dtp r246. 🔴 `record` IS A DICT FOR SOME STREAMS AND A
 #   LIST FOR OTHERS, and assuming a list gave a SILENT ZERO: raw/trades
 #   pushes ONE TRADE PER OBJECT as a dict, so entry_report fetched 1,595
@@ -195,7 +201,8 @@ class WarehouseCache:
             _ACTIVE.remove(self.root)
 
     # ── fill ───────────────────────────────────────────────────────────
-    def load(self, table: str, dates, columns, s3=None, datatype=None) -> int:
+    def load(self, table: str, dates, columns, s3=None, datatype=None,
+             syms=None, part=None, keep=None) -> int:
         # ⚠️ AN EMPTY DATE LIST IS A LEGITIMATE INPUT, NOT A CRASH SITE. A
         # reversed range (END before START) produced one, and this raised
         # IndexError on `dates[-1]` four frames below the caller. A library
@@ -227,12 +234,45 @@ class WarehouseCache:
         # ⚠️ THE TOTAL IS COUNTED FIRST, ACROSS ALL DATES, so a multi-day read
         # shows one honest percentage instead of restarting at 0% each day and
         # looking stuck. Listing is cheap relative to the GETs.
-        plan = []
+        # 🔴 r253 — THE BUCKET PARTITIONS ON MORE THAN THE DATE AND THIS DID
+        # NOT USE IT. The key layout is
+        #   raw/<datatype>/dt=<day>/sym=<SYM>/[interval=<iv>/]<file>.json
+        # and this listed `raw/<dt>/dt=<d>/` and fetched EVERYTHING under it.
+        # Measured 2026-09-02: the sweep forensics report needed 1m bars for
+        # the six or eight symbols that have sweep trades and instead queued
+        # **48,305 GETs for ~39 MB** — 798 bytes an object, a THIRTY-MINUTE
+        # run dominated entirely by round trips.
+        # 🔑 LATENCY, NOT VOLUME, IS WHAT COSTS HERE, and the warehouse map
+        # already said so: signal_journal is 67% of all objects and 0.4% of
+        # the bytes. I wrote that down yesterday and did not apply it.
+        # ⚠️ SCOPING THE PREFIX IS THE WHOLE FIX. A caller that knows its
+        # symbols — and a report always does, because it reads `trades` first —
+        # lists only those partitions.
+        prefixes = []
         for d in dates:
-            for page in pg.paginate(Bucket=WR.BUCKET,
-                                    Prefix=f"{WR.PREFIX}/{dt}/dt={d}/"):
+            base = f"{WR.PREFIX}/{dt}/dt={d}/"
+            if syms:
+                for sy in syms:
+                    p2 = f"{base}sym={sy}/"
+                    prefixes.append(p2 + (f"{part}/" if part else ""))
+            else:
+                prefixes.append(base + (f"*/{part}/" if part else ""))
+        plan = []
+        for pfx in prefixes:
+            # ⚠️ A WILDCARD IS NOT A LIST OPERATION. S3 has no globbing, so a
+            # partition segment below an UNSCOPED symbol has to be filtered
+            # after listing rather than in the Prefix. Naming the symbols is
+            # what makes it cheap; `part` alone only avoids the fetch.
+            if "*" in pfx:
+                listing, want = pfx.split("*/", 1)[0], pfx.split("*/", 1)[1]
+            else:
+                listing, want = pfx, None
+            for page in pg.paginate(Bucket=WR.BUCKET, Prefix=listing):
                 for o in page.get("Contents", []) or []:
-                    plan.append((o["Key"], int(o.get("Size", 0) or 0)))
+                    k = o["Key"]
+                    if want and want not in k:
+                        continue
+                    plan.append((k, int(o.get("Size", 0) or 0)))
         tk = Ticker(f"{dt} {dates[0]}..{dates[-1]}", total=len(plan))
         for d in dates:
             pfx = f"{WR.PREFIX}/{dt}/dt={d}/"
@@ -269,8 +309,13 @@ class WarehouseCache:
                     rec = [rec]
                 elif not isinstance(rec, list):
                     rec = []
+                # ⚠️ `keep` FILTERS AT INSERT, NOT AT QUERY. It does not reduce
+                # the download — the object is already here — but it stops a
+                # report writing 3.3M rows to read eight check names out of
+                # them, which is the write, the index and the memory.
                 batch = [tuple([sym] + [r.get(c) for c in cols])
-                         for r in rec if isinstance(r, dict)]
+                         for r in rec
+                         if isinstance(r, dict) and (keep is None or keep(r))]
                 if batch:
                     self.conn.executemany(ins, batch)
                     n += len(batch)
