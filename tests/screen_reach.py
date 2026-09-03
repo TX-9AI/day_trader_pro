@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-"""day_trader_pro/tests/screen_reach.py — v1.0
+"""day_trader_pro/tests/screen_reach.py — v1.1
+v1.1  2026-09-03 — dtp r261. 🔴 v1.0 MEASURED REACH ENTRY-TO-EXIT AND THE MEDIAN
+      RUNAWAY HOLD IS THREE MINUTES, so "the underlying travelled 0.99 ATR"
+      measured three minutes of tape rather than the tape's capacity — a
+      measurement truncated by the very early exits MOM.1 exists to fix. It
+      could not distinguish "the strike was 6 ATR too far" from "the strike was
+      fine and we left after 3 minutes", and those have OPPOSITE fixes. Reach is
+      now measured over FIXED HORIZONS (5/15/30/60 min) with the exit reach kept
+      alongside: the GAP between them is the answer.
 HOW FAR DOES THE TAPE TRAVEL, AND WERE OUR STRIKES INSIDE IT? Read-only.
 
 v1.0  2026-09-03 — dtp r260.
@@ -75,7 +83,9 @@ if _measure is None:
                      " — set OTV4_ROOT.")
 
 TRIG_WINDOW = 10        # the shortest window carried the most signal
-HOLD_CAP_MIN = 90       # if a trade is still open, cap the forward look
+# 🔑 FIXED HORIZONS, IN MINUTES. The tape's capacity, not our participation.
+HORIZONS = (5, 15, 30, 60)
+HOLD_CAP_MIN = 90
 
 
 def _utc(ts):
@@ -185,11 +195,19 @@ def _render(cache, dates, chosen, t0):
         ets, xts = _utc(r["entry_time"]), _utc(r["exit_time"])
         if not spot or not k or not ets:
             continue
-        end = xts or ets
-        end_ms = int(max(end.timestamp(),
-                         ets.timestamp() + HOLD_CAP_MIN * 60) * 1000) \
-            if not xts else int(xts.timestamp() * 1000)
         e_ms = int(ets.timestamp() * 1000)
+        # 🔴 r261 — REACH IS MEASURED OVER FIXED HORIZONS, NOT TO THE EXIT.
+        # v1.0 ran entry -> exit, and the median runaway hold is THREE MINUTES
+        # — so "the underlying travelled 0.99 ATR" measured three minutes of
+        # tape, not what the tape was capable of. That is circular: the
+        # measurement was truncated by the very early exits MOM.1 exists to
+        # fix, and it could not tell "the strike was 6 ATR too far" from "the
+        # strike was fine and we left after 3 minutes". Those have OPPOSITE
+        # fixes.
+        # 🔑 A FIXED HORIZON MEASURES THE TAPE'S CAPACITY instead of our
+        # participation in it, and the exit horizon is kept alongside so the
+        # gap between them IS the answer.
+        exit_ms = int(xts.timestamp() * 1000) if xts else None
         # ── ATR from BEFORE the fill ────────────────────────────────────
         pre = cache.query(
             'SELECT high, low, close FROM "candles" WHERE symbol = ?'
@@ -216,25 +234,43 @@ def _render(cache, dates, chosen, t0):
         # ── the trigger reading, from BEFORE the fill ───────────────────
         ts = _measure(pre[-TRIG_WINDOW:], "long" if long_side else "short")
         # ── REACH: underlying travel AFTER the fill ─────────────────────
+        dist = (k - spot) if long_side else (spot - k)
+        far_ms = e_ms + max(HORIZONS) * 60_000
         post = cache.query(
-            'SELECT high, low FROM "candles" WHERE symbol = ?'
+            'SELECT ts_epoch_ms, high, low FROM "candles" WHERE symbol = ?'
             ' AND interval = ? AND ts_epoch_ms BETWEEN ? AND ?'
-            ' ORDER BY ts_epoch_ms', (r["symbol"], "1m", e_ms, end_ms),
+            ' ORDER BY ts_epoch_ms', (r["symbol"], "1m", e_ms, far_ms),
             max_rows=400)
         post = [dict(x) for x in post]
         if not post:
             no_bars += 1
             continue
-        reach = (max(x["high"] for x in post) - spot) if long_side \
-            else (spot - min(x["low"] for x in post))
-        dist = (k - spot) if long_side else (spot - k)
-        recs.append({
-            "reach": reach, "dist": dist, "atr": atr,
-            "reach_atr": reach / atr, "dist_atr": dist / atr,
-            "reached": reach >= dist,
-            "trig": (ts.acc_recent if ts.ok else None),
-            "score": (ts.score if ts.ok else None),
-            "pnl": r["pnl_usd"] or 0, "sym": r["symbol"]})
+
+        def _reach_to(cut_ms):
+            sl = [x for x in post if x["ts_epoch_ms"] <= cut_ms]
+            if not sl:
+                return None
+            return ((max(x["high"] for x in sl) - spot) if long_side
+                    else (spot - min(x["low"] for x in sl)))
+
+        rec = {"dist": dist, "atr": atr, "dist_atr": dist / atr,
+               "trig": (ts.acc_recent if ts.ok else None),
+               "score": (ts.score if ts.ok else None),
+               "pnl": r["pnl_usd"] or 0, "sym": r["symbol"],
+               "held_min": (None if exit_ms is None
+                            else (exit_ms - e_ms) / 60_000)}
+        for h in HORIZONS:
+            rr = _reach_to(e_ms + h * 60_000)
+            rec[f"reach_{h}"] = (None if rr is None else rr / atr)
+        # ⚠️ THE EXIT REACH IS KEPT TOO. The GAP between what the tape offered
+        # and what we stayed for is the whole question.
+        rec["reach_exit"] = (None if exit_ms is None
+                             else (lambda v: None if v is None else v / atr)(
+                                 _reach_to(exit_ms)))
+        rec["reach_atr"] = rec.get(f"reach_{HORIZONS[-1]}")
+        rec["reached"] = (rec["reach_atr"] is not None
+                          and rec["reach_atr"] >= rec["dist_atr"])
+        recs.append(rec)
     bar.done(f"{len(recs)} measured")
 
     if not recs:
@@ -248,24 +284,54 @@ def _render(cache, dates, chosen, t0):
     # 🔴 THIS IS THE ONE THAT CAN INVALIDATE THE WHOLE DELTA IDEA. If most
     # strikes sat beyond where the tape actually went, the selector is the
     # binding constraint and no trigger improvement fixes it.
-    w("1. WERE THE STRIKES INSIDE THE TAPE'S TRAVEL?")
+    # ══ THE QUESTION THE v1.0 RUN COULD NOT ANSWER ══════════════════════
+    # 🔴 v1.0 MEASURED REACH ENTRY-TO-EXIT, AND THE MEDIAN HOLD IS 3 MINUTES.
+    # So "the underlying travelled 0.99 ATR" measured three minutes of tape,
+    # truncated by the very early exits MOM.1 exists to fix. It could not tell
+    # "the strike was 6 ATR too far" from "the strike was fine and we left
+    # after 3 minutes" — and those have OPPOSITE fixes.
+    w("1. HOW FAR DID THE TAPE GO — AND HOW FAR DID WE STAY FOR?")
+    w("   fixed horizons measure the tape; the exit column is us.")
     w("-" * 70)
-    reached = [x for x in recs if x["reached"]]
-    w(f"  strike reached by the underlying : {len(reached):,}/{len(recs):,}"
-      f"  ({len(reached)/len(recs):.0%})")
+    held = [x["held_min"] for x in recs if x["held_min"] is not None]
+    if held:
+        w(f"  median hold: {_med(held):.0f} min   p75 {_q(held,.75):.0f}"
+          f"   p90 {_q(held,.90):.0f}")
     w("")
-    w(f"  {'':<22}{'median':>10}{'p75':>10}{'p90':>10}{'max':>10}")
-    for lab, key in (("strike distance (ATR)", "dist_atr"),
-                     ("underlying reach (ATR)", "reach_atr")):
-        v = [x[key] for x in recs]
-        w(f"  {lab:<22}{_med(v):>10.2f}{_q(v,.75):>10.2f}"
-          f"{_q(v,.90):>10.2f}{_q(v,1.0):>10.2f}")
+    w(f"  {'reach (ATR)':<20}{'median':>10}{'p75':>10}{'p90':>10}{'max':>10}"
+      f"{'reached':>10}")
+    ex = [x["reach_exit"] for x in recs if x["reach_exit"] is not None]
+    if ex:
+        n_ex = sum(1 for x in recs if x["reach_exit"] is not None
+                   and x["reach_exit"] >= x["dist_atr"])
+        w(f"  {'at our EXIT':<20}{_med(ex):>10.2f}{_q(ex,.75):>10.2f}"
+          f"{_q(ex,.90):>10.2f}{_q(ex,1.0):>10.2f}"
+          f"{n_ex/len(ex):>9.0%}")
+    for h in HORIZONS:
+        v = [x[f"reach_{h}"] for x in recs if x.get(f"reach_{h}") is not None]
+        if not v:
+            continue
+        nr = sum(1 for x in recs if x.get(f"reach_{h}") is not None
+                 and x[f"reach_{h}"] >= x["dist_atr"])
+        w(f"  {f'+{h} min':<20}{_med(v):>10.2f}{_q(v,.75):>10.2f}"
+          f"{_q(v,.90):>10.2f}{_q(v,1.0):>10.2f}{nr/len(v):>9.0%}")
     w("")
-    short = [x for x in recs if not x["reached"]]
-    if short:
-        gap = [x["dist_atr"] - x["reach_atr"] for x in short]
-        w(f"  when it did NOT reach, it fell short by a median "
-          f"{_med(gap):.2f} ATR ({len(short):,} trades)")
+    d = [x["dist_atr"] for x in recs]
+    w(f"  {'strike distance':<20}{_med(d):>10.2f}{_q(d,.75):>10.2f}"
+      f"{_q(d,.90):>10.2f}{_q(d,1.0):>10.2f}")
+    w("")
+    # 🔑 THE GAP IS THE ANSWER. If +60 reaches far more often than the exit
+    # does, the HOLD is the problem and the strikes were defensible. If even
+    # +60 barely reaches, the STRIKES are too far and no hold fixes it.
+    if ex:
+        far = [x[f"reach_{HORIZONS[-1]}"] for x in recs
+               if x.get(f"reach_{HORIZONS[-1]}") is not None]
+        w(f"  🔑 the tape offered a median {_med(far):.2f} ATR over "
+          f"{HORIZONS[-1]} min; we stayed for {_med(ex):.2f} ATR "
+          f"({_med(ex)/_med(far):.0%} of it).")
+        w("     If the +60 reached-rate is far above the exit rate, the HOLD")
+        w("     is the problem and the strikes were defensible. If even +60")
+        w("     barely reaches, the STRIKES are too far and no hold fixes it.")
     w("")
 
     # ══ Q1: DOES THE TRIGGER PREDICT TRAVEL? ════════════════════════════
