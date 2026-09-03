@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/test_trend_calibration.py — v1.1
+# day_trader_pro/tests/test_trend_calibration.py — v1.2
+# v1.2 (2026-09-03) — dtp r259. C10-C13: the outcome is a sample QUANTILE
+#   ('did it run'), the acceptance-trajectory and FVG families are scored,
+#   and the FVG component is pinned as backward-looking — a forward-looking
+#   version would calibrate beautifully and be unusable as a gate.
 # v1.1 (2026-09-03) — dtp r258. C7/C8/C9: the candle query is bounded at both
 #   ends, the window carries no ORB anchor, and several lengths are swept per
 #   run. C7 exists because an unbounded lookback threw MemoryError twice in
@@ -208,6 +212,49 @@ def main():
     # to try 20 bars instead of 10 is not a cost worth paying twice.
     check("C9 more than one window length is swept per run",
           "WINDOWS = (" in src and src.count("BAR WINDOW") >= 1)
+
+    # ── C10 — THE OUTCOME IS A QUANTILE OF THE SAMPLE ───────────────────
+    # 🔴 THE 5% THRESHOLD WAS ARBITRARY AND GAVE A 74% BASE RATE (136 of 183).
+    # Asking a meter to predict an event that happens three times in four
+    # leaves almost nothing to separate, and it was the wrong question for
+    # MOM.1 besides: on 2026-09-03 FIVE trades produced 97% of the runaway
+    # P&L, and going 5% green is not what those five did — RUNNING is.
+    # ⚠️ AND SEVERAL CUT POINTS ARE SWEPT, because replacing one arbitrary
+    # constant with another would repeat the mistake.
+    check("C10 the outcome is a sample quantile, not a fixed percentage",
+          "CUTS = (" in src and "top slice of favourable excursion" in src
+          and "DID IT RUN" in src)
+
+    # ── C11 — THE NEW COMPONENT FAMILIES ARE SCORED ─────────────────────
+    # ⚠️ Recorded and scored SEPARATELY, none of them in the composite yet:
+    # adding an unproven component to the score moves the gate on a guess.
+    for _c in ("acc_slope", "acc_delta", "acc_run", "fvg_respect"):
+        if _c not in src:
+            _fails.append(f"C11 {_c} not scored")
+    check("C11 the acceptance-trajectory and FVG components are scored",
+          all(c in src for c in
+              ("acc_slope", "acc_recent", "acc_delta", "acc_run",
+               "fvg_respect")))
+
+    # ── C12 — FVG IS BACKWARD-LOOKING ───────────────────────────────────
+    # 🔴 WHETHER THE PULLBACK AFTER ENTRY FILLED AND CONTINUED IS A POST-ENTRY
+    # FACT. It would calibrate beautifully and be UNUSABLE as a gate. The meter
+    # only counts gaps completed INSIDE the window, which is what a decision at
+    # the fill can actually see.
+    ts_src = open(os.path.join(
+        os.environ.get("OTV4_ROOT",
+                       os.path.expanduser("~/options-trader-v4")),
+        "analysis", "trend_strength.py"), encoding="utf-8").read()
+    check("C12 the FVG component looks only INSIDE the window",
+          "BACKWARD-LOOKING BY CONSTRUCTION" in ts_src
+          and "entry_snapshot" in ts_src,
+          "and says why it does not read trades.entry_snapshot")
+
+    # ── C13 — NO IMBALANCE TESTED IS NOT ZERO RESPECT ───────────────────
+    # ⚠️ "No gap was retested" and "every retest failed" are different facts;
+    # scoring the first as the second reads a clean trend as a broken one.
+    check("C13 an untested imbalance yields None, not 0.0",
+          "None WHEN NO GAP WAS TESTED" in ts_src)
 
     print()
     if _fails:

@@ -1,5 +1,17 @@
 #!/usr/bin/env python3
-"""day_trader_pro/tests/calibrate_trend_strength.py — v1.1
+"""day_trader_pro/tests/calibrate_trend_strength.py — v1.2
+v1.2  2026-09-03 — dtp r259. 🔴 THE OUTCOME IS A SAMPLE QUANTILE — "DID IT
+      RUN" — NOT A FIXED PERCENTAGE. The first calibration came back negative
+      (best AUC 0.63 under a 0.65 floor, 183 trades) and the diagnosis is the
+      OUTCOME: "went 5% green" had a 74% BASE RATE, 136 of 183, and predicting
+      a near-universal event leaves nothing to separate. It was also the wrong
+      question for MOM.1 — five trades made 97% of the runaway P&L on
+      2026-09-03, and going 5% green is not what those five did. Three cut
+      points are swept (top 10/20/25%) so one arbitrary constant is not simply
+      replaced by another, and the excursion distribution is printed beside
+      them. The acceptance-TRAJECTORY family and `fvg_respect` are scored
+      separately; none is in the composite.
+
 v1.1  2026-09-03 — dtp r258. 🔴 THE ORB ANCHOR IS GONE, AND IT WAS CAUSING A
       MemoryError. Finding the break bar meant querying EVERY candle for the
       symbol since the range began — no lower bound, thousands of rows per
@@ -84,7 +96,11 @@ if _measure is None:
         "  CANNOT FIND options_trader_v4/analysis/trend_strength.py. The "
         "calibration must score the SAME function that trades; set OTV4_ROOT.")
 
-COMPONENTS = ("score", "efficiency", "acceptance", "shallowness", "pace")
+COMPONENTS = ("score", "efficiency", "acceptance", "shallowness", "pace",
+              # r259 — the acceptance TRAJECTORY family and the FVG component.
+              # Recorded and scored separately; none is in the composite yet.
+              "acc_slope", "acc_recent", "acc_delta", "acc_run",
+              "fvg_respect")
 
 
 def _utc(ts):
@@ -177,7 +193,7 @@ def _render(cache, dates, chosen, green_at, t0):
     w(f"TREND STRENGTH CALIBRATION — {dates[0]} .. {dates[-1]} ET — {label}")
     w("=" * 70)
     w(f"GREEN = the entry went {green_at:.0%} in profit at some point.")
-    w("Window = the ORB break bar through the fill — what a gate would see.")
+    w("Window = the N closed 1m bars BEFORE the fill — no ORB anchor.")
     w("")
     if not rows:
         w("  no closed trades with excursion telemetry for this selection")
@@ -202,9 +218,22 @@ def _render(cache, dates, chosen, green_at, t0):
     # paying. If strength separates at ANY window that is the signal; the leg
     # definition can be argued afterwards.
     WINDOWS = (10, 20, 30)
+    # 🔴 r259 — THE OUTCOME IS A QUANTILE OF THE SAMPLE, NOT A FIXED NUMBER.
+    # The 5%-green threshold was arbitrary — operator, 2026-09-03: "it was
+    # arbitrary to begin with just so we'd have a starting point" — and it
+    # produced a 74% BASE RATE (136 of 183). Asking a meter to predict an event
+    # that happens three times in four leaves almost nothing to separate, which
+    # is the likeliest reason nothing cleared the noise floor.
+    # 🔑 AND IT WAS THE WRONG QUESTION FOR MOM.1. The tape said FIVE trades
+    # produced 97% of the runaway P&L on 2026-09-03. Going 5% green is not what
+    # those five did — RUNNING is. So the outcome is "did this trade run",
+    # expressed as the top slice of favourable excursion IN THIS SAMPLE.
+    # ⚠️ REPLACING ONE ARBITRARY CONSTANT WITH ANOTHER WOULD REPEAT THE
+    # MISTAKE, so several cut points are swept the way the windows are.
+    CUTS = (0.90, 0.80, 0.75)
     bar = Bar("measuring", len(rows) * len(WINDOWS))
-    by_win = {w: {"green": [], "other": [], "short": 0} for w in WINDOWS}
-    scored_any = 0
+    readings = {wl: [] for wl in WINDOWS}       # (TrendStrength, fav)
+    short_ct = {wl: 0 for wl in WINDOWS}
     for r in rows:
         e = r["entry_premium"] or 0
         mfe, mae = r["mfe_premium"], r["mae_premium"]
@@ -223,14 +252,10 @@ def _render(cache, dates, chosen, green_at, t0):
         # extreme is the LOW mark, because mfe_premium is the HIGHEST seen.
         credit = (r["credit_received"] or 0) > 0
         fav = ((e - mae) / e) if credit else ((mfe - e) / e)
-        is_green = fav >= green_at
         end_ms = int(ets.timestamp() * 1000)
-        # ⚠️ NOT `w` — that is the report writer (`w = out.append`), and
-        # shadowing it here clobbered the writer mid-function.
+        # ⚠️ NOT `w` — that is the report writer (`w = out.append`).
         for wl in WINDOWS:
             bar.step()
-            # ⚠️ BOUNDED BOTH ENDS. `w + 5` minutes of slack absorbs gaps in
-            # the 1m series without unbounding the query.
             start_ms = end_ms - (wl + 5) * 60_000
             bars = cache.query(
                 'SELECT open, high, low, close FROM "candles"'
@@ -241,39 +266,68 @@ def _render(cache, dates, chosen, green_at, t0):
             win = [dict(x) for x in bars][-wl:]
             ts = _measure(win, direction)
             if not ts.ok:
-                by_win[wl]["short"] += 1
+                short_ct[wl] += 1
                 continue
-            by_win[wl]["green" if is_green else "other"].append(ts)
-            scored_any += 1
-    bar.done(f"{scored_any:,} readings")
+            readings[wl].append((ts, fav))
+    bar.done(f"{sum(len(v) for v in readings.values()):,} readings")
 
-    w(f"  {len(rows):,} closed trades   {len(WINDOWS)} window(s) swept")
-    w("  ⚠️ WINDOW = the N closed 1m bars BEFORE the fill. No ORB anchor —")
-    w("     the opening range is a 15-minute artefact and an afternoon tape")
-    w("     does not inherit from it.")
+    w(f"  {len(rows):,} closed trades   {len(WINDOWS)} window(s) x "
+      f"{len(CUTS)} cut point(s)")
+    w("  ⚠️ WINDOW = the N closed 1m bars BEFORE the fill. No ORB anchor.")
+    w("  🔑 OUTCOME = DID IT RUN — the top slice of favourable excursion in")
+    w("     this sample, NOT a fixed percentage. The 5% threshold was")
+    w("     arbitrary and gave a 74% base rate; predicting a near-universal")
+    w("     event leaves nothing to separate.")
     w("")
-    for wlen in WINDOWS:
-        g, o, sh = (by_win[wlen]["green"], by_win[wlen]["other"],
-                    by_win[wlen]["short"])
-        small = min(len(g), len(o))
-        w(f"  ── {wlen}-BAR WINDOW ──  green {len(g)}  never-green {len(o)}"
-          f"  unreadable {sh}   limiting {small}")
-        if small < 10:
-            w("     too few to rank at this window")
-            w("")
-            continue
-        w(f"     {'component':<14} {'AUC':>6} {'med green':>11} {'med other':>11}")
-        for c in COMPONENTS:
-            gv = [getattr(x, c) for x in g if getattr(x, c) is not None]
-            ov = [getattr(x, c) for x in o if getattr(x, c) is not None]
-            auc = _auc(gv, ov)
-            if auc is None:
-                continue
-            w(f"     {c:<14} {auc:>6.2f} {_med(gv):>11.3f} {_med(ov):>11.3f}")
+    allf = sorted(f for v in readings.values() for _t, f in v)
+    if allf:
+        w(f"  favourable excursion across the sample: median "
+          f"{allf[len(allf)//2]:.1%}   p75 {allf[int(.75*(len(allf)-1))]:.1%}"
+          f"   p90 {allf[int(.90*(len(allf)-1))]:.1%}"
+          f"   max {allf[-1]:.1%}")
         w("")
-    green = by_win[WINDOWS[-1]]["green"]
-    other = by_win[WINDOWS[-1]]["other"]
-    no_read = by_win[WINDOWS[-1]]["short"]
+    best = (0.0, "", "", 0)
+    for wl in WINDOWS:
+        rr = readings[wl]
+        if not rr:
+            continue
+        favs_w = sorted(f for _t, f in rr)
+        for cut in CUTS:
+            thr = favs_w[min(len(favs_w) - 1, int(cut * (len(favs_w) - 1)))]
+            ran = [t for t, f in rr if f >= thr]
+            didnt = [t for t, f in rr if f < thr]
+            small = min(len(ran), len(didnt))
+            w(f"  ── {wl}-BAR WINDOW, top {1-cut:.0%} (fav >= {thr:.1%}) ──  "
+              f"ran {len(ran)}  didn't {len(didnt)}  unreadable {short_ct[wl]}")
+            if small < 10:
+                w("     too few to rank")
+                w("")
+                continue
+            w(f"     {'component':<14} {'AUC':>6} {'med ran':>10} "
+              f"{'med other':>10}")
+            for c in COMPONENTS:
+                gv = [getattr(x, c) for x in ran if getattr(x, c) is not None]
+                ov = [getattr(x, c) for x in didnt if getattr(x, c) is not None]
+                auc = _auc(gv, ov)
+                if auc is None:
+                    continue
+                mark = "  <--" if abs(auc - 0.5) > 0.15 else ""
+                w(f"     {c:<14} {auc:>6.2f} {_med(gv):>10.3f} "
+                  f"{_med(ov):>10.3f}{mark}")
+                if abs(auc - 0.5) > abs(best[0] - 0.5):
+                    best = (auc, c, f"{wl}-bar / top {1-cut:.0%}", small)
+            w("")
+    if best[1]:
+        w(f"  STRONGEST SEPARATION ANYWHERE: {best[1]} at {best[2]} — "
+          f"AUC {best[0]:.2f}, limiting class {best[3]}")
+        w("")
+    # the composite sweep still uses the widest window and the top decile
+    _rr = readings[WINDOWS[-1]]
+    _fw = sorted(f for _t, f in _rr) or [0.0]
+    _thr = _fw[min(len(_fw) - 1, int(0.90 * (len(_fw) - 1)))]
+    green = [t for t, f in _rr if f >= _thr]
+    other = [t for t, f in _rr if f < _thr]
+    no_read = short_ct[WINDOWS[-1]]
     no_orb = 0
     n = len(green) + len(other)
     w(f"  {len(rows):,} closed trades   {n:,} measured")
