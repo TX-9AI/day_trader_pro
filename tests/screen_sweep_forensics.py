@@ -1,5 +1,36 @@
 #!/usr/bin/env python3
-"""day_trader_pro/tests/screen_sweep_forensics.py — v1.5
+"""day_trader_pro/tests/screen_sweep_forensics.py — v1.6
+v1.6  2026-09-03 — dtp r265. PANEL 8: DOES A LEVEL'S DEFENDED COUNT PREDICT
+      WHETHER IT HOLDS? Operator, 2026-09-03: *"I'd rather have a handful of
+      rare firing high quality reversals than a stack of lottery tickets"*,
+      and the primary outcome is SIGNAL QUALITY, not P&L.
+      🔑 THE COUNT THE STRATEGY USES IS NOT REAL AND THE REAL ONE IS UNUSED.
+      `LiquidityPool.touch_count` is `len(cluster)` from a map rebuilt every
+      tick, and `_add_named_pool` hardcodes it to 1 — 44,450 of 44,890 ticks
+      read exactly 1, which is why `level_strength` came back 94% ties on two
+      values. `level_ledger.touch_count`, written by otv4 `derived/levels.py`
+      to the operator's 2026-08-22 ruling (*"a touch count is a HELD level,
+      and when it doesn't hold that level is FINISHED"*), IS a real run that
+      terminates at the break — and no strategy reads it.
+      ⚠️ IT RIDES THE FILL ALREADY. `derived/snapshot.py` writes the level
+      WALK into `fire_snapshot.payload["levels"]` — nearest levels each way
+      with `touches` and `provenance` — so this is a JOIN, not a build, and
+      it costs no extra S3 objects: panel 6 already loads that stream.
+      🔴 A DEGENERATE DISTRIBUTION IS REPORTED AS DEGENERATE, NEVER AS A NULL
+      RESULT. If every joined level reads one touch, the hypothesis is
+      UNTESTABLE on this sample and the panel says so instead of printing a
+      flat comparison that would read as "defended count does not matter".
+      That is the r191/C.19 shape: a policy the instrument cannot see.
+      ⚠️ AND COVERAGE IS PRINTED. `walk()` is called with limit=3, so a pool
+      beyond the third rung is ABSENT from the payload — absent is not
+      one-touch, and unmatched trades are counted out loud rather than
+      dropped.
+      ⚠️ OUTCOME IS PANEL 1'S, DELIBERATELY. `pen` (did price trade beyond the
+      short anchor) and `acc` (longest run of closes beyond it) are the
+      signal-quality variables a stop cannot manufacture. P&L is reported
+      beside them and is NOT the split key — r219 established this book's
+      P&L measured a fill-basis artefact, so grading levels on it would fit
+      the artefact.
 v1.5  2026-09-02 — dtp r256. 🔴 `entry_time` IS UTC AND I PARSED IT AS ET.
       A four-hour error on every fill timestamp. `at_entry` then walked back
       past the start of the session and returned the SAME stale evaluation for
@@ -177,8 +208,11 @@ def main(argv):
         # never needed them. This tool does: the SHORT strike is the level, and
         # which side of it a breach comes from is decided by whether the long
         # sits above or below. Loaded explicitly rather than assumed present.
+        # ⚠️ r265 — `pool_price` JOINED EXPLICITLY. r154 added it as "the level
+        # this trade was sold against"; it is not in RP.COLS and panel 8 keys
+        # on it. Falls back to the short strike when null, and says which.
         cache.load("trades", dates,
-                   RP.COLS + ["short_strike", "long_strike"],
+                   RP.COLS + ["short_strike", "long_strike", "pool_price"],
                    datatype="trades")
         cache.conn.execute(
             "CREATE INDEX IF NOT EXISTS ix_tr ON trades(strategy, status)")
@@ -316,6 +350,7 @@ def main(argv):
                 recs.append({"sym": r["symbol"], "anchor": anchor, "side": side,
                              "pen": None, "acc": None, "bars": 0,
                              "pnl": r["pnl_usd"] or 0, "call": call,
+                             "tid": r["trade_id"], "pool": r["pool_price"],
                              "reason": r["exit_reason"] or ""})
                 continue
             # PENETRATION: furthest the EXTREME travelled beyond the anchor
@@ -335,6 +370,7 @@ def main(argv):
             recs.append({"sym": r["symbol"], "anchor": anchor, "side": side,
                          "pen": pen, "acc": best, "bars": len(bars),
                          "pnl": r["pnl_usd"] or 0, "call": call,
+                         "tid": r["trade_id"], "pool": r["pool_price"],
                          "reason": r["exit_reason"] or ""})
         bar.done(f"{len(recs)} trades")
 
@@ -570,9 +606,162 @@ def main(argv):
         w("⚠️ NO CONTROL GROUP AND NO FIT. 3 winners cannot anchor a")
         w("   comparison. This says what the failing population DID; whether")
         w("   any of it is selectable is the next question, not this one.")
+        # ══ 8. LEVEL QUALITY ══════════════════════════════════
+        w("")
+        w("8. DOES THE DEFENDED COUNT PREDICT WHETHER THE LEVEL HOLDS?")
+        w("   level_ledger touch_count at the fill, vs panel 1's outcome")
+        w("-" * 68)
+        w("   a touch is a HOLD (otv4 derived/levels.py, operator 2026-08-22);")
+        w("   the run TERMINATES at the break, so this is not a tally.")
+        w("")
+        matched, cov = _level_join(cache, recs)
+        w(f"  joined {len(matched)}/{len(recs)} trades to a ledger level")
+        for k, lab in (("no_payload", "had no fire_snapshot payload"),
+                       ("no_walk", "had payload but levels=null (walk unavailable)"),
+                       ("no_rung", "had a walk but the sold pool was NOT in it")):
+            if cov[k]:
+                w(f"    {cov[k]:>3} {lab}")
+        if cov["no_rung"]:
+            w("        (walk limit=3 \u2014 these are UNMEASURED, not one-touch)")
+        w("")
+        for line in _level_report(matched, _med):
+            w(line)
+        w("")
+        w("\u26a0\ufe0f SIGNAL QUALITY FIRST, P&L SECOND \u2014 the operator's ordering.")
+        w("   n is small: this finds a MECHANISM, not a conclusion (WA \u00a712).")
+        w("   No dial moves on it. If the buckets separate hard, the next step")
+        w("   is wiring level_ledger into the sweep's candidate selection")
+        w("   LOG-ONLY and measuring it live (WA \u00a731).")
         return _emit(out, dates, t0)
     finally:
         cache.close()
+
+
+# ── r265 PANEL 8 HELPERS, EXTRACTED SO THE SELFTEST DRIVES THE REAL CODE ───
+# ⚠️ C.23: a check that re-implements the join it is pinning tests itself.
+# `tests/test_level_quality.py` calls THESE functions, not a copy.
+_LEVEL_TOL = 0.0015          # 0.15% — the ledger rounds to the cent and a
+                             # moving tine drifts between fill and write.
+
+
+def _level_join(cache, recs):
+    """(matched, coverage) — each rec joined to its ledger level at the fill.
+
+    🔑 MATCHES THE LEVEL THE TRADE WAS SOLD AGAINST, not the nearest one.
+    `pool_price` is r154's record of exactly that; the walk is a ladder
+    ordered by distance, so the match is the rung closest to the pool.
+
+    ⚠️ COVERAGE IS RETURNED, NOT SWALLOWED. `walk()` runs with limit=3, so a
+    pool beyond the third rung is ABSENT from the payload. Absent is not
+    one-touch, and dropping it silently would turn missing instrumentation
+    into a finding about levels — the plausible-silence class this repo is
+    named after.
+    """
+    import json as _j
+    snap = {}
+    for r in cache.iter('SELECT trade_id, payload FROM "fire_snapshot"'):
+        try:
+            snap[r["trade_id"]] = _j.loads(r["payload"] or "{}")
+        except Exception:                                       # noqa: BLE001
+            continue
+    matched = []
+    cov = {"no_payload": 0, "no_walk": 0, "no_rung": 0}
+    for x in recs:
+        p = snap.get(x.get("tid"))
+        if not p:
+            cov["no_payload"] += 1
+            continue
+        wk = p.get("levels")
+        if not isinstance(wk, dict):
+            cov["no_walk"] += 1
+            continue
+        target = x.get("pool") or x.get("anchor")
+        try:
+            target = float(target or 0.0)
+        except (TypeError, ValueError):
+            target = 0.0
+        if target <= 0:
+            cov["no_rung"] += 1
+            continue
+        best_l, best_d = None, None
+        for side_key in ("above", "below"):
+            for lv in (wk.get(side_key) or []):
+                try:
+                    lp = float(lv.get("price") or 0.0)
+                except (TypeError, ValueError):
+                    continue
+                if lp <= 0:
+                    continue
+                d = abs(lp - target) / target
+                if best_d is None or d < best_d:
+                    best_l, best_d = lv, d
+        if best_l is None or best_d is None or best_d > _LEVEL_TOL \
+                or best_l.get("touches") is None:
+            cov["no_rung"] += 1
+            continue
+        matched.append({**x, "touches": int(best_l["touches"]),
+                        "prov": str(best_l.get("provenance") or "?")})
+    return matched, cov
+
+
+def _level_bucket(t):
+    return "1 touch" if t <= 1 else ("2 touches" if t == 2 else "3+ touches")
+
+
+def _level_report(matched, med):
+    """The panel's lines. Split out so the degenerate case is testable.
+
+    🔴 A DEGENERATE DISTRIBUTION IS REPORTED AS DEGENERATE, NEVER AS A NULL
+    RESULT. If every joined level carries the same count there is no variance
+    to score against, and printing a comparison table over one value would
+    read as "defended count does not matter" when the true statement is "this
+    sample cannot test it".
+    """
+    if not matched:
+        return ["  \u26a0\ufe0f NOTHING JOINED. The hypothesis is UNTESTED on this",
+                "     sample, which is a different statement from 'defended",
+                "     count does not matter'. Fix the join first."]
+    dist = {}
+    for m in matched:
+        dist[m["touches"]] = dist.get(m["touches"], 0) + 1
+    out = ["  touch distribution: " +
+           "  ".join(f"{k}x:{v}" for k, v in sorted(dist.items()))]
+    if len(dist) < 2:
+        out += ["",
+                "  \U0001f534 EVERY JOINED LEVEL CARRIES THE SAME COUNT. This sample",
+                "     CANNOT test the hypothesis \u2014 there is no variance to score",
+                "     against. That is not evidence the count does not matter;",
+                "     it is evidence the ledger is not accumulating, which is",
+                "     its own defect to chase."]
+        return out
+    out += ["", f"  {'bucket':<12} {'n':>3} {'held':>7} {'med pen':>9}"
+                f" {'med acc':>8} {'med P&L':>9}"]
+    for b in ("1 touch", "2 touches", "3+ touches"):
+        g = [m for m in matched if _level_bucket(m["touches"]) == b]
+        if not g:
+            continue
+        pens = [m["pen"] for m in g if m.get("pen") is not None]
+        accs = [m["acc"] for m in g if m.get("acc") is not None]
+        # HELD = price NEVER traded beyond the short anchor. The signal-quality
+        # outcome, and the one a stop cannot manufacture.
+        held = sum(1 for v in pens if v <= 0)
+        hs = f"{held}/{len(pens)}" if pens else "n/a"
+        out.append(f"  {b:<12} {len(g):>3} {hs:>7}"
+                   f" {(med(pens) if pens else float('nan')):>9.2f}"
+                   f" {(med(accs) if accs else float('nan')):>8.1f}"
+                   f" {med([m['pnl'] for m in g]):>9.0f}")
+    out += ["",
+            "  held = price NEVER traded beyond the short anchor.",
+            "  pen/acc are panel 1's. P&L is shown but is NOT the split key \u2014",
+            "  r219 established this book's P&L measured a fill-basis",
+            "  artefact, so grading levels on it would fit the artefact."]
+    prov = {}
+    for m in matched:
+        prov[m["prov"]] = prov.get(m["prov"], 0) + 1
+    out += ["", "  by provenance: " +
+            "  ".join(f"{k}:{v}" for k, v in sorted(prov.items(),
+                                                    key=lambda kv: -kv[1]))]
+    return out
 
 
 def _emit(out, dates, t0):

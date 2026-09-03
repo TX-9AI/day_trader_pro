@@ -768,3 +768,35 @@ Net: +$8,667.00   94 closed  (50W/44L, 53%)
 [DONE      ] 15 verified and stopped · 0 HELD UP
 [DONE      ] all 15 box(es) verified against S3 and stopped
 [REARM     ] re-arming s3-push.timer + candle-logger.timer
+[START     ] EOD conductor v2 — 2026-09-03
+[START     ] 15 box(es): AMD, AMZN, AVGO, CRM, CVX, GOOGL, META, MU, NFLX, NVDA, PLTR, QQQ, SPX, TSLA, UNH
+[QUIESCE   ] stopping other writers — the conductor owns the close
+[STOP      ] stopping optionsbot on 15 box(es) — feed and machine STAY UP
+[SETTLE    ] 45s for the bots to flush their stores
+[DRAIN     ] draining + verifying 15 box(es) against S3
+[VERIFY    ] AMD    OK         short=0 local=90921 s3=91254
+[VERIFY    ] AMZN   OK         short=0 local=91393 s3=91724
+[VERIFY    ] AVGO   OK         short=0 local=93415 s3=93751
+[VERIFY    ] CRM    OK         short=0 local=79720 s3=80056
+[VERIFY    ] CVX    OK         short=0 local=70436 s3=70777
+[VERIFY    ] GOOGL  OK         short=0 local=94242 s3=94584
+[VERIFY    ] META   OK         short=0 local=71310 s3=71650
+[VERIFY    ] MU     OK         short=0 local=93278 s3=93733
+[VERIFY    ] NFLX   OK         short=0 local=75334 s3=75677
+[VERIFY    ] NVDA   OK         short=0 local=93560 s3=93993
+[VERIFY    ] PLTR   OK         short=0 local=100972 s3=101314
+[VERIFY    ] QQQ    OK         short=0 local=93533 s3=94011
+[VERIFY    ] SPX    OK         short=0 local=104620 s3=104990
+[VERIFY    ] TSLA   OK         short=0 local=83322 s3=83678
+[VERIFY    ] UNH    OK         short=0 local=84953 s3=85308
+[PURGE     ] retention purge on 15 verified box(es)
+[PURGE     ]   AMD: [retention] removed 1,881,375 row(s) | [retention]    quote_series                 1,554,711 | [retention]    prints    
+[PURGE     ]   AMZN: [retention] removed 1,377,563 row(s) | [retention]    quote_series                   920,568 | [retention]    prints    
+[PURGE     ]   AVGO: [retention] removed 1,117,531 row(s) | [retention]    quote_series                   807,459 | [retention]    prints    
+[PURGE     ]   CRM: [retention] removed 1,171,898 row(s) | [retention]    quote_series                   928,292 | [retention]    prints    
+[PURGE     ]   CVX: [retention] removed 671,014 row(s) | [retention]    quote_series                   515,382 | [retention]    prints      
+[PURGE     ]   GOOGL: [retention] removed 1,237,005 row(s) | [retention]    quote_series                   828,296 | [retention]    prints    
+[PURGE     ]   META: [retention] removed 1,812,732 row(s) | [retention]    quote_series                 1,487,556 | [retention]    prints    
+[PURGE     ]   MU: [retention] removed 3,261,505 row(s) | [retention]    quote_series                 2,680,690 | [retention]    prints    
+[PURGE     ]   NFLX: [retention] removed 893,676 row(s) | [retention]    quote_series                   681,921 | [retention]    prints      
+[PURGE     ]   NVDA: [retention] removed 2,257,614 row(s) | [retention]    quote_series                 1,389,962 | [retention]    prints    
