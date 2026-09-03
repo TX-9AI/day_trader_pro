@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""day_trader_pro/tests/calibrate_trend_strength.py — v1.0
+"""day_trader_pro/tests/calibrate_trend_strength.py — v1.1
+v1.1  2026-09-03 — dtp r258. 🔴 THE ORB ANCHOR IS GONE, AND IT WAS CAUSING A
+      MemoryError. Finding the break bar meant querying EVERY candle for the
+      symbol since the range began — no lower bound, thousands of rows per
+      trade, past the cache's 2,000-row refusal. It cost the operator TWELVE
+      MINUTES across two runs. The window is now a BOUNDED lookback from the
+      fill, which fixes the query and the measure at once, and 10/20/30 bars
+      are swept in ONE pass because each run costs ~6 minutes.
 DOES THE TREND STRENGTH METER DISCRIMINATE? Read-only calibration.
 
 v1.0  2026-09-03 — dtp r257.
@@ -24,12 +31,12 @@ fixture a vector of pure uniform noise reached AUC 0.69 on 30 against 30. Any
 figure in the mid-0.6s at this sample size is a reason to look, never to act.
 The window matters as much as the number, so BOTH are reported.
 
-⚠️ THE WINDOW IS THE BREAK THROUGH THE FILL, which is what the runaway gate
-would actually see: the bars from the ORB break bar to the moment of entry. The
-break bar is recovered from `orb_range_high/low` on the trade row and the first
-1m close beyond it; entry_time bounds the far end. Trades whose window is
-shorter than the meter's floor are reported as NO READING and excluded, never
-scored as weak.
+⚠️ THE WINDOW IS A BOUNDED LOOKBACK FROM THE FILL — the N closed 1m bars before
+entry — and SEVERAL LENGTHS ARE SWEPT IN ONE PASS. There is NO ORB anchor:
+the opening range is the highest-volume fifteen minutes of the day and an
+afternoon tape does not inherit from it, so anchoring a momentum measure there
+imports a correlation that is not present. Trades whose window is shorter than
+the meter's floor are reported UNREADABLE and excluded, never scored as weak.
 
 ⚠️ `entry_time` IS STORED UTC (trade_logger says so three times). Parsed as UTC
 here — reading it as ET was a four-hour error in the sweep forensics that made
@@ -126,8 +133,7 @@ def main(argv):
     cache = WCACHE.WarehouseCache("trendcal")
     try:
         cache.load("trades", dates,
-                   RP.COLS + ["orb_range_high", "orb_range_low",
-                              "option_side"], datatype="trades")
+                   RP.COLS + ["option_side"], datatype="trades")
         cache.conn.execute("CREATE INDEX IF NOT EXISTS ix_tr "
                            "ON trades(strategy, status)")
         cache.conn.commit()
@@ -177,56 +183,98 @@ def _render(cache, dates, chosen, green_at, t0):
         w("  no closed trades with excursion telemetry for this selection")
         return _emit(out, dates, label, t0)
 
-    bar = Bar("measuring", len(rows))
-    green, other, no_read, no_orb = [], [], 0, 0
+    # 🔴 r258 — THE WINDOW IS A LOOKBACK FROM THE FILL, NOT AN ORB LEG.
+    # Operator, 2026-09-03: *"I'm apprehensive about marrying the trend meter
+    # to the ORB structure — the ORB range is defined by the highest volume
+    # period of the day and is not indicative of the remainder of it, and an
+    # afternoon of chop isn't preceded by a strong or weak ORB range. They're
+    # uncorrelated."* Both objections are right, and the ORB was only ever
+    # SCAFFOLDING here — `orb_range_high` was the one anchor already on the
+    # trade row. The meter itself has no concept of an opening range;
+    # `measure(bars, direction)` is a pure function of a window.
+    # 🔴 AND THE ORB ANCHOR CAUSED A MemoryError THAT COST THE OPERATOR TWELVE
+    # MINUTES ACROSS TWO RUNS. Finding "the first close beyond the boundary"
+    # meant querying EVERY bar for that symbol since the range began — no lower
+    # bound, thousands of rows per trade, straight past the cache's 2,000-row
+    # refusal. A bounded lookback fixes the window and the query at once.
+    # 🔑 SEVERAL WINDOWS IN ONE PASS, because each run costs ~6 minutes of RTH
+    # attention and re-running to try 20 bars instead of 10 is not a cost worth
+    # paying. If strength separates at ANY window that is the signal; the leg
+    # definition can be argued afterwards.
+    WINDOWS = (10, 20, 30)
+    bar = Bar("measuring", len(rows) * len(WINDOWS))
+    by_win = {w: {"green": [], "other": [], "short": 0} for w in WINDOWS}
+    scored_any = 0
     for r in rows:
-        bar.step()
         e = r["entry_premium"] or 0
         mfe, mae = r["mfe_premium"], r["mae_premium"]
         if not e or mfe is None or mae is None:
+            for _wl in WINDOWS:
+                bar.step()
             continue
         side = str(r["option_side"] or "").lower()
         direction = "long" if side.startswith("c") else "short"
-        bound = (r["orb_range_high"] if direction == "long"
-                 else r["orb_range_low"])
-        if not bound:
-            no_orb += 1
-            continue
         ets = _utc(r["entry_time"])
         if not ets:
+            for _wl in WINDOWS:
+                bar.step()
             continue
-        # window: the session's 1m bars up to the fill, from the first close
-        # beyond the boundary
-        bars = cache.query(
-            'SELECT open, high, low, close, ts_epoch_ms FROM "candles"'
-            ' WHERE symbol = ? AND interval = ? AND ts_epoch_ms <= ?'
-            ' ORDER BY ts_epoch_ms', (r["symbol"], "1m",
-                                      int(ets.timestamp() * 1000)),
-            max_rows=2000)
-        b = float(bound)
-        start = None
-        for i, x in enumerate(bars):
-            c = x["close"]
-            if c is None:
-                continue
-            if (c > b) if direction == "long" else (c < b):
-                start = i
-                break
-        if start is None:
-            no_read += 1
-            continue
-        win = [dict(x) for x in bars[start:]]
-        ts = _measure(win, direction)
-        if not ts.ok:
-            no_read += 1
-            continue
-        # 🔴 SIGNED BY STRUCTURE. A credit vertical's favourable extreme is the
-        # LOW mark (r214/r219): mfe_premium is the HIGHEST mark seen.
+        # 🔴 SIGNED BY STRUCTURE (r214/r219): a credit vertical's favourable
+        # extreme is the LOW mark, because mfe_premium is the HIGHEST seen.
         credit = (r["credit_received"] or 0) > 0
         fav = ((e - mae) / e) if credit else ((mfe - e) / e)
-        (green if fav >= green_at else other).append(ts)
-    bar.done(f"{len(green) + len(other)} measured")
+        is_green = fav >= green_at
+        end_ms = int(ets.timestamp() * 1000)
+        # ⚠️ NOT `w` — that is the report writer (`w = out.append`), and
+        # shadowing it here clobbered the writer mid-function.
+        for wl in WINDOWS:
+            bar.step()
+            # ⚠️ BOUNDED BOTH ENDS. `w + 5` minutes of slack absorbs gaps in
+            # the 1m series without unbounding the query.
+            start_ms = end_ms - (wl + 5) * 60_000
+            bars = cache.query(
+                'SELECT open, high, low, close FROM "candles"'
+                ' WHERE symbol = ? AND interval = ? '
+                ' AND ts_epoch_ms BETWEEN ? AND ?'
+                ' ORDER BY ts_epoch_ms',
+                (r["symbol"], "1m", start_ms, end_ms), max_rows=200)
+            win = [dict(x) for x in bars][-wl:]
+            ts = _measure(win, direction)
+            if not ts.ok:
+                by_win[wl]["short"] += 1
+                continue
+            by_win[wl]["green" if is_green else "other"].append(ts)
+            scored_any += 1
+    bar.done(f"{scored_any:,} readings")
 
+    w(f"  {len(rows):,} closed trades   {len(WINDOWS)} window(s) swept")
+    w("  ⚠️ WINDOW = the N closed 1m bars BEFORE the fill. No ORB anchor —")
+    w("     the opening range is a 15-minute artefact and an afternoon tape")
+    w("     does not inherit from it.")
+    w("")
+    for wlen in WINDOWS:
+        g, o, sh = (by_win[wlen]["green"], by_win[wlen]["other"],
+                    by_win[wlen]["short"])
+        small = min(len(g), len(o))
+        w(f"  ── {wlen}-BAR WINDOW ──  green {len(g)}  never-green {len(o)}"
+          f"  unreadable {sh}   limiting {small}")
+        if small < 10:
+            w("     too few to rank at this window")
+            w("")
+            continue
+        w(f"     {'component':<14} {'AUC':>6} {'med green':>11} {'med other':>11}")
+        for c in COMPONENTS:
+            gv = [getattr(x, c) for x in g if getattr(x, c) is not None]
+            ov = [getattr(x, c) for x in o if getattr(x, c) is not None]
+            auc = _auc(gv, ov)
+            if auc is None:
+                continue
+            w(f"     {c:<14} {auc:>6.2f} {_med(gv):>11.3f} {_med(ov):>11.3f}")
+        w("")
+    green = by_win[WINDOWS[-1]]["green"]
+    other = by_win[WINDOWS[-1]]["other"]
+    no_read = by_win[WINDOWS[-1]]["short"]
+    no_orb = 0
     n = len(green) + len(other)
     w(f"  {len(rows):,} closed trades   {n:,} measured")
     w(f"  no ORB boundary on the row : {no_orb:,}")

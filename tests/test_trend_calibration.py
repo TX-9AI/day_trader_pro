@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/test_trend_calibration.py — v1.0
+# day_trader_pro/tests/test_trend_calibration.py — v1.1
+# v1.1 (2026-09-03) — dtp r258. C7/C8/C9: the candle query is bounded at both
+#   ends, the window carries no ORB anchor, and several lengths are swept per
+#   run. C7 exists because an unbounded lookback threw MemoryError twice in
+#   production and cost twelve minutes.
 # v1.0 (2026-09-03) — dtp r257.
 #
 # 🔑 C1 IS THE CHECK THAT MAKES THE CALIBRATION MEAN ANYTHING: the calibrator
@@ -173,6 +177,37 @@ def main():
     check("C6 a too-short window is counted as unreadable, not weak",
           "window too short to read" in out6
           and "NOT scored weak" in out6)
+
+    # ── C7 — THE CANDLE QUERY IS BOUNDED AT BOTH ENDS ───────────────────
+    # 🔴 THE MemoryError THAT COST TWELVE MINUTES. The ORB-anchored window had
+    # to find "the first close beyond the boundary", so it queried EVERY bar
+    # for the symbol since the range began — `ts_epoch_ms <= ?` with no lower
+    # bound — thousands of rows per trade, straight past the cache's 2,000-row
+    # refusal. A check on the SQL, because the failure was in the query shape
+    # and not in any value it returned.
+    check("C7 the candle query has a lower bound",
+          "BETWEEN ? AND ?" in src and "ts_epoch_ms <= ?" not in src,
+          "an unbounded lookback is what blew the cache's row limit")
+
+    # ── C8 — NO ORB ANCHOR ──────────────────────────────────────────────
+    # ⚠️ Operator: the ORB range is the highest-volume fifteen minutes of the
+    # day and an afternoon tape does not inherit from it. Anchoring a momentum
+    # measure there imports a correlation that is not present.
+    # ⚠️ CODE LINES ONLY. The first draft matched the COMMENT explaining why
+    # the anchor was removed and failed on the very prose asserting the
+    # property — the same trap as check_fill_basis F7 and the §20 canaries.
+    _code = "\n".join(l for l in src.splitlines()
+                      if l.strip() and not l.strip().startswith("#"))
+    _code = _code.split('"""', 2)[-1]
+    check("C8 the window does not depend on the ORB range",
+          "orb_range_high" not in _code,
+          "the meter is a pure function of a bar window")
+
+    # ── C9 — SEVERAL WINDOWS IN ONE PASS ────────────────────────────────
+    # ⚠️ Each real run costs ~6 minutes of the operator's attention; re-running
+    # to try 20 bars instead of 10 is not a cost worth paying twice.
+    check("C9 more than one window length is swept per run",
+          "WINDOWS = (" in src and src.count("BAR WINDOW") >= 1)
 
     print()
     if _fails:
