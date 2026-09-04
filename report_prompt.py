@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
-# day_trader_pro/report_prompt.py — v1.1
-# v1.1 (2026-09-02) — dtp r247. The menu LOOPS: the caller can take several
+# day_trader_pro/report_prompt.py — v1.2
+# v1.2  2026-09-04 — dtp r269. `stop_premium` JOINS THE TRADES PROJECTION.
+#       It is trade_logger's "immutable entry-time floor" and is the denominator
+#       `trade_report.risk_taken` falls back to for a winner, which has no stop
+#       percentage in its exit reason.# v1.1 (2026-09-02) — dtp r247. The menu LOOPS: the caller can take several
 #   cuts off one pull, because a 49-second S3 read should not be repeated to
 #   look at a second strategy. `q` quits, and quit is a SENTINEL rather than
 #   None — None already means ALL types, and reusing it would silently run an
@@ -135,7 +138,11 @@ COLS = ["trade_id", "strategy", "setup_type", "status",
         "entry_time", "exit_time", "entry_premium", "exit_premium",
         "contracts", "pnl_usd", "pnl_pct", "exit_reason",
         "mfe_premium", "mfe_bars", "mae_premium", "mae_bars",
-        "credit_received", "spread_width"]
+        "credit_received", "spread_width",
+        # ⚠️ dtp-r269 — `stop_premium` IS THE DENOMINATOR OF THE MODIFIED R.
+        # trade_logger calls it "the immutable entry-time floor", so it is the
+        # risk the trade was OPENED with, not whatever the trail later became.
+        "stop_premium"]
 
 
 def load_trades(cache, dates):

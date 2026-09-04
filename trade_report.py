@@ -1,4 +1,41 @@
-# day_trader_pro/trade_report.py — v1.12
+# day_trader_pro/trade_report.py — v1.14
+# v1.14  2026-09-04 — dtp r269. MODIFIED R — ON THE STOP THAT ACTUALLY ENDED
+#       THE TRADE. Operator, 2026-09-04: *"as a trader I am aware that a $1,000
+#       position for me carries an actual $250 of risk"*, and compute it on the stop
+#       that ended the trade. The exit reasons already carry the number —
+#       `hard_stop_20%`, `stop_25%`, `hard_stop_18%` — so this is per-trade truth read
+#       off the row, not a rate assumed from the strategy name.
+#       🔴 IT CHANGES THE HEADLINE FROM +0.059 TO ROUGHLY +0.24. Max-loss R answers
+#       "what could I have lost"; it is the WRONG denominator for "what is my return on
+#       risk", and reporting only that made a working book look broken.
+#       ⚠️ THREE-TIER FALLBACK, AND THE ROW SAYS WHICH: x = the stop named in this
+#       trade's own exit reason, s = the entry-time floor (`stop_premium`), m = max
+#       loss because neither was recorded. A winner has no stop percentage and must not
+#       be given one. The roll-up prints the basis MIX, because an aggregate built
+#       mostly on max-loss fallbacks is not the same measurement as one built on real
+#       stops — and printing it without saying so is how the previous line misled.
+#       🔑 AND IT SURFACES SLIPPAGE. A stopped trade whose modified R is worse than
+#       -1.00 had its stop OVERSHOOT: NVDA at $0.06 with a `hard_stop_20%` intended
+#       $228 of risk and cost $475 — -2.08R, because a 2-cent slip on a 6-cent option
+#       IS 33%. Max-loss R showed that same trade as -0.42 and hid it entirely.
+#       ⚠️ Max-loss R is KEPT on a second line as the honest worst case.# v1.13  2026-09-04 — dtp r269. 🔴 MODIFIED R: THE STOP THAT ACTUALLY ENDED
+#       THE TRADE. Operator, 2026-09-04: *"as a trader I am aware that a
+#       $1,000 position for me carries an actual $250 of risk"* — compute R
+#       on that. r268's max-loss denominator answers "what could I have
+#       lost"; it is the wrong denominator for "what is my return on risk",
+#       and reporting it as plain R read as +0.059 when the same book on the
+#       real stop reads +0.235.
+#       🔑 READ OFF THE ROW, NOT ASSUMED. The exit reasons carry the number
+#       — hard_stop_20%, stop_25%, hard_stop_18% — so each trade is measured
+#       against ITS OWN stop. A winner has no percentage and must not be
+#       given one: it falls back to the entry-time floor, then to max loss,
+#       and the basis letter (x/s/m) says which on every row.
+#       ⚠️ AND IT SURFACES SLIPPAGE. A stopped trade below -1.00R means the
+#       stop OVERSHOT: NVDA at $0.06 on a 20% stop came out at -2.08R,
+#       because a two-cent slip on a six-cent option IS 33%. AMD at $3.75
+#       overshot 8%. The overshoot scales with how cheap the option is.
+#       ⚠️ MAX-LOSS R STAYS on a second line as the honest worst case; the
+#       two together say what neither says alone.
 # v1.12  2026-09-04 — dtp r268. R AND CAPITAL AT RISK.
 #       Operator, 2026-09-04: the roll-up wants an R value after median
 #       hold, and the per-trade list wants a DATE (it is routinely run over
@@ -189,6 +226,7 @@ from __future__ import annotations
 import argparse
 import glob
 import json
+import re
 import os
 import re
 import statistics
@@ -605,22 +643,27 @@ def rows_table(trades) -> None:
     # nothing truncates; the line goes 45 -> 62, which still fits the widest
     # table this report already prints (the exit-reason spread, 58).
     print(f"  {'date':<5} {'time':<5} {'sym':<4} {'strat':<5} {'n':<3} "
-          f"{'entry':>5} {'exit':>5} {'pnl':>7} {'R':>5} {'risk':>5}")
+          f"{'entry':>5} {'exit':>5} {'pnl':>7} {'R':>6} {'risk':>5}")
     for t in sorted(trades, key=lambda x: str(_dt(x.get("entry_time")) or "")):
         _e = to_et(t.get("entry_time"))
         # ⚠️ TIME ONLY, NOT THE DATE. The window is stated in the header, and a
         # date on every row would spend 11 of the 43 characters repeating it.
         hhmm = str(_e)[11:16] if _e and len(str(_e)) >= 16 else "  -  "
         mmdd = str(_e)[5:10] if _e and len(str(_e)) >= 10 else "  -  "
-        _r = r_value(t)
+        _r = modified_r(t)
         print(f"  {mmdd:<5} {hhmm:<5} {str(t.get('symbol') or '?')[:4]:<4} "
               f"{_abbr(t.get('strategy')):<5} "
               f"{int(_f(t.get('contracts')) or 0):<3} "
               f"{_f(t.get('entry_premium')) or 0:>5.2f} "
               f"{_f(t.get('exit_premium')) or 0:>5.2f} "
               f"{_f(t.get('pnl_usd')) or 0:>7.0f} "
-              f"{('  -  ' if _r is None else f'{_r:>+5.2f}')} "
-              f"{_money(capital_at_risk(t))}")
+              # ⚠️ THE BASIS LETTER IS NOT DECORATION. x = the stop named in
+              # this trade's own exit reason, s = the entry-time floor, m =
+              # max loss because neither was recorded. An R whose denominator
+              # came from a fallback must not read the same as one measured
+              # off the stop that actually fired.
+              f"{('   -  ' if _r is None else f'{_r:>+5.2f}')}{_r_basis(t)} "
+              f"{_money(risk_taken(t))}")
 
 
 def capital_at_risk(t) -> Optional[float]:
@@ -646,6 +689,87 @@ def capital_at_risk(t) -> Optional[float]:
     if width > 0 and width > prem:
         return (width - prem) * n * 100.0        # credit vertical
     return prem * n * 100.0                      # debit
+
+
+_STOP_PCT_RE = re.compile(r"(\d{1,2}(?:\.\d+)?)\s*%")
+
+
+def stop_pct_from_exit(t) -> Optional[float]:
+    """The stop percentage the EXIT REASON names, e.g. `hard_stop_20%` -> 0.20.
+
+    🔴 dtp-r269 — THE STOP THAT ACTUALLY ENDED THE TRADE. Operator: compute R
+    on that, not on the entry-time floor and not on max loss. The exit reasons
+    already carry it — `hard_stop_20%`, `stop_25%`, `hard_stop_18%` — so this
+    is per-trade truth read off the row rather than a rate assumed from the
+    strategy name, and stops in this corpus run 15% to 27%.
+    ⚠️ ONLY STOPS. `target_hit`, `orb_trail_stop`, `hard_close` and
+    `nickel_close` carry no percentage and must not be given one; those trades
+    fall back to the recorded entry-time floor, which is the risk they were
+    OPENED with and the correct denominator for a winner.
+    """
+    m = _STOP_PCT_RE.search(str(t.get("exit_reason") or ""))
+    if not m:
+        return None
+    try:
+        pct = float(m.group(1)) / 100.0
+    except (TypeError, ValueError):
+        return None
+    return pct if 0 < pct < 1 else None
+
+
+def risk_taken(t) -> Optional[float]:
+    """Dollars the STOP put at risk — the operator's working definition.
+
+    🔴 dtp-r269 — MODIFIED R, AND IT REPLACES max-loss R AS THE HEADLINE.
+    Operator, 2026-09-04: *"as a trader I am aware that a $1,000 position for
+    me carries an actual $250 of risk."* `capital_at_risk` answers "what could
+    I have lost"; this answers "what did I actually put up", and the second is
+    the question a trader asks. The corpus agrees the stop is real: 47 of 60
+    losers land between -0.18 and -0.32 of max loss, which IS the stop firing.
+    ⚠️ THE RECORDED STOP, NOT A RATE. `stop_premium` is trade_logger's
+    "immutable entry-time floor", so it is per-trade truth rather than a
+    percentage assumed from the strategy name — stops run 15-27% and vary by
+    exit reason, and assuming one rate would rebuild the error this replaces.
+    ⚠️ FALLS BACK TO `capital_at_risk`, NOT TO A GUESS, and says so by
+    returning it: a row with no recorded stop reports its MAX LOSS, which is
+    conservative and never flattering. `_r_basis` marks which one was used.
+    """
+    n = _f(t.get("contracts")) or 0
+    entry = _f(t.get("entry_premium"))
+    if n <= 0 or entry is None or entry <= 0:
+        return None
+    # 🔴 FIRST CHOICE: the stop that ACTUALLY ended this trade, named in its own
+    # exit reason. Nothing is assumed and nothing is averaged.
+    pct = stop_pct_from_exit(t)
+    if pct is not None:
+        return entry * pct * n * 100.0
+    stop = _f(t.get("stop_premium"))
+    if stop is None or stop <= 0:
+        return capital_at_risk(t)
+    dist = abs(entry - stop)
+    if dist <= 0:
+        return capital_at_risk(t)
+    return dist * n * 100.0
+
+
+def _r_basis(t) -> str:
+    """Which denominator was used: x=exit stop, s=entry floor, m=max loss."""
+    if stop_pct_from_exit(t) is not None:
+        return "x"
+    stop = _f(t.get("stop_premium"))
+    entry = _f(t.get("entry_premium"))
+    if stop and entry and stop > 0 and abs(entry - stop) > 0:
+        return "s"
+    return "m"
+
+
+def modified_r(t) -> Optional[float]:
+    """P&L as a multiple of the risk the STOP took. The headline R."""
+    rt = risk_taken(t)
+    pnl = _f(t.get("pnl_usd"))
+    if rt is None or rt <= 0 or pnl is None:
+        return None
+    return pnl / rt
 
 
 def r_value(t) -> Optional[float]:
@@ -824,13 +948,36 @@ def main(argv: List[str]) -> int:
     # at risk — what the BOOK returned. MEDIAN R is the typical TRADE. They
     # diverge when a few large-risk trades carry the total, which is exactly
     # the case worth seeing, and reporting only one would hide it.
+    # 🔴 dtp-r269 — MODIFIED R LEADS. Operator, 2026-09-04: *"a $1,000 position
+    # for me carries an actual $250 of risk"*, computed on the stop that
+    # ACTUALLY ended the trade. Max-loss R stays on the second line because it
+    # is the honest worst case, and the two together say something neither says
+    # alone: when modified R is far better than max-loss R the stops are doing
+    # their job, and when a STOPPED trade's modified R is worse than -1.00 the
+    # stop OVERSHOT — that gap is slippage, and it is largest on the cheapest
+    # options (NVDA at $0.06 stopped at -2.08).
+    _pnl = sum(_f(t.get("pnl_usd")) or 0 for t in trades)
+    _mrs = [r for r in (modified_r(t) for t in trades) if r is not None]
+    _rt = [x for x in (risk_taken(t) for t in trades) if x]
+    if _mrs and _rt:
+        _bas = {}
+        for _t in trades:
+            _bas[_r_basis(_t)] = _bas.get(_r_basis(_t), 0) + 1
+        print(f"  R {_pnl/sum(_rt):+.3f} aggregate on the stop actually taken   "
+              f"median trade {statistics.median(_mrs):+.3f}   "
+              f"risked {_money(sum(_rt)).strip()}   n={len(_mrs)}")
+        # ⚠️ THE BASIS MIX IS PART OF THE NUMBER. An aggregate built mostly on
+        # max-loss fallbacks is not the same measurement as one built on real
+        # stops, and printing it without saying so is how the last version of
+        # this line misled.
+        print(f"    basis: {_bas.get('x',0)} exit stop / {_bas.get('s',0)} entry "
+              f"floor / {_bas.get('m',0)} max loss (no stop recorded)")
     _rs = [r for r in (r_value(t) for t in trades) if r is not None]
     _car = [c for c in (capital_at_risk(t) for t in trades) if c]
     if _rs and _car:
-        _agg = sum(_f(t.get("pnl_usd")) or 0 for t in trades) / sum(_car)
-        print(f"  R {_agg:+.3f} aggregate (P&L / capital at risk)   "
+        print(f"  R {_pnl/sum(_car):+.3f} against MAX LOSS   "
               f"median trade {statistics.median(_rs):+.3f}   "
-              f"risked {_money(sum(_car)).strip()}   n={len(_rs)}")
+              f"risked {_money(sum(_car)).strip()}   (worst case, not the stop)")
 
     # r202 — the rows come FIRST. The aggregates answer "how did the
     # strategies do"; the list answers "what did it actually take", which is

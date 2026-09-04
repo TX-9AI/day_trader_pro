@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/test_r_value.py — v1.0
+# day_trader_pro/tests/test_r_value.py — v1.1
+# v1.1 (2026-09-04) — dtp r269. MODIFIED R, ON THE STOP THAT ACTUALLY ENDED
+#      THE TRADE. E1-E3 added: the exit reason's own percentage is the
+#      denominator, a winner has no percentage and must not be given one, and
+#      a nonsense percentage is refused. E1c is the one that matters — a
+#      stopped trade can report WORSE than -1.00, which is the stop
+#      overshooting, and max-loss R hid that completely.
 # v1.0 (2026-09-04) — dtp r268. R AND CAPITAL AT RISK, one definition for both
 #      reports. Operator, 2026-09-04: the roll-up wants an R value and the
 #      per-trade list wants R plus the capital that was at risk.
@@ -77,11 +83,54 @@ def main():
     else:
         check("D5 _money is always 5 chars", True)
 
+    # ══ E1 — THE STOP THAT ACTUALLY ENDED THE TRADE ═══════════════════════
+    # 🔴 dtp-r269. Operator: compute R on that, not the entry floor and not max
+    # loss. The exit reasons carry the number.
+    st = {"contracts": 190, "entry_premium": 0.06, "pnl_usd": -475.0,
+          "spread_width": 0, "exit_reason": "hard_stop_20%"}
+    check("E1 the exit reason's percentage is read",
+          abs(T.stop_pct_from_exit(st) - 0.20) < 1e-9)
+    check("E1b risk is that percentage of the premium, not the whole premium",
+          abs(T.risk_taken(st) - 228.0) < 0.01, str(T.risk_taken(st)))
+    # 🔴 THE FINDING THIS EXISTS TO SURFACE: a stop can overshoot. A 2-cent slip
+    # on a 6-cent option IS 33%, so a 20% stop cost 2.08x its intended risk.
+    check("E1c an overshooting stop reports worse than -1.00",
+          T.modified_r(st) < -2.0, f"{T.modified_r(st):.2f}")
+    check("E1d and the basis says the exit stop set it", T._r_basis(st) == "x")
+
+    # ══ E2 — A WINNER HAS NO STOP PERCENTAGE, AND MUST NOT BE GIVEN ONE ═══
+    # ⚠️ `target_hit`, `orb_trail_stop`, `hard_close`, `nickel_close` carry no
+    # number. Inventing one would make every winner's R a fiction.
+    for reason in ("target_hit", "orb_trail_stop", "hard_close", "nickel_close",
+                   "orb_structure_stop", "breach"):
+        if T.stop_pct_from_exit({"exit_reason": reason}) is not None:
+            check("E2 a non-stop exit yields no percentage", False, reason)
+            break
+    else:
+        check("E2 a non-stop exit yields no percentage", True)
+    win = {"contracts": 27, "entry_premium": 2.75, "pnl_usd": 1080.0,
+           "spread_width": 0, "exit_reason": "orb_trail_stop",
+           "stop_premium": 2.06}
+    check("E2b a winner falls back to its ENTRY-TIME floor, basis 's'",
+          T._r_basis(win) == "s" and abs(T.risk_taken(win) - 1863.0) < 1.0,
+          f"{T._r_basis(win)} {T.risk_taken(win):.0f}")
+    bare = {"contracts": 50, "entry_premium": 6.95, "pnl_usd": 2500.0,
+            "spread_width": 0, "exit_reason": "target_hit"}
+    check("E2c with neither recorded it falls back to MAX LOSS, basis 'm'",
+          T._r_basis(bare) == "m" and T.risk_taken(bare) == 34750.0)
+
+    # ══ E3 — A NONSENSE PERCENTAGE IS REFUSED ═════════════════════════════
+    # ⚠️ 0% and 100%+ are not stops. Either would produce an infinite or
+    # inverted R rather than a wrong-but-plausible one.
+    check("E3 0% and 100% are rejected",
+          T.stop_pct_from_exit({"exit_reason": "hard_stop_0%"}) is None
+          and T.stop_pct_from_exit({"exit_reason": "x_100%"}) is None)
+
     print()
     if FAILED:
         print(f"RED — {len(FAILED)} failed: {', '.join(FAILED)}")
         return 1
-    print("GREEN — 7 checks")
+    print("GREEN — 14 checks")
     return 0
 
 
