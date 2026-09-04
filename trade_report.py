@@ -1,4 +1,23 @@
-# day_trader_pro/trade_report.py — v1.11
+# day_trader_pro/trade_report.py — v1.12
+# v1.12  2026-09-04 — dtp r268. R AND CAPITAL AT RISK.
+#       Operator, 2026-09-04: the roll-up wants an R value after median
+#       hold, and the per-trade list wants a DATE (it is routinely run over
+#       five sessions, which made every row's time ambiguous), an R, and
+#       the capital that was at risk.
+#       🔴 THE DENOMINATOR IS THE STRUCTURE'S MAX LOSS, NOT THE STOP'S.
+#       Stops run 15-27%% by strategy and exit reason, so measuring against
+#       them would give a different denominator per row and make the column
+#       incomparable across strategies.
+#       ⚠️ THE ROLL-UP PRINTS TWO NUMBERS. Aggregate R is what the BOOK
+#       returned on committed capital; median R is the typical TRADE. They
+#       diverge when a few large-risk trades carry the total - SPX risked
+#       ~$35k a trade across 21, the runaway a few thousand across 202 -
+#       and reporting one would hide exactly that.
+#       ⚠️ THE DATE COLUMN REVERSES AN EARLIER NOTE that said time only,
+#       because the window is in the header. True of a single session; this
+#       report is routinely asked for five. entry/exit narrow 6->5 and pnl
+#       8->7 to pay for it: line 45 -> 60, still inside the widest table
+#       this report already prints.
 # v1.11 (2026-08-31) — r202. --rows / --rows-only: ONE LINE PER TRADE.
 #   Every report in the suite aggregated and none listed a trade, so "what
 #   did the fleet actually do today" had no answer short of reading the
@@ -575,19 +594,74 @@ def rows_table(trades) -> None:
         print("\n  (no trades in this window)")
         return
     print(f"\nTRADES TAKEN  ({len(trades)})")
-    print(f"  {'sym':<4} {'time':<5} {'strat':<5} {'n':<3} "
-          f"{'entry':>6} {'exit':>6} {'pnl':>8}")
+    # ⚠️ dtp-r268 — THE DATE IS BACK, AND THE OLD NOTE WAS RIGHT UNTIL IT WAS
+    # NOT. It read "TIME ONLY, NOT THE DATE — the window is stated in the
+    # header, and a date on every row would spend 11 of the 43 characters
+    # repeating it." True of a single-session run; this report is routinely
+    # asked for five, and then every row's time is ambiguous. MM-DD, not the
+    # full date, spends 5 rather than 11.
+    # ⚠️ ENTRY/EXIT NARROW FROM 6 TO 5 AND PNL FROM 8 TO 7 to pay for it. No
+    # premium in the corpus reaches 100.00 and no trade reaches ±100,000, so
+    # nothing truncates; the line goes 45 -> 62, which still fits the widest
+    # table this report already prints (the exit-reason spread, 58).
+    print(f"  {'date':<5} {'time':<5} {'sym':<4} {'strat':<5} {'n':<3} "
+          f"{'entry':>5} {'exit':>5} {'pnl':>7} {'R':>5} {'risk':>5}")
     for t in sorted(trades, key=lambda x: str(_dt(x.get("entry_time")) or "")):
         _e = to_et(t.get("entry_time"))
         # ⚠️ TIME ONLY, NOT THE DATE. The window is stated in the header, and a
         # date on every row would spend 11 of the 43 characters repeating it.
         hhmm = str(_e)[11:16] if _e and len(str(_e)) >= 16 else "  -  "
-        print(f"  {str(t.get('symbol') or '?')[:4]:<4} {hhmm:<5} "
+        mmdd = str(_e)[5:10] if _e and len(str(_e)) >= 10 else "  -  "
+        _r = r_value(t)
+        print(f"  {mmdd:<5} {hhmm:<5} {str(t.get('symbol') or '?')[:4]:<4} "
               f"{_abbr(t.get('strategy')):<5} "
               f"{int(_f(t.get('contracts')) or 0):<3} "
-              f"{_f(t.get('entry_premium')) or 0:>6.2f} "
-              f"{_f(t.get('exit_premium')) or 0:>6.2f} "
-              f"{_f(t.get('pnl_usd')) or 0:>8.0f}")
+              f"{_f(t.get('entry_premium')) or 0:>5.2f} "
+              f"{_f(t.get('exit_premium')) or 0:>5.2f} "
+              f"{_f(t.get('pnl_usd')) or 0:>7.0f} "
+              f"{('  -  ' if _r is None else f'{_r:>+5.2f}')} "
+              f"{_money(capital_at_risk(t))}")
+
+
+def capital_at_risk(t) -> Optional[float]:
+    """Dollars that could have been lost on this trade, at its structure's max.
+
+    🔴 dtp-r268 — ONE DEFINITION, AND IT IS THE STRUCTURE'S MAX LOSS, NOT THE
+    STOP'S. A debit risks the premium paid; a credit vertical risks
+    `(width - credit)`. The stop is what we INTEND to lose and it is honoured
+    at 15-27% depending on the strategy, so measuring against it would report a
+    different denominator per exit reason and make the column incomparable
+    across strategies — the exact failure r234 fixed in the other direction for
+    the entry gate.
+    ⚠️ AND IT IS PRINTED BESIDE THE R VALUE ON PURPOSE. A ratio whose
+    denominator is not visible is a number nobody can check.
+    ⚠️ None WHEN UNPRICEABLE, never 0.0 — an unknown risk is not a free trade,
+    and a zero would render as an infinite R.
+    """
+    n = _f(t.get("contracts")) or 0
+    prem = _f(t.get("entry_premium"))
+    if n <= 0 or prem is None or prem <= 0:
+        return None
+    width = _f(t.get("spread_width")) or 0.0
+    if width > 0 and width > prem:
+        return (width - prem) * n * 100.0        # credit vertical
+    return prem * n * 100.0                      # debit
+
+
+def r_value(t) -> Optional[float]:
+    """Realised P&L as a multiple of the capital that was at risk."""
+    car = capital_at_risk(t)
+    pnl = _f(t.get("pnl_usd"))
+    if car is None or car <= 0 or pnl is None:
+        return None
+    return pnl / car
+
+
+def _money(v) -> str:
+    """Compact dollars: 675, 7.4k, 34.8k — five characters, always."""
+    if v is None:
+        return "    -"
+    return f"{v/1000:>4.1f}k" if abs(v) >= 1000 else f"{v:>5.0f}"
 
 
 def main(argv: List[str]) -> int:
@@ -742,6 +816,21 @@ def main(argv: List[str]) -> int:
           f"worst {overall['worst']:+.2f}")
     if overall["median_hold_min"] is not None:
         print(f"  median hold {overall['median_hold_min']} min")
+    # 🔴 dtp-r268 — R IN THE ROLL-UP. Net dollars alone cannot say whether the
+    # book was efficient with the capital it committed: SPX's +12,453 came off
+    # 21 trades that risked ~$35k apiece, and the runaway's +15,721 came off
+    # 202 that risked a few thousand. Same dollars, very different use.
+    # ⚠️ TWO NUMBERS, DELIBERATELY. AGGREGATE R is total P&L over total capital
+    # at risk — what the BOOK returned. MEDIAN R is the typical TRADE. They
+    # diverge when a few large-risk trades carry the total, which is exactly
+    # the case worth seeing, and reporting only one would hide it.
+    _rs = [r for r in (r_value(t) for t in trades) if r is not None]
+    _car = [c for c in (capital_at_risk(t) for t in trades) if c]
+    if _rs and _car:
+        _agg = sum(_f(t.get("pnl_usd")) or 0 for t in trades) / sum(_car)
+        print(f"  R {_agg:+.3f} aggregate (P&L / capital at risk)   "
+              f"median trade {statistics.median(_rs):+.3f}   "
+              f"risked {_money(sum(_car)).strip()}   n={len(_rs)}")
 
     # r202 — the rows come FIRST. The aggregates answer "how did the
     # strategies do"; the list answers "what did it actually take", which is
