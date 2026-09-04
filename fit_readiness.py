@@ -1,6 +1,21 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/fit_readiness.py — v1.3
+day_trader_pro/fit_readiness.py — v1.4
+v1.4  2026-09-04 — dtp r267. TWO WRONG POPULATIONS, NEITHER A DATA
+      PROBLEM. (1) STRATEGY_ALIAS canonicalises on READ: otv4 stamped the raw
+      dispatch label on strategy_note while plans and gates used the class
+      name, so the report showed "ORB" (78 fired, ZERO declined) and
+      "ORBStrategy" (zero fired, 4,260 declined) as two strategies and
+      neither arm could ever be fittable. otv4 r239 fixes the writer; this
+      map exists because that only helps TOMORROW, and a report that cannot
+      read its own history is not a fix.
+      (2) `manage` IS NOT AN ENTRY RUNG — it is the management path declining
+      to act on an OPEN position, and it held 70%% of the butterfly's
+      refusals, 89%% of the runaway's and 100%% of two others. The verdict
+      read "one rung dominates, so there is no surface to fit": a true
+      sentence about the wrong population. Split, not dropped — the count
+      still prints, on its own line, where it cannot share a denominator
+      with an entry gate.
 # v1.3  2026-09-04 — dtp r266. 🔴 THE SECOND COLLAPSE WAS THE ONE THAT
 #       DROPPED ROWS. `SELECT * FROM t GROUP BY _rid` ran across the whole date
 #       range and undid the upstream partition-scoped collapse. Removing it
@@ -173,6 +188,26 @@ def _rows_sqlite(db, dates):
 # makes the de-dup below partition-safe: `_rid` alone repeats across sessions
 # because boxes rebuild their stores and rowids restart, but (_rid, ts) does
 # not — two sessions' row 1 have different timestamps.
+# 🔴 dtp-r267 — THE SAME SPLIT THE FLEET HAD. otv4 `_note_evaluation` stamped
+# the raw `_safe_strategy` label on `strategy_note` while the plan and gate
+# rows used the class name, so the report saw "ORB" (78 fired, ZERO declined)
+# and "ORBStrategy" (zero fired, 4,260 declined) as two strategies, and
+# neither arm could ever be fittable. otv4 r239 fixes the writer.
+# ⚠️ THIS MAP EXISTS BECAUSE THE FIX ONLY HELPS TOMORROW. Every row already in
+# the warehouse carries the old label, and a report that cannot read its own
+# history is not a fix. Mirrors `strategy/plan.py:DISPATCH_ALIAS`.
+STRATEGY_ALIAS = {
+    "ORB": "ORBStrategy",
+    "SweepForLeg2": "SweepCreditSpread",
+    "CondorPlan": "IronCondorStrategy",
+    "CondorLeg": "IronCondorStrategy",
+}
+
+
+def canon(strategy):
+    return STRATEGY_ALIAS.get(str(strategy or ""), str(strategy or ""))
+
+
 _NEED = {
     "strategy_note":    ["_rid", "ts_epoch", "strategy", "fired", "outcome",
                          "payload"],
@@ -282,7 +317,7 @@ def collect(src: dict, dates: list) -> dict:
     # that was true at the moment the engine looked. That is what makes the
     # comparison possible at all — the skipped trades have snapshots too.
     for r in src.get("strategy_note") or []:
-        strat = r.get("strategy")
+        strat = canon(r.get("strategy"))   # dtp-r267
         if not strat:
             continue
         rec = out[strat]
@@ -306,13 +341,13 @@ def collect(src: dict, dates: list) -> dict:
     for r in src.get("gate_disposition") or []:
         if str(r.get("event") or "") == "CLEARED":
             continue
-        strat, gate = r.get("strategy"), r.get("gate")
+        strat, gate = canon(r.get("strategy")), r.get("gate")   # dtp-r267
         if strat and gate:
             out[strat]["rungs"][gate] += 1
 
     # intent that never became a trade
     for r in src.get("plan_ledger") or []:
-        strat = r.get("strategy")
+        strat = canon(r.get("strategy"))   # dtp-r267
         if strat:
             out[strat]["plans"][r.get("terminal_reason") or "(live)"] += 1
     return out
@@ -330,6 +365,24 @@ def _spread(vals: list) -> str:
     return f"{p10:>8.3f} {p50:>8.3f} {p90:>8.3f}"
 
 
+# 🔴 dtp-r267 — `manage` IS NOT AN ENTRY RUNG. It is the MANAGEMENT path
+# declining to act on an OPEN position, and it swamped every strategy's
+# distribution: 70% of the butterfly's refusals, 89% of the runaway's, 100% of
+# IronCondorStrategy's and ORBStrategy's. The verdict then read "one rung
+# dominates, so there is no surface to fit" — a true sentence about the wrong
+# population. The butterfly's actual entry story was underneath it:
+# wing_search 461, entry_window 296, legs 152.
+# ⚠️ SPLIT, NOT DROPPED. A management decline is a real event and its count is
+# still printed — on its own line, where it cannot be mistaken for an entry
+# refusal or dominate a share that is computed over entries.
+MANAGEMENT_RUNGS = {"manage"}
+
+
+def entry_rungs(rungs):
+    """The rungs that describe an ENTRY decision. Management is reported apart."""
+    return {g: n for g, n in rungs.items() if g not in MANAGEMENT_RUNGS}
+
+
 def verdict(rec: dict) -> tuple:
     """(READY|NOT READY, reason). Coverage, not volume."""
     nf, nd = rec["fired"], rec["declined"]
@@ -337,9 +390,13 @@ def verdict(rec: dict) -> tuple:
         return "NOT READY", f"only {nf} fired (need ~{MIN_FIRED} for outcomes)"
     if nd < MIN_DECLINED:
         return "NOT READY", f"only {nd} declined (need ~{MIN_DECLINED})"
-    total = sum(rec["rungs"].values())
+    # ⚠️ dtp-r267 — computed over ENTRY rungs only. Including `manage` made
+    # every strategy look un-fittable for a reason that has nothing to do with
+    # its entry gates.
+    _entry = entry_rungs(rec["rungs"])
+    total = sum(_entry.values())
     if total:
-        top, n = rec["rungs"].most_common(1)[0]
+        top, n = max(_entry.items(), key=lambda kv: kv[1])
         share = n / total
         if share > MAX_RUNG_SHARE:
             # 🔴 THE FINDING THAT MATTERS MOST, AND THE ONE A ROW COUNT HIDES.
@@ -347,7 +404,7 @@ def verdict(rec: dict) -> tuple:
                     f"{share:.0%} of declines are '{top}' — one rung dominates, "
                     f"so there is no surface to fit; the data shows where the "
                     f"line IS, not where it should be")
-    if len(rec["rungs"]) < 2:
+    if len(_entry) < 2:
         return "NOT READY", "declines land on fewer than two distinct rungs"
     return "READY", f"{nf} fired / {nd} declined across {len(rec['rungs'])} rungs"
 
@@ -383,13 +440,23 @@ def render(data: dict, dates: list, only=None) -> str:
         L.append(f"    fired    {rec['fired']:>6}")
         L.append(f"    declined {rec['declined']:>6}")
 
-        if rec["rungs"]:
-            total = sum(rec["rungs"].values())
+        _entry = entry_rungs(rec["rungs"])
+        _mgmt = sum(n for g, n in rec["rungs"].items() if g in MANAGEMENT_RUNGS)
+        if _entry:
+            total = sum(_entry.values())
             L.append("")
-            L.append("    Where the refusals land:")
-            for gate, n in rec["rungs"].most_common(8):
+            L.append("    Where the ENTRY refusals land:")
+            for gate, n in sorted(_entry.items(), key=lambda kv: -kv[1])[:8]:
                 bar = "█" * max(1, int(28 * n / total))
                 L.append(f"      {gate:<26} {n:>5}  {n/total:>4.0%} {bar}")
+        elif rec["rungs"]:
+            L.append("")
+            L.append("    No ENTRY refusals recorded — every rung was management.")
+        if _mgmt:
+            # ⚠️ PRINTED, NOT DROPPED. A management decline is a real event;
+            # it is simply not evidence about an entry gate, so it does not
+            # share a denominator with one.
+            L.append(f"    (management declines, not entry: {_mgmt:>5})")
 
         if rec["plans"]:
             L.append("")
