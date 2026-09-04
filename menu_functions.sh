@@ -1,4 +1,12 @@
-# day_trader_pro/menu_functions.sh — v1.48
+# day_trader_pro/menu_functions.sh — v1.49
+# — v1.49 (2026-09-04) — dtp r270. PLAN GATES: every rung, PASS and FAIL,
+#   from S3. `gate_disposition` records ONLY the rung that refused, so the fit
+#   report's "where the refusals land" is a ranking AMONG refusals and not a
+#   failure RATE — on 2026-09-03 `geometry` was 41% of the sweep's refusals AND
+#   passed 761/761 on QQQ. `plan_check` carries both arms and r126b already
+#   pushes it, so the item runs with the FLEET DOWN.
+#   ⚠️ A MENU ITEM AND NOT A PASTED COMMAND, per the operator: Termius
+#   truncates a long paste at ~230 chars, and this one needs four prompts.
 # — v1.48 (2026-09-01) — r242. The three study/reference items added at r238
 # and r241 are removed; the tools stay in tools/ and are run from the CLI.
 # The menu is the operating loop, not a tool drawer. See menu_registry v1.7.
@@ -1099,6 +1107,33 @@ mi_sensor_decisions_now() {
 }
 
 # Plan ledger: intent and its outcome    (one/all/some)
+mi_sensor_plan_gates() {
+    # 🔴 dtp-r270 — THE HALF `gate_disposition` CANNOT SHOW. That table records
+    # only the rung that REFUSED, so the fit report's "where the refusals land"
+    # is a ranking AMONG refusals and not a failure RATE. On 2026-09-03
+    # `geometry` was 41% of the sweep's refusals AND passed 761/761 on QQQ.
+    # `plan_check` carries both arms and r126b already pushes it to S3, so this
+    # runs with the FLEET DOWN.
+    echo
+    echo "  Plan gates — every rung, PASS and FAIL, per strategy."
+    echo "  Reads the S3 warehouse; boxes stay off."
+    echo "  ⚠️ A rung at 100% FAIL is a BLOCKER. A rung that never fails is"
+    echo "     not evidence of anything — it is a gate the tape never tested."
+    echo "  ⚠️ Sessions before 2026-09-05 predate r230-r234: this says what"
+    echo "     blocked a strategy THEN, not whether it fires now."
+    read -rp "  START (YYYY-MM-DD): " D1
+    read -rp "  END   (ENTER = same day): " D2
+    read -rp "  One strategy only (ENTER = all): " ST
+    read -rp "  One symbol only   (ENTER = all): " SY
+    [ -z "$D2" ] && D2="$D1"
+    ARGS=""
+    [ -n "$D1" ] && ARGS="--from $D1 --to $D2"
+    [ -n "$ST" ] && ARGS="$ARGS --strat $ST"
+    [ -n "$SY" ] && ARGS="$ARGS --sym $SY"
+    $PY tests/screen_plan_gates.py $ARGS
+    pause
+}
+
 mi_sensor_plan_ledger() {
     echo; echo "  Source: derived_store.db -> plan_ledger"
     echo "  Plans are INTENT. A plan can produce no trade at all, or two."

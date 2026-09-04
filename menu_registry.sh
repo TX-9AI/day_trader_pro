@@ -1,5 +1,12 @@
 #!/usr/bin/env bash
-# day_trader_pro/menu_registry.sh — v1.7
+# day_trader_pro/menu_registry.sh — v1.8
+# — v1.8 (2026-09-04) — dtp r270. PLAN GATES registered in the SENSORS block,
+#   beside PLAN BOARD and Plan ledger. It answers a question neither of those
+#   can: which rungs FAIL, as a rate, with the pass count beside them.
+#   ⚠️ THIS IS NOT THE r242 CASE. r242 removed three items because a STUDY is
+#   run once to answer a question and belongs in tools/ with real arguments.
+#   This is a SENSOR — the same shape as PLAN BOARD, which is already an item —
+#   and it is how you find out why a strategy has not fired.
 # — v1.7 (2026-09-01) — r242. 🔴 THE THREE ITEMS r238/r241 ADDED ARE REMOVED.
 # Operator, 2026-09-01: "don't keep adding more shit to devtools. We run those
 # as separate studies from the CLI."
@@ -100,6 +107,7 @@ MENU=(
   "ITEM|PLAN BOARD            (every plan, every check, per tick)|mi_sensor_plan_board"
   "ITEM|DECISIONS NOW         (enter on / exit on, live snapshot)|mi_sensor_decisions_now"
   "ITEM|Plan ledger           (intent + terminal reason)|mi_sensor_plan_ledger"
+  "ITEM|PLAN GATES            (every rung, PASS and FAIL, from S3)|mi_sensor_plan_gates"
   "ITEM|Exit counterfactual   (flow vs the stop)|mi_sensor_exit_counterfactual"
   "ITEM|Fire snapshot         (derived vector at entry)|mi_sensor_fire_snapshot"
   "ITEM|Surface               (charm / vanna / GEX)|mi_sensor_surface"
