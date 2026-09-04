@@ -1,6 +1,13 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/fit_readiness.py  v1.2
+day_trader_pro/fit_readiness.py — v1.3
+# v1.3  2026-09-04 — dtp r266. 🔴 THE SECOND COLLAPSE WAS THE ONE THAT
+#       DROPPED ROWS. `SELECT * FROM t GROUP BY _rid` ran across the whole date
+#       range and undid the upstream partition-scoped collapse. Removing it
+#       outright let a re-pushed object DOUBLE-COUNT (caught by
+#       test_fit_readiness_memory M4), so the de-dup returns on (_rid, ts): two
+#       sessions' row 1 have different timestamps, one object pushed twice does
+#       not. `_NEED` gains the timestamp column per table to make that possible.
 Per setup type: what fired, what was declined, and whether it is FITTABLE yet.
 
 v1.2  2026-09-02  dtp r245 — 🔴 OOM-KILLED TWICE ON THE SAME RANGE, FROM
@@ -11,7 +18,8 @@ v1.2  2026-09-02  dtp r245 — 🔴 OOM-KILLED TWICE ON THE SAME RANGE, FROM
   8 bytes a value against ~32 for a boxed float, quantiles still exact.
   (2) `load_derived` materialised all three tables. They stream through
   warehouse_cache now, projected to the columns actually read, with the CDC
-  collapse preserved as GROUP BY _rid.
+  collapse preserved UPSTREAM in load_derived, scoped to its partition
+  by (symbol, dt, _rid) — r266. It is NOT repeated here.
   ⚠️ r240 ADDED A PROGRESS METER HERE AND I SAID AT THE TIME IT MAKES THE WAIT
   VISIBLE, NOT SMALLER. It did exactly that and the operator was killed again.
   A meter on a known memory fault is instrumentation standing in for a fix.
@@ -161,11 +169,18 @@ def _rows_sqlite(db, dates):
     return src, notes
 
 
+# ⚠️ r266 — THE TIMESTAMP COLUMN IS PART OF THE PROJECTION NOW. It is what
+# makes the de-dup below partition-safe: `_rid` alone repeats across sessions
+# because boxes rebuild their stores and rowids restart, but (_rid, ts) does
+# not — two sessions' row 1 have different timestamps.
 _NEED = {
-    "strategy_note":    ["_rid", "strategy", "fired", "outcome", "payload"],
-    "gate_disposition": ["_rid", "strategy", "gate", "event"],
-    "plan_ledger":      ["_rid", "strategy", "terminal_reason"],
+    "strategy_note":    ["_rid", "ts_epoch", "strategy", "fired", "outcome",
+                         "payload"],
+    "gate_disposition": ["_rid", "ts_epoch", "strategy", "gate", "event"],
+    "plan_ledger":      ["_rid", "created_ts", "strategy", "terminal_reason"],
 }
+_DEDUP_TS = {"strategy_note": "ts_epoch", "gate_disposition": "ts_epoch",
+             "plan_ledger": "created_ts"}
 
 
 def _rows_warehouse(dates, cache):
@@ -181,8 +196,10 @@ def _rows_warehouse(dates, cache):
 
     ⚠️ THE CDC COLLAPSE IS PRESERVED, IN SQL. `load_derived` keeps one row per
     `_rid`; dropping it would double-count any record pushed twice and inflate
-    every number in the report. `GROUP BY _rid` does the same job without
-    holding the range in a dict.
+    every number in the report. ⚠️ r266 — IT IS NOT REPEATED HERE. A second
+    `GROUP BY _rid` cannot carry the partition, and rowids restart when a box
+    rebuilds its store, so re-collapsing across a range folded whole sessions
+    together and undid the upstream fix.
     ⚠️ AND THE PER-TABLE SOURCE BANNER SURVIVES. An unreachable bucket and a
     session with no evaluations must never render the same — this report's own
     stated contract, and a rewrite is exactly when that gets lost.
@@ -196,17 +213,40 @@ def _rows_warehouse(dates, cache):
                          f"{type(exc).__name__}: {exc}")
             src[t] = []
             continue
-        uniq = cache.query(f'SELECT COUNT(*) c FROM'
-                           f' (SELECT 1 FROM "{t}" GROUP BY _rid)')[0]["c"]
+        # 🔴 dtp-r266 — THIS SECOND COLLAPSE WAS THE ONE THE REPORT PRINTED,
+        # AND IT WAS WRONG THE SAME WAY THE READER WAS. `_rid` is the source
+        # table's sqlite `rowid`, unique only within ONE box's table at ONE
+        # moment; boxes purge and rebuild, so rowids restart and a GROUP BY
+        # across a multi-day range folds different sessions' rows together.
+        # It reported 325,762 -> 37,584 on 08-31..09-04 and made the butterfly
+        # look like 2 fires when the trade log has 20.
+        # ⚠️ THE COLLAPSE NOW HAPPENS ONCE, UPSTREAM, PARTITION-SCOPED, in
+        # `warehouse_reader.load_derived`. Repeating it here on a key that
+        # cannot carry the partition would undo that fix silently — so the
+        # banner reports what was LOADED and names where the collapse ran,
+        # rather than recomputing it against a key that does not identify a row.
+        uniq = cache.query(f'SELECT COUNT(*) c FROM (SELECT 1 FROM "{t}"'
+                           f' GROUP BY _rid, {_DEDUP_TS[t]})')[0]["c"]
         notes.append(f"SOURCE: s3 [{t}] — {n:,} row(s), "
-                     f"{uniq:,} after collapse by _rid")
+                     f"{uniq:,} after collapse by (_rid, ts)")
         # ⚠️ PLAIN DICTS, NOT sqlite3.Row. `collect()`'s own docstring says it
         # "takes plain dicts and knows nothing about the source", and that is
         # what keeps the local and warehouse runs from drifting into two
         # different sets of numbers. A Row has no `.get`, so handing one over
         # would both break it and quietly violate that contract.
         src[t] = (dict(r) for r in
-                  cache.iter(f'SELECT * FROM "{t}" GROUP BY _rid'))
+                  # 🔴 dtp-r266 — THE `GROUP BY _rid` IS GONE, AND THIS WAS
+                  # THE LINE THAT ACTUALLY DROPPED ROWS. `_rid` is the source
+                  # table's sqlite rowid, unique only within ONE box's table
+                  # at ONE moment; boxes purge and rebuild, so grouping on it
+                  # across a multi-day range folded different sessions
+                  # together. `load_derived` already collapses CDC correctly,
+                  # scoped to its partition by (symbol, dt, _rid), so doing it
+                  # again here on a key that cannot carry the partition
+                  # silently undid that. Measured: the report read 2 fired
+                  # GEX butterflies where the trade log has 20.
+                  cache.iter(f'SELECT * FROM "{t}"'
+                             f' GROUP BY _rid, {_DEDUP_TS[t]}'))
     return src, notes
 
 

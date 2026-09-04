@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-# day_trader_pro/warehouse_reader.py — v1.8
+# day_trader_pro/warehouse_reader.py — v1.9
+# v1.9  2026-09-04 — dtp r266. 🔴 THE CDC COLLAPSE KEY NOW CARRIES THE
+#       PARTITION. `_rid` is the source table's sqlite `rowid` (otv4
+#       s3_push:945), unique only within ONE box's table at ONE moment — boxes
+#       purge and rebuild, so rowids RESTART every session and (QQQ, 1) on 09-01
+#       collided with (QQQ, 1) on 09-04, later push winning. Measured
+#       08-31..09-04: strategy_note 325,762 rows -> 37,584, and the fit report
+#       read 2 fired GEX butterflies against 20 in the trade log. The collapse
+#       itself is correct and stays; only its SCOPE was wrong.
 # v1.8 (2026-09-01) — r240. PROGRESS ON THE SHARED FETCH PATH. Operator:
 #   "the S3 options in devtools need a progress meter, some of them run
 #   long" — 53.5s for one date, measured. fit_readiness, pnl_s3,
@@ -313,7 +321,21 @@ def load_derived(table, dates, s3=None, forward=None):
             for r in (env.get("record") or []):
                 if not isinstance(r, dict):
                     continue
-                key = (sym, r.get("_rid"))
+                # 🔴 dtp-r266 — THE PARTITION DATE IS PART OF THE KEY. `_rid`
+                # is the SOURCE TABLE'S sqlite `rowid` (s3_push:945,
+                # `SELECT rowid AS _rid, *`), which is unique only within ONE
+                # box's table at ONE moment. Boxes purge and rebuild their
+                # derived stores, so rowids RESTART — (QQQ, 1) on 09-01 and
+                # (QQQ, 1) on 09-04 collided, and the later `pushed_at_utc`
+                # silently won. Measured on the 08-31..09-04 range:
+                # strategy_note 325,762 rows collapsed to 37,584, and the fit
+                # report read 2 fired butterflies where the trade log has 20.
+                # ⚠️ THE COLLAPSE ITSELF IS CORRECT AND STAYS — CDC pushes the
+                # same row repeatedly and only the latest state should survive.
+                # What was wrong is the SCOPE: latest-per-rowid WITHIN a
+                # partition, never across partitions, because two partitions
+                # are two different days of a table whose rowids repeat.
+                key = (sym, d, r.get("_rid"))
                 if key not in best or stamp >= best[key][0]:
                     best[key] = (stamp, sym, r)
 

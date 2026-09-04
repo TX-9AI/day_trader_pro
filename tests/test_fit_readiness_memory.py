@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/test_fit_readiness_memory.py — v1.0
+# day_trader_pro/tests/test_fit_readiness_memory.py — v1.1
+# v1.1 (2026-09-04) — dtp r266. M3 RE-DERIVED. It matched the banner string
+#      "after collapse by _rid" — the label for a collapse that was WRONG,
+#      because `_rid` is the source table's sqlite rowid and repeats across
+#      sessions when a box rebuilds its store. Asserting that string would
+#      have kept the defect green. The de-dup now keys on (_rid, ts) and the
+#      banner says so; M4 is UNCHANGED and is what caught the first cut, where
+#      removing the second collapse outright let a re-pushed object
+#      double-count.
 # v1.0 (2026-09-02) — dtp r245. THE REPORT SURVIVES ITS OWN RANGE.
 #
 # 🔴 OOM-KILLED TWICE ON 2026-08-24..09-01, FROM TWO INDEPENDENT CAUSES, AND
@@ -111,9 +119,16 @@ def main():
     # ── M3 — the per-table SOURCE banner survives ───────────────────────
     # This report's own contract: an unreachable bucket and a session with no
     # evaluations must never render the same.
+    # 🔴 M3 RE-DERIVED AT dtp-r266. It matched "after collapse by _rid" — the
+    # banner for a collapse that was WRONG: `_rid` is the source table's sqlite
+    # rowid, unique only within one box's table at one moment, so grouping on
+    # it across a multi-day range folded different sessions together and made
+    # the butterfly read 2 fires against 20 real trades. The collapse now runs
+    # ONCE, upstream, scoped to its partition. Asserting the old string would
+    # have kept the defect green.
     check("M3 a SOURCE line still prints per stream",
           out.count("SOURCE: s3 [") == 3
-          and "after collapse by _rid" in out)
+          and "after collapse by (_rid, ts)" in out)
 
     # ── M4 — the CDC collapse is preserved ──────────────────────────────
     # Dropping it would double-count anything pushed twice and inflate every
