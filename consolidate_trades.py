@@ -1,4 +1,5 @@
-# day_trader_pro/consolidate_trades.py — v1.3
+# day_trader_pro/consolidate_trades.py — v1.4
+# v1.4 (2026-09-05) — dtp r287 / TZ.1 — the naive `today` here asked a UTC box and rolled at 20:00 ET (19:00 in winter), so a report run after that silently asked for TOMORROW and came back empty. It now goes through `ettime`, the one ET/UTC boundary.
 # v1.3   (2026-08-03) — DOC ONLY, no behaviour change. Two stale claims in the
 #        docstring, both of the kind that cost real time on 2026-08-03: the
 #        source line put the date BEFORE the _trades token in the raw DB
@@ -69,6 +70,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import config
+import ettime                                            # noqa: E402
 
 _ET = ZoneInfo("US/Eastern")
 SELECTION_LOG = os.path.join(config.DATA_DIR, "selection_log.jsonl")
@@ -77,7 +79,7 @@ _DB_RE = re.compile(r"^(?P<sym>.+)_trades_(?P<date>\d{4}-\d{2}-\d{2})\.db$")
 
 
 def _today_et():
-    return datetime.now(_ET).strftime("%Y-%m-%d")
+    return ettime.today_et()
 
 
 def _read_table(conn, table, date=None, date_col=None):

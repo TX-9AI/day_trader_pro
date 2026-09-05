@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/pnl_s3.py  v1.0
+day_trader_pro/pnl_s3.py  v1.1
+v1.1  2026-09-05 — dtp r287 / TZ.1 — the naive `today` here asked a UTC box and rolled at 20:00 ET (19:00 in winter), so a report run after that silently asked for
+      TOMORROW and came back empty. It now goes through `ettime`, the one ET/UTC boundary.
+
 P&L for a day or a range, read FROM THE WAREHOUSE. No boxes involved.
 
 v1.0  2026-08-25  Operator: "I want the P&L to come from S3 and notify via
@@ -45,6 +48,7 @@ from datetime import date as _date, datetime, timedelta
 
 import config                                                   # noqa: E402
 import warehouse_reader as wr                                   # noqa: E402
+import ettime                                            # noqa: E402
 
 try:
     import notify
@@ -79,7 +83,7 @@ def _dates(a) -> list:
             out.append(d.isoformat())
             d += timedelta(days=1)
         return out
-    return [_date.today().isoformat()]
+    return [ettime.today_et()]
 
 
 def collect(dates: list) -> tuple:

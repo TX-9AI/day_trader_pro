@@ -1,4 +1,7 @@
-# day_trader_pro/orchestrator.py — v0.4.0
+# day_trader_pro/orchestrator.py — v0.5.0
+# v0.5.0 (2026-09-05) — dtp r287 / TZ.1 — the naive `today` here asked a UTC box and rolled at 20:00 ET
+#   (19:00 in winter), so anything run after that silently asked for TOMORROW and came
+#   back empty. It now goes through `ettime`, the one ET/UTC boundary.
 # v0.4.0 (2026-07-30) — FLEET PARITY AT WAKE. One line in the morning ack saying
 #   whether the boxes that will trade today are on the code you think they are:
 #   "parity: 15/15 on ba2761d" or "⚠ BEHIND/AHEAD: AAPL(9912c90)". Rides the SSH
@@ -89,6 +92,7 @@ import ec2ops
 import instance_registry
 import market_calendar
 import notify
+import ettime                                            # noqa: E402
 
 
 def run(dry_run=False, gate=True):
@@ -193,7 +197,7 @@ def _report_date_et():
     """Today's date in ET as the reporter stamps it (YYYY-MM-DD)."""
     import datetime as _dt
     from zoneinfo import ZoneInfo as _Z
-    return _dt.datetime.now(_Z("America/New_York")).strftime("%Y-%m-%d")
+    return ettime.today_et()
 
 
 def _load_selection():
@@ -382,7 +386,7 @@ def _push_brief_flags(resolved, reached, brief_strength):
                      if st == "running" and ip}
     except Exception:  # noqa: BLE001
         return
-    today = _dt.date.today().isoformat()
+    today = ettime.today_et()
     for sym, iid in resolved.items():
         if not reached.get(iid):
             continue

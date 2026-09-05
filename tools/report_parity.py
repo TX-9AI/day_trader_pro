@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-# day_trader_pro/tools/report_parity.py — v1.5
+# day_trader_pro/tools/report_parity.py — v1.6
+# v1.6 (2026-09-05) — dtp r287 / TZ.1 — the naive `today` here asked a UTC box and rolled at 20:00 ET (19:00 in winter), so a report run after that silently asked for TOMORROW and came back empty. It now goes through `ettime`, the one ET/UTC boundary.
 # v1.5 (2026-08-29) — r187 / dtp r228. PASS --all-history TO REPORT 41 ON
 #      BOTH SIDES. trade_report v1.9 applies a 2026-08-25 engine-epoch floor
 #      by default. Symmetric filtering would not have broken the COMPARISON
@@ -93,6 +94,11 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 
 import config  # noqa: E402
+# ⚠️ ONE LEVEL DOWN, so the repo root has to be on the path before `ettime`
+# resolves — a tool that imports fine from the root and not from `tools/` is a
+# tool that works until somebody runs it the other way.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import ettime                                            # noqa: E402
 
 PY = sys.executable
 WAREHOUSE_DIR = os.path.join(config.REPORTS_DIR, "warehouse")
@@ -314,7 +320,8 @@ def main(argv):
         days = [a.date]
     elif a.since:
         d0 = date.fromisoformat(a.since)
-        d1 = date.fromisoformat(a.to) if a.to else date.today()
+        d1 = (date.fromisoformat(a.to) if a.to
+              else date.fromisoformat(ettime.today_et()))
         days = []
         while d0 <= d1:
             if d0.weekday() < 5:

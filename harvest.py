@@ -1,4 +1,7 @@
-# day_trader_pro/harvest.py — v0.6.3
+# day_trader_pro/harvest.py — v0.7.3
+# v0.7.3 (2026-09-05) — dtp r287 / TZ.1 — the naive `today` here asked a UTC box and rolled at 20:00 ET
+#   (19:00 in winter), so anything run after that silently asked for TOMORROW and came
+#   back empty. It now goes through `ettime`, the one ET/UTC boundary.
 # v0.6.3 — 2026-08-05 — TRIM THE PULLED trades.db TO ONE TRADING DAY.
 #   The box DB is cumulative by design; the fault was copying the whole file
 #   into a DATED folder, so every dated artifact contained all history. Reading
@@ -104,6 +107,7 @@ import consolidate_trades
 import instance_registry
 import notify
 import ssh_util
+import ettime                                            # noqa: E402
 
 _ET = ZoneInfo("US/Eastern")
 SELECTION_LOG = os.path.join(config.DATA_DIR, "selection_log.jsonl")
@@ -113,7 +117,7 @@ REMOTE_REPO = "options-trader"
 
 
 def _today_et():
-    return datetime.now(_ET).strftime("%Y-%m-%d")
+    return ettime.today_et()
 
 
 def _pull(ip):

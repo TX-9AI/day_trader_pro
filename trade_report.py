@@ -1,4 +1,5 @@
-# day_trader_pro/trade_report.py — v1.14
+# day_trader_pro/trade_report.py — v1.15
+# v1.15 (2026-09-05) — dtp r287 / TZ.1 — the naive `today` here asked a UTC box and rolled at 20:00 ET (19:00 in winter), so a report run after that silently asked for TOMORROW and came back empty. It now goes through `ettime`, the one ET/UTC boundary.
 # v1.14  2026-09-04 — dtp r269. MODIFIED R — ON THE STOP THAT ACTUALLY ENDED
 #       THE TRADE. Operator, 2026-09-04: *"as a trader I am aware that a $1,000
 #       position for me carries an actual $250 of risk"*, and compute it on the stop
@@ -234,6 +235,7 @@ import sys
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
+import ettime                                            # noqa: E402
 
 try:
     import config
@@ -1067,7 +1069,7 @@ def main(argv: List[str]) -> int:
             "exit_concentration": conc,
         }
         os.makedirs(REPORTS_DIR, exist_ok=True)
-        stamp = used[-1][0] if used else datetime.now().strftime("%Y-%m-%d")
+        stamp = used[-1][0] if used else ettime.today_et()
         tag = "warehouse_" if args.bundles_dir else ""
         payload["source"] = ("warehouse:" + src_dir
                              if src_dir == WAREHOUSE_DIR

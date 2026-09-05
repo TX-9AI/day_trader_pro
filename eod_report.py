@@ -1,4 +1,7 @@
-# day_trader_pro/eod_report.py — v0.2
+# day_trader_pro/eod_report.py — v0.3
+# v0.3 (2026-09-05) — dtp r287 / TZ.1 — the naive `today` here asked a UTC box and rolled at 20:00 ET
+#   (19:00 in winter), so anything run after that silently asked for TOMORROW and came
+#   back empty. It now goes through `ettime`, the one ET/UTC boundary.
 """
 v0.2 — 2026-08-13 — WH.4: THE TRADED BOXES ARE VERIFIED BEFORE THEY GO DARK.
        These are the boxes holding chains, the signal journal, shadow and
@@ -43,12 +46,13 @@ import ec2ops
 import instance_registry
 import notify
 import ssh_util
+import ettime                                            # noqa: E402
 
 _ET = ZoneInfo("US/Eastern")
 
 
 def _today_et():
-    return datetime.now(_ET).strftime("%Y-%m-%d")
+    return ettime.today_et()
 
 
 # --------------------------------------------------------------------------

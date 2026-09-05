@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/eod_analysis.py  v1.3
+day_trader_pro/eod_analysis.py  v1.4
+v1.4  2026-09-05 — dtp r287 / TZ.1 — the naive `today` here asked a UTC box and rolled at 20:00 ET (19:00 in winter), so a report run after that silently asked for
+      TOMORROW and came back empty. It now goes through `ettime`, the one ET/UTC boundary.
+
 The reports. Runs AFTER the boxes are down, reads the warehouse.
 
 v1.3  2026-09-05  dtp r285 / S3.12 — THE PER-STREAM COVERAGE BOARD JOINS THE
@@ -117,6 +120,7 @@ from datetime import datetime
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import config                                                   # noqa: E402
+import ettime                                            # noqa: E402
 try:
     import notify
 except Exception:                                               # noqa: BLE001
@@ -440,7 +444,7 @@ def _weeks_ago(date: str, n: int) -> str:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--date", default=datetime.now().strftime("%Y-%m-%d"))
+    ap.add_argument("--date", default=ettime.today_et())
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args(argv[1:] if argv else None)
     return run(a.date, a.dry_run)

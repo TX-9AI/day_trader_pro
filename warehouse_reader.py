@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-# day_trader_pro/warehouse_reader.py — v2.0
+# day_trader_pro/warehouse_reader.py — v2.1
+# v2.1 (2026-09-05) — dtp r287 / TZ.1. `et_day` and `et_bounds` MOVED TO
+#   `ettime` and are re-exported here. They are the ET/UTC boundary, and this
+#   module cannot own it: `warehouse_reader` imports `market_calendar`, which
+#   now asks the boundary what "today" is, so keeping them here closed an
+#   import cycle the moment the boundary existed. Callers importing them from
+#   this name since r184 are unaffected — one implementation, dependency
+#   pointing one way.
 # v2.0  2026-09-05 — dtp r276. 🔴 THE CDC COLLAPSE KEYS ON THE TABLE'S OWN
 #       DECLARED PRIMARY KEY. `_rid` was never an identity — it is the source
 #       table's sqlite `rowid`, and r266 scoped it to the partition to stop two
@@ -286,28 +293,13 @@ class WhMeta:
         return "%s — %s" % (head, tail)
 
 
-def et_day(ts) -> str:
-    """A unix epoch -> the ET TRADING DAY it belongs to.
-
-    ⚠️ THE PREDICATE IS AN EXCHANGE FACT, NOT A DISPLAY CHOICE. Every
-    ts_epoch in the derived store is UTC seconds and the control box runs
-    UTC, so a naive `datetime.fromtimestamp(ts).date()` rolls the day at
-    20:00 ET — the long-standing symptom that a report for "today" run
-    after the close comes back wrong. Convert explicitly; never lean on the
-    ambient clock.
-    """
-    try:
-        return (datetime.fromtimestamp(float(ts), tz=timezone.utc)
-                .astimezone(_ET).date().isoformat())
-    except (TypeError, ValueError, OSError, OverflowError):
-        return ""
-
-
-def et_bounds(d0: str, d1: str) -> tuple:
-    """[start, end) epoch seconds spanning the ET days d0..d1 inclusive."""
-    a = datetime.strptime(d0, "%Y-%m-%d").replace(tzinfo=_ET)
-    b = datetime.strptime(d1, "%Y-%m-%d").replace(tzinfo=_ET) + timedelta(days=1)
-    return a.timestamp(), b.timestamp()
+# 🔑 r287 — `et_day` AND `et_bounds` MOVED TO `ettime`, WHICH IS NOW THE ONE
+# BOUNDARY between operator time and machine time. They are re-exported here
+# because this module's callers have imported them from this name since r184,
+# and a rename would be churn for no gain. What matters is that there is ONE
+# implementation: five private copies of "what is today in ET" is how nine
+# other sites ended up with none.
+from ettime import et_bounds, et_day                      # noqa: E402,F401
 
 
 # A row is dated by the column that says when the THING happened. A plan is

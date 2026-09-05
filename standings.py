@@ -1,4 +1,5 @@
-# day_trader_pro/standings.py — v1.5
+# day_trader_pro/standings.py — v1.6
+# v1.6 (2026-09-05) — dtp r287 / TZ.1 — the naive `today` here asked a UTC box and rolled at 20:00 ET (19:00 in winter), so a report run after that silently asked for TOMORROW and came back empty. It now goes through `ettime`, the one ET/UTC boundary.
 # v1.5 (2026-09-02) — dtp r250. 🔴 `exit_price` IS NOT A COLUMN. The trades
 #   table has 82 columns and the exit mark is `exit_premium`; I invented
 #   `exit_price` in r236 and it has been in every version since. Verified now
@@ -104,6 +105,7 @@ import config
 import instance_registry
 import notify
 import ssh_util
+import ettime                                            # noqa: E402
 
 _ET = ZoneInfo("US/Eastern")
 
@@ -358,7 +360,7 @@ def run(send=False):
     errs = []
 
     off = _et_offset()
-    today_et = datetime.now(_ET).strftime("%Y-%m-%d")
+    today_et = ettime.today_et()
     all_open, all_ghost, all_closed = [], [], []
 
     for sym in sorted(running):

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/eod_conductor_v2.py — v2.3
+day_trader_pro/eod_conductor_v2.py — v2.4
+v2.4  2026-09-05 — dtp r287 / TZ.1 — the naive `today` here asked a UTC box and rolled at 20:00 ET (19:00 in winter), so a report run after that silently asked for TOMORROW and came back empty. It now goes through `ettime`, the one ET/UTC boundary.
 STOP TRADING → FILL THE BUCKET → VERIFY IT LANDED → TAKE THEM DOWN.
 
 v2.3    2026-09-05  🔴 `head -3` ATE THE CAUSE OF EVERY PURGE FAILURE. The phase
@@ -45,6 +46,7 @@ v2.2    2026-09-05  RELEASE THE STORES BEFORE RECLAIMING THEM. The purge has
 
 v2.1    2026-08-27  THE RETENTION PURGE IS A CONDUCTOR PHASE. It was called
 from warehouse/self_close.py, which fires at 16:45 — but this conductor stops
+import ettime                                            # noqa: E402
 the boxes by ~16:08, so on any NORMAL night that timer fired into a stopped
 machine and THE PURGE NEVER RAN. It executed only on nights the conductor had
 already failed. Two months of "dry runs" were therefore also two months of no
@@ -480,7 +482,7 @@ def main(argv=None) -> int:
                     help="seconds between stopping the bot and draining")
     a = ap.parse_args(argv[1:] if argv else None)
 
-    date = datetime.now().strftime("%Y-%m-%d")
+    date = ettime.today_et()
     dry = a.dry_run
     _log("START", f"EOD conductor v2 — {date}" + ("  [DRY-RUN]" if dry else ""))
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/excursion_report.py — v3.5 — MFE/MAE distributions from the
+day_trader_pro/excursion_report.py — v3.6 — MFE/MAE distributions from the
+v3.6  2026-09-05 — dtp r287 / TZ.1 — the naive `today` here asked a UTC box and rolled at 20:00 ET (19:00 in winter), so a report run after that silently asked for TOMORROW and came back empty. It now goes through `ettime`, the one ET/UTC boundary.
 fleet's trade records, per-box DBs or a bundle.
 
 v3.5 — 2026-08-29 — r186 / dtp r227. 🔴 THE PROVENANCE LINE WAS DESTROYED BY
@@ -250,6 +251,7 @@ import sys
 from datetime import date, datetime
 from statistics import mean, median
 from typing import Optional
+import ettime                                            # noqa: E402
 
 SCRIPT_DIR   = os.path.dirname(os.path.abspath(__file__))
 REPORTS_DIR  = os.path.join(SCRIPT_DIR, "reports")
@@ -874,7 +876,7 @@ def build_report(rows, day, src, skipped, mode, hints=None,
 def main():
     ap = argparse.ArgumentParser(description="MFE/MAE report from the "
                                              "consolidated fleet trades file")
-    ap.add_argument("--date", default=date.today().isoformat(),
+    ap.add_argument("--date", default=ettime.today_et(),
                     help="snapshot day, YYYY-MM-DD (default today)")
     ap.add_argument("--since",
                     help="cumulative: include trades entered ON/AFTER this "

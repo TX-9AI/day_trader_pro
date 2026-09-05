@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/fit_readiness.py — v1.5
+day_trader_pro/fit_readiness.py — v1.6
+v1.6  2026-09-05 — dtp r287 / TZ.1 — the naive `today` here asked a UTC box and rolled at 20:00 ET (19:00 in winter), so a report run after that silently asked for TOMORROW and came back empty. It now goes through `ettime`, the one ET/UTC boundary.
 v1.5  2026-09-05 — dtp r286 / S3.11. 🔴 THE SOURCE BANNER DESCRIBED A COLLAPSE
       THAT NEVER TOUCHED THIS REPORT'S DATA. It printed "N after collapse by
       (_rid, ts)" — a number computed over the cache — while the docstring
@@ -89,6 +90,7 @@ v1.0  2026-08-25  Replaces `fit_report.py`, which is obsolete — see below.
 🔴 WHY THE OLD FIT REPORT CANNOT ANSWER THIS. It bundled a trade breakdown, an
 excursion read and a (long dead) v3 section into one text file, all sourced
 from `trades`. But `trades` is the population that FIRED. **The question "is
+import ettime                                            # noqa: E402
 this setup ready to fit?" is mostly answered by the population that did NOT** —
 and `strategy_note`, `gate_disposition` and `plan_ledger` did not exist when
 that report was written.
@@ -174,7 +176,7 @@ def _dates(a) -> list:
             out.append(d.isoformat())
             d += timedelta(days=1)
         return out
-    return [datetime.now().strftime("%Y-%m-%d")]
+    return [ettime.today_et()]
 
 
 TABLES = ("strategy_note", "gate_disposition", "plan_ledger")
