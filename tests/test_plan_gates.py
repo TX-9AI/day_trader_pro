@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/test_plan_gates.py — v1.1
+# day_trader_pro/tests/test_plan_gates.py — v1.2
+# v1.2 (2026-09-04) — dtp r272. Q1 pins the quantiles with two distributions
+#      that share a range and give OPPOSITE answers — the case a min/max
+#      cannot distinguish and the reason the panel exists.
 # v1.1 (2026-09-04) — dtp r271. T1/T2 pin the PER-TICK grouping, including
 #      the case that matters: a long and a short plan evaluated in the SAME
 #      millisecond must not merge, because plan_check's key includes
@@ -110,11 +113,35 @@ def main():
     check("T2 the sole failing rung on a one-away tick is named",
           only == {"geometry": 1}, str(only))
 
+    # ══ Q1 — THE QUANTILES, WHICH A MIN/MAX CANNOT GIVE ══════════════════
+    # 🔴 dtp-r272. Two distributions with the SAME range and opposite answers:
+    # r234's bar sits at 0.15 on the old scale, so one of these mostly clears
+    # it and the other mostly does not. A min/max reports them identically.
+    def q(vals):
+        v = sorted(vals)
+        return [v[min(len(v) - 1, int(len(v) * f))]
+                for f in (0.10, 0.25, 0.50, 0.75, 0.90)]
+    low  = [0.0, 0.9841] + [0.02] * 98      # range 0..0.9841, median 0.02
+    high = [0.0, 0.9841] + [0.60] * 98      # SAME range, median 0.60
+    check("Q1 identical ranges, different medians",
+          min(low) == min(high) and max(low) == max(high)
+          and q(low)[2] != q(high)[2], f"{q(low)[2]} vs {q(high)[2]}")
+    check("Q1b the low distribution stays below r234's 0.15 bar",
+          q(low)[2] < 0.15 and q(low)[4] < 0.15, str(q(low)))
+    check("Q1c and the high one clears it at every quantile above p10",
+          q(high)[2] > 0.15 and q(high)[1] > 0.15, str(q(high)))
+    # ⚠️ A rung with too few failures has no shape worth printing, and a
+    # quantile over 3 values is noise wearing a statistic's clothing.
+    check("Q1d the panel skips rungs with fewer than 20 failures",
+          "len(vals) < 20" in open(os.path.join(
+              os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+              "tests", "screen_plan_gates.py"), encoding="utf-8").read())
+
     print()
     if FAILED:
         print(f"RED — {len(FAILED)} failed: {', '.join(FAILED)}")
         return 1
-    print("GREEN — 9 checks")
+    print("GREEN — 13 checks")
     return 0
 
 

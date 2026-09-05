@@ -1,5 +1,14 @@
 #!/usr/bin/env python3
-"""day_trader_pro/tests/screen_plan_gates.py — v1.1
+"""day_trader_pro/tests/screen_plan_gates.py — v1.2
+v1.2  2026-09-04 — dtp r272. FAIL VALUE QUANTILES. Operator, 2026-09-04,
+      asking whether r234 will make `wing_r_best` block dramatically less: a
+      min/max cannot answer that. It failed 58,205 times over 0.0000 .. 0.9841
+      and r234's bar sits at the equivalent of 0.15 on that scale, so whether
+      most of those now pass depends on WHERE INSIDE the range they sit — a
+      median of 0.60 and a median of 0.02 report identically as a range.
+      ⚠️ Only rungs carrying a value, only those with 20+ failures. A null
+      `value` is a pass/fail flag with no magnitude, and a quantile over three
+      points is noise wearing a statistic's clothing.
 v1.1  2026-09-04 — dtp r271. PER-TICK: DID ANY SINGLE EVALUATION CLEAR EVERY
       GATE? The per-rung panel below cannot answer that and I over-read it —
       "wing_r_best passed 3,436 times" and "age passed 14,850 times" are counts
@@ -103,6 +112,13 @@ def main(argv):
     if a.sym:
         where.append("symbol = ?")
         args.append(a.sym)
+    # 🔑 dtp-r272 — QUARTILES, NOT A RANGE. Operator, 2026-09-04, asking
+    # whether r234 will make `wing_r_best` block "dramatically less": min/max
+    # cannot answer that. The fleet-wide fail range was 0.0000 .. 0.9841, and
+    # r234's new bar sits at the old 0.15 — so whether most of those failures
+    # now pass depends entirely on WHERE INSIDE that range they sit, which a
+    # range by definition hides. sqlite has no percentile function, so the
+    # values are pulled and sorted per rung.
     sql = ('SELECT strategy, check_name, verdict, COUNT(*) c,'
            ' MIN(value) lo, MAX(value) hi FROM plan_check')
     if where:
@@ -144,6 +160,7 @@ def main(argv):
                   f"  {rng:>22}{mark}")
         print()
 
+    _fail_quantiles(cache, a)
     _per_tick(cache, a, dates)
 
     print("=" * 74)
@@ -242,6 +259,64 @@ def _per_tick(cache, a, dates) -> None:
         print("  ⚠️ plan_tick unavailable for this range — the per-rung and")
         print("     per-tick panels above still stand; only the plan's own")
         print("     verdict is missing. ABSENT, not zero.")
+
+
+def _fail_quantiles(cache, a) -> None:
+    """Where inside the fail range the failures actually sit.
+
+    🔴 dtp-r272 — A MIN/MAX HIDES THE ONLY THING THAT MATTERS. Operator,
+    2026-09-04: will r234 make `wing_r_best` block dramatically less? It failed
+    58,205 times over a range of 0.0000 .. 0.9841, and r234's new bar sits at
+    the equivalent of 0.15 on that scale — so whether most of those now pass
+    depends entirely on WHERE INSIDE the range they sit. If the median is above
+    0.15 most clear it; if it is 0.02 then r234 barely touched the sweep and
+    the anchor distance is still the problem (SWEEP.2). A range reports those
+    two cases identically, and I could not answer the question without this.
+    ⚠️ ONLY RUNGS THAT CARRY A VALUE, and only those with at least 20 failures.
+    A rung whose `value` is null everywhere is a pass/fail flag with no
+    magnitude, and a quantile over three values is noise wearing a statistic's
+    clothing.
+    ⚠️ SORTED IN SQL, SLICED IN PYTHON — sqlite has no percentile function, and
+    inventing one with a subquery would be a second implementation to trust.
+    """
+    where, args = ["verdict = 'FAIL'", "value IS NOT NULL"], []
+    if a.strat:
+        where.append("strategy = ?")
+        args.append(a.strat)
+    if a.sym:
+        where.append("symbol = ?")
+        args.append(a.sym)
+    rows = cache.query("SELECT strategy, check_name, value FROM plan_check"
+                       " WHERE " + " AND ".join(where)
+                       + " ORDER BY strategy, check_name, value", args)
+    book = defaultdict(list)
+    for r in rows:
+        book[(r["strategy"], r["check_name"])].append(r["value"])
+    if not book:
+        return
+    print()
+    print("=" * 74)
+    print("  FAIL VALUES — where inside the range the failures sit")
+    print("=" * 74)
+    print("  A median says whether a moved threshold clears most of them or")
+    print("  barely any. A min/max reports both cases identically.")
+    cur = None
+    for (strat, rung), vals in sorted(book.items(),
+                                      key=lambda kv: (kv[0][0], -len(kv[1]))):
+        if len(vals) < 20:
+            continue
+        if strat != cur:
+            cur = strat
+            print()
+            print("─" * 74)
+            print(f"  {strat}")
+            print("─" * 74)
+            print(f"    {'rung':<20} {'n':>8} {'p10':>9} {'p25':>9}"
+                  f" {'median':>9} {'p75':>9} {'p90':>9}")
+        q = [vals[min(len(vals) - 1, int(len(vals) * f))]
+             for f in (0.10, 0.25, 0.50, 0.75, 0.90)]
+        print(f"    {rung:<20} {len(vals):>8,}"
+              + "".join(f" {x:>9.4g}" for x in q))
 
 
 def _fail_rate(v) -> float:
