@@ -1,5 +1,45 @@
 #!/usr/bin/env bash
-# day_trader_pro/tools/land.sh — v1.0
+# day_trader_pro/tools/land.sh — v1.1
+# v1.1 (2026-09-05) — dtp r278. THREE GAPS BETWEEN WHAT THIS DID AND WHAT THE
+#   OPERATOR ASKED A DEPLOY TO DO, plus the menu item LAND.1 refused and he has
+#   now asked for. His list, 2026-09-05: unpack, stage, verify the write map,
+#   the file map, the file versions, the changelog and the Genesis append,
+#   "any smoke tests or canaries are verified", then commit and clean up.
+#   v1.0 already did all of that EXCEPT the checks — so this adds the one
+#   missing stage rather than rebuilding the nine that worked.
+#
+#   🔴 (1) IT RAN NO CHECKERS. The content gate greps for a distinctive line;
+#   it never EXECUTES anything. That is precisely the r201 shape WA §0.6 names:
+#   the gate asserted a function existed and that the file parsed, and both were
+#   true of the broken version. `CHECK <path>` directives now RUN in the repo
+#   and must exit 0.
+#   ⚠️ AND A HALF THAT SHIPS CODE AND DECLARES NO CHECK IS REFUSED — detected,
+#   not assumed: if the payload carries a `.py` outside `docs/` and the spec
+#   names no check, nothing was executed and the delivery says so by failing.
+#   A docs-only half legitimately has nothing to run and reports that out loud
+#   rather than passing silently, because "not applicable" and "passed" must
+#   never look alike (the CV.1 failure, and r183's own SKIP idiom).
+#
+#   🔴 (2) `git add -A` STAGED WHATEVER WAS IN THE TREE. The operator's own
+#   standing rule is the opposite — "NEVER git add -A; stage shipped files by
+#   name" — written after a stray `fit_report.py` was pushed off main. WA §33's
+#   sketch of the land order says `git add -A`, so two documents disagreed and
+#   the looser one was the one in the code. Now every path is named: the
+#   payload's own file list, plus the two regenerated maps and the GENESIS row
+#   when the repo has them. An unrelated local edit is no longer swept into a
+#   delivery commit.
+#
+#   🔴 (3) THE ARCHIVE IT DELETED WAS A GUESS. `ls "$HOME"/*_r*.tar* | head -1`
+#   takes the first glob match, and the operator routinely has two pending — on
+#   2026-09-05 he had r276 and r277 in `/home/ubuntu` at once. The cleanup then
+#   `rm -f`s that guess. `LAND_ARCHIVE` is now honoured and `tools/deploy.sh`
+#   sets it to the file it actually extracted; without it, an AMBIGUOUS glob
+#   deletes NOTHING and says so. Untidy is recoverable; deleting the wrong
+#   tarball is not (r206: a derived figure must name the layer it came from).
+#
+#   ⚠️ NEW OPTIONAL DIRECTIVE `ORDER <n>` sorts the halves when `deploy.sh`
+#   discovers them, so a two-repo delivery whose second half cites the first
+#   cannot land backwards. Default 50; ties break on name.
 # v1.0 (2026-09-01) — otv4 r207 / dtp r235. THE LANDER, GENERIC AND MULTI-REPO.
 #   Operator, 2026-09-01: "why don't you package your land script as a generic
 #   in the tarball & keep calling it every time we land a new update... we can
@@ -49,7 +89,16 @@
 set -u
 
 STAGE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ARCHIVE="$(ls "$HOME"/*_r*.tar* 2>/dev/null | head -1)"
+# v1.1 — NAMED, NOT GUESSED. deploy.sh exports the file it actually extracted.
+# Falling back to a glob is kept for a hand-run, but an ambiguous glob resolves
+# to NOTHING rather than to whichever name sorts first, because the only thing
+# this variable is used for is `rm -f`.
+ARCHIVE="${LAND_ARCHIVE:-}"
+if [ -z "$ARCHIVE" ]; then
+  _n="$(ls "$HOME"/*_r*.tar* 2>/dev/null | wc -l)"
+  if [ "$_n" = "1" ]; then ARCHIVE="$(ls "$HOME"/*_r*.tar* 2>/dev/null)"; fi
+  AMBIGUOUS="$_n"
+fi
 FAILED=0
 LANDED=""
 
@@ -143,6 +192,36 @@ land_one() {
   fi
   echo "  content gate: pass"
 
+  # ── THE CHECKS: EXECUTED, NOT GREPPED (v1.1) ────────────────────────────
+  # WA §0.6 — "the land gate RUNS the thing and requires its output, not its
+  # presence." §21 says the same one level up: a test that reads source text
+  # proves nothing about runtime. Each CHECK runs with the repo as cwd, which
+  # is how every checker in these trees expects to be invoked.
+  local nchk=0 chk
+  while IFS= read -r line; do
+    chk="${line#CHECK }"
+    nchk=$((nchk+1))
+    if ( cd "$repo" && python3 "$chk" ) >/dev/null 2>&1; then
+      echo "  check: $chk PASS"
+    else
+      echo "  🔴 CHECK FAILED: $chk"
+      echo "     re-run it yourself:  cd $repo && python3 $chk"
+      die "A DECLARED CHECK DID NOT PASS"; return 1
+    fi
+  done < <(grep '^CHECK ' "$spec")
+
+  # ⚠️ A CODE HALF WITH NO CHECK IS REFUSED. Detected from the payload rather
+  # than trusted to the author: if this half ships a .py outside docs/ and
+  # declared nothing to run, then nothing ran, and a delivery that verified
+  # nothing must not read the same as one that verified everything.
+  local ncode
+  ncode="$(cd "$d" && find . -name '*.py' -not -path './docs/*' | wc -l)"
+  if [ "$nchk" = "0" ] && [ "$ncode" != "0" ]; then
+    die "THIS HALF SHIPS $ncode .py FILE(S) AND DECLARES NO CHECK — nothing was executed. Add a CHECK line to land.spec."
+    return 1
+  fi
+  [ "$nchk" = "0" ] && echo "  checks: NONE DECLARED (docs-only half — nothing was executed)"
+
   # ── generated maps regenerate INSIDE the land command (§33) ─────────────
   # Detected, not assumed: dtp carries neither, and "not applicable" must
   # never look like "passed" (the CV.1 failure).
@@ -179,7 +258,18 @@ land_one() {
   python3 "$ld/tools/check_land_discipline.py" --repo "$repo" --rev "$rev" \
     || { die "LAND DISCIPLINE FAILED"; return 1; }
 
-  git add -A
+  # ── STAGE BY NAME (v1.1) ────────────────────────────────────────────────
+  # Operator's standing rule: "NEVER git add -A — stage shipped files by name",
+  # written after a stray file was pushed off main. The set is the payload's
+  # own file list plus the artifacts THIS command generated, and nothing else.
+  local staged=0
+  while IFS= read -r rel; do
+    git add -- "$rel" && staged=$((staged+1))
+  done < <(cd "$d" && find . -type f ! -name land.spec -printf '%P\n')
+  for gen in docs/FILE_MAP.md docs/WRITE_MAP.md docs/GENESIS.md; do
+    [ -f "$repo/$gen" ] && git add -- "$gen"
+  done
+  echo "  staged $staged payload file(s) by name"
   git commit -q -m "$rev: $desc" || { die "COMMIT FAILED"; return 1; }
   if git push -q; then
     echo "  LANDED $rev — pushed."
@@ -205,8 +295,14 @@ echo
 if [ "$FAILED" = "0" ] && [ -n "$LANDED" ]; then
   # ── delivery scaffolding cleans itself up (§27) ─────────────────────────
   rm -rf "$STAGE" /tmp/.land_running.sh
-  [ -n "$ARCHIVE" ] && rm -f "$ARCHIVE"
-  echo "ALL LANDED:$LANDED — archive and staging removed."
+  if [ -n "$ARCHIVE" ]; then
+    rm -f "$ARCHIVE"
+    echo "ALL LANDED:$LANDED — archive and staging removed."
+  else
+    echo "ALL LANDED:$LANDED — staging removed."
+    echo "⚠️ ${AMBIGUOUS:-0} tarball(s) matched in \$HOME and none was named, so"
+    echo "   NOTHING was deleted. Remove the one you landed by hand."
+  fi
   exit 0
 fi
 echo "INCOMPLETE. Archive and staging KEPT so nothing has to be re-downloaded."

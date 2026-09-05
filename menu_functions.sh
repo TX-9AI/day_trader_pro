@@ -1,4 +1,16 @@
-# day_trader_pro/menu_functions.sh — v1.50
+# day_trader_pro/menu_functions.sh — v1.51
+# — v1.51 (2026-09-05) — dtp r278. NEW `mi_land_tarball`: the deploy the
+#   operator has been doing by hand every session, as one item. It CALLS
+#   tools/deploy.sh rather than inlining it — r206's rule, and the menu is
+#   the copy people trust, so a second implementation here would drift from
+#   the one that was proven.
+#   ⚠️ THIS REVERSES LAND.1, and the reversal is the operator's own: that
+#   ruling said land.sh gets no menu item because "installer scripts should
+#   call it, not me manually running it." No installer ever called it — every
+#   land since r235 has been a pasted command — so the premise was false in
+#   practice and he asked for the item directly on 2026-09-05. Recorded
+#   rather than quietly overridden: a rule outliving its reason is a rule the
+#   next reader loosens for a worse reason (C.31).
 # — v1.50 (2026-09-04) — dtp r274. STOP FORENSICS. Every butterfly loss over
 #   08-31..09-04 is a PREMIUM STOP - stop_24/25/26%, n=13, -2,393.50, matching
 #   the 13 losers to the dollar - at a 16-26 minute hold, while its winners run
@@ -1252,4 +1264,25 @@ mi_sensor_order_flow() {
     SC=$(ask_scope)
     $PY fleet.py run "cd $INSTALL_DIR; sqlite3 -header -column data/feed_store.db \"SELECT COALESCE(aggressor_side,'(untagged)') AS side, COUNT(*) AS prints, ROUND(SUM(size)) AS volume FROM prints WHERE ts_epoch > strftime('%s','now','-1 day') GROUP BY side;\" 2>&1; sqlite3 -header -column data/feed_store.db \"SELECT COUNT(*) AS quote_rows, ROUND(AVG(bid_size)) AS avg_bid_sz, ROUND(AVG(ask_size)) AS avg_ask_sz FROM quote_series WHERE ts_epoch > strftime('%s','now','-1 day');\" 2>&1; echo ok" $SC
     pause
+}
+
+# Land a tarball from /home/ubuntu
+mi_land_tarball() {
+    # r278 — THE UNIVERSAL DEPLOY. Nine of its ten stages live in
+    # tools/land.sh (r235) and the tenth — executing the declared checks —
+    # was added there, not here. This item is a call, deliberately.
+    # ⚠️ IT PROMPTS WHEN MORE THAN ONE ARCHIVE IS PRESENT rather than taking
+    # the newest, because picking silently is how the wrong one gets landed
+    # and the other gets deleted.
+    echo; bash tools/deploy.sh; pause
+}
+
+# Land a tarball — DRY RUN
+mi_land_tarball_dry() {
+    # ⚠️ A SEPARATE ITEM RATHER THAN A PROMPT ON THE ONE ABOVE. MEN.1 merged
+    # two items that were one flag apart, and this looks like that case and is
+    # not: the destructive item must not have a path where a mis-keyed answer
+    # commits and pushes. The prompt there is WHICH ARCHIVE, never whether to
+    # land.
+    echo; bash tools/deploy.sh --dry; pause
 }

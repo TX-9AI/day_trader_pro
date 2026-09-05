@@ -1,5 +1,17 @@
 #!/usr/bin/env bash
-# day_trader_pro/menu_registry.sh — v1.9
+# day_trader_pro/menu_registry.sh — v1.10
+# — v1.10 (2026-09-05) — dtp r278. LAND A TARBALL, and its dry run, in the
+#   CONTROL REPO section beside the two GitHub force-syncs — the same
+#   subject: this checkout against the remote.
+#   🔑 IT PASSES THE r242 TEST rather than dodging it. That ruling removed
+#   three items because a STUDY is run once to answer a question and belongs
+#   on the CLI. A deploy is the opposite: it is the single most repeated act
+#   in this project, done by hand every session since r235, and it is exactly
+#   what "items here are things run to fly the fleet — status, DEPLOYS, EOD,
+#   warehouse hygiene" already names.
+#   ⚠️ AND IT REVERSES LAND.1 AT THE OPERATOR'S OWN REQUEST (2026-09-05).
+#   That ruling assumed an installer would call the lander; none ever did.
+#   Numbers shift again — cite items by LABEL, never by number (C.15).
 # — v1.9 (2026-09-04) — dtp r274. Stop forensics registered in SENSORS. It asks
 #   a question no other item can: for a stopped-out trade, what was the BEST
 #   mark it ever reached.
@@ -145,6 +157,8 @@ MENU=(
   "SECTION|CONTROL REPO (this checkout <-> GitHub, force sync)"
   "ITEM|PUSH -> GitHub  (FORCE; this server is source of truth)|mi_push_github_force_this_server_is_source_of_t"
   "ITEM|PULL <- GitHub  (FORCE; GitHub is source of truth)|mi_pull_github_force_github_is_source_of_truth"
+  "ITEM|LAND a tarball from /home/ubuntu (verify -> commit -> push -> clean)|mi_land_tarball"
+  "ITEM|LAND a tarball — DRY RUN (show the halves, touch nothing)|mi_land_tarball_dry"
   "SECTION|TRADES DATA & R SUITE"
   "ITEM|Re-run consolidation -> fleet_trades_<date>.json (+ .csv)|mi_re_run_consolidation_fleet_trades_date_json"
   "ITEM|Trade breakdown (cross-day, warehouse, day one onward)|mi_trade_breakdown_cross_day"

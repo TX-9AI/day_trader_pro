@@ -1,5 +1,32 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/check_land_sh.py — v1.0
+# day_trader_pro/tests/check_land_sh.py — v1.1
+# v1.1 (2026-09-05) — dtp r278. THE THREE NEW STAGES, EACH DRIVEN BOTH WAYS.
+#   C1/C1b — a declared CHECK is EXECUTED and its exit code decides. C1 lands a
+#   delivery whose check passes; C1b re-runs the identical world with a check
+#   that exits 1 and requires the land to be REFUSED with HEAD unmoved. A gate
+#   that only ever passes is indistinguishable from one that never runs, which
+#   is the r201 shape §0.6 names.
+#   C2 — a half shipping a .py and declaring NO check is refused. That is the
+#   case a spec author will actually hit: not a broken check, a forgotten one,
+#   and "nothing was executed" must not read like "everything passed".
+#   C2b — a DOCS-ONLY half with no check still lands, and says out loud that
+#   nothing ran. "Not applicable" and "passed" must never look alike (r183).
+#   C3 — 🔴 THE ONE THAT WOULD HAVE BEEN CAUGHT ONLY IN PRODUCTION. v1.0 ran
+#   `git add -A`, against the operator's own standing rule ("NEVER git add -A;
+#   stage shipped files by name", written after a stray file was pushed off
+#   main). C3 plants an UNRELATED dirty file in the repo and requires the
+#   delivery commit not to contain it. A test that only checked the payload
+#   landed would pass against both versions.
+#   C4 — an ambiguous archive glob deletes NOTHING. The cleanup `rm -f`s
+#   whatever the glob matched first, and the operator routinely has two
+#   tarballs pending; untidy is recoverable, deleting the wrong one is not.
+#   D1-D4 — tools/deploy.sh, the thing the MENU actually invokes. Driven end to
+#   end against a real tarball in a real $HOME: it finds the archive, discovers
+#   both halves from their land.spec files, ORDERS them, and hands off. D2 is
+#   the one worth having: a two-half delivery whose SECOND half gates on an
+#   artifact the FIRST produces lands only in the right order, which is exactly
+#   r277's otv4 half gating on r247's GENESIS row. D4 proves --dry commits
+#   nothing, because a preview that changes the tree is not a preview.
 # v1.0 (2026-09-01) — otv4 r207 / dtp r235. THE LANDER'S OWN GATE.
 #
 # 🔴 WHY THIS IS NOT OPTIONAL. tools/land.sh is now the only thing standing
@@ -30,6 +57,7 @@ import tempfile
 
 _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LAND = os.path.join(_root, "tools", "land.sh")
+DEPLOY = os.path.join(_root, "tools", "deploy.sh")
 
 _fails = []
 
@@ -45,7 +73,7 @@ def _run(cmd, cwd=None, env=None):
                           capture_output=True, text=True)
 
 
-def _world(tmp, spec_lines, payload="v2\n"):
+def _world(tmp, spec_lines, payload="v2\n", extra=None, docs_only=False):
     """A home with one git repo, a bare remote, and a staged delivery.
 
     ⚠️ BUILT FROM THE LANDER'S OWN CONTRACT, not from a belief about it: the
@@ -73,8 +101,20 @@ def _world(tmp, spec_lines, payload="v2\n"):
     # DEMANDS ONE. The first draft of this file omitted it and the lander
     # correctly refused the "happy path" — the tool was right and the fixture
     # was wrong, which is the good direction for that to go.
-    with open(os.path.join(stage, "half", "thing.py"), "w") as f:
-        f.write("# thing.py — v1.1\n# v1.1 (2026-09-01) — the edit.\nNEW_LINE = 2\n")
+    if docs_only:
+        # v1.1 — a half with no .py at all. The lander must still land it and
+        # must SAY that nothing was executed rather than implying it verified.
+        os.makedirs(os.path.join(stage, "half", "docs"), exist_ok=True)
+        with open(os.path.join(stage, "half", "docs", "NOTE.md"), "w") as f:
+            f.write("# NOTE.md — v1.1\nv1.1 (2026-09-05) — the edit. NEW_LINE = 2\n")
+    else:
+        with open(os.path.join(stage, "half", "thing.py"), "w") as f:
+            f.write("# thing.py — v1.1\n# v1.1 (2026-09-01) — the edit.\nNEW_LINE = 2\n")
+    for rel, body in (extra or {}).items():
+        dst = os.path.join(stage, "half", rel)
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        with open(dst, "w") as f:
+            f.write(body)
     with open(os.path.join(stage, "half", "land.spec"), "w") as f:
         f.write("\n".join(spec_lines) + "\n")
     shutil.copy(LAND, os.path.join(stage, "land.sh"))
@@ -89,7 +129,11 @@ def _world(tmp, spec_lines, payload="v2\n"):
 
 
 GOOD = ["REPO MARKER", "REV r999", "DESC a real sentence about why",
-        "POS thing.py|NEW_LINE = 2", "NEG thing.py|OLD_LINE = 1"]
+        "POS thing.py|NEW_LINE = 2", "NEG thing.py|OLD_LINE = 1",
+        # v1.1 — a code half must declare a check, so the baseline world does.
+        "CHECK tests/ok.py"]
+PASS_CHK = {"tests/ok.py": "import sys; sys.exit(0)\n"}
+FAIL_CHK = {"tests/ok.py": "import sys; sys.exit(1)\n"}
 
 
 def _land(home, stage, half="half"):
@@ -109,7 +153,7 @@ def _head(repo):
 def main():
     # ── P1 — the happy path lands, pushes and cleans up ──────────────────
     with tempfile.TemporaryDirectory() as tmp:
-        home, repo, stage = _world(tmp, GOOD)
+        home, repo, stage = _world(tmp, GOOD, extra=PASS_CHK)
         r = _land(home, stage)
         subj = _run("git log --oneline -1", cwd=repo).stdout
         check("P1 a clean delivery lands, commits and pushes",
@@ -120,7 +164,7 @@ def main():
 
     # ── L1 — no spec is a REFUSAL, not a fallthrough ─────────────────────
     with tempfile.TemporaryDirectory() as tmp:
-        home, repo, stage = _world(tmp, GOOD)
+        home, repo, stage = _world(tmp, GOOD, extra=PASS_CHK)
         os.remove(os.path.join(stage, "half", "land.spec"))
         r = _land(home, stage)
         check("L1 a half with no land.spec is refused outright",
@@ -131,7 +175,7 @@ def main():
     # This is the header-bump-with-no-edit case: the file arrived, the version
     # moved, and the actual change is not in it.
     with tempfile.TemporaryDirectory() as tmp:
-        home, repo, stage = _world(tmp, GOOD)
+        home, repo, stage = _world(tmp, GOOD, extra=PASS_CHK)
         with open(os.path.join(stage, "half", "thing.py"), "w") as f:
             f.write("# thing.py — v1.1\n# v1.1 (2026-09-01) — the edit.\n"
                     "OLD_LINE = 1\n")                          # bumped, not edited
@@ -146,7 +190,7 @@ def main():
 
     # ── L3 — a NEG that still matches stops the land ─────────────────────
     with tempfile.TemporaryDirectory() as tmp:
-        home, repo, stage = _world(tmp, GOOD)
+        home, repo, stage = _world(tmp, GOOD, extra=PASS_CHK)
         with open(os.path.join(stage, "half", "thing.py"), "w") as f:
             f.write("# thing.py — v1.1\nNEW_LINE = 2\nOLD_LINE = 1\n")
         r = _land(home, stage)
@@ -167,7 +211,7 @@ def main():
     # ── L5 — the archive and staging SURVIVE any failure ─────────────────
     # ⚠️ THE POINT: a failed land must never cost the operator a re-download.
     with tempfile.TemporaryDirectory() as tmp:
-        home, repo, stage = _world(tmp, GOOD)
+        home, repo, stage = _world(tmp, GOOD, extra=PASS_CHK)
         os.remove(os.path.join(stage, "half", "land.spec"))
         _land(home, stage)
         check("L5 a failed land keeps the staging directory",
@@ -184,6 +228,181 @@ def main():
         check("L6 a spec with no REV is refused",
               r.returncode != 0 and "no REV" in r.stdout and not _dirty(repo),
               f"rc={r.returncode}")
+
+    # ══ C1 — A DECLARED CHECK IS EXECUTED, AND ITS EXIT CODE DECIDES ══════
+    # C1's pass arm is P1 above (the baseline world now declares one). This is
+    # the arm that proves it RUNS: identical world, check exits 1.
+    with tempfile.TemporaryDirectory() as tmp:
+        home, repo, stage = _world(tmp, GOOD, extra=FAIL_CHK)
+        before = _head(repo)
+        r = _land(home, stage)
+        check("C1b a declared CHECK that fails refuses the land",
+              r.returncode != 0 and "CHECK FAILED" in (r.stdout + r.stderr),
+              (r.stdout + r.stderr).strip().splitlines()[-1:] and
+              (r.stdout + r.stderr).strip().splitlines()[-1] or "")
+        check("C1c ...and HEAD did not move", _head(repo) == before)
+
+    # ══ C2 — A CODE HALF THAT DECLARES NOTHING IS REFUSED ═════════════════
+    # 🔑 The realistic failure is a FORGOTTEN check, not a broken one. Without
+    # this, a delivery that verified nothing lands looking exactly like one
+    # that verified everything.
+    with tempfile.TemporaryDirectory() as tmp:
+        NOCHK = [l for l in GOOD if not l.startswith("CHECK ")]
+        home, repo, stage = _world(tmp, NOCHK)
+        before = _head(repo)
+        r = _land(home, stage)
+        check("C2 a half shipping .py with no CHECK is refused",
+              r.returncode != 0 and "DECLARES NO CHECK" in (r.stdout + r.stderr))
+        check("C2b ...and HEAD did not move", _head(repo) == before)
+
+    # ══ C2c — BUT A DOCS-ONLY HALF STILL LANDS, AND SAYS SO ═══════════════
+    with tempfile.TemporaryDirectory() as tmp:
+        DOCS = ["REPO MARKER", "REV r999", "DESC a docs-only sentence",
+                "POS docs/NOTE.md|NEW_LINE = 2"]
+        home, repo, stage = _world(tmp, DOCS, docs_only=True)
+        r = _land(home, stage)
+        out = r.stdout + r.stderr
+        check("C2c a docs-only half lands with no check declared",
+              r.returncode == 0, out.strip().splitlines()[-1:] and
+              out.strip().splitlines()[-1] or "")
+        check("C2d ...and states plainly that nothing was executed",
+              "NONE DECLARED" in out)
+
+    # ══ C3 — STAGE BY NAME: AN UNRELATED EDIT IS NOT SWEPT IN ═════════════
+    # 🔴 v1.0 ran `git add -A`. The operator's standing rule is the opposite,
+    # written after a stray file was pushed off main, and only a dirty-tree
+    # fixture can tell the two versions apart.
+    with tempfile.TemporaryDirectory() as tmp:
+        home, repo, stage = _world(tmp, GOOD, extra=PASS_CHK)
+        with open(os.path.join(repo, "STRAY.txt"), "w") as f:
+            f.write("an unrelated local edit\n")
+        r = _land(home, stage)
+        files = _run("git show --name-only --format= HEAD", cwd=repo).stdout
+        check("C3 the delivery commit does not contain an unrelated file",
+              r.returncode == 0 and "STRAY.txt" not in files,
+              files.replace("\n", " ").strip())
+        check("C3b ...and the stray edit is still there, untouched",
+              os.path.exists(os.path.join(repo, "STRAY.txt")))
+
+    # ══ C4 — AN AMBIGUOUS ARCHIVE GLOB DELETES NOTHING ════════════════════
+    with tempfile.TemporaryDirectory() as tmp:
+        home, repo, stage = _world(tmp, GOOD, extra=PASS_CHK)
+        a1 = os.path.join(home, "one_r1.tar.gz")
+        a2 = os.path.join(home, "two_r2.tar.gz")
+        for a in (a1, a2):
+            with open(a, "w") as f:
+                f.write("not really a tarball\n")
+        r = _land(home, stage)
+        check("C4 two candidate archives: the land still succeeds",
+              r.returncode == 0)
+        check("C4b ...and NEITHER archive is deleted",
+              os.path.exists(a1) and os.path.exists(a2))
+        check("C4c ...and it says so rather than cleaning up silently",
+              "NOTHING was deleted" in (r.stdout + r.stderr))
+
+    # ══ D — tools/deploy.sh, END TO END THROUGH A REAL TARBALL ════════════
+    # 🔑 THIS IS WHAT THE MENU ITEM RUNS. Testing land.sh and calling the menu
+    # verified would be the laundered green §18 names: the discovery, the
+    # half-detection and the ordering all live here and nowhere else.
+    def _two_half_world(tmp):
+        """A home with TWO repos and one archive containing both halves.
+
+        The second half's content gate requires a file the FIRST half's land
+        creates, so landing them backwards is REFUSED rather than merely odd —
+        the same shape as r277's otv4 half gating on r247's GENESIS row.
+        """
+        home, repo, stage = _world(tmp, GOOD + ["ORDER 1"], extra=PASS_CHK)
+        # a second repo, with its own marker
+        r2 = os.path.join(home, "otherrepo")
+        b2 = os.path.join(tmp, "bare2")
+        os.makedirs(r2)
+        for n, body in (("MARKER2", "m\n"),
+                        ("other.py", "# other.py — v1.0\n# v1.0 (2026-08-01) — base.\nOLD2 = 1\n")):
+            with open(os.path.join(r2, n), "w") as f:
+                f.write(body)
+        _run("git init -q -b main .", cwd=r2)
+        _run('git config user.email t@t; git config user.name t', cwd=r2)
+        _run("git add -A; git commit -q -m base", cwd=r2)
+        _run(f'git init -q --bare "{b2}"')
+        _run(f'git remote add origin "{b2}"; git push -q origin main; '
+             f'git branch -q --set-upstream-to=origin/main main', cwd=r2)
+        h2 = os.path.join(stage, "second")
+        os.makedirs(os.path.join(h2, "tests"))
+        with open(os.path.join(h2, "other.py"), "w") as f:
+            f.write("# other.py — v1.1\n# v1.1 (2026-09-05) — the edit.\nNEW2 = 2\n")
+        with open(os.path.join(h2, "tests", "ok2.py"), "w") as f:
+            f.write("import sys; sys.exit(0)\n")
+        with open(os.path.join(h2, "land.spec"), "w") as f:
+            f.write("\n".join([
+                "REPO MARKER2", "REV r1000", "DESC the second half",
+                "ORDER 2",
+                "POS other.py|NEW2 = 2", "NEG other.py|OLD2 = 1",
+                # ⚠️ THE ORDERING GATE: this file only exists once half one has
+                # landed, so a backwards run is refused rather than tolerated.
+                "POS ../myrepo/thing.py|NEW_LINE = 2",
+                "CHECK tests/ok2.py"]) + "\n")
+        arc = os.path.join(home, "delivery_r1000.tar.gz")
+        _run(f'tar czf "{arc}" -C "{stage}" .')
+        shutil.rmtree(stage)
+        return home, repo, r2, arc
+
+    with tempfile.TemporaryDirectory() as tmp:
+        home, repo, r2, arc = _two_half_world(tmp)
+        # ⚠️ NAME THE STAGING DIR RATHER THAN SCANNING /tmp FOR ONE. The first
+        # draft globbed `/tmp/land.*` and went RED against CORRECT code, because
+        # --dry leaves its staging behind BY DESIGN and other cases had left
+        # theirs too. A check that fires on a sibling's residue is a check that
+        # gets distrusted — and LAND_STAGE exists precisely so a caller can
+        # assert on the directory it actually chose.
+        mine = os.path.join(tmp, "stagedir")
+        env = dict(os.environ, HOME=home, LAND_STAGE=mine)
+        r = _run(f'bash "{DEPLOY}"', env=env)
+        out = r.stdout + r.stderr
+        check("D1 deploy.sh finds the archive and discovers both halves",
+              "halves: half second" in out, out.strip().splitlines()[:1])
+        check("D2 both repos land, in ORDER",
+              _head(repo).startswith("r999") and _head(r2).startswith("r1000"),
+              f"{_head(repo)!r} / {_head(r2)!r}")
+        check("D2b the second half's gate on the first half's artifact passed",
+              r.returncode == 0)
+        check("D3 the archive it actually landed is the one deleted",
+              not os.path.exists(arc))
+        # 🔴 THE STAGING DIR IS UNIQUE PER RUN AND THIS CASE IS WHY. A fixed
+        # /tmp/land is shared state, and THIS SELFTEST invokes deploy.sh — a
+        # nested run would have deleted the staging of a delivery landing at
+        # the same moment, from inside its own verification.
+        check("D3b ...and its own staging directory is gone",
+              not os.path.isdir(mine), mine)
+
+    # ══ D2c — AND BACKWARDS IS REFUSED, WHICH IS WHAT MAKES `ORDER` REAL ══
+    # An ordering that is never tested against the wrong order is an ordering
+    # nobody knows works (§17). Driven through land.sh directly, since deploy.sh
+    # exists precisely to make this order impossible to get wrong by hand.
+    with tempfile.TemporaryDirectory() as tmp:
+        home, repo, r2, arc = _two_half_world(tmp)
+        st = os.path.join(tmp, "unpack"); os.makedirs(st)
+        _run(f'tar xf "{arc}" -C "{st}"')
+        env = dict(os.environ, HOME=home)
+        r = _run(f'bash "{st}/land.sh" second half', env=env)
+        check("D2c landing the halves BACKWARDS is refused",
+              r.returncode != 0 and _head(r2) == "base",
+              f"rc={r.returncode} head={_head(r2)!r}")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        home, repo, r2, arc = _two_half_world(tmp)
+        env = dict(os.environ, HOME=home)
+        r = _run(f'bash "{DEPLOY}" --dry', env=env)
+        check("D4 --dry names the halves and their revisions",
+              "r999" in r.stdout and "r1000" in r.stdout)
+        check("D4b --dry commits nothing, deletes nothing",
+              _head(repo) == "base" and _head(r2) == "base"
+              and os.path.exists(arc), f"{_head(repo)!r} archive={os.path.exists(arc)}")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        empty = os.path.join(tmp, "home"); os.makedirs(empty)
+        r = _run(f'bash "{DEPLOY}"', env=dict(os.environ, HOME=empty))
+        check("D5 no tarball at all is a named refusal, not a traceback",
+              r.returncode != 0 and "nothing to land" in (r.stdout + r.stderr))
 
     print()
     if _fails:
