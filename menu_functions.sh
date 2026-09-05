@@ -1,4 +1,12 @@
-# day_trader_pro/menu_functions.sh — v1.51
+# day_trader_pro/menu_functions.sh — v1.52
+# — v1.52 (2026-09-05) — dtp r283. 🔴 SIX CONFIRMS ACCEPTED LOWERCASE `y` AND
+#   NOTHING ELSE. The operator answered the LIVE backfill prompt with `Y` on
+#   2026-09-05 and the run silently did not happen — no error, no message, just
+#   the next prompt. A confirm that discards a plausible yes is worse than one
+#   that refuses, because "declined" and "ran and did nothing" look identical.
+#   All six route through `_yes` (devtools.sh) and the DESTRUCTIVE ones now say
+#   what they declined; a flag toggle stays quiet, which is why the helper is a
+#   pure predicate rather than one that prints.
 # — v1.51 (2026-09-05) — dtp r278. NEW `mi_land_tarball`: the deploy the
 #   operator has been doing by hand every session, as one item. It CALLS
 #   tools/deploy.sh rather than inlining it — r206's rule, and the menu is
@@ -528,7 +536,7 @@ mi_eod_analysis() {
         $PY eod_analysis.py $ARGS --dry-run
         echo
         read -rp "  Proceed for real? [y/N]: " GO
-        [ "$GO" = "y" ] || { pause; return 0; }
+        _yes "$GO" || { echo "  declined — nothing was run."; pause; return 0; }
     fi
     $PY eod_analysis.py $ARGS
     pause
@@ -550,7 +558,7 @@ mi_pnl_from_warehouse() {
     ARGS=""
     if [ -n "$D1" ] && [ -n "$D2" ]; then ARGS="--from $D1 --to $D2"
     elif [ -n "$D1" ];               then ARGS="--date $D1"; fi
-    [ "$S" = "y" ] && ARGS="$ARGS --send"
+    _yes "$S" && ARGS="$ARGS --send"
     $PY pnl_s3.py $ARGS
     pause
 }
@@ -591,7 +599,7 @@ mi_backfill_missing_ohlc_auto_batched() {
     # ⚠️ THE LIVE RUN WAKES AND STOPS BOXES — that is why the dry run always
     # prints first and the confirm is explicit.
     read -rp "Proceed with LIVE backfill (wakes/stops boxes)? [y/N]: " GO
-    [ "$GO" = "y" ] && $PY eod_backfill.py --date "$D" $ONLY --batch "$B"
+    if _yes "$GO"; then $PY eod_backfill.py --date "$D" $ONLY --batch "$B"; else echo "  declined — nothing was woken, nothing was fetched."; fi
     pause
 }
 
@@ -673,7 +681,7 @@ mi_blind_alert_drill_on_the_fleet_sends_real_te() {
         echo "READ THE PER-BOX 'DRILL PASSED/FAILED' LINE, NOT the 29/29 tally —"; \
         echo "the tally cannot see the drill's exit code (v1.26)."; \
         read -rp "Send for real? (n = dry-run, no Telegram) [y/N]: " GO; \
-        if [ "$GO" = "y" ]; then \
+        if _yes "$GO"; then \
           $PY fleet.py run "cd ~/options-trader && venv/bin/python tests/blind_alert_selftest.py 2>&1 | tail -4; true"; \
         else \
           $PY fleet.py run "cd ~/options-trader && venv/bin/python tests/blind_alert_selftest.py --no-send 2>&1 | tail -4; true"; \
@@ -687,7 +695,7 @@ mi_feed_maintenance_window_fleet_up_nothing_on() {
           echo "Feed maintenance is currently ACTIVE."; \
           echo "Turning it OFF lets every box feed again on its next gate check."; \
           read -rp "Turn maintenance OFF? [y/N]: " GO; \
-          if [ "$GO" = "y" ]; then \
+          if _yes "$GO"; then \
             $PY fleet.py run "rm -f ~/options-trader/data/FEED_MAINTENANCE; echo MAINT=\$([ -f ~/options-trader/data/FEED_MAINTENANCE ] && echo ON || echo OFF)" --all; \
             rm -f "$_MAINT_MARK"; \
             echo; echo "Read the per-box MAINT= lines above - every one must say OFF."; \
@@ -701,7 +709,7 @@ mi_feed_maintenance_window_fleet_up_nothing_on() {
           echo "it SURVIVES a bake. Nothing removes it but you."; \
           echo "!! A box left flagged at 09:15 trades blind. The menu line stays RED."; \
           read -rp "Turn maintenance ON? [y/N]: " GO; \
-          if [ "$GO" = "y" ]; then \
+          if _yes "$GO"; then \
             $PY fleet.py run "mkdir -p ~/options-trader/data && touch ~/options-trader/data/FEED_MAINTENANCE; echo MAINT=\$([ -f ~/options-trader/data/FEED_MAINTENANCE ] && echo ON || echo OFF)" --all; \
             mkdir -p "$SCRIPT_DIR/data" && touch "$_MAINT_MARK"; \
             echo; echo "Read the per-box MAINT= lines above - every one must say ON."; \

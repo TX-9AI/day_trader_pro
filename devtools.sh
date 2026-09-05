@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
-# day_trader_pro/devtools.sh — v1.60
+# day_trader_pro/devtools.sh — v1.61
+# v1.61 (2026-09-05) — dtp r283. NEW `_yes()`, beside `pause()`: ONE reader for
+#   every yes/no answer in the menu. Six sites compared against lowercase "y"
+#   and nothing else, so a `Y` at the LIVE backfill prompt silently did nothing
+#   on 2026-09-05 — no error, no message, just the next prompt. A pure
+#   predicate on purpose: the destructive callers say what they declined in
+#   their own words, and a flag toggle must stay quiet.
 # v1.60 (2026-08-29) — the Excursion report items (local and warehouse) are
 #   RETIRED and R LEDGER replaces them, carrying the never-favourable split
 #   that was the only measurement unique to them; S3 WAREHOUSE loses its
@@ -233,6 +239,18 @@ OTV3_PY="$OTV3_DIR/venv/bin/python"
 # Open an interactive shell in a directory via tmux (a menu item can't cd the
 # parent shell). Inside tmux -> new window; otherwise attach-or-create a session.
 pause() { read -rp $'\nPress Enter to continue...' _; }
+
+# r283 — ONE ANSWER-READER FOR EVERY PROMPT IN THE MENU.
+# 🔴 SIX SITES COMPARED AGAINST LOWERCASE "y" AND NOTHING ELSE. On 2026-09-05
+# the operator answered the LIVE backfill prompt with `Y`, the comparison did
+# not match, and the run simply did not happen — no error, no message, just the
+# next prompt. A confirm that silently discards a plausible yes is worse than
+# one that refuses, because the operator has no way to tell "declined" from
+# "ran and did nothing".
+# ⚠️ A PURE PREDICATE, NO OUTPUT. The destructive sites say what they declined
+# in their own words; a toggle that merely adds a flag must stay quiet, and one
+# helper that printed for both would be wrong at half its callers.
+_yes() { case "${1:-}" in y|Y|yes|YES|Yes) return 0 ;; *) return 1 ;; esac; }
 
 # Symbol scope: ENTER = all running boxes; else `--only SYM,SYM`.
 ask_scope() {

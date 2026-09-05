@@ -1,4 +1,13 @@
-# day_trader_pro/eod_backfill.py — v1.4
+# day_trader_pro/eod_backfill.py — v1.5
+# v1.5  2026-09-05  dtp r283. THE STREAM CAP WAS 29-BOX ARITHMETIC AND IT HARD
+#         STOPS. A ONE-box backfill against a 15-box fleet was refused outright:
+#         `10 stream cap`, 15 running, `return 2` — not the warn-never-stop this
+#         header describes for the phantom check nearby. r53 retired the
+#         fleet-wide copy of this same guard after the 2026-08-20 pare ("the
+#         fleet is 15 and a normal session already carried ~20 without strain")
+#         and this one was never swept. Default 10 -> 20 via `STREAM_CAP` /
+#         `OT_STREAM_CAP`; 20 is r53's recorded figure, not one chosen here, and
+#         it is a PRIOR until the DXFeed ceiling is measured rather than inferred.
 # v1.4  2026-08-17  WH.5: THE DIAGNOSIS EXISTED AND WAS TRUNCATED TWICE.
 #         `s3_push --verify` ALREADY prints the full audit trail - manifest,
 #         progress, outcome, and `SHORT <prefix> expected>=N got=M` per prefix.
@@ -50,6 +59,12 @@ v1.2 — 2026-08-13 — WH.4: each batch must PROVE it filled the warehouse befo
 
 EOD candle backfill for sat-out symbols.
 
+r283 (2026-09-05): --stream-cap's default moves 10 -> 20 (STREAM_CAP,
+OT_STREAM_CAP). Ten was 29-box arithmetic; r53 retired the fleet-wide copy of
+this guard after the 2026-08-20 pare and this one was missed, so a ONE-box
+backfill against a 15-box fleet was refused outright — and it is a hard stop,
+not a warning. Twenty is r53's own recorded figure, and it is a PRIOR.
+
 Stream capacity caps live trading at ~N boxes/day, so the symbols that sat out
 never wrote their 1-min OHLC — leaving gaps in the tape the analysis needs.
 This walks the day's harvest folder, finds which symbols are MISSING their CSV,
@@ -100,6 +115,10 @@ PRODUCE_CMD = f"bash ~/{REMOTE_REPO}/pull_today_ohlc.sh"
 CHECK_CMD   = f"bash ~/{REMOTE_REPO}/pull_today_ohlc.sh --check"
 
 SSH_READY_TIMEOUT = 150      # s to wait for a booted box to answer SSH
+# r283 — the concurrent-stream ceiling. Env-overridable so a one-off does not
+# need a flag, and so a checker can drive the real resolution path.
+STREAM_CAP        = int(os.environ.get("OT_STREAM_CAP", "20"))
+
 PRODUCE_TIMEOUT   = 210      # s to wait for a box to write its CSV
 POLL_EVERY        = 15       # s between --check polls
 FULL_SESSION_BARS = 380      # soft "complete" threshold (RTH ≈ 390)
@@ -490,7 +509,17 @@ def main(argv):
     p = argparse.ArgumentParser(description="EOD candle backfill for sat-out symbols")
     p.add_argument("--date", default=None, help="YYYY-MM-DD (default: today ET)")
     p.add_argument("--batch", type=int, default=5, help="boxes per batch (default 5)")
-    p.add_argument("--stream-cap", type=int, default=10,
+    # 🔴 r283 — 10 IS 29-BOX ARITHMETIC AND THE PARE WAS 2026-08-20. r53
+    # retired the fleet-wide version of this same guard on exactly this
+    # reasoning: "it existed so a maintenance wake could not put 29 boxes on
+    # the wire at once; the fleet is 15 and a normal session already carried
+    # ~20 without strain." This per-report copy was never swept — the same
+    # shape as the README fleet count that read 29 for nine days after the pare.
+    # ⚠️ AND IT IS A HARD STOP, NOT A WARNING (`return 2`), so on 2026-09-05 a
+    # one-box backfill against a 15-box fleet was refused outright.
+    # ⚠️ 20 IS r53's RECORDED NUMBER, NOT ONE I CHOSE, and it is a PRIOR: if the
+    # DXFeed ceiling is ever measured rather than inferred, this moves.
+    p.add_argument("--stream-cap", type=int, default=STREAM_CAP,
                    help="max concurrent boxes/streams allowed (default 10)")
     p.add_argument("--only", default=None,
                    help="comma-separated symbols to limit to (default: all missing)")
