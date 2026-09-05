@@ -1,5 +1,37 @@
 #!/usr/bin/env python3
-# day_trader_pro/warehouse_coverage.py — v1.2
+# day_trader_pro/warehouse_coverage.py — v1.3
+# v1.3 (2026-09-05) — dtp r280. THE POLICY TABLE CORRECTED AGAINST THE BUCKET,
+#      WHICH IS WHY v1.2 WAS NOT WIRED INTO THE NIGHTLY CHAIN. First real run,
+#      2026-09-01..09-04, raised NINE flags. SEVEN WERE MINE.
+#      🔴 (1) `prints` IS NOT WRITTEN BY A CASH INDEX. SPX has no TimeAndSale,
+#      and r95 already recorded that `prints` on a cash index renders n/a — I
+#      declared the stream EVERY anyway, so it flagged SPX on all four days.
+#      Fixed with a per-symbol exception rather than by loosening the stream:
+#      a box that legitimately cannot write a stream is a DIFFERENT fact from a
+#      stream nobody is graded on, and collapsing them would stop the report
+#      noticing the day the other fourteen go quiet.
+#      🔴 (2) `trades` IS CONDITIONAL, NOT EVERY. `push_trades` is CDC: a box
+#      with no changed rows pushes nothing, so absence means that box took no
+#      trades — a market outcome. ⚠️ AND THIS IS CORROBORATED RATHER THAN
+#      REASONED: `derived_fire_snapshot` and `derived_plan_ledger` matched the
+#      trades count box-for-box on all four days — 15/13/10/12 against trades
+#      missing 0/2/5/3 — three independent streams agreeing on which boxes had
+#      no fills.
+#      🔴 (3) `shadow` IS LIVE, AND THE "NEVER INSTALLED" FINDING IS WRONG.
+#      Measured on QQQ 2026-09-05: 32 date directories, newest 2026-09-04, and
+#      a shadow systemd unit present. The bucket says the same thing from the
+#      other side — `WAREHOUSE_MAP.md` generated 09-01 shows `raw/shadow` at
+#      160,978 objects across 7 days, and this run shows 15 boxes pushing it
+#      every session. It is reclassified EVERY because that is what it
+#      demonstrably is.
+#      ⚠️ WHAT THAT COSTS IS RECORDED IN THE BACKLOG, NOT SOFTENED HERE: the
+#      2026-08-25 purge deleted 492,945 `raw/shadow` objects as a dead stream,
+#      on this belief. It was not dead.
+#      🔑 THE REPORT EARNED ITS PLACE ON ITS FIRST RUN AND NOT IN THE WAY
+#      INTENDED — it was built to find gaps in the bucket and what it found
+#      first was three wrong declarations in its own policy table. That is the
+#      argument for having run it by hand before wiring it into the conductor
+#      (S3.12), and the argument stands whichever way the next run goes.
 # v1.2 (2026-09-05) — dtp r277. PER-STREAM, PER-DAY, PER-BOX COVERAGE (S3.10).
 #      ADDITIVE: `--streams`. The VIX report, its verdicts and its exit code are
 #      untouched, because a menu item that quietly starts answering a different
@@ -138,6 +170,12 @@ COLLECTION_START = os.environ.get("OT_WAREHOUSE_START", "2026-08-13")
 #
 #   EXPECTATION   EVERY        every panel box on a trading day; absence is a gap
 #                 OWNER:<SYM>  one writer by design; absence from others is right
+#                 EVERY_EXCEPT:<SYM,...>  every panel box that CAN write it. A
+#                              box structurally unable to produce a stream is
+#                              not a gap and is not silence either — it is a
+#                              third fact, and it must not be collapsed into
+#                              CONDITIONAL or the report stops noticing the day
+#                              the others go quiet
 #                 CONDITIONAL  only when the event happened; absence proves nothing
 #                 DEAD         retired or never installed; absence is correct
 #   GRAIN         record       one object per row/line   -> object count IS volume
@@ -150,7 +188,10 @@ COLLECTION_START = os.environ.get("OT_WAREHOUSE_START", "2026-08-13")
 # report prints what landed and refuses to grade it. Calling a quiet day a gap
 # is how a board earns a permanent red and stops being read.
 STREAM_POLICY = {
-    "trades":            ("EVERY", "record", "closed + open trade rows, per box"),
+    # r280 — CDC: a box with no changed rows pushes nothing, so absence means
+    # that box took no trades. Corroborated box-for-box on 4 days by
+    # derived_fire_snapshot and derived_plan_ledger, not reasoned from the code.
+    "trades":            ("CONDITIONAL", "record", "CDC — absence means the box took no trades that day"),
     "signal_journal":    ("EVERY", "record", "one object per journal line"),
     "candles":           ("EVERY", "batch",  "high-water per symbol+interval"),
     "ohlc":              ("EVERY", "file",   "one CSV per day"),
@@ -158,7 +199,8 @@ STREAM_POLICY = {
     "eod":               ("EVERY", "file",   "pnl_today / trades_today"),
     "greeks_series":     ("EVERY", "batch",  "per-contract greeks"),
     "quote_series":      ("EVERY", "batch",  "per-contract bid/ask"),
-    "prints":            ("EVERY", "batch",  "TimeAndSale, with aggressor"),
+    # r280 — SPX is a cash index and publishes no TimeAndSale (r95).
+    "prints":            ("EVERY_EXCEPT:SPX", "batch", "TimeAndSale; a cash index publishes none"),
     "last_trade":        ("EVERY", "batch",  "Trade events"),
     "session_summary":   ("EVERY", "batch",  "Summary, prev-day close"),
     "indicator_series":  ("EVERY", "batch",  "ADX/ATR/EMA/VWAP  (ns=dseries)"),
@@ -175,7 +217,9 @@ STREAM_POLICY = {
     "derived_exit_counterfactual": ("CONDITIONAL", "pusher", "only when a flow exit WOULD have fired"),
     "chain_snapshots":   ("CONDITIONAL", "record", "only boxes that TRADED; NOT reconstructible after the session"),
     "circuit_breaker":   ("CONDITIONAL", "record", "only on a breaker trip"),
-    "shadow":            ("DEAD", "record", "NEVER INSTALLED on the v4 fleet — verified on a box"),
+    # 🔴 r280 — RECLASSIFIED. "Never installed on the v4 fleet" is FALSE:
+    # QQQ 2026-09-05 holds 32 date dirs, newest 09-04, with a shadow unit live.
+    "shadow":            ("EVERY", "record", "sweep-precursor primitives; LIVE (r280 corrected 'never installed')"),
     "theo_series":       ("DEAD", "batch",  "unsubscribed r118 after it took SPX's chain down"),
     "underlying_series": ("DEAD", "batch",  "published zero events on both symbol spaces (r125b)"),
     "orb_range":         ("DEAD", "record", "retired s3_push v1.8, 2026-08-16"),
@@ -277,6 +321,13 @@ def check_streams(s3, day, want, counts=False):
             verdict = "PARTIAL_BY_DESIGN"
         elif expect == "EVERY":
             missing = [b for b in live if b not in boxes]
+            verdict = "OK" if not missing else "GAP"
+        elif expect.startswith("EVERY_EXCEPT:"):
+            # The excused boxes are dropped from the EXPECTED set, never from
+            # the report: the stream is still graded, just not against a box
+            # that cannot write it.
+            excused = set(expect.split(":", 1)[1].split(","))
+            missing = [b for b in live if b not in boxes and b not in excused]
             verdict = "OK" if not missing else "GAP"
         elif expect.startswith("OWNER:"):
             owner = expect.split(":", 1)[1]

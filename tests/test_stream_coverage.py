@@ -1,5 +1,14 @@
 #!/usr/bin/env python3
-"""day_trader_pro/tests/test_stream_coverage.py — v1.0
+"""day_trader_pro/tests/test_stream_coverage.py — v1.1
+v1.1  2026-09-05 — dtp r280. THE THREE CORRECTIONS THE FIRST REAL RUN FORCED,
+PINNED ON BEHAVIOUR RATHER THAN ON THE TABLE.
+
+⚠️ S12-S14 DO NOT ASSERT THAT `STREAM_POLICY` CONTAINS A PARTICULAR STRING.
+A test that reads the map back is the map agreeing with itself (C.23) and would
+pass against any typo that still parses. They drive `check_streams` and assert
+the VERDICT: SPX absent from `prints` is not a gap while any other box is; a box
+absent from `trades` is not a gap at all; `shadow` absent from a box IS one now.
+
 v1.0  2026-09-05 — dtp r277. PER-STREAM COVERAGE, AND THE FOUR WAYS IT COULD
 CRY WOLF.
 
@@ -100,7 +109,13 @@ def main():
         "signal_journal":        full("NVDA", "SPX", "QQQ"),
         "derived_plan_check":    full("SPX", "QQQ"),          # NVDA missing
         "derived_fire_snapshot": full("SPX"),                 # CONDITIONAL
-        "shadow":                {DAY: {}},                   # DEAD
+        # ⚠️ r280 RE-DERIVED THIS FIXTURE. It used `shadow` as the DEAD
+        # example, and shadow turned out to be LIVE — so the case would have
+        # gone on asserting the very classification this revision corrects,
+        # which is the r233/r234 trap. `theo_series` is still genuinely dead:
+        # unsubscribed at r118 after it took SPX's whole chain down.
+        "theo_series":           {DAY: {}},                   # DEAD
+        "shadow":                full("NVDA", "SPX", "QQQ"),  # LIVE (r280)
         "chain_snapshots":       {DAY: {}},                   # CONDITIONAL
         "candles":               full("NVDA", "SPX", "QQQ", "NVDA_EXT", "VIX"),
         "sentiment_probe":       full("SPX"),                 # UNDECLARED
@@ -145,7 +160,10 @@ def main():
     check("S3b a CONDITIONAL stream that DID land is still not graded",
           by.get("derived_fire_snapshot", {}).get("verdict") == "CONDITIONAL")
     check("S4 a DEAD stream is not a gap",
-          by.get("shadow", {}).get("verdict") == "DEAD")
+          by.get("theo_series", {}).get("verdict") == "DEAD")
+    check("S4b ...and `shadow` is no longer one of them",
+          by.get("shadow", {}).get("verdict") == "OK",
+          by.get("shadow", {}).get("verdict"))
 
     # ══ S5 — AND NOTHING IS QUIETLY SKIPPED ═══════════════════════════════
     # A tool that shrinks its own scope is as misleading as one that
@@ -237,11 +255,53 @@ def main():
     check("S11c a fleet-wide absence collapses rather than listing every box",
           any("MISS: ALL" in l for l in lines))
 
+    # ══ S12-S14 — THE FIRST REAL RUN'S CORRECTIONS ════════════════════════
+    # 2026-09-01..09-04 raised nine flags and SEVEN were my policy table.
+    DAY2 = "2026-09-03"
+    want2 = ["NVDA", "SPX", "QQQ"]
+    b2 = {
+        # SPX writes no prints (cash index, r95); the others do.
+        "prints":  {DAY2: {"NVDA": 3, "QQQ": 3}},
+        # nobody wrote trades — CDC, so nobody traded. Not a gap.
+        "trades":  {DAY2: {}},
+        # shadow is LIVE, so a box missing from it IS a gap now.
+        "shadow":  {DAY2: {"NVDA": 3, "SPX": 3}},
+        "candles": {DAY2: {s_: 1 for s_ in want2}},
+    }
+    d2 = wc.check_streams(FakeS3(b2), DAY2, want2)
+    by2 = {r["stream"]: r for r in d2["rows"]}
+
+    check("S12 SPX absent from `prints` is NOT a gap — a cash index publishes "
+          "no TimeAndSale",
+          by2.get("prints", {}).get("verdict") == "OK",
+          f"{by2.get('prints', {}).get('verdict')} {by2.get('prints', {}).get('missing')}")
+    # 🔑 AND THE EXCEPTION IS PER-BOX, NOT A LOOSENING OF THE STREAM. If the
+    # excused symbol had simply switched the stream off, the report would stop
+    # noticing the day the other fourteen went quiet — which is the whole
+    # failure this stream exists to catch.
+    d2b = wc.check_streams(FakeS3({**b2, "prints": {DAY2: {"NVDA": 3}}}),
+                           DAY2, want2)
+    pr = {r["stream"]: r for r in d2b["rows"]}["prints"]
+    check("S12b ...but a NON-excused box absent from it still is",
+          pr["verdict"] == "GAP" and pr["missing"] == ["QQQ"],
+          f"{pr['verdict']} {pr['missing']}")
+
+    check("S13 no box writing `trades` is NOT a gap — CDC, so nobody traded",
+          by2.get("trades", {}).get("verdict") == "CONDITIONAL")
+
+    # 🔴 S14 — `shadow` WAS DECLARED DEAD AND IS LIVE. Measured on QQQ
+    # 2026-09-05: 32 date dirs, newest 09-04, shadow unit present; and 15 boxes
+    # push it every session in the bucket. Under v1.2 this case returned DEAD.
+    check("S14 a box absent from `shadow` is a gap — it is live, not dead",
+          by2.get("shadow", {}).get("verdict") == "GAP"
+          and by2.get("shadow", {}).get("missing") == ["QQQ"],
+          f"{by2.get('shadow', {}).get('verdict')} {by2.get('shadow', {}).get('missing')}")
+
     print()
     if FAILED:
         print(f"RED — {len(FAILED)} failed: {', '.join(FAILED)}")
         return 1
-    print("GREEN — 24 checks")
+    print("GREEN — 29 checks")
     return 0
 
 
