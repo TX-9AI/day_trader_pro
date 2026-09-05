@@ -1,5 +1,25 @@
 #!/usr/bin/env python3
-# day_trader_pro/warehouse_cache.py — v1.5
+# day_trader_pro/warehouse_cache.py — v1.6
+# v1.6 (2026-09-05) — dtp r290 / S3.21. 🔴 THIS METHOD READ THE WRONG ROWS IN
+#   BOTH DIRECTIONS, AND HAD SINCE IT WAS WRITTEN. It listed only the requested
+#   `dt=` partitions and filtered nothing afterwards — but a DERIVED partition
+#   carries the PUSH day, not the row's ET day (C.9). So a row whose session was
+#   in range but which pushed the next morning was NEVER READ, and a row pushed
+#   inside the range whose own day fell before it was read anyway. Neither
+#   consumer compensated: `collect()` takes `dates` and does not filter on them,
+#   `screen_plan_gates` bounds by strategy and symbol.
+#   🔑 `load_derived` HAS DONE THIS CORRECTLY SINCE r184 — scan a forward window,
+#   keep rows whose OWN timestamp lands in range — and it has no production
+#   callers (S3.11). The correct behaviour sat on the dead road while every real
+#   report used this one, which is the same finding as S3.11 one layer down.
+#   ⚠️ THE FILTER IS PER ROW IN PYTHON, NOT AN SQL OFFSET. `_et_offset()` applies
+#   TODAY's UTC offset to every row — right for eight months, an hour wrong for
+#   four, the exact DST trap its own docstring warns about. `ettime.et_day`
+#   converts each epoch on its own terms, at insert, so memory stays O(one
+#   object) and the row count stays honest.
+#   ⚠️ FORWARD SCANNING IS DERIVED-ONLY. A raw stream like `candles` is
+#   partitioned by the day it describes, so scanning forward there would pull in
+#   genuinely later sessions.
 # v1.5 (2026-09-05) — dtp r286 / S3.11. 🔴 THE CDC COLLAPSE NOW RUNS HERE,
 #   WHERE THE DATA ACTUALLY COMES FROM. `warehouse_reader.load_derived` has
 #   carried the natural-key collapse since r276 and HAS NO PRODUCTION CALLERS:
@@ -99,12 +119,13 @@ import signal
 import sqlite3
 import sys
 import tempfile
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 _ET = ZoneInfo("US/Eastern")
 
 import config
+import ettime                                            # noqa: E402
 import warehouse_reader as WR
 
 
@@ -267,7 +288,7 @@ class WarehouseCache:
         return "collapsed on " + ", ".join(nat)
 
     def load(self, table: str, dates, columns, s3=None, datatype=None,
-             syms=None, part=None, keep=None) -> int:
+             syms=None, part=None, keep=None, forward=None) -> int:
         # ⚠️ AN EMPTY DATE LIST IS A LEGITIMATE INPUT, NOT A CRASH SITE. A
         # reversed range (END before START) produced one, and this raised
         # IndexError on `dates[-1]` four frames below the caller. A library
@@ -287,6 +308,48 @@ class WarehouseCache:
         """
         s3 = s3 or WR._client()
         dt = datatype or f"derived_{table}"
+
+        # ── 🔴 r290 / S3.21 — SCAN FORWARD, KEEP BY THE ROW'S OWN ET DAY ────
+        # This method listed ONLY the requested `dt=` partitions and filtered
+        # nothing afterwards, and BOTH halves of that are wrong because a
+        # DERIVED partition is stamped with the PUSH day, not the row's ET day
+        # (C.9 — it is why the coverage report grades these streams `pusher`).
+        #   · a row whose ET day is in range but which pushed the next morning
+        #     was NEVER READ — silently, and the report showed a smaller,
+        #     plausible number with nothing to indicate a hole;
+        #   · a row pushed inside the range whose ET day falls BEFORE it was
+        #     read anyway, so a one-day report could carry the previous
+        #     session's tail.
+        # Wrong in both directions, and neither consumer compensated:
+        # `collect()` takes `dates` and does not filter on them, and
+        # `screen_plan_gates` bounds by strategy and symbol, not by day.
+        # 🔑 `load_derived` HAS DONE THIS CORRECTLY SINCE r184 — scan a forward
+        # window, then keep rows whose OWN timestamp lands in range. It has no
+        # production callers (S3.11), so the correct behaviour sat on the dead
+        # road while every real report used this one.
+        fwd = WR.DERIVED_FORWARD_DAYS if forward is None else int(forward)
+        # ⚠️ ONLY FOR DERIVED STREAMS. A raw stream like `candles` or `ohlc` is
+        # partitioned by the day it describes, so a forward scan there would
+        # pull genuinely later sessions in.
+        if not dt.startswith("derived_"):
+            fwd = 0
+        scan = list(dates)
+        if fwd:
+            _last = datetime.strptime(dates[-1], "%Y-%m-%d")
+            scan += [(_last + timedelta(days=i + 1)).date().isoformat()
+                     for i in range(fwd)]
+        ts_col = WR.DERIVED_TS_COL.get(table, WR.DEFAULT_TS_COL)
+        want_days = set(dates)
+        # ⚠️ FILTERED PER ROW IN PYTHON, NOT BY AN SQL OFFSET. `_et_offset()`
+        # applies TODAY's UTC offset to every row, which is right for eight
+        # months and an hour wrong for four — the same DST trap its own
+        # docstring warns about, one level up. `ettime.et_day` converts each
+        # epoch on its own terms, and doing it at INSERT keeps memory at
+        # O(one object) and keeps the row count honest.
+        def _in_range(r):
+            if not fwd or ts_col not in r:
+                return True
+            return ettime.et_day(r.get(ts_col)) in want_days
         cols = list(columns)
         ddl = ", ".join(f'"{c}"' for c in cols)
         self.conn.execute(f'CREATE TABLE IF NOT EXISTS "{table}" '
@@ -347,7 +410,12 @@ class WarehouseCache:
         # symbols — and a report always does, because it reads `trades` first —
         # lists only those partitions.
         prefixes = []
-        for d in dates:
+        # ⚠️ THE LISTING WALKS `scan`, NOT `dates`. A first cut changed only the
+        # FETCH loop and left this on `dates`, so the forward partitions were
+        # never listed and the fix did nothing — the checker showed identical
+        # failures before and after, which is exactly what a fix applied to the
+        # wrong half looks like.
+        for d in scan:
             base = f"{WR.PREFIX}/{dt}/dt={d}/"
             if syms:
                 for sy in syms:
@@ -372,7 +440,7 @@ class WarehouseCache:
                         continue
                     plan.append((k, int(o.get("Size", 0) or 0)))
         tk = Ticker(f"{dt} {dates[0]}..{dates[-1]}", total=len(plan))
-        for d in dates:
+        for d in scan:
             pfx = f"{WR.PREFIX}/{dt}/dt={d}/"
             keys = [(k, sz) for k, sz in plan if k.startswith(pfx)]
             for key, size in keys:
@@ -413,7 +481,8 @@ class WarehouseCache:
                 # them, which is the write, the index and the memory.
                 batch = [tuple([sym] + [r.get(c) for c in cols])
                          for r in rec
-                         if isinstance(r, dict) and (keep is None or keep(r))]
+                         if isinstance(r, dict) and (keep is None or keep(r))
+                         and _in_range(r)]
                 if batch:
                     self.conn.executemany(ins, batch)
                     n += len(batch)

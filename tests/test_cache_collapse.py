@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""day_trader_pro/tests/test_cache_collapse.py — v1.0
+"""day_trader_pro/tests/test_cache_collapse.py — v1.1
+v1.1  2026-09-05 — dtp r290. Fixture epochs now MATCH their `dt=` partition.
+They were `1000.0` — 1970 — on rows filed under 2026, which was internally
+inconsistent from the start and invisible until the cache began filtering by
+each row's own ET day (S3.21). A fixture whose timestamp contradicts its
+partition cannot exercise a day filter.
+
 v1.0  2026-09-05 — dtp r286 / S3.11. THE CDC COLLAPSE, DRIVEN THROUGH THE PATH
 REPORTS ACTUALLY TAKE.
 
@@ -17,6 +23,8 @@ future refactor could satisfy without touching the data.
 """
 import os
 import sys
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _root)
@@ -68,7 +76,14 @@ def main():
     check("W0 warehouse_cache exposes the r286 collapse gate", True)
 
     DAY = "2026-09-02"
-    base = {"ts_epoch": 1000.0, "strategy": "orb", "direction": "long",
+    # ⚠️ r290 — THE EPOCH NOW MATCHES THE PARTITION. This fixture used
+    # `ts_epoch: 1000.0` — 1970 — on rows filed under a 2026 `dt=`, which was
+    # internally inconsistent from the start and only became visible when the
+    # cache began filtering by the row's OWN ET day (S3.21). A fixture whose
+    # timestamp contradicts its partition cannot exercise a day filter.
+    DAY_TS = datetime.strptime(DAY + " 14:00", "%Y-%m-%d %H:%M").replace(
+        tzinfo=ZoneInfo("America/New_York")).timestamp()
+    base = {"ts_epoch": DAY_TS, "strategy": "orb", "direction": "long",
             "check_name": "vwap", "verdict": "PASS", "value": 1.0, "_rid": 7}
     # The SAME logical row pushed three times — CDC's normal behaviour, and the
     # thing that inflated every count that reached a report.
@@ -121,9 +136,9 @@ def main():
 
     store2 = {
         f"raw/derived_plan_ledger/dt={DAY}/sym=QQQ/1.json": _env(
-            [{"plan_id": "p1", "_rid": 1, "created_ts": 1.0}], "2026-09-02T20:00:00Z"),
+            [{"plan_id": "p1", "_rid": 1, "created_ts": DAY_TS}], "2026-09-02T20:00:00Z"),
         f"raw/derived_plan_ledger/dt={DAY}/sym=QQQ/2.json": _env(
-            [{"plan_id": "p2", "_rid": 1, "created_ts": 1.0}], "2026-09-02T20:01:00Z"),
+            [{"plan_id": "p2", "_rid": 1, "created_ts": DAY_TS}], "2026-09-02T20:01:00Z"),
     }
     WR._client = lambda *a, **k: _S3(store2)
     c2 = WC.WarehouseCache("t_partial")
