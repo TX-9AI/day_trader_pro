@@ -1,5 +1,29 @@
 #!/usr/bin/env python3
-# day_trader_pro/warehouse_reader.py — v1.9
+# day_trader_pro/warehouse_reader.py — v2.0
+# v2.0  2026-09-05 — dtp r276. 🔴 THE CDC COLLAPSE KEYS ON THE TABLE'S OWN
+#       DECLARED PRIMARY KEY. `_rid` was never an identity — it is the source
+#       table's sqlite `rowid`, and r266 scoped it to the partition to stop two
+#       sessions colliding. That fixed an UNDER-count and opened an OVER-count
+#       in the same motion: one CDC row re-pushed on two days is one row and
+#       two partitions, so the scoped key keeps BOTH copies. Every one of these
+#       tables except `character_ledger` declares a PRIMARY KEY the box already
+#       enforces, so the identity was sitting in the schema the whole time.
+#       ⚠️ r266's STATED MECHANISM IS NOT ESTABLISHED and this does not rest on
+#       it. Its comment says rowids restart because "boxes purge and rebuild
+#       their derived stores"; `otv4/warehouse/retention_purge.py` at HEAD
+#       touches the derived store ONLY for DERIVED_ARTIFACT_DAYS
+#       (indicator/fork/surface_series), and `plan_check` and `plan_tick` are in
+#       neither that list nor NEVER_PURGE — nothing deletes them and nothing
+#       protects them by name. A box REBUILD restarts rowids; the nightly purge
+#       does not. Keyed on the natural key, both readings are moot.
+#       🔑 THE COUNT BECOMES SELF-VERIFYING. Distinct primary keys per ET day IS
+#       the row population, so "is 2.38M complete" stops being unanswerable.
+#       ⚠️ A MISSING KEY COMPONENT FALLS BACK TO r266's SCOPED `_rid` AND IS
+#       COUNTED OUT LOUD in the banner. Absent is not zero: a silent fallback
+#       would mean two collapse rules running with nothing saying which.
+#       ⚠️ ABSENT IS TESTED AS `is None`, NEVER FALSINESS — `direction` is
+#       NOT NULL DEFAULT '' and `ts_epoch` can be 0.0, and `x or DEFAULT`
+#       rewrites a valid extreme into the sentinel for missing (C.45).
 # v1.9  2026-09-04 — dtp r266. 🔴 THE CDC COLLAPSE KEY NOW CARRIES THE
 #       PARTITION. `_rid` is the source table's sqlite `rowid` (otv4
 #       s3_push:945), unique only within ONE box's table at ONE moment — boxes
@@ -238,6 +262,12 @@ class WhMeta:
         self.rows = 0            # rows after CDC collapse
         self.kept = 0            # rows inside the requested ET window
         self.error = ""
+        # r276 — WHICH COLLAPSE RULE RAN, and how many rows could not be
+        # keyed by it. r266 already established that a printed number must
+        # name the collapse that produced it; these two make that true of
+        # the natural-key rule and of its fallback.
+        self.collapsed_by = ""
+        self.unkeyed = 0
 
     def banner(self) -> str:
         head = "SOURCE: s3://%s/%s [%s]" % (BUCKET, PREFIX, self.what)
@@ -246,6 +276,11 @@ class WhMeta:
         tail = ("%d partition(s), %d object(s), %d row(s) after collapse, "
                 "%d in window" % (self.partitions, self.objects,
                                   self.rows, self.kept))
+        if self.collapsed_by:
+            tail += "  [collapsed by %s]" % self.collapsed_by
+        if self.unkeyed:
+            tail += ("  ⚠️ %d row(s) lacked a key component and fell back to "
+                     "(sym, dt, _rid)" % self.unkeyed)
         if self.objects == 0:
             tail += "  (a real, empty result — not a missing path)"
         return "%s — %s" % (head, tail)
@@ -281,6 +316,68 @@ def et_bounds(d0: str, d1: str) -> tuple:
 DERIVED_TS_COL = {"plan_ledger": "created_ts"}
 DEFAULT_TS_COL = "ts_epoch"
 
+# 🔑 r276 — EACH TABLE'S OWN DECLARED PRIMARY KEY. Read out of otv4's schemas,
+# never invented, because a key this file made up would be a second definition
+# of identity and the box would not be enforcing it:
+#   fire_snapshot        data/derived_store.py:170
+#   strategy_note        derived/notes.py:109
+#   plan_ledger          derived/plan_ledger.py:144
+#   plan_tick            strategy/plan.py:301
+#   plan_check           strategy/plan.py:313
+#   gate_disposition     analysis/gate_report.py:125
+#   level_ledger         data/derived_store.py:127
+#   exit_counterfactual  derived/counterfactual.py:80
+# `screen_plan_gates` already groups its per-tick panel on plan_check's own PK
+# (dtp r271) — the natural key is not a new idea here, it is the one that was
+# already working in the one consumer that needed to be right.
+#
+# ⚠️ `character_ledger` IS DELIBERATELY ABSENT. Its key is
+# `id INTEGER PRIMARY KEY AUTOINCREMENT` (derived/character_engine.py:83), and
+# in sqlite an INTEGER PRIMARY KEY *is* the rowid — so it has no identity
+# independent of `_rid` and falls back to r266's partition-scoped key. Listing
+# it here would look like coverage and mean nothing.
+DERIVED_NATURAL_KEY = {
+    "fire_snapshot":       ("trade_id",),
+    "strategy_note":       ("ts_epoch", "symbol", "strategy"),
+    "plan_ledger":         ("plan_id",),
+    "plan_tick":           ("ts_epoch", "symbol", "strategy", "direction"),
+    "plan_check":          ("ts_epoch", "symbol", "strategy", "direction",
+                            "check_name"),
+    "gate_disposition":    ("ts_epoch", "symbol", "strategy"),
+    "level_ledger":        ("level_id",),
+    "exit_counterfactual": ("trade_id", "ts_epoch"),
+}
+
+
+def collapse_key(table, sym, part, row):
+    """The identity of one derived row -> (key, keyed_naturally).
+
+    The writing box rides in the key even when the table's own PK already
+    carries `symbol`: two boxes are two stores, and cheap belt-and-braces
+    beats a cross-box merge nobody would ever see.
+
+    ⚠️ A COMPONENT IS ABSENT ONLY IF IT IS MISSING OR None. `direction` is
+    `NOT NULL DEFAULT ''` and `ts_epoch` can legitimately be 0.0, so a
+    falsiness test would rewrite valid values into the fallback — C.45, the
+    `x or DEFAULT` idiom that turned the freshest sweep into the stale
+    sentinel. Falling back is not free: it reinstates the r266 key, which
+    over-counts a row pushed on two days.
+
+    ⚠️ EXTRACTED TO MODULE LEVEL so the checker drives the real function
+    rather than a copy of the arithmetic (C.23).
+    """
+    cols = DERIVED_NATURAL_KEY.get(table)
+    if cols:
+        vals = []
+        for c in cols:
+            if c not in row or row[c] is None:
+                vals = None
+                break
+            vals.append(row[c])
+        if vals is not None:
+            return (sym, "PK", tuple(vals)), True
+    return (sym, "RID", part, row.get("_rid")), False
+
 # How many days PAST the requested window to scan for late-pushed rows. Three
 # covers a weekend plus one night the pusher did not run. Raising it costs
 # LIST calls, never correctness; lowering it can silently drop rows.
@@ -291,10 +388,15 @@ def load_derived(table, dates, s3=None, forward=None):
     """Latest state of one derived_store table for the ET days `dates`.
 
     -> (rows, WhMeta). Rows are plain dicts exactly as the box wrote them,
-    collapsed latest-per-(symbol, _rid) by `pushed_at_utc`, then filtered to
-    the requested ET days by each row's own timestamp column.
+    collapsed latest-per-(box, PRIMARY KEY) by `pushed_at_utc` — r276, see
+    `collapse_key` — then filtered to the requested ET days by each row's own
+    timestamp column. The banner names the rule that ran and counts any row
+    that had to fall back to the partition-scoped `_rid`.
     """
     meta = WhMeta("derived_%s %s..%s" % (table, dates[0], dates[-1]))
+    _nat = DERIVED_NATURAL_KEY.get(table)
+    meta.collapsed_by = ("(sym, %s)" % ", ".join(_nat) if _nat
+                         else "(sym, dt, _rid) — no natural key for this table")
     s3 = s3 or _client()
     fwd = DERIVED_FORWARD_DAYS if forward is None else forward
 
@@ -321,21 +423,25 @@ def load_derived(table, dates, s3=None, forward=None):
             for r in (env.get("record") or []):
                 if not isinstance(r, dict):
                     continue
-                # 🔴 dtp-r266 — THE PARTITION DATE IS PART OF THE KEY. `_rid`
-                # is the SOURCE TABLE'S sqlite `rowid` (s3_push:945,
-                # `SELECT rowid AS _rid, *`), which is unique only within ONE
-                # box's table at ONE moment. Boxes purge and rebuild their
-                # derived stores, so rowids RESTART — (QQQ, 1) on 09-01 and
-                # (QQQ, 1) on 09-04 collided, and the later `pushed_at_utc`
-                # silently won. Measured on the 08-31..09-04 range:
-                # strategy_note 325,762 rows collapsed to 37,584, and the fit
-                # report read 2 fired butterflies where the trade log has 20.
-                # ⚠️ THE COLLAPSE ITSELF IS CORRECT AND STAYS — CDC pushes the
-                # same row repeatedly and only the latest state should survive.
-                # What was wrong is the SCOPE: latest-per-rowid WITHIN a
-                # partition, never across partitions, because two partitions
-                # are two different days of a table whose rowids repeat.
-                key = (sym, d, r.get("_rid"))
+                # 🔴 dtp-r276 — THE KEY IS THE TABLE'S OWN PRIMARY KEY.
+                # `_rid` is the source table's sqlite `rowid` (s3_push:945,
+                # `SELECT rowid AS _rid, *`), unique only within ONE box's
+                # table at ONE moment. r266 scoped it to the partition after
+                # (QQQ, 1) on 09-01 collided with (QQQ, 1) on 09-04 and the
+                # later push silently won — strategy_note 325,762 rows
+                # collapsing to 37,584, and the fit report reading 2 fired
+                # butterflies against 20 in the trade log.
+                # ⚠️ THAT FIXED AN UNDER-COUNT AND OPENED AN OVER-COUNT. CDC
+                # re-pushes a row whenever it changes, and `push_derived`
+                # files under the PUSH day — so one row touched on two days
+                # lands in two partitions, and a partition-scoped key keeps
+                # both. Under-count, then over-count, on the same data.
+                # 🔑 THE COLLAPSE ITSELF IS CORRECT AND STAYS. Only its
+                # SUBJECT was wrong: these rows have an identity the box
+                # already enforces, and it is not the rowid.
+                key, keyed = collapse_key(table, sym, d, r)
+                if not keyed:
+                    meta.unkeyed += 1
                 if key not in best or stamp >= best[key][0]:
                     best[key] = (stamp, sym, r)
 

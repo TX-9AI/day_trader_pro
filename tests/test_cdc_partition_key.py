@@ -1,5 +1,19 @@
 #!/usr/bin/env python3
-"""day_trader_pro/tests/test_cdc_partition_key.py — v1.0
+"""day_trader_pro/tests/test_cdc_partition_key.py — v1.1
+v1.1  2026-09-05 — dtp r276. RE-DERIVED, NOT PATCHED. C2 asserted that the
+collapse key is 3-part `(sym, partition, _rid)` — which is the exact shape r276
+replaces, so leaving it would CERTIFY THE DEFECT ON EVERY RUN. That is the trap
+r234 named three times in one file and r233 named again: a fixture that pins the
+rule being retired is worse than no fixture, because it goes green while the
+thing it guards is wrong.
+🔑 THE HISTORY IN C1/C1b STAYS. The rowid collision was real and the arithmetic
+that shows it is still the reason `_rid` is not an identity. What changes is the
+CONCLUSION drawn from it: the answer was never a better scope for a rowid, it
+was the primary key the box already enforces. C2 now pins that the partition-
+scoped rid survives ONLY as the fallback for a table with no natural key.
+⚠️ The behavioural proof lives in `tests/test_natural_key.py`, which EXECUTES
+`load_derived`; this file stays a structural companion to it.
+
 v1.0  2026-09-04 — dtp r266. THE CDC COLLAPSE KEY MUST CARRY THE PARTITION.
 
 🔴 `_rid` is the SOURCE TABLE'S sqlite `rowid` (otv4 `warehouse/s3_push.py:945`,
@@ -40,18 +54,33 @@ def main():
           len(old) == 1, str(old))
     check("C1b the partition-scoped key keeps both", len(new) == 2)
 
-    # ══ C2 — THE READER USES THE SCOPED KEY ═══════════════════════════════
-    # ⚠️ AST, not a string search: the file's own comment explains the OLD key,
-    # so grepping for it would match the explanation (§20).
-    src = open(os.path.join(root, "warehouse_reader.py"), encoding="utf-8").read()
-    keys = []
-    for node in ast.walk(ast.parse(src)):
-        if (isinstance(node, ast.Assign)
-                and any(getattr(t, "id", "") == "key" for t in node.targets)
-                and isinstance(node.value, ast.Tuple)):
-            keys.append(len(node.value.elts))
-    check("C2 load_derived's collapse key is 3-part (sym, partition, _rid)",
-          keys and all(k == 3 for k in keys), f"arities {keys}")
+    # ══ C2 — THE READER KEYS ON THE TABLE'S OWN PRIMARY KEY ══════════════
+    # ⚠️ EXECUTED, not read as source text. r276's `collapse_key` is a module
+    # function precisely so a checker can drive it rather than re-implement the
+    # arithmetic beside it (C.23), and the file's own comments discuss BOTH the
+    # old key and the new one, so any string search would match the prose (§20).
+    import warehouse_reader as wr
+    if not hasattr(wr, "collapse_key"):
+        check("C2 the reader exposes collapse_key", False,
+              "absent — r276 has not landed in this checkout")
+    else:
+        pk, keyed = wr.collapse_key(
+            "plan_check", "QQQ", "2026-09-04",
+            {"_rid": 1, "ts_epoch": 1788364800.0, "symbol": "QQQ",
+             "strategy": "SweepCreditSpread", "direction": "short",
+             "check_name": "age"})
+        check("C2 a keyed table collapses on its PRIMARY KEY, not on _rid",
+              keyed and "2026-09-04" not in str(pk) and 1 not in pk,
+              str(pk))
+        # 🔑 AND THE r266 KEY IS NOT DELETED — it is demoted to the fallback for
+        # the one table with no identity of its own (`character_ledger`, whose
+        # `id INTEGER PRIMARY KEY AUTOINCREMENT` IS the rowid). Two different
+        # answers for two different situations, which is why this is a demotion
+        # rather than a reversal.
+        fb, keyed_fb = wr.collapse_key("character_ledger", "QQQ", "2026-09-04",
+                                       {"_rid": 1, "ts_epoch": 1.0})
+        check("C2b the partition-scoped _rid survives as the fallback",
+              (not keyed_fb) and "2026-09-04" in str(fb), str(fb))
 
     # ══ C3 — AND IT IS NOT RE-COLLAPSED DOWNSTREAM ════════════════════════
     # 🔴 fit_readiness ran a SECOND collapse in SQL — `GROUP BY _rid` — which
@@ -77,7 +106,7 @@ def main():
     if FAILED:
         print(f"RED — {len(FAILED)} failed: {', '.join(FAILED)}")
         return 1
-    print("GREEN — 5 checks")
+    print("GREEN — 6 checks")
     return 0
 
 
