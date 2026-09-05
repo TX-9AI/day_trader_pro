@@ -1,5 +1,16 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/check_land_sh.py — v1.2
+# day_trader_pro/tests/check_land_sh.py — v1.3
+# v1.3 (2026-09-05) — dtp r289 / DEP.2. F1-F3 PIN THAT POS/NEG MATCH AS FIXED
+#   STRINGS. `grep -q` is a BASIC REGULAR EXPRESSION and it graded two
+#   deliveries wrongly in one day, in OPPOSITE directions: `**r247**`
+#   degenerated to `r24` and PASSED against a GENESIS with no such row (failed
+#   OPEN), and `[ "$GO" = "y" ]` read as a character class and REFUSED a
+#   correct delivery (failed CLOSED). A gate that can do both is not weak — it
+#   is unrelated to what it claims to check.
+#   ⚠️ F1/F2 DRIVE A REAL LAND rather than grepping the source for `-qF`: a
+#   string check would pass against the flag sitting in a comment and prove
+#   nothing, which is the same defect one level up. F3 exists because
+#   loosening a check that misfires is the easy wrong fix.
 # v1.2 (2026-09-05) — dtp r279. ALL OR NONE, DRIVEN AGAINST A REAL SECOND REPO.
 #   A1-A1d are the cases the operator asked for after watching a real one:
 #   r277_r2 landed out of order, its dtp half passed and PUSHED, and only then
@@ -484,6 +495,48 @@ def main():
               f"{_remote_head(bare1)!r} / {_remote_head(bare2)!r}")
         check("A2b ...and the pushes come after every commit, not between them",
               "holding the push until every half is in" in (r.stdout + r.stderr))
+
+    # ══ 🔴 F1-F3 — POS/NEG ARE FIXED STRINGS (dtp r289 / DEP.2) ═══════════
+    # Both shapes below were REAL spec lines this gate graded wrongly on
+    # 2026-09-05, in OPPOSITE directions. A gate that can fail open and closed
+    # is not a weak gate — it is unrelated to what it claims to check.
+
+    # F1 — FAILED OPEN. In a BRE `**r247**` is "r24" then "zero or more 7s",
+    # so it matched a GENESIS containing r24 and no r247, and the delivery
+    # landed on a ledger that did not have the row it asserted.
+    with tempfile.TemporaryDirectory() as tmp:
+        spec = [l for l in GOOD if not l.startswith("POS")] + \
+               ["POS thing.py|**NEW_LINE = 2**"]
+        home, repo, stage = _world(tmp, spec, extra=PASS_CHK)
+        r = _land(home, stage)
+        check("F1 a POS whose LITERAL text is absent is refused, even though "
+              "it would match as a regex",
+              r.returncode != 0 and _head(repo) == "base",
+              f"rc={r.returncode} head={_head(repo)!r}")
+
+    # F2 — FAILED CLOSED. Brackets are a character class, so a NEG naming a
+    # string the file does not contain matched anyway and refused a correct
+    # delivery. This is the one that cost a re-cut earlier today.
+    with tempfile.TemporaryDirectory() as tmp:
+        spec = [l for l in GOOD if not l.startswith("NEG")] + \
+               ['NEG thing.py|[ "$GO" = "y" ]']
+        home, repo, stage = _world(tmp, spec, extra=PASS_CHK)
+        r = _land(home, stage)
+        check("F2 a NEG whose LITERAL text is absent does not trip, though "
+              "its characters would match as a class",
+              r.returncode == 0, f"rc={r.returncode} out={r.stdout[-120:]!r}")
+
+    # ⚠️ F3 — AND THE GATE STILL BITES. Loosening a check that misfires is the
+    # easy wrong fix; the literal form must still refuse a delivery whose
+    # asserted content really is missing.
+    with tempfile.TemporaryDirectory() as tmp:
+        spec = [l for l in GOOD if not l.startswith("POS")] + \
+               ["POS thing.py|a string that is genuinely not there"]
+        home, repo, stage = _world(tmp, spec, extra=PASS_CHK)
+        r = _land(home, stage)
+        check("F3 ...and a genuinely absent string is still refused",
+              r.returncode != 0 and _head(repo) == "base",
+              f"rc={r.returncode}")
 
     print()
     if _fails:

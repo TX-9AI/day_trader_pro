@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
-# day_trader_pro/tools/land.sh — v1.2
+# day_trader_pro/tools/land.sh — v1.3
+# v1.3 (2026-09-05) — dtp r289 / DEP.2. POS/NEG MATCH AS FIXED STRINGS. See the
+#   block in the spec-format header: `grep -q` is a BRE, and it graded two
+#   deliveries wrongly in one day — `**r247**` degenerated to `r24` and PASSED
+#   against a file with no such row, and `[ "$GO" = "y" ]` read as a character
+#   class and REFUSED a correct one. One failed open, one failed closed.
 # v1.2 (2026-09-05) — dtp r279. ALL HALVES LAND, OR NONE REACH ORIGIN.
 #   Operator, 2026-09-05: "make sure all will land or none."
 #
@@ -128,8 +133,26 @@
 #   REPO   <marker-file> <marker-file>     files that identify the target repo
 #   REV    r207                             revision id, for GENESIS + the gate
 #   DESC   <one line>                       GENESIS row AND commit subject
-#   POS    <path>|<grep pattern>            must be present after extraction
-#   NEG    <path>|<grep pattern>            must be ABSENT after extraction
+#   POS    <path>|<literal string>          must be present after extraction
+#   NEG    <path>|<literal string>          must be ABSENT after extraction
+#
+# 🔴 v1.3 — POS/NEG ARE FIXED STRINGS (`grep -qF`), NOT PATTERNS. They were
+# `grep -q`, which is a BASIC REGULAR EXPRESSION, and the gate therefore
+# passed twice on patterns it never actually matched:
+#   · `POS docs/GENESIS.md|**r247**` — BRE reads `*` as "zero or more of the
+#     preceding character", so `**r247**` degenerates to `r24`, and the gate
+#     said PASS against a GENESIS with no r247 row in it.
+#   · `NEG menu_functions.sh|[ "$GO" = "y" ]` — the brackets are a CHARACTER
+#     CLASS, so it matched almost any line and REFUSED a correct delivery.
+# ⚠️ ONE FAILED OPEN AND ONE FAILED CLOSED, WHICH IS THE POINT. A gate that
+# can do either is not weaker in one direction, it is unrelated to the thing
+# it claims to check.
+# 🔑 AND THE ASSERTIONS ARE CONTENT, NOT PATTERNS, BY DESIGN — the operator's
+# own rule is that a supersession check keys on a distinctive LINE from the
+# real change. `**bold**`, `[brackets]`, `$vars`, `(parens)` and `.` are all
+# ordinary characters in the text being asserted, so a regex engine here only
+# ever misreads them. Nothing was gained by it and two deliveries were graded
+# wrongly.
 set -u
 
 STAGE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -228,13 +251,13 @@ land_one() {
   local g=0 f p
   while IFS= read -r line; do
     f="${line#POS }"; p="${f#*|}"; f="${f%%|*}"
-    if ! grep -q "$p" "$repo/$f" 2>/dev/null; then
+    if ! grep -qF "$p" "$repo/$f" 2>/dev/null; then
       echo "  MISSING in $f: $p"; g=1
     fi
   done < <(grep '^POS ' "$spec")
   while IFS= read -r line; do
     f="${line#NEG }"; p="${f#*|}"; f="${f%%|*}"
-    if grep -q "$p" "$repo/$f" 2>/dev/null; then
+    if grep -qF "$p" "$repo/$f" 2>/dev/null; then
       echo "  STILL PRESENT in $f: $p"; g=1
     fi
   done < <(grep '^NEG ' "$spec")
