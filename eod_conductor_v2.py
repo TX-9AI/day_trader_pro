@@ -1,7 +1,31 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/eod_conductor_v2.py — v2.1
+day_trader_pro/eod_conductor_v2.py — v2.2
 STOP TRADING → FILL THE BUCKET → VERIFY IT LANDED → TAKE THEM DOWN.
+
+v2.2    2026-09-05  RELEASE THE STORES BEFORE RECLAIMING THEM. The purge has
+        run since v2.1 with `optionsbot` and `candle-feed` STILL RUNNING, and
+        that is fine for deleting rows and fatal for getting the space back.
+        🔴 MEASURED, NOT REASONED (otv4 tests/check_purge_reclaim.py R2/R2b):
+        `wal_checkpoint(TRUNCATE)` returns **busy** while any other connection
+        holds a read mark, and the WAL is only partly reclaimed — 7.1MB fell to
+        4.4MB with a reader open and to 0 with none. That is almost certainly
+        why MU carried a **1.6 GB `feed_store.db-wal`** beside a 2.3 GB store on
+        2026-09-05, with META at 1.1 GB and AMD at 963 MB.
+        `stop_services()` stops both units on the VERIFIED list only, between
+        the verdict and the purge.
+        ⚠️ ON `ok` ONLY, NEVER ON `held`. A held box is up for the operator to
+        troubleshoot (his 2026-08-25 ruling), and it keeps everything until its
+        next wake proves the push — taking its writers down would change what he
+        is looking at.
+        ⚠️ AFTER THE DRAIN, NOT BEFORE. Stopping first would make the drain
+        cleaner still, but it would stop services on boxes that then get HELD,
+        and a held box left with its services down is a different state from the
+        one the ruling describes. The drain is unchanged; only the reclaim
+        needed the release.
+        ⚠️ AND IT NEVER BLOCKS THE HALT — a failed stop is logged and stepped
+        over, the same rule the purge already follows: a box left running all
+        night costs money and a large file does not.
 
 v2.1    2026-08-27  THE RETENTION PURGE IS A CONDUCTOR PHASE. It was called
 from warehouse/self_close.py, which fires at 16:45 — but this conductor stops
@@ -252,6 +276,41 @@ def drain_and_verify(symbols, dry: bool) -> dict:
 
 
 # ── STEP 4 — TAKE DOWN, PER BOX, ONLY ON ITS OWN VERIFICATION. ──────────────
+def stop_services(ok: list, dry: bool) -> dict:
+    """Stop the writers on the verified boxes, so the reclaim can do its job.
+
+    🔴 WHY IT EXISTS (v2.2). `retention_purge` checkpoints and vacuums, and
+    BOTH are blocked by a live connection: `wal_checkpoint(TRUNCATE)` returns
+    busy while another connection holds a read mark and the WAL is only partly
+    reclaimed. Measured in otv4 `tests/check_purge_reclaim.py` R2/R2b — 7.1MB
+    to 4.4MB with a reader, 7.1MB to 0 without. The fleet's evidence is MU's
+    1.6 GB `feed_store.db-wal` beside a 2.3 GB database.
+
+    ⚠️ `ok` ONLY. A HELD box keeps its services, because it is up for the
+    operator to look at and its data is still the only copy.
+    ⚠️ NEVER BLOCKS THE HALT. A stop that fails is logged and stepped over.
+    ⚠️ NOT `disable` — the units must come back on the next wake. This stops
+    the RUNNING service and touches nothing about whether it starts again.
+    """
+    out = {}
+    if not ok:
+        return out
+    if dry:
+        _log("STOP", f"[dry] would stop optionsbot + candle-feed on "
+                     f"{len(ok)} verified box(es) before the purge")
+        return out
+    _log("STOP", f"releasing the stores on {len(ok)} verified box(es)")
+    cmd = ("sudo systemctl stop optionsbot candle-feed 2>&1; "
+           "echo STOPPED $(systemctl is-active optionsbot) "
+           "$(systemctl is-active candle-feed)")
+    for sym, ip, _st in fleet.get_fleet(list(ok)):
+        rc, text, err = ssh_util.ssh_run(ip, cmd, timeout=VERIFY_TIMEOUT_S)
+        line = (text or err or "").strip().replace("\n", " | ")
+        out[sym] = line
+        _log("STOP", f"  {sym}: {line or 'no output'}")
+    return out
+
+
 def purge_verified(ok: list, dry: bool) -> dict:
     """Retention purge on the boxes that VERIFIED, before they are stopped.
 
@@ -278,12 +337,17 @@ def purge_verified(ok: list, dry: bool) -> dict:
     the box still comes down, because a box left running all night costs money
     and a large file does not.
 
-    ⚠️ NO VACUUM. It rewrites the whole database and would stall the halt for
-    minutes. With the purge actually running, SQLite reuses freed pages and the
-    store reaches steady state. VACUUM stays a manual, occasional operation —
-    and when it is run it needs `SQLITE_TMPDIR` pointed at the data directory,
-    because `/tmp` is a 476M tmpfs and a 1.8G rewrite cannot fit in it (learned
-    the hard way on MU, NVDA and QQQ the same day).
+    🔴 v2.2 — THE RECLAIM NOTE THAT STOOD HERE WAS WRONG AND IS REPLACED. It
+    read "SQLite reuses freed pages and the store reaches steady state", which
+    is true and not the same as the space coming back: steady state is a plateau
+    at the HIGH-WATER MARK. Measured fleet-wide 2026-09-05, every `feed_store`
+    carried 18-34% free pages while four boxes ran out of disk. The reclaim now
+    lives in `retention_purge` — one implementation, both close paths — and it
+    is GATED on free disk exceeding the live size, with `SQLITE_TMPDIR` on the
+    data directory because `/tmp` is a 476M tmpfs and a 1.8G rewrite cannot fit
+    in it (learned on MU, NVDA and QQQ, 2026-08-27).
+    ⚠️ THIS PHASE STILL RUNS NOTHING OF ITS OWN. A second reclaim here would be
+    two answers to one question and would bypass that gate.
     """
     out = {}
     if not ok:
@@ -348,6 +412,12 @@ def takedown(results: dict, dry: bool, enabled: bool) -> tuple:
         _log("TAKEDOWN", f"[dry] would stop {len(ok)} verified box(es); "
                          f"would HOLD {len(held)}")
         return ok, held
+
+    # ── 🔴 v2.2 — RELEASE THE STORES, THEN PURGE, THEN HALT ─────────────
+    # The order is the whole point: a checkpoint cannot truncate a WAL that a
+    # live connection is holding, so the reclaim inside the purge is worth
+    # whatever the bot and the feed have let go of.
+    stop_services(ok, dry)
 
     # ── 🔴 PURGE BEFORE THE HALT, ON THE VERIFIED LIST ONLY ─────────────
     # Operator, 2026-08-27: *"immediately after the s3 drain is confirmed &

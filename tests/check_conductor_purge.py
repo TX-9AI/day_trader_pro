@@ -1,5 +1,14 @@
 #!/usr/bin/env python3
-"""check_conductor_purge.py — v1.0
+"""check_conductor_purge.py — v1.1
+v1.1  2026-09-05 — dtp r281. C9/C10 pin the v2.2 ordering: the writers are
+      released BEFORE the purge, on the VERIFIED list only, by stopping and
+      never disabling. ⚠️ C7 IS RE-DERIVED, NOT PATCHED — it asserted "no
+      VACUUM at takedown", which stopped being true the moment `retention_purge`
+      grew a gated one, and it would have passed forever because the conductor's
+      own text never mentions vacuum either way. What survives is the real
+      invariant: ONE implementation of the reclaim, and the conductor is not a
+      second one (the r233/r234 trap).
+v1.0  2026-08-27
 
 🔴 THE PURGE RUNS IN THE CONDUCTOR, AFTER VERIFY, BEFORE TAKEDOWN.
 
@@ -78,11 +87,48 @@ def main():
     check("C6 a dry result is called out explicitly",
           "WOULD remove" in pbody and "RAN DRY" in pbody)
 
-    # ── C7 — NO VACUUM at takedown ───────────────────────────────────────
-    # ⚠️ It rewrites the whole file and would stall the halt for minutes.
-    check("C7 the phase does not run VACUUM",
-          "VACUUM" not in pbody.upper().replace("NO VACUUM", "")
-          .replace("VACUUM STAYS", "").replace("A VACUUM", ""))
+    # ── C7 — RE-DERIVED 2026-09-05 (dtp r281) ────────────────────────────
+    # 🔴 IT ASSERTED "NO VACUUM AT TAKEDOWN" AND THAT IS NO LONGER TRUE. A
+    # gated vacuum now runs inside `retention_purge` at exactly this point, so
+    # the old check would have gone on certifying a rule the system had stopped
+    # following — the r233/r234 trap, and it would have passed forever because
+    # the conductor's own text never mentions vacuum either way.
+    # WHAT SURVIVES IS THE REAL INVARIANT: there is ONE implementation of the
+    # reclaim and the conductor is not a second one. If a future edit puts a
+    # VACUUM in the phase body, that is two answers to one question (§35) and
+    # the box-side gate — free-disk against live size — is bypassed.
+    # ⚠️ ANCHORED ON A CALL, NOT A MENTION (§20). This phase's docstring now
+    # EXPLAINS the reclaim at length, so any string search for the word matches
+    # the prose that documents the property — the trap this repo has tripped
+    # four times in one week.
+    check("C7 the conductor does not run VACUUM ITSELF; the gated one lives "
+          "in retention_purge",
+          'execute("vacuum' not in pbody.lower()
+          and "vacuum()" not in pbody.lower())
+
+    # ── 🔴 C9/C10 — v2.2, THE ORDER THAT MAKES THE RECLAIM WORTH ANYTHING ─
+    # A checkpoint cannot truncate a WAL another connection is holding, so the
+    # writers have to be released BEFORE the purge or the reclaim returns only
+    # what the bot happened to let go of. Measured in otv4
+    # check_purge_reclaim R2/R2b; the fleet's evidence is MU's 1.6 GB WAL.
+    check("C9 stop_services() exists", "stop_services" in fns)
+    i_stop = body.find("stop_services(")
+    check("C9b services are released BEFORE the purge, and after the verdict",
+          i_stop != -1 and i_ok < i_stop < i_p, f"{i_ok} < {i_stop} < {i_p}")
+    # ⚠️ HELD BOXES KEEP THEIR SERVICES. A held box is up for the operator to
+    # troubleshoot and holds the only copy of its day; taking its writers down
+    # changes what he is looking at.
+    check("C10 the stop is called on the VERIFIED list, never on held",
+          "stop_services(ok" in body and "stop_services(held" not in body)
+    sf = next((n for n in ast.walk(tree)
+               if isinstance(n, ast.FunctionDef) and n.name == "stop_services"),
+              None)
+    sbody = ast.unparse(sf) if sf else ""
+    # ⚠️ STOP, NEVER DISABLE — the units must come back on the next wake.
+    # ⚠️ SAME ANCHORING: the docstring says "NOT `disable`" on purpose, so the
+    # check keys on the COMMAND that would do it.
+    check("C10b it stops the units without disabling them",
+          "systemctl stop" in sbody and "systemctl disable" not in sbody)
 
     # ── C8 — a long timeout, or it dies at 22 seconds ────────────────────
     # ⚠️ ssh_util gives subprocess `SSH_CONNECT_TIMEOUT + 10` = 22s by default.
