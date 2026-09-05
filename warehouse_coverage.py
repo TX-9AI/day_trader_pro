@@ -1,5 +1,30 @@
 #!/usr/bin/env python3
-# day_trader_pro/warehouse_coverage.py — v1.3
+# day_trader_pro/warehouse_coverage.py — v1.4
+# v1.4 (2026-09-05) — dtp r284. ACCEPTED LOSS: a fourth explanation for an
+#      absence, so a permanent gap stops reading as a permanent fault.
+#      🔴 THE CASE IT EXISTS FOR, and it is closed rather than hypothetical.
+#      QQQ ran out of disk on 2026-09-03 and lost two streams for that day.
+#      `eod` is unrecoverable: `pnl_today.json` is a fixed filename and the
+#      09-04 session overwrote it. `ohlc` is unrecoverable too: it is
+#      date-partitioned so nothing overwrote it, but the directory was never
+#      written, and `eod_backfill` came back STILL MISSING because DXFeed
+#      history is same-evening only. Both were investigated to a conclusion.
+#      ⚠️ WITHOUT THIS THE BOARD CARRIES TWO RED LINES FOREVER, and a permanent
+#      red is the one thing that stops a board being read — the same CV.1
+#      lesson v1.1 learned on a Sunday and v1.3 learned from `shadow`.
+#      🔴 AND THE ALTERNATIVE WAS WORSE. Uploading placeholder objects would
+#      have satisfied the check by LYING TO IT: `raw/` is the durable record,
+#      an object there is a claim that a box wrote something, and
+#      `WAREHOUSE_MAP.md` is generated FROM THE BUCKET precisely so it states
+#      what is actually stored rather than what was intended. A synthetic `eod`
+#      would be indistinguishable from a real one to every future reader.
+#      ⚠️ IT PRINTS EVERY RUN, WITH ITS REASON AND THE DATE IT WAS ACCEPTED.
+#      An absence silently deleted from the board is as bad as one that cries
+#      wolf — nobody would ever learn the fleet had a hole.
+#      ⚠️ AND IT AUDITS ITSELF. If an accepted-loss entry's data ever turns up,
+#      the row renders RESOLVED and says to delete the entry. A stale exemption
+#      that quietly suppresses a future real gap is exactly the failure this
+#      category is supposed to prevent, one level up.
 # v1.3 (2026-09-05) — dtp r280. THE POLICY TABLE CORRECTED AGAINST THE BUCKET,
 #      WHICH IS WHY v1.2 WAS NOT WIRED INTO THE NIGHTLY CHAIN. First real run,
 #      2026-09-01..09-04, raised NINE flags. SEVEN WERE MINE.
@@ -227,6 +252,21 @@ STREAM_POLICY = {
 }
 
 
+# ── r284 — ABSENCES THAT WERE INVESTIGATED AND CLOSED ──────────────────────
+# (datatype, ET day, box) -> why. One entry per stream-day-box, never a wildcard:
+# a rule broad enough to cover "QQQ ohlc, any day" would hide the next outage on
+# the same stream, which is the whole risk of an exemption list.
+ACCEPTED_LOSS = {
+    ("eod", "2026-09-03", "QQQ"):
+        "disk full; ~/eod/pnl_today.json is a fixed filename and the 09-04 "
+        "session overwrote it (accepted 2026-09-05)",
+    ("ohlc", "2026-09-03", "QQQ"):
+        "disk full; the date directory was never written and eod_backfill "
+        "returned STILL MISSING — DXFeed history is same-evening only "
+        "(accepted 2026-09-05)",
+}
+
+
 def panel():
     """The trading panel, from its ONE authority.
 
@@ -317,11 +357,28 @@ def check_streams(s3, day, want, counts=False):
             continue
         expect, grain, note = pol
         missing = []
+        # ⚠️ RESET PER ROW. A first draft read this out of `locals()`, which
+        # persists across loop iterations — one accepted stream would have
+        # stamped its exemption onto every stream after it.
+        accepted_boxes = []
         if partial:
             verdict = "PARTIAL_BY_DESIGN"
         elif expect == "EVERY":
             missing = [b for b in live if b not in boxes]
-            verdict = "OK" if not missing else "GAP"
+            # r284 — an absence that was investigated and closed is not a gap.
+            excused = [b for b in missing if (dtp_, day, b) in ACCEPTED_LOSS]
+            missing = [b for b in missing if b not in excused]
+            # ⚠️ AND THE ENTRY AUDITS ITSELF. If the data turned up, the
+            # exemption is stale and must be removed rather than left to
+            # suppress the next real gap on that stream.
+            resolved = [b for b in boxes if (dtp_, day, b) in ACCEPTED_LOSS]
+            if resolved:
+                verdict = "RESOLVED"
+            elif excused and not missing:
+                verdict = "ACCEPTED"
+            else:
+                verdict = "OK" if not missing else "GAP"
+            accepted_boxes = excused or resolved
         elif expect.startswith("EVERY_EXCEPT:"):
             # The excused boxes are dropped from the EXPECTED set, never from
             # the report: the stream is still graded, just not against a box
@@ -342,7 +399,9 @@ def check_streams(s3, day, want, counts=False):
             verdict = "DEAD"
         row = {"stream": dtp_, "expect": expect, "grain": grain,
                "n": len(boxes), "missing": missing, "verdict": verdict,
-               "note": note}
+               "note": note,
+               "accepted": [(b, ACCEPTED_LOSS[(dtp_, day, b)])
+                            for b in accepted_boxes]}
         if counts:
             row["objects"] = sum(
                 _count(s3, f"{PREFIX}/{dtp_}/dt={day}/sym={b}/") for b in boxes)
@@ -391,8 +450,9 @@ def report_streams(s3, days, counts=False):
             _log("STREAMS", "     not counted against every stream below")
         for r in d["rows"]:
             mark = {"OK": "✅", "GAP": "🔴", "OWNER_SILENT": "⚠️",
-                    "CONDITIONAL": "◇", "DEAD": "·",
-                    "PARTIAL_BY_DESIGN": "◐", "UNDECLARED": "❓"}[r["verdict"]]
+                    "CONDITIONAL": "◇", "DEAD": "·", "ACCEPTED": "▪",
+                    "RESOLVED": "❗", "PARTIAL_BY_DESIGN": "◐",
+                    "UNDECLARED": "❓"}[r["verdict"]]
             # ⚠️ WIDTH IS THE CONSTRAINT AND NOT TASTE — this is read over
             # Termius on a phone. The longest declared stream name is
             # `derived_exit_counterfactual` at 27, so the column is 27.
@@ -420,7 +480,20 @@ def report_streams(s3, days, counts=False):
             if r["verdict"] in ("CONDITIONAL", "DEAD", "UNDECLARED"):
                 for chunk in textwrap.wrap(r["note"], 54):
                     _log("STREAMS", f"       {chunk}")
-            if r["verdict"] in ("GAP", "UNDECLARED"):
+            # ⚠️ AN ACCEPTED LOSS PRINTS EVERY RUN, WITH ITS REASON. An absence
+            # silently removed from the board is as bad as one that cries wolf:
+            # nobody would ever learn the fleet had a hole.
+            for b, why in r.get("accepted", []):
+                head = ("❗ RESOLVED — data is present; DELETE the entry"
+                        if r["verdict"] == "RESOLVED"
+                        else "accepted loss")
+                _log("STREAMS", f"       {b}: {head}")
+                for chunk in textwrap.wrap(why, 54):
+                    _log("STREAMS", f"         {chunk}")
+            # ⚠️ RESOLVED COUNTS AS SOMETHING TO ANSWER. A stale exemption is
+            # exactly what would suppress the next real gap on that stream, so
+            # it is not allowed to sit quietly at the bottom of a green board.
+            if r["verdict"] in ("GAP", "UNDECLARED", "RESOLVED"):
                 bad += 1
     if bad:
         _log("STREAMS", f"🔴 {bad} stream-day(s) need an answer.")

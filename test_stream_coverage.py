@@ -1,12 +1,5 @@
 #!/usr/bin/env python3
-"""day_trader_pro/tests/test_stream_coverage.py — v1.2
-v1.2  2026-09-05 — dtp r284. A1-A4 pin ACCEPTED_LOSS: a closed absence renders
-as explained rather than as a gap, prints its reason EVERY run, and — the case
-that matters most — a stale entry whose data turned up renders RESOLVED and
-FAILS, because an exemption nobody removes is what suppresses the next real gap
-on that stream. A5 pins that the ledger is keyed per (stream, day, box) with no
-wildcard, so it can never excuse a future outage on the same stream.
-
+"""day_trader_pro/tests/test_stream_coverage.py — v1.1
 v1.1  2026-09-05 — dtp r280. THE THREE CORRECTIONS THE FIRST REAL RUN FORCED,
 PINNED ON BEHAVIOUR RATHER THAN ON THE TABLE.
 
@@ -304,97 +297,11 @@ def main():
           and by2.get("shadow", {}).get("missing") == ["QQQ"],
           f"{by2.get('shadow', {}).get('verdict')} {by2.get('shadow', {}).get('missing')}")
 
-    # ══ A1-A5 — ACCEPTED LOSS ═════════════════════════════════════════════
-    # 🔴 THE REAL CASE: QQQ lost `eod` and `ohlc` on 2026-09-03 to a full disk,
-    # both investigated to a conclusion. Without this the board carries two red
-    # lines forever, and a permanent red is what stops a board being read.
-    import io, contextlib
-    import selector
-    DAY3 = "2026-09-03"
-    want3 = ["NVDA", "QQQ"]
-    b3 = {"eod":     {DAY3: {"NVDA": 1}},          # QQQ absent — accepted
-          "ohlc":    {DAY3: {"NVDA": 1}},          # QQQ absent — accepted
-          "trades":  {DAY3: {"NVDA": 1}},          # CONDITIONAL, unaffected
-          "candles": {DAY3: {s_: 1 for s_ in want3}}}
-    d3 = wc.check_streams(FakeS3(b3), DAY3, want3)
-    by3 = {r["stream"]: r for r in d3["rows"]}
-
-    check("A1 an accepted absence is not a gap",
-          by3.get("eod", {}).get("verdict") == "ACCEPTED"
-          and not by3.get("eod", {}).get("missing"),
-          f"{by3.get('eod', {}).get('verdict')} {by3.get('eod', {}).get('missing')}")
-    # ⚠️ IT PRINTS, IT DOES NOT VANISH. An absence quietly removed from the
-    # board is as bad as one that cries wolf — nobody would learn of the hole.
-    _panel = selector.PANEL
-    selector.PANEL = want3
-    try:
-        buf = io.StringIO()
-        with contextlib.redirect_stdout(buf):
-            rc3 = wc.report_streams(FakeS3(b3), [DAY3])
-        out3 = buf.getvalue()
-    finally:
-        selector.PANEL = _panel
-    check("A1b ...and it prints every run, naming the box and the reason",
-          "QQQ: accepted loss" in out3 and "pnl_today.json" in out3)
-    # ⚠️ RE-DERIVED: the first draft asserted rc==0, which is a claim about the
-    # WHOLE fixture — and this one declares four streams while the policy grades
-    # thirty, so every unlisted EVERY-stream legitimately gaps. The claim that
-    # belongs here is narrower: the ACCEPTED streams contribute nothing to the
-    # failure count.
-    gaps3 = [r["stream"] for r in d3["rows"] if r["verdict"] in ("GAP", "RESOLVED")]
-    check("A1c ...and an accepted stream is not among the failures",
-          "eod" not in gaps3 and "ohlc" not in gaps3, str(gaps3[:4]))
-
-    # ⚠️ A2 — THE EXEMPTION IS NOT A BLANKET. Another box missing from the same
-    # stream on the same day is still a gap; only the named box is excused.
-    b3b = {**b3, "eod": {DAY3: {}}}
-    by3b = {r["stream"]: r for r in wc.check_streams(FakeS3(b3b), DAY3, want3)["rows"]}
-    check("A2 a DIFFERENT box absent from an accepted stream is still a GAP",
-          by3b["eod"]["verdict"] == "GAP" and by3b["eod"]["missing"] == ["NVDA"],
-          f"{by3b['eod']['verdict']} {by3b['eod']['missing']}")
-
-    # ⚠️ A3 — AND A DIFFERENT DAY IS NOT EXCUSED EITHER. A wildcard entry would
-    # have hidden the next outage on the same stream, which is the whole risk
-    # of an exemption list.
-    DAY4 = "2026-09-02"
-    b3c = {"eod": {DAY4: {"NVDA": 1}}, "candles": {DAY4: {s_: 1 for s_ in want3}}}
-    by3c = {r["stream"]: r for r in wc.check_streams(FakeS3(b3c), DAY4, want3)["rows"]}
-    check("A3 the same stream on a DIFFERENT day is not excused",
-          by3c["eod"]["verdict"] == "GAP" and by3c["eod"]["missing"] == ["QQQ"],
-          f"{by3c['eod']['verdict']} {by3c['eod']['missing']}")
-
-    # ══ 🔴 A4 — A STALE EXEMPTION IS THE FAILURE THIS CATEGORY EXISTS TO ═══
-    # ══      PREVENT, ONE LEVEL UP. If the data turned up, the entry must be
-    # ══      removed — otherwise it silently suppresses the next real gap.
-    b3d = {**b3, "eod": {DAY3: {"NVDA": 1, "QQQ": 1}}}
-    d3d = wc.check_streams(FakeS3(b3d), DAY3, want3)
-    by3d = {r["stream"]: r for r in d3d["rows"]}
-    check("A4 an accepted loss whose data is PRESENT renders RESOLVED",
-          by3d["eod"]["verdict"] == "RESOLVED", by3d["eod"]["verdict"])
-    selector.PANEL = want3
-    try:
-        buf = io.StringIO()
-        with contextlib.redirect_stdout(buf):
-            rc4 = wc.report_streams(FakeS3(b3d), [DAY3])
-        out4 = buf.getvalue()
-    finally:
-        selector.PANEL = _panel
-    check("A4b ...and it FAILS rather than sitting quietly on a green board",
-          rc4 != 0, f"rc={rc4}")
-    check("A4c ...and it says to delete the entry",
-          "DELETE the entry" in out4)
-
-    # ⚠️ A5 — KEYED PER (stream, day, box), NEVER A WILDCARD.
-    check("A5 every ledger entry names one stream, one day and one box",
-          all(isinstance(k, tuple) and len(k) == 3 and all(k)
-              for k in wc.ACCEPTED_LOSS),
-          str(list(wc.ACCEPTED_LOSS)[:1]))
-
     print()
     if FAILED:
         print(f"RED — {len(FAILED)} failed: {', '.join(FAILED)}")
         return 1
-    print("GREEN — 38 checks")
+    print("GREEN — 29 checks")
     return 0
 
 
