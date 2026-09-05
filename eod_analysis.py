@@ -1,7 +1,31 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/eod_analysis.py  v1.2
+day_trader_pro/eod_analysis.py  v1.3
 The reports. Runs AFTER the boxes are down, reads the warehouse.
+
+v1.3  2026-09-05  dtp r285 / S3.12 — THE PER-STREAM COVERAGE BOARD JOINS THE
+      NIGHTLY CHAIN, and it joins it LAST rather than on the day it was built.
+      🔑 THE PRECONDITION WAS THE POINT. r277 shipped `--streams` and
+      deliberately did NOT wire it, because the CONDITIONAL and DEAD
+      classifications were declarations read out of `s3_push`'s stage list and
+      never checked against a real bucket. The first hand-run raised NINE flags
+      and SEVEN were the policy table — `prints` graded EVERY when SPX is a cash
+      index that publishes none, `trades` graded EVERY when `push_trades` is
+      CDC, and `shadow` graded DEAD when 15 boxes push it every session. All
+      three were corrected in r280, and the two real absences were closed as
+      ACCEPTED_LOSS in r284. **An alarm wired before that would have cried wolf
+      on its first night and been ignored by its second.**
+      ⚠️ A SEPARATE PHASE FROM `COVERAGE`. The VIX report answers "did the
+      single-writer stream land"; this answers "did every box push every stream
+      it owes". Two questions behind one green is how a passing check stops
+      meaning anything.
+      ⚠️ IT PRINTS THE FLAGGED ROWS, NOT A COUNT. dtp r282 is one phase over:
+      `head -3` ate the cause of every purge failure for weeks. A summary that
+      hides the rows is a summary nobody can act on. The ACCEPTED-LOSS rows
+      print on a clean night too — r284's contract is that a closed absence
+      stays VISIBLE, not that it disappears.
+      ⚠️ WARN, NEVER STOP: a coverage gap is a fact about yesterday, and a
+      phase that aborted would cost the R baseline over a missing OHLC file.
 
 v1.2  2026-08-29  r186 / dtp r227 — EXCURSION READS THE BUNDLE CONSOLIDATE
       JUST BUILT (backlog S3.3). 🔴 THIS PHASE HAS BEEN FAILING EVERY NIGHT
@@ -265,6 +289,44 @@ def run(date: str, dry: bool) -> int:
         else:
             _log("COVERAGE", "✅ coverage checked")
 
+    def _streams():
+        """S3.12 — per-stream, per-day, per-box coverage, in the nightly chain.
+
+        🔑 A SEPARATE PHASE FROM `COVERAGE`, NOT AN ARGUMENT TO IT. The VIX
+        report answers "did the single-writer stream land"; this answers "did
+        every box push every stream it owes". Different questions, different
+        exit codes, and folding them into one line would make a green mean two
+        things at once.
+
+        ⚠️ IT PRINTS THE FLAGGED ROWS, NOT A COUNT, AND NOT A TRUNCATION. The
+        `head -3` lesson from dtp r282 is one phase over: a summary that hides
+        the rows is a summary nobody can act on. The ACCEPTED-LOSS rows print
+        too, on a clean night as much as a dirty one, because r284's whole
+        contract is that a closed absence stays visible.
+
+        ⚠️ WARN, NEVER STOP. A coverage gap is a fact about yesterday; the rest
+        of the chain still has work to do, and a phase that aborted the run
+        would cost the R baseline over a missing OHLC file.
+        """
+        import subprocess
+        r = subprocess.run(
+            [sys.executable, "warehouse_coverage.py", "--streams", "--date", date],
+            cwd=_here, capture_output=True, text=True, timeout=900)
+        out = (r.stdout or "") + (r.stderr or "")
+        # 🔴 / ❗ / ❓ are the rows that need an answer; ▪ is a recorded loss and
+        # prints by contract. Everything else is the ordinary green board.
+        flagged = [l for l in out.splitlines()
+                   if any(m in l for m in ("🔴", "❗", "❓", "▪"))]
+        for line in flagged[:20]:
+            _log("STREAMS", line.split("] ", 1)[-1].strip())
+        if r.returncode == 0:
+            _log("STREAMS", "✅ every stream had every box it owes")
+        else:
+            _warn(warns, "STREAMS",
+                  f"rc={r.returncode} — {len([l for l in flagged if '🔴' in l])} "
+                  f"gap(s), {len([l for l in flagged if '❗' in l])} stale "
+                  f"exemption(s); see the rows above")
+
     # ── the R suite (otv4 tools, S3-sourced, run HERE on control) ───────
     # ⚠️ CROSS-REPO BY SUBPROCESS, NEVER BY IMPORT — the modularity contract.
     # Precedent: the conductor has always shelled to validate_regime.sh in
@@ -328,6 +390,7 @@ def run(date: str, dry: bool) -> int:
                          ("LABEL", _label, "price-action session label"),
                          ("EXCURSION", _excursion, "MFE/MAE report"),
                          ("COVERAGE", _coverage, "warehouse coverage"),
+                         ("STREAMS", _streams, "per-stream, per-day, per-box coverage"),
                          ("R_LEDGER", _r_ledger, "R baseline from the warehouse (headline → Telegram)"),
                          ("EDGE_SCAN", _edge_scan, "weekly edge scan (Fridays; silent unless the bar clears)")):
         if nm == "EDGE_SCAN":
