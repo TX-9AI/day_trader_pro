@@ -1,7 +1,23 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/eod_conductor_v2.py — v2.2
+day_trader_pro/eod_conductor_v2.py — v2.3
 STOP TRADING → FILL THE BUCKET → VERIFY IT LANDED → TAKE THEM DOWN.
+
+v2.3    2026-09-05  🔴 `head -3` ATE THE CAUSE OF EVERY PURGE FAILURE. The phase
+        piped the remote purge through `head -3`, which was sized for the old
+        one-line summary. On 2026-09-05 four boxes raised inside the purge and
+        all the operator saw was `Traceback (most recent call last): | File
+        ".../retention_purge.py", line 598, in <mo` — the OUTERMOST frame, with
+        the exception type and the raising line cut off. It cost three round
+        trips to learn it was `database is locked` on `DELETE FROM candles`.
+        ⚠️ A TRACEBACK PUTS ITS CAUSE LAST, so `tail` is the only correct end
+        of the pipe. And the reclaim line prints AFTER the deletion counts, so
+        `head` guaranteed the checkpoint verdict was invisible on every box,
+        every night — the one line that says whether a 1.6 GB WAL came back.
+        ⚠️ THE PARTIAL-PURGE EXIT CODE IS READ (r256 returns 4). "removed 1,452
+        rows" and "removed 1,452 rows and failed on four tables" are different
+        facts, and only one needs an operator; the phase now says PARTIAL per
+        box rather than letting it read as done.
 
 v2.2    2026-09-05  RELEASE THE STORES BEFORE RECLAIMING THEM. The purge has
         run since v2.1 with `optionsbot` and `candle-feed` STILL RUNNING, and
@@ -357,8 +373,18 @@ def purge_verified(ok: list, dry: bool) -> dict:
                       f"before takedown")
         return out
     _log("PURGE", f"retention purge on {len(ok)} verified box(es)")
+    # 🔴 v2.3 — `tail`, NOT `head`. A traceback puts its cause LAST, and the
+    # reclaim verdict prints after the deletion counts, so `head -3` truncated
+    # both — the checkpoint result was invisible every night and a failure
+    # showed only its outermost frame. 12 lines covers a summary plus a real
+    # exception; the purge's own output is bounded.
+    # ⚠️ REDIRECTED, NOT PIPED — `echo rc=$?` after a pipeline reports TAIL's
+    # exit code, not the purge's, which is the swallowed-exit-code trap this
+    # project already names for pytest. The full output also stays on the box
+    # for a follow-up read, which is what `head -3` made impossible.
     cmd = (f"cd {INSTALL_DIR} && python3 warehouse/retention_purge.py "
-           f"--apply 2>&1 | head -3")
+           f"--apply > /tmp/retention_purge.out 2>&1; rc=$?; "
+           f"tail -12 /tmp/retention_purge.out; echo rc=$rc")
     for sym, ip, _st in fleet.get_fleet(list(ok)):
         rc, text, err = ssh_util.ssh_run(ip, cmd, timeout=VERIFY_TIMEOUT_S)
         line = (text or err or "").strip().replace("\n", " | ")

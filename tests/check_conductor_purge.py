@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""check_conductor_purge.py — v1.1
+"""check_conductor_purge.py — v1.2
+v1.2  2026-09-05 — dtp r282. C11/C11b pin that the phase reads the END of
+      the purge's output and captures its REAL exit code. `head -3`
+      truncated every traceback to its outermost frame and hid the reclaim
+      verdict on every box every night; and piping into `tail` would have
+      made `$?` report tail's status, which is the swallowed-exit-code trap
+      already recorded for pytest.
 v1.1  2026-09-05 — dtp r281. C9/C10 pin the v2.2 ordering: the writers are
       released BEFORE the purge, on the VERIFIED list only, by stopping and
       never disabling. ⚠️ C7 IS RE-DERIVED, NOT PATCHED — it asserted "no
@@ -136,6 +142,18 @@ def main():
     # would report failure on every box while the work completed anyway.
     check("C8 the phase passes a long ssh timeout",
           "timeout=VERIFY_TIMEOUT_S" in pbody)
+
+    # ── 🔴 C11 — THE CAUSE OF A FAILURE MUST SURVIVE THE PIPE ────────────
+    # A traceback puts its exception LAST and the reclaim verdict prints after
+    # the deletion counts, so `head` truncated both. Cost on 2026-09-05: three
+    # round trips to learn it was `database is locked`.
+    check("C11 the purge output is read from the END, not the head",
+          "head -" not in pbody and "tail -" in pbody)
+    # ⚠️ AND THE EXIT CODE IS THE PURGE'S. `cmd | tail; echo rc=$?` reports
+    # TAIL's status — the same swallowed-exit-code trap this project already
+    # records for pytest — so the output is redirected and `$?` captured first.
+    check("C11b the purge's own exit code is captured, not the pipe's",
+          "rc=$?" in pbody and "| tail" not in pbody)
 
     print()
     if _fails:
