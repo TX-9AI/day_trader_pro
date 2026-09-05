@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-"""day_trader_pro/tests/screen_plan_gates.py — v1.2
+"""day_trader_pro/tests/screen_plan_gates.py — v1.3
+v1.3  2026-09-04 — dtp r273. THE QUANTILE PANEL AGGREGATES IN SQL. The
+      r272 cut SELECTed every FAIL value and the warehouse cache refused it:
+      "query returned more than 200,000 rows... materialising a large result is
+      what the cache exists to avoid." The guard was right — `wing_r_best`
+      alone has 58,205 failures. A ROW_NUMBER window ranks each rung inside
+      sqlite and the WHERE picks five positions, so five rows come back per
+      rung instead of tens of thousands, and the 20-failure floor moved into
+      the query so a rung too small to describe never crosses the wire.
 v1.2  2026-09-04 — dtp r272. FAIL VALUE QUANTILES. Operator, 2026-09-04,
       asking whether r234 will make `wing_r_best` block dramatically less: a
       min/max cannot answer that. It failed 58,205 times over 0.0000 .. 0.9841
@@ -279,6 +287,19 @@ def _fail_quantiles(cache, a) -> None:
     ⚠️ SORTED IN SQL, SLICED IN PYTHON — sqlite has no percentile function, and
     inventing one with a subquery would be a second implementation to trust.
     """
+    # 🔴 dtp-r273 — AGGREGATED IN SQL. The first cut SELECTed every FAIL value
+    # and the cache refused it: "query returned more than 200,000 rows.
+    # Aggregate in SQL (GROUP BY) or stream with .iter() — materialising a
+    # large result is what the cache exists to avoid." It was right, and the
+    # guard caught a real fault: `wing_r_best` alone has 58,205 failures and
+    # the fleet-wide set is well past the limit.
+    # ⚠️ A WINDOW FUNCTION, NOT A GROUP BY, because a quantile is positional
+    # and no aggregate gives it. ROW_NUMBER ranks each rung's failures and the
+    # WHERE picks the five positions, so at most 5 rows come back per rung
+    # instead of 58,205 — the cost is in sqlite, where it belongs.
+    # ⚠️ THE 20-FAILURE FLOOR MOVES INTO THE QUERY TOO. A quantile over three
+    # points is noise wearing a statistic's clothing, and filtering after the
+    # fact would have meant transporting the rows anyway.
     where, args = ["verdict = 'FAIL'", "value IS NOT NULL"], []
     if a.strat:
         where.append("strategy = ?")
@@ -286,12 +307,23 @@ def _fail_quantiles(cache, a) -> None:
     if a.sym:
         where.append("symbol = ?")
         args.append(a.sym)
-    rows = cache.query("SELECT strategy, check_name, value FROM plan_check"
-                       " WHERE " + " AND ".join(where)
-                       + " ORDER BY strategy, check_name, value", args)
-    book = defaultdict(list)
-    for r in rows:
-        book[(r["strategy"], r["check_name"])].append(r["value"])
+    q = ("WITH r AS (SELECT strategy, check_name, value,"
+         " ROW_NUMBER() OVER (PARTITION BY strategy, check_name"
+         "                    ORDER BY value) rn,"
+         " COUNT(*) OVER (PARTITION BY strategy, check_name) n"
+         " FROM plan_check WHERE " + " AND ".join(where) + ")"
+         " SELECT strategy, check_name, n, rn, value FROM r"
+         " WHERE n >= 20 AND (rn = MAX(1, CAST(n*0.10 AS INTEGER))"
+         " OR rn = MAX(1, CAST(n*0.25 AS INTEGER))"
+         " OR rn = MAX(1, CAST(n*0.50 AS INTEGER))"
+         " OR rn = MAX(1, CAST(n*0.75 AS INTEGER))"
+         " OR rn = MAX(1, CAST(n*0.90 AS INTEGER)))"
+         " ORDER BY strategy, check_name, rn")
+    book, sizes = defaultdict(list), {}
+    for r in cache.query(q, args):
+        key = (r["strategy"], r["check_name"])
+        book[key].append(r["value"])
+        sizes[key] = r["n"]
     if not book:
         return
     print()
@@ -301,10 +333,8 @@ def _fail_quantiles(cache, a) -> None:
     print("  A median says whether a moved threshold clears most of them or")
     print("  barely any. A min/max reports both cases identically.")
     cur = None
-    for (strat, rung), vals in sorted(book.items(),
-                                      key=lambda kv: (kv[0][0], -len(kv[1]))):
-        if len(vals) < 20:
-            continue
+    for key in sorted(book, key=lambda k: (k[0], -sizes[k])):
+        strat, rung = key
         if strat != cur:
             cur = strat
             print()
@@ -313,10 +343,13 @@ def _fail_quantiles(cache, a) -> None:
             print("─" * 74)
             print(f"    {'rung':<20} {'n':>8} {'p10':>9} {'p25':>9}"
                   f" {'median':>9} {'p75':>9} {'p90':>9}")
-        q = [vals[min(len(vals) - 1, int(len(vals) * f))]
-             for f in (0.10, 0.25, 0.50, 0.75, 0.90)]
-        print(f"    {rung:<20} {len(vals):>8,}"
-              + "".join(f" {x:>9.4g}" for x in q))
+        # ⚠️ FEWER THAN FIVE ROWS IS POSSIBLE — two quantile positions can
+        # collide on a small rung. Pad rather than mis-align the columns.
+        vals = book[key]
+        while len(vals) < 5:
+            vals.append(vals[-1])
+        print(f"    {rung:<20} {sizes[key]:>8,}"
+              + "".join(f" {x:>9.4g}" for x in vals[:5]))
 
 
 def _fail_rate(v) -> float:

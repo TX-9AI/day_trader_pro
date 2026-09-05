@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/test_plan_gates.py — v1.2
+# day_trader_pro/tests/test_plan_gates.py — v1.3
+# v1.3 (2026-09-04) — dtp r273. Q1d RE-DERIVED into Q2. It asserted a Python
+#      guard (`len(vals) < 20`) that r273 moved into SQL; Q2 drives the real
+#      window query and pins that 1,005 failures return FIVE rows, that a
+#      5-failure rung never crosses the wire, and that the median is exact.
 # v1.2 (2026-09-04) — dtp r272. Q1 pins the quantiles with two distributions
 #      that share a range and give OPPOSITE answers — the case a min/max
 #      cannot distinguish and the reason the panel exists.
@@ -130,10 +134,40 @@ def main():
           q(low)[2] < 0.15 and q(low)[4] < 0.15, str(q(low)))
     check("Q1c and the high one clears it at every quantile above p10",
           q(high)[2] > 0.15 and q(high)[1] > 0.15, str(q(high)))
-    # ⚠️ A rung with too few failures has no shape worth printing, and a
-    # quantile over 3 values is noise wearing a statistic's clothing.
-    check("Q1d the panel skips rungs with fewer than 20 failures",
-          "len(vals) < 20" in open(os.path.join(
+    # ══ Q2 — THE QUANTILES ARE COMPUTED IN SQL, AND EXACTLY ══════════════
+    # 🔴 dtp-r273. The first cut SELECTed every FAIL value and the warehouse
+    # cache refused it at 200,000 rows — correctly: `wing_r_best` alone has
+    # 58,205. A window function ranks in sqlite and returns FIVE rows per rung.
+    # ⚠️ AND THE 20-FAILURE FLOOR MOVED INTO THE QUERY, so a rung too small to
+    # describe never crosses the wire at all.
+    import sqlite3
+    c2 = sqlite3.connect(":memory:")
+    c2.execute("CREATE TABLE plan_check (strategy TEXT, check_name TEXT,"
+               " verdict TEXT, value REAL)")
+    big = [("S", "wing_r_best", "FAIL", i / 1000.0) for i in range(1000)]
+    tiny = [("S", "tiny", "FAIL", 0.5)] * 5
+    c2.executemany("INSERT INTO plan_check VALUES (?,?,?,?)", big + tiny)
+    Q = ("WITH r AS (SELECT strategy, check_name, value,"
+         " ROW_NUMBER() OVER (PARTITION BY strategy, check_name"
+         "                    ORDER BY value) rn,"
+         " COUNT(*) OVER (PARTITION BY strategy, check_name) n"
+         " FROM plan_check WHERE verdict='FAIL' AND value IS NOT NULL)"
+         " SELECT strategy, check_name, n, rn, value FROM r"
+         " WHERE n >= 20 AND (rn = MAX(1, CAST(n*0.10 AS INTEGER))"
+         " OR rn = MAX(1, CAST(n*0.25 AS INTEGER))"
+         " OR rn = MAX(1, CAST(n*0.50 AS INTEGER))"
+         " OR rn = MAX(1, CAST(n*0.75 AS INTEGER))"
+         " OR rn = MAX(1, CAST(n*0.90 AS INTEGER)))"
+         " ORDER BY strategy, check_name, rn")
+    got = list(c2.execute(Q))
+    check("Q2 1,005 failures return 5 rows, not 1,005",
+          len(got) == 5, str(len(got)))
+    check("Q2b the rung with 5 failures never crosses the wire",
+          not any(g[1] == "tiny" for g in got))
+    check("Q2c the median is the real median, not an approximation",
+          abs(got[2][4] - 0.499) < 0.002, str(got[2][4]))
+    check("Q2d and the SCREEN uses this query, not a materialising SELECT",
+          "ROW_NUMBER() OVER" in open(os.path.join(
               os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
               "tests", "screen_plan_gates.py"), encoding="utf-8").read())
 
@@ -141,7 +175,7 @@ def main():
     if FAILED:
         print(f"RED — {len(FAILED)} failed: {', '.join(FAILED)}")
         return 1
-    print("GREEN — 13 checks")
+    print("GREEN — 16 checks")
     return 0
 
 
