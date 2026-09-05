@@ -1,5 +1,49 @@
 #!/usr/bin/env bash
-# day_trader_pro/tools/land.sh — v1.1
+# day_trader_pro/tools/land.sh — v1.2
+# v1.2 (2026-09-05) — dtp r279. ALL HALVES LAND, OR NONE REACH ORIGIN.
+#   Operator, 2026-09-05: "make sure all will land or none."
+#
+#   🔴 THE FAILURE HE IS CLOSING, OBSERVED RATHER THAN IMAGINED. Landing
+#   r277_r2 before r276_r2 in the sandbox: the dtp half passed its gate,
+#   committed AND PUSHED, and only then did the otv4 half's gate correctly
+#   refuse on a GENESIS row r276 had not yet written. Origin ended up holding
+#   the code with no backlog entry — a half delivery, on the shared truth the
+#   fleet pulls from — and re-running it then died at `git commit` with nothing
+#   left to stage. v1.1 landed halves sequentially and stopped at the first
+#   failure, which is one-at-a-time, not all-or-nothing.
+#
+#   🔑 WHY A PRE-FLIGHT OF EVERY GATE WOULD NOT HAVE WORKED, and this is the
+#   whole design. The obvious fix is "verify every half before landing any" —
+#   and it is WRONG here, because a half is ALLOWED to gate on an artifact an
+#   EARLIER half produces. r277_r2's otv4 half asserts a GENESIS row that
+#   r276_r2's otv4 land appends. Pre-flighting it before r276 landed would fail
+#   a gate that is not actually failing. The dependency is real and the ordering
+#   exists to serve it.
+#
+#   🔑 SO THE SPLIT IS COMMIT vs PUSH, WHICH IS WHERE THE IRREVERSIBILITY
+#   ACTUALLY SITS. Phase 1 verifies and commits each half LOCALLY, in order, so
+#   a later half still sees an earlier half's landed files. Nothing is pushed.
+#   Phase 2 pushes every repo, and only runs if EVERY half reached a commit.
+#   A failure anywhere in phase 1 rolls every repo this run committed to back
+#   to the SHA it was on before the run started — so ORIGIN NEVER SEES A
+#   PARTIAL DELIVERY, which is the property that matters when fifteen boxes
+#   pull from it.
+#
+#   ⚠️ THE ROLLBACK IS `reset --soft`, NOT `--hard`, AND THAT IS DELIBERATE.
+#   A hard reset would also revert an unrelated tracked file the operator had
+#   edited — the exact reason §35 already refuses a blind `git checkout -- .`
+#   on a failed gate. Soft moves HEAD back and leaves the tree, so a rolled-back
+#   half looks EXACTLY like a half that failed its gate today: files present,
+#   uncommitted, recovery printed. Nothing of his is destroyed to tidy up after
+#   a delivery of mine.
+#
+#   ⚠️ AND THE HONEST LIMIT IS STATED RATHER THAN PAPERED OVER. Phase 2 pushes
+#   to two independent remotes; that is not a transaction and cannot be made
+#   one. What it CAN be is ordered last, back to back, with nothing between
+#   them but network — and if one push fails the report names exactly which
+#   repo is ahead of its remote and the one command that fixes it. A rolled-back
+#   push is not attempted: reverting something already on origin is a decision
+#   for a human, not a cleanup step.
 # v1.1 (2026-09-05) — dtp r278. THREE GAPS BETWEEN WHAT THIS DID AND WHAT THE
 #   OPERATOR ASKED A DEPLOY TO DO, plus the menu item LAND.1 refused and he has
 #   now asked for. His list, 2026-09-05: unpack, stage, verify the write map,
@@ -101,6 +145,8 @@ if [ -z "$ARCHIVE" ]; then
 fi
 FAILED=0
 LANDED=""
+declare -A PRE_SHA=()      # v1.2 — repo -> sha before this run touched it
+declare -a COMMITTED=()    # v1.2 — repos this run committed to, in order
 
 # ── re-exec from a private copy if we are running from inside a repo ───────
 # A dtp delivery that ships a new tools/land.sh would otherwise overwrite this
@@ -163,6 +209,11 @@ land_one() {
 
   cd "$repo" || { die "cannot cd $repo"; return 1; }
 
+  # v1.2 — WHERE THIS REPO WAS BEFORE WE TOUCHED IT. Captured BEFORE the pull,
+  # so a rollback returns it to the operator's own starting point rather than
+  # to whatever origin happened to hold mid-run.
+  PRE_SHA["$repo"]="$(git rev-parse HEAD 2>/dev/null)"
+
   # ── pull FIRST so the extract lands on true HEAD (§15) ──────────────────
   git pull --ff-only || { die "PULL FAILED — nothing extracted."; return 1; }
 
@@ -201,7 +252,16 @@ land_one() {
   while IFS= read -r line; do
     chk="${line#CHECK }"
     nchk=$((nchk+1))
-    if ( cd "$repo" && python3 "$chk" ) >/dev/null 2>&1; then
+    # 🔴 A CHECK MUST NOT INHERIT THIS DELIVERY'S OWN CONTROL VARIABLES, and
+    # this was found by the CHECK stage biting its own delivery: r279's
+    # `check_land_sh.py` itself invokes a land, that nested run inherited
+    # `LAND_ARCHIVE` from the outer one, and on success its cleanup would have
+    # `rm -f`d THE TARBALL CURRENTLY BEING LANDED. It surfaced as a check that
+    # failed under the lander and passed by hand — the worst shape of red,
+    # because it looks like a flaky test rather than a leak.
+    # The general rule: a CHECK is arbitrary code and gets a clean slate of
+    # everything that names this delivery.
+    if ( cd "$repo" && env -u LAND_ARCHIVE -u LAND_STAGE python3 "$chk" ) >/dev/null 2>&1; then
       echo "  check: $chk PASS"
     else
       echo "  🔴 CHECK FAILED: $chk"
@@ -271,15 +331,14 @@ land_one() {
   done
   echo "  staged $staged payload file(s) by name"
   git commit -q -m "$rev: $desc" || { die "COMMIT FAILED"; return 1; }
-  if git push -q; then
-    echo "  LANDED $rev — pushed."
-    LANDED="$LANDED $half"
-    return 0
-  fi
-  echo "  PUSH FAILED — committed locally, archive KEPT."
-  echo "  Fix the remote, then: cd $repo && git push"
-  FAILED=1
-  return 1
+  # v1.2 — COMMITTED, NOT PUSHED. Phase 2 pushes, and only if every half got
+  # this far. Recording the repo and its PRE-RUN sha here is what makes the
+  # rollback possible and what makes it precise: we can only undo what this
+  # run did.
+  COMMITTED+=("$repo")
+  echo "  committed $rev locally — holding the push until every half is in"
+  LANDED="$LANDED $half"
+  return 0
 }
 
 if [ "$#" -eq 0 ]; then
@@ -287,23 +346,76 @@ if [ "$#" -eq 0 ]; then
   exit 1
 fi
 
+# ── PHASE 1 — VERIFY AND COMMIT EVERY HALF, LOCALLY ────────────────────────
 for half in "$@"; do
   land_one "$half" || break
 done
 
-echo
-if [ "$FAILED" = "0" ] && [ -n "$LANDED" ]; then
-  # ── delivery scaffolding cleans itself up (§27) ─────────────────────────
-  rm -rf "$STAGE" /tmp/.land_running.sh
-  if [ -n "$ARCHIVE" ]; then
-    rm -f "$ARCHIVE"
-    echo "ALL LANDED:$LANDED — archive and staging removed."
-  else
-    echo "ALL LANDED:$LANDED — staging removed."
-    echo "⚠️ ${AMBIGUOUS:-0} tarball(s) matched in \$HOME and none was named, so"
-    echo "   NOTHING was deleted. Remove the one you landed by hand."
+# ── ROLLBACK — nothing reaches origin unless everything got here ───────────
+# 🔑 THIS IS THE POINT OF v1.2. A half that failed leaves the others' commits
+# undone, so the operator is never left reconciling a delivery that half
+# happened on a remote fifteen boxes pull from.
+if [ "$FAILED" != "0" ]; then
+  if [ "${#COMMITTED[@]}" -gt 0 ]; then
+    echo
+    echo "ROLLING BACK ${#COMMITTED[@]} half/halves that had already committed —"
+    echo "NOTHING WAS PUSHED, so origin is untouched."
+    for r in "${COMMITTED[@]}"; do
+      sha="${PRE_SHA[$r]:-}"
+      if [ -n "$sha" ] && ( cd "$r" && git reset --soft "$sha" ); then
+        echo "  $r -> $sha (soft: the files are still in the tree, uncommitted)"
+      else
+        # ⚠️ NAMED, NEVER SWALLOWED. A rollback that fails silently is worse
+        # than no rollback, because the operator would believe origin and his
+        # checkout agree when they do not.
+        echo "  🔴 $r — COULD NOT ROLL BACK. It holds a commit that is NOT on"
+        echo "     origin. Inspect it: cd $r && git log --oneline -3"
+      fi
+    done
   fi
-  exit 0
+  echo
+  echo "INCOMPLETE. Archive and staging KEPT so nothing has to be re-downloaded."
+  exit 1
 fi
-echo "INCOMPLETE. Archive and staging KEPT so nothing has to be re-downloaded."
-exit 1
+
+if [ -z "$LANDED" ]; then
+  echo
+  echo "INCOMPLETE — nothing landed."
+  exit 1
+fi
+
+# ── PHASE 2 — PUSH, LAST, BACK TO BACK ─────────────────────────────────────
+# ⚠️ TWO REMOTES ARE NOT A TRANSACTION and this does not pretend otherwise.
+# What it can do is leave nothing but network between the pushes, and name the
+# exact recovery if one of them fails.
+PUSHED=""
+for r in "${COMMITTED[@]}"; do
+  if ( cd "$r" && git push -q ); then
+    PUSHED="$PUSHED $r"
+    echo "  pushed $r"
+  else
+    echo
+    echo "🔴 PUSH FAILED for $r."
+    [ -n "$PUSHED" ] && echo "   ALREADY ON ORIGIN:$PUSHED"
+    echo "   This one is committed locally and ahead of its remote."
+    echo "   Fix the remote, then:  cd $r && git push"
+    echo "   ⚠️ NOT rolled back — reverting something already pushed is a"
+    echo "      decision for you, not a cleanup step."
+    echo
+    echo "INCOMPLETE. Archive and staging KEPT."
+    exit 1
+  fi
+done
+
+echo
+# ── delivery scaffolding cleans itself up (§27) ────────────────────────────
+rm -rf "$STAGE" /tmp/.land_running.sh
+if [ -n "$ARCHIVE" ]; then
+  rm -f "$ARCHIVE"
+  echo "ALL LANDED:$LANDED — archive and staging removed."
+else
+  echo "ALL LANDED:$LANDED — staging removed."
+  echo "⚠️ ${AMBIGUOUS:-0} tarball(s) matched in \$HOME and none was named, so"
+  echo "   NOTHING was deleted. Remove the one you landed by hand."
+fi
+exit 0

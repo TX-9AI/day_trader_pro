@@ -1,5 +1,18 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/check_land_sh.py — v1.1
+# day_trader_pro/tests/check_land_sh.py — v1.2
+# v1.2 (2026-09-05) — dtp r279. ALL OR NONE, DRIVEN AGAINST A REAL SECOND REPO.
+#   A1-A1d are the cases the operator asked for after watching a real one:
+#   r277_r2 landed out of order, its dtp half passed and PUSHED, and only then
+#   did the otv4 half refuse — origin left holding code with no backlog entry.
+#   🔑 A1 IS THE CHECK THAT CARRIES THE WEIGHT AND IT ASSERTS ON THE REMOTE,
+#   not on the checkout. "The local HEAD moved back" is a weaker claim than
+#   "origin never saw it", and origin is the thing fifteen boxes pull from —
+#   so A1b reads the BARE REPO directly.
+#   ⚠️ A1c IS THE ONE THAT WOULD CATCH A LAZY ROLLBACK. `reset --hard` would
+#   pass every other case here and silently revert an unrelated tracked file
+#   the operator had edited. A1c plants exactly that and requires it to survive,
+#   which is §35's reason for refusing a blind `git checkout -- .` applied to
+#   the undo path.
 # v1.1 (2026-09-05) — dtp r278. THE THREE NEW STAGES, EACH DRIVEN BOTH WAYS.
 #   C1/C1b — a declared CHECK is EXECUTED and its exit code decides. C1 lands a
 #   delivery whose check passes; C1b re-runs the identical world with a check
@@ -66,6 +79,22 @@ def check(name, ok, detail=""):
     print(("  PASS  " if ok else "  FAIL  ") + name + (f"   [{detail}]" if detail else ""))
     if not ok:
         _fails.append(name)
+
+
+def _clean_env(**over):
+    """Child env with this delivery's own control variables stripped.
+
+    ⚠️ BELT AND BRACES BESIDE land.sh's `env -u`. If a future caller runs these
+    cases some other way, inheriting `LAND_ARCHIVE` would point a nested land at
+    the OUTER delivery's tarball and its cleanup would delete it. The case that
+    caught it, C4c, failed under the lander and passed by hand — which reads as
+    a flaky test and is actually a leak.
+    """
+    e = dict(os.environ)
+    for k in ("LAND_ARCHIVE", "LAND_STAGE"):
+        e.pop(k, None)
+    e.update(over)
+    return e
 
 
 def _run(cmd, cwd=None, env=None):
@@ -137,7 +166,7 @@ FAIL_CHK = {"tests/ok.py": "import sys; sys.exit(1)\n"}
 
 
 def _land(home, stage, half="half"):
-    env = dict(os.environ, HOME=home)
+    env = _clean_env(HOME=home)
     return _run(f'bash "{stage}/land.sh" {half}', env=env)
 
 
@@ -304,7 +333,7 @@ def main():
     # 🔑 THIS IS WHAT THE MENU ITEM RUNS. Testing land.sh and calling the menu
     # verified would be the laundered green §18 names: the discovery, the
     # half-detection and the ordering all live here and nowhere else.
-    def _two_half_world(tmp):
+    def _two_half_world(tmp, second_check="import sys; sys.exit(0)\n"):
         """A home with TWO repos and one archive containing both halves.
 
         The second half's content gate requires a file the FIRST half's land
@@ -331,7 +360,7 @@ def main():
         with open(os.path.join(h2, "other.py"), "w") as f:
             f.write("# other.py — v1.1\n# v1.1 (2026-09-05) — the edit.\nNEW2 = 2\n")
         with open(os.path.join(h2, "tests", "ok2.py"), "w") as f:
-            f.write("import sys; sys.exit(0)\n")
+            f.write(second_check)
         with open(os.path.join(h2, "land.spec"), "w") as f:
             f.write("\n".join([
                 "REPO MARKER2", "REV r1000", "DESC the second half",
@@ -344,10 +373,10 @@ def main():
         arc = os.path.join(home, "delivery_r1000.tar.gz")
         _run(f'tar czf "{arc}" -C "{stage}" .')
         shutil.rmtree(stage)
-        return home, repo, r2, arc
+        return home, repo, r2, arc, os.path.join(tmp, "bare"), b2
 
     with tempfile.TemporaryDirectory() as tmp:
-        home, repo, r2, arc = _two_half_world(tmp)
+        home, repo, r2, arc, bare1, bare2 = _two_half_world(tmp)
         # ⚠️ NAME THE STAGING DIR RATHER THAN SCANNING /tmp FOR ONE. The first
         # draft globbed `/tmp/land.*` and went RED against CORRECT code, because
         # --dry leaves its staging behind BY DESIGN and other cases had left
@@ -355,7 +384,7 @@ def main():
         # gets distrusted — and LAND_STAGE exists precisely so a caller can
         # assert on the directory it actually chose.
         mine = os.path.join(tmp, "stagedir")
-        env = dict(os.environ, HOME=home, LAND_STAGE=mine)
+        env = _clean_env(HOME=home, LAND_STAGE=mine)
         r = _run(f'bash "{DEPLOY}"', env=env)
         out = r.stdout + r.stderr
         check("D1 deploy.sh finds the archive and discovers both halves",
@@ -379,18 +408,18 @@ def main():
     # nobody knows works (§17). Driven through land.sh directly, since deploy.sh
     # exists precisely to make this order impossible to get wrong by hand.
     with tempfile.TemporaryDirectory() as tmp:
-        home, repo, r2, arc = _two_half_world(tmp)
+        home, repo, r2, arc, bare1, bare2 = _two_half_world(tmp)
         st = os.path.join(tmp, "unpack"); os.makedirs(st)
         _run(f'tar xf "{arc}" -C "{st}"')
-        env = dict(os.environ, HOME=home)
+        env = _clean_env(HOME=home)
         r = _run(f'bash "{st}/land.sh" second half', env=env)
         check("D2c landing the halves BACKWARDS is refused",
               r.returncode != 0 and _head(r2) == "base",
               f"rc={r.returncode} head={_head(r2)!r}")
 
     with tempfile.TemporaryDirectory() as tmp:
-        home, repo, r2, arc = _two_half_world(tmp)
-        env = dict(os.environ, HOME=home)
+        home, repo, r2, arc, bare1, bare2 = _two_half_world(tmp)
+        env = _clean_env(HOME=home)
         r = _run(f'bash "{DEPLOY}" --dry', env=env)
         check("D4 --dry names the halves and their revisions",
               "r999" in r.stdout and "r1000" in r.stdout)
@@ -400,9 +429,61 @@ def main():
 
     with tempfile.TemporaryDirectory() as tmp:
         empty = os.path.join(tmp, "home"); os.makedirs(empty)
-        r = _run(f'bash "{DEPLOY}"', env=dict(os.environ, HOME=empty))
+        r = _run(f'bash "{DEPLOY}"', env=_clean_env(HOME=empty))
         check("D5 no tarball at all is a named refusal, not a traceback",
               r.returncode != 0 and "nothing to land" in (r.stdout + r.stderr))
+
+    # ══ A — ALL HALVES LAND, OR NONE REACHES ORIGIN ═══════════════════════
+    # The second half's CHECK exits 1. The first half is otherwise perfect and
+    # WOULD have landed and pushed under v1.1 — that is the observed failure
+    # this case exists for, not a hypothetical.
+    def _remote_head(bare):
+        return _run(f'git --git-dir="{bare}" log --format=%s -1 main').stdout.strip()
+
+    with tempfile.TemporaryDirectory() as tmp:
+        home, repo, r2, arc, bare1, bare2 = _two_half_world(
+            tmp, second_check="import sys; sys.exit(1)\n")
+        # An unrelated edit to a TRACKED file that is NOT in the payload — a
+        # `--hard` rollback would revert it. ⚠️ THE FIRST DRAFT EDITED
+        # `thing.py`, WHICH THE DELIVERY LEGITIMATELY OVERWRITES, so it asserted
+        # a property no lander could have and went red against correct code. The
+        # claim is about files the delivery does not ship, and MARKER is one.
+        with open(os.path.join(repo, "MARKER"), "a") as f:
+            f.write("the operator was mid-edit\n")
+        before1, before2 = _head(repo), _head(r2)
+        env = _clean_env(HOME=home, LAND_STAGE=os.path.join(tmp, "sd"))
+        r = _run(f'bash "{DEPLOY}"', env=env)
+        out = r.stdout + r.stderr
+
+        check("A1 a failure in the SECOND half rolls back the first",
+              _head(repo) == before1 and _head(r2) == before2,
+              f"{_head(repo)!r} / {_head(r2)!r}")
+        check("A1b ...and ORIGIN never saw either half",
+              _remote_head(bare1) == "base" and _remote_head(bare2) == "base",
+              f"{_remote_head(bare1)!r} / {_remote_head(bare2)!r}")
+        check("A1c ...and the operator's own unrelated edit SURVIVED the "
+              "rollback (soft, never hard)",
+              "mid-edit" in open(os.path.join(repo, "MARKER")).read())
+        check("A1d ...and it says so rather than tidying up silently",
+              "ROLLING BACK" in out and "origin is untouched" in out)
+        check("A1e ...and the archive is KEPT so nothing is re-downloaded",
+              os.path.exists(arc))
+
+    # ══ A2 — AND THE HAPPY PATH STILL PUSHES BOTH ═════════════════════════
+    # A rollback that fires on a good delivery is worse than none. D1-D3 above
+    # already land the two-half world; this asserts the REMOTES specifically,
+    # because the whole claim of v1.2 is about what origin ends up holding.
+    with tempfile.TemporaryDirectory() as tmp:
+        home, repo, r2, arc, bare1, bare2 = _two_half_world(tmp)
+        env = _clean_env(HOME=home, LAND_STAGE=os.path.join(tmp, "sd"))
+        r = _run(f'bash "{DEPLOY}"', env=env)
+        check("A2 a clean two-half delivery reaches BOTH remotes",
+              r.returncode == 0
+              and _remote_head(bare1).startswith("r999")
+              and _remote_head(bare2).startswith("r1000"),
+              f"{_remote_head(bare1)!r} / {_remote_head(bare2)!r}")
+        check("A2b ...and the pushes come after every commit, not between them",
+              "holding the push until every half is in" in (r.stdout + r.stderr))
 
     print()
     if _fails:
