@@ -1,5 +1,21 @@
 #!/usr/bin/env python3
-"""day_trader_pro/tests/screen_bfly_stop.py — v1.0
+"""day_trader_pro/tests/screen_bfly_stop.py — v1.1
+v1.1  2026-09-04 — dtp r275. TWO FAULTS IN THE r274 CUT, BOTH MINE.
+      (1) NO STATUS FILTER — it reported 419 GEXPinButterfly trades where there
+      are 20, because ~399 unclosed rows with pnl 0 and exit_reason None sat in
+      the SURVIVED group. Now keyed on a CLOSING FACT (a non-empty exit_reason)
+      rather than a status spelling, and the count is labelled CLOSED so it
+      cannot recur silently.
+      (2) THE VERDICT READ THE MFE RATIO AND IGNORED `mfe_bars`. It printed
+      "the stop is taking trades that were working" when the column beside it
+      said the opposite: winners peaked at bar 141-305, stopped trades at a
+      MEDIAN OF BAR 5.5. The operator was one step from removing a stop on the
+      strength of that line.
+      🔑 THE BAR FLOOR COMES FROM THE WINNERS, NOT FROM ME — a trade "was
+      working" if it traded above entry AND peaked no earlier than the earliest
+      winner in THIS sample. Hard-coding a threshold would be a number I chose.
+      ⚠️ AND A RANGE WITH NO WINNERS SAYS SO rather than defaulting: absent is
+      not evidence either way.
 v1.0  2026-09-04 — dtp r274. DID THE BUTTERFLY'S STOP CUT WINNERS OR LIMIT
       LOSERS? Operator, 2026-09-04: *"something about the losing nature of this
       trade doesn't sit well with me because I've seen us hold several all the
@@ -77,9 +93,23 @@ def main(argv):
     print(f"SOURCE: s3 [trades] — {n:,} row(s) over {len(dates)} date(s)")
 
     rows = cache.query(
+        # 🔴 dtp-r275 — CLOSED ROWS ONLY. The r274 cut had no status filter and
+        # reported 419 GEXPinButterfly "trades" when there are 20: ~399 rows
+        # with exit_premium 0.00, pnl 0 and exit_reason None are unclosed or
+        # non-terminal. `RP.COLS` has carried `status` the whole time and the
+        # screen never used it. The 13 stopped and 7 real winners were correct
+        # and the quantiles were computed off real rows, so the FINDING stood —
+        # but the counts were junk, and the next reader would have no narration
+        # to save them.
+        # ⚠️ KEYED ON A CLOSING FACT, NOT ON A STATUS SPELLING. A row with an
+        # exit reason and an exit premium is a closed trade whatever the status
+        # column happens to say, and this project has been bitten twice this
+        # week by a value that was renamed underneath a name check.
         "SELECT symbol, entry_time, entry_premium, exit_premium, contracts,"
-        " pnl_usd, exit_reason, mfe_premium, mfe_bars, mae_premium, mae_bars"
-        " FROM trades WHERE strategy = ? ORDER BY entry_time", [a.strat])
+        " pnl_usd, exit_reason, mfe_premium, mfe_bars, mae_premium, mae_bars,"
+        " status FROM trades WHERE strategy = ?"
+        " AND exit_reason IS NOT NULL AND TRIM(exit_reason) <> ''"
+        " ORDER BY entry_time", [a.strat])
     if not rows:
         # ⚠️ ABSENT, NOT ZERO. No rows for this strategy in this range is a
         # coverage statement, not a finding about the strategy.
@@ -97,7 +127,7 @@ def main(argv):
     print("=" * 74)
     print(f"  {a.strat} — DID THE STOP CUT WINNERS OR LIMIT LOSERS?")
     print("=" * 74)
-    print(f"  {len(rows)} trade(s):  {len(stopped)} stopped out,"
+    print(f"  {len(rows)} CLOSED trade(s):  {len(stopped)} stopped out,"
           f" {len(survived)} reached another exit")
     print()
     print("  MFE is the BEST mark the position ever reached. On a stopped")
@@ -136,16 +166,45 @@ def main(argv):
         print()
 
     # ── THE VERDICT, STATED IN ONE LINE AND NOT INFERRED BY THE READER ────
-    sr = [(_f(r["mfe_premium"]) or 0) / (_f(r["entry_premium"]) or 1)
-          for r in stopped if _f(r["entry_premium"])]
-    up = sum(1 for x in sr if x > 1.0)
+    # 🔴 dtp-r275 — THE VERDICT READS `mfe_bars` TOO, AND THE r274 LINE WAS
+    # WRONG WITHOUT IT. It printed "the stop is taking trades that were
+    # working" off the MFE ratio alone. The column beside it said otherwise:
+    # winners peaked at bar 141-305, the stopped trades at a MEDIAN OF BAR 5.5
+    # — ten of twelve within 15 bars at 1.03-1.49x and then faded. That is a
+    # pop on entry noise, not a trade working toward the pin, and the operator
+    # was one step from removing a stop on the strength of it.
+    # 🔑 THE TEST IS THE WINNERS' OWN SHAPE, NOT A CONSTANT. A trade "was
+    # working" if it traded above entry AND peaked no earlier than the winners
+    # in THIS sample do. Hard-coding a bar threshold would be a number I chose;
+    # the survivors define it.
+    def _ratio(r):
+        e = _f(r["entry_premium"])
+        m = _f(r["mfe_premium"])
+        return (m / e) if (e and m is not None) else None
+    win_bars = sorted(_f(r["mfe_bars"]) or 0 for r in survived
+                      if _ratio(r) and _ratio(r) > 1.0)
+    floor_bar = win_bars[0] if win_bars else None
+    sr = [(_ratio(r), _f(r["mfe_bars"]) or 0) for r in stopped
+          if _ratio(r) is not None]
+    up = sum(1 for x, _b in sr if x > 1.0)
+    shape = sum(1 for x, b in sr
+                if x > 1.0 and floor_bar is not None and b >= floor_bar)
     print("=" * 74)
-    if sr and up >= max(1, len(sr) // 2):
-        print(f"  🔴 {up} of {len(sr)} STOPPED trades traded ABOVE entry before")
-        print("     being cut. The stop is taking trades that were working.")
-    elif sr:
-        print(f"  ✅ only {up} of {len(sr)} stopped trades ever traded above")
-        print("     entry. The stop is limiting losers, not cutting winners.")
+    if not sr:
+        print("  no stopped trade carried a readable MFE — nothing to judge.")
+    elif floor_bar is None:
+        print(f"  {up} of {len(sr)} stopped trades traded above entry, but NO")
+        print("  survivor won in this range, so there is no shape to compare")
+        print("  against. ABSENT, not evidence either way.")
+    else:
+        print(f"  {up} of {len(sr)} stopped trades traded ABOVE entry —")
+        print(f"  but only {shape} peaked at or after bar {floor_bar:.0f}, which is the")
+        print(f"  EARLIEST any winner in this sample peaked.")
+        if shape >= max(1, len(sr) // 2):
+            print("  🔴 the stop is cutting trades with the winners' shape.")
+        else:
+            print(f"  ✅ the other {up - shape} popped early and faded — a stop cutting")
+            print("     an entry blip, not a trade that was working.")
     print("  ⚠️ MFE is the best mark REACHED, not a guarantee it would have")
     print("     held to 15:45. It bounds the question, it does not settle it.")
     print(f"  {(datetime.now(ET) - t0).total_seconds():.0f}s")

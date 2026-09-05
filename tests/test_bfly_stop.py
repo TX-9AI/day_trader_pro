@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/test_bfly_stop.py — v1.0
+# day_trader_pro/tests/test_bfly_stop.py — v1.1
+# v1.1 (2026-09-04) — dtp r275. B5 pins that the ratio alone says 10 of 12
+#      while mfe_bars says 1 — the opposite conclusion from the same rows — and
+#      that the bar floor is the winners' own minimum. B6 pins the closed-rows
+#      filter. NOTE: I said "2 of 13" in chat using a loose bar>15 cut; against
+#      the winners' floor of 141 only CVX at 144 qualifies.
 # v1.0 (2026-09-04) — dtp r274. Selftest for the stop-forensics split.
 #
 # 🔴 THE QUESTION IT DECIDES: every butterfly loss over 08-31..09-04 is a
@@ -75,11 +80,52 @@ def main():
           S._f(None) is None and S._f("") is None and S._f("x") is None)
     check("B4b and a real value still parses", S._f("0.61") == 0.61)
 
+    # ══ B5 — THE VERDICT MUST READ mfe_bars, NOT JUST THE RATIO ══════════
+    # 🔴 dtp-r275. The r274 line printed "the stop is taking trades that were
+    # working" from the MFE ratio alone. The real 08-31..09-04 numbers:
+    # winners peaked at bar 141-305, stopped trades at a MEDIAN OF BAR 5.5.
+    # Ten of twelve popped within 15 bars and faded. The operator was one step
+    # from removing a stop on the strength of that line.
+    win  = [(1.27,155),(2.98,279),(2.95,305),(2.79,170),(1.88,141),(1.25,158),(1.13,188)]
+    stop = [(1.49,11),(1.24,9),(1.17,2),(1.35,144),(0.89,1),(1.08,1),(0.86,1),
+            (1.08,5),(1.03,2),(1.70,52),(1.32,9),(1.09,6)]
+    floor_bar = min(b for r, b in win if r > 1.0)
+    up    = sum(1 for r, _ in stop if r > 1.0)
+    shape = sum(1 for r, b in stop if r > 1.0 and b >= floor_bar)
+    check("B5 the ratio alone says 10 of 12 — the r274 verdict",
+          up == 10, str(up))
+    # ⚠️ ONE, NOT TWO. I said "2 of 13 share the winners' signature" in the
+    # chat using a loose bar>15 cut. Against the winners' OWN floor — bar 141,
+    # the earliest any of them peaked — only CVX at bar 144 qualifies. QQQ
+    # peaked at 52, which is late for a stopped trade and early for a winner.
+    # The stricter test is the honest one and it argues harder against removing
+    # the stop: 1 of 12, against a break-even needing 9 of 13.
+    check("B5b with mfe_bars it is 1 of 12 — the opposite conclusion",
+          shape == 1, str(shape))
+    check("B5c the bar floor comes from the WINNERS, not a constant",
+          floor_bar == 141, str(floor_bar))
+    # ⚠️ AND A RANGE WITH NO WINNERS MUST SAY SO rather than pick a default.
+    check("B5d no winner in range -> no floor, and the screen says ABSENT",
+          not [b for r, b in [] if r > 1.0])
+
+    # ══ B6 — CLOSED ROWS ONLY ═════════════════════════════════════════════
+    # 🔴 r274 reported 419 trades where there are 20: ~399 rows with pnl 0 and
+    # exit_reason None are unclosed. Keyed on a CLOSING FACT rather than a
+    # status spelling, because this project has twice been bitten this week by
+    # a value renamed underneath a name check.
+    src = open(os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "tests", "screen_bfly_stop.py"), encoding="utf-8").read()
+    check("B6 the query filters on a non-empty exit_reason",
+          "exit_reason IS NOT NULL" in src and "TRIM(exit_reason) <> ''" in src)
+    check("B6b and the count is labelled CLOSED so 419 cannot recur silently",
+          "CLOSED trade(s)" in src)
+
     print()
     if FAILED:
         print(f"RED — {len(FAILED)} failed: {', '.join(FAILED)}")
         return 1
-    print("GREEN — 15 checks")
+    print("GREEN — 21 checks")
     return 0
 
 
