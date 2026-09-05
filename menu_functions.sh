@@ -1,4 +1,10 @@
-# day_trader_pro/menu_functions.sh — v1.49
+# day_trader_pro/menu_functions.sh — v1.50
+# — v1.50 (2026-09-04) — dtp r274. STOP FORENSICS. Every butterfly loss over
+#   08-31..09-04 is a PREMIUM STOP - stop_24/25/26%, n=13, -2,393.50, matching
+#   the 13 losers to the dollar - at a 16-26 minute hold, while its winners run
+#   to hard_close at 289 minutes for +2,751. The screen prints MFE per trade so
+#   "the stop cut a winner" and "the stop limited a loser" stop being the same
+#   number.
 # — v1.49 (2026-09-04) — dtp r270. PLAN GATES: every rung, PASS and FAIL,
 #   from S3. `gate_disposition` records ONLY the rung that refused, so the fit
 #   report's "where the refusals land" is a ranking AMONG refusals and not a
@@ -1107,6 +1113,32 @@ mi_sensor_decisions_now() {
 }
 
 # Plan ledger: intent and its outcome    (one/all/some)
+mi_sensor_stop_forensics() {
+    # 🔴 dtp-r274 — EVERY butterfly loss over 08-31..09-04 is a PREMIUM STOP:
+    # stop_24/25/26%, n=13, -$2,393.50, matching the 13 losers to the dollar.
+    # It has never lost to the market, only to its own stop, at a 16-26 minute
+    # hold — while its winners run to hard_close at 289 minutes for +$2,751.
+    # ⚠️ THAT IS NOT AUTOMATICALLY A DEFECT. A pin butterfly is worth little
+    # mid-session by construction, so a -25% mark at minute 17 measures elapsed
+    # time rather than the thesis — but a stopped fly might equally have
+    # expired worthless. MFE decides which.
+    echo
+    echo "  Stop forensics — for every stopped-out trade, the BEST mark it"
+    echo "  ever reached. MFE above entry means it was working when it was cut."
+    echo "  Survivors are printed alongside, because a stopped trade's MFE"
+    echo "  means nothing without knowing what a winner's looked like."
+    echo "  Reads the S3 warehouse; boxes stay off."
+    read -rp "  START (YYYY-MM-DD): " D1
+    read -rp "  END   (ENTER = same day): " D2
+    read -rp "  Strategy (ENTER = GEXPinButterfly): " ST
+    [ -z "$D2" ] && D2="$D1"
+    ARGS=""
+    [ -n "$D1" ] && ARGS="--from $D1 --to $D2"
+    [ -n "$ST" ] && ARGS="$ARGS --strat $ST"
+    $PY tests/screen_bfly_stop.py $ARGS
+    pause
+}
+
 mi_sensor_plan_gates() {
     # 🔴 dtp-r270 — THE HALF `gate_disposition` CANNOT SHOW. That table records
     # only the rung that REFUSED, so the fit report's "where the refusals land"

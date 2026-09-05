@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# day_trader_pro/menu_registry.sh — v1.8
+# day_trader_pro/menu_registry.sh — v1.9
+# — v1.9 (2026-09-04) — dtp r274. Stop forensics registered in SENSORS. It asks
+#   a question no other item can: for a stopped-out trade, what was the BEST
+#   mark it ever reached.
 # — v1.8 (2026-09-04) — dtp r270. PLAN GATES registered in the SENSORS block,
 #   beside PLAN BOARD and Plan ledger. It answers a question neither of those
 #   can: which rungs FAIL, as a rate, with the pass count beside them.
@@ -108,6 +111,7 @@ MENU=(
   "ITEM|DECISIONS NOW         (enter on / exit on, live snapshot)|mi_sensor_decisions_now"
   "ITEM|Plan ledger           (intent + terminal reason)|mi_sensor_plan_ledger"
   "ITEM|PLAN GATES            (every rung, PASS and FAIL, from S3)|mi_sensor_plan_gates"
+  "ITEM|Stop forensics        (did the stop cut winners or limit losers?)|mi_sensor_stop_forensics"
   "ITEM|Exit counterfactual   (flow vs the stop)|mi_sensor_exit_counterfactual"
   "ITEM|Fire snapshot         (derived vector at entry)|mi_sensor_fire_snapshot"
   "ITEM|Surface               (charm / vanna / GEX)|mi_sensor_surface"
