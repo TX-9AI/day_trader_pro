@@ -1,5 +1,13 @@
 #!/usr/bin/env bash
-# day_trader_pro/tools/land.sh — v1.3
+# day_trader_pro/tools/land.sh — v1.4
+# v1.4 (2026-09-05) — dtp r291. `DEL <path>` — A DELIVERY CAN REMOVE A FILE.
+#   A payload only ever ADDED or overwrote, so retiring a document meant the
+#   operator deleting it by hand after the land: outside the gate, outside the
+#   commit, and outside the GENESIS row that is supposed to describe what the
+#   revision did. otv4 r269 needed to remove eight spent thread contracts and
+#   had nowhere to say so. One path per directive, never a glob, and a target
+#   that is already absent is a REFUSAL rather than a no-op — a spec describing
+#   a repo that does not exist must not land quietly.
 # v1.3 (2026-09-05) — dtp r289 / DEP.2. POS/NEG MATCH AS FIXED STRINGS. See the
 #   block in the spec-format header: `grep -q` is a BRE, and it graded two
 #   deliveries wrongly in one day — `**r247**` degenerated to `r24` and PASSED
@@ -133,6 +141,7 @@
 #   REPO   <marker-file> <marker-file>     files that identify the target repo
 #   REV    r207                             revision id, for GENESIS + the gate
 #   DESC   <one line>                       GENESIS row AND commit subject
+#   DEL    <path>                            REMOVED from the repo (v1.4)
 #   POS    <path>|<literal string>          must be present after extraction
 #   NEG    <path>|<literal string>          must be ABSENT after extraction
 #
@@ -349,6 +358,30 @@ land_one() {
   while IFS= read -r rel; do
     git add -- "$rel" && staged=$((staged+1))
   done < <(cd "$d" && find . -type f ! -name land.spec -printf '%P\n')
+
+  # ── DEL (v1.4) — A DELIVERY CAN REMOVE A FILE ───────────────────────────
+  # 🔴 UNTIL NOW IT COULD NOT. A payload only ADDS or overwrites, so retiring a
+  # document meant the operator deleting it by hand afterwards — outside the
+  # gate, outside the commit, and outside the record. r269 needed to remove
+  # eight spent thread contracts and had nowhere to say so.
+  # ⚠️ ONE PATH PER DIRECTIVE, NEVER A GLOB. A pattern here would delete
+  # whatever happened to match at land time, which is the same class as the
+  # `ls | head -1` archive guess v1.1 removed and the BRE gate v1.3 removed.
+  # ⚠️ AND A MISSING TARGET IS A REFUSAL, NOT A NO-OP. If the file is already
+  # gone the spec is describing a repo that does not exist, and landing it
+  # would record a deletion that never happened.
+  local deleted=0
+  while IFS= read -r line; do
+    local target="${line#DEL }"
+    [ -z "$target" ] && continue
+    if [ ! -e "$repo/$target" ]; then
+      die "DEL $target — not present in $repo. The spec describes a repo this is not."
+      return 1
+    fi
+    git rm -q -- "$target" || { die "DEL $target failed"; return 1; }
+    deleted=$((deleted+1))
+  done < <(grep '^DEL ' "$spec" 2>/dev/null || true)
+  [ "$deleted" -gt 0 ] && echo "  removed $deleted file(s) named by DEL"
   for gen in docs/FILE_MAP.md docs/WRITE_MAP.md docs/GENESIS.md; do
     [ -f "$repo/$gen" ] && git add -- "$gen"
   done

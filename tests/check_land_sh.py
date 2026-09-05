@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/check_land_sh.py — v1.3
+# day_trader_pro/tests/check_land_sh.py — v1.4
+# v1.4 (2026-09-05) — dtp r291. D1-D3 pin the `DEL` directive: a delivery can
+#   REMOVE a file, the removal is committed with the rest, and a target that is
+#   already absent is a REFUSAL. Until r291 a payload could only add or
+#   overwrite, so retiring a document meant a manual `rm` after the land —
+#   outside the gate, the commit and the GENESIS row.
 # v1.3 (2026-09-05) — dtp r289 / DEP.2. F1-F3 PIN THAT POS/NEG MATCH AS FIXED
 #   STRINGS. `grep -q` is a BASIC REGULAR EXPRESSION and it graded two
 #   deliveries wrongly in one day, in OPPOSITE directions: `**r247**`
@@ -536,6 +541,44 @@ def main():
         r = _land(home, stage)
         check("F3 ...and a genuinely absent string is still refused",
               r.returncode != 0 and _head(repo) == "base",
+              f"rc={r.returncode}")
+
+    # ══ 🔴 D1-D3 — `DEL` (dtp r291) ══════════════════════════════════════
+    # A payload only ever ADDED or overwrote. Retiring a file meant the
+    # operator deleting it by hand AFTER the land — outside the gate, outside
+    # the commit, and outside the row that is supposed to say what changed.
+    with tempfile.TemporaryDirectory() as tmp:
+        spec = GOOD + ["DEL MARKER"]
+        home, repo, stage = _world(tmp, spec, extra=PASS_CHK)
+        r = _land(home, stage)
+        check("D1 a DEL target is removed from the working tree",
+              r.returncode == 0 and not os.path.exists(os.path.join(repo, "MARKER")),
+              f"rc={r.returncode}")
+        # ⚠️ AND IT IS IN THE COMMIT, not merely gone from disk. A file deleted
+        # but unstaged leaves the repo dirty and the removal unrecorded.
+        tracked = _run("git ls-files MARKER", cwd=repo).stdout.strip()
+        check("D1b ...and the removal is committed, not left dirty",
+              tracked == "" and not _dirty(repo),
+              f"tracked={tracked!r} dirty={_dirty(repo)!r}")
+
+    # 🔴 D2 — AN ALREADY-ABSENT TARGET IS A REFUSAL. The spec would be
+    # describing a repo that does not exist, and landing it would record a
+    # deletion that never happened.
+    with tempfile.TemporaryDirectory() as tmp:
+        spec = GOOD + ["DEL no_such_file.md"]
+        home, repo, stage = _world(tmp, spec, extra=PASS_CHK)
+        r = _land(home, stage)
+        check("D2 a DEL naming a file that is not there is REFUSED",
+              r.returncode != 0 and _head(repo) == "base",
+              f"rc={r.returncode} head={_head(repo)!r}")
+
+    # ⚠️ D3 — AND A SPEC WITH NO DEL IS UNAFFECTED. The directive is optional;
+    # every existing delivery must behave exactly as before.
+    with tempfile.TemporaryDirectory() as tmp:
+        home, repo, stage = _world(tmp, GOOD, extra=PASS_CHK)
+        r = _land(home, stage)
+        check("D3 a delivery with no DEL still lands and deletes nothing",
+              r.returncode == 0 and os.path.exists(os.path.join(repo, "MARKER")),
               f"rc={r.returncode}")
 
     print()
