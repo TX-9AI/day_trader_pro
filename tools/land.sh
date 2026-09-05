@@ -1,5 +1,16 @@
 #!/usr/bin/env bash
-# day_trader_pro/tools/land.sh — v1.4
+# day_trader_pro/tools/land.sh — v1.5
+# v1.5 (2026-09-05) — dtp r293 / LAND.3. 🔴 A ROLLED-BACK HALF SAID "the files
+#   are still in the tree, uncommitted" — TRUE, AND MISLEADING. `reset --soft`
+#   leaves the payload STAGED, and the habitual cleanup `git checkout -- .`
+#   copies the INDEX into the working tree, restoring exactly what it was meant
+#   to discard. Observed on a real retry 2026-09-05: the tree read clean, the
+#   files were still there, and the next land appended a SECOND GENESIS row for
+#   the same revision — caught only by `check_land_discipline`'s duplicate-row
+#   check. The message now says STAGED and prints a command that unstages
+#   FIRST. ⚠️ The rollback itself is unchanged and stays `--soft`, so an
+#   unrelated file the operator had mid-edit survives (§35): the defect was in
+#   the sentence and the missing command, not in the mechanism.
 # v1.4 (2026-09-05) — dtp r291. `DEL <path>` — A DELIVERY CAN REMOVE A FILE.
 #   A payload only ever ADDED or overwrote, so retiring a document meant the
 #   operator deleting it by hand after the land: outside the gate, outside the
@@ -419,7 +430,20 @@ if [ "$FAILED" != "0" ]; then
     for r in "${COMMITTED[@]}"; do
       sha="${PRE_SHA[$r]:-}"
       if [ -n "$sha" ] && ( cd "$r" && git reset --soft "$sha" ); then
-        echo "  $r -> $sha (soft: the files are still in the tree, uncommitted)"
+        # 🔴 v1.5 — "IN THE TREE, UNCOMMITTED" WAS TRUE AND MISLEADING. After
+        # `reset --soft` the payload is still STAGED IN THE INDEX, and the
+        # operator's habitual cleanup — `git checkout -- .` — copies the INDEX
+        # back into the working tree, restoring exactly what he meant to
+        # discard. Observed 2026-09-05: the tree read clean, the files were
+        # still there, and the next attempt appended a SECOND GENESIS row for
+        # the same revision. `check_land_discipline` caught the duplicate,
+        # which is the only reason it was not silent.
+        # ⚠️ THE ROLLBACK STAYS `--soft` — that is deliberate, so an unrelated
+        # file the operator had mid-edit survives (§35). The defect was in what
+        # the operator was TOLD, and in the absence of a command to act on.
+        echo "  $r -> $sha (soft: the payload is STAGED, not discarded)"
+        echo "     re-land as-is, or discard with:"
+        echo "     cd $r && git reset -q HEAD -- . && git checkout -- . && git clean -fd"
       else
         # ⚠️ NAMED, NEVER SWALLOWED. A rollback that fails silently is worse
         # than no rollback, because the operator would believe origin and his

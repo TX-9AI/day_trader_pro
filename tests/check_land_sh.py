@@ -1,5 +1,14 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/check_land_sh.py — v1.4
+# day_trader_pro/tests/check_land_sh.py — v1.5
+# v1.5 (2026-09-05) — dtp r293 / LAND.3. R1 RUNS THE RECOVERY THE ROLLBACK
+#   PRINTS, on the ROLLED-BACK repo. `reset --soft` leaves the payload staged,
+#   and `git checkout -- .` copies the INDEX back into the tree — so the old
+#   message restored what it claimed to discard and a retry appended a second
+#   GENESIS row. ⚠️ TWO WRONG DRAFTS OF THIS CASE ARE WORTH RECORDING: the
+#   first failed at the CONTENT GATE, where nothing is committed or staged, so
+#   the broken command worked and the case passed at HEAD; the second read
+#   `die()`'s line, which belongs to the half that FAILED and never had
+#   anything staged either. Only the rolled-back half reaches the defect.
 # v1.4 (2026-09-05) — dtp r291. D1-D3 pin the `DEL` directive: a delivery can
 #   REMOVE a file, the removal is committed with the rest, and a target that is
 #   already absent is a REFUSAL. Until r291 a payload could only add or
@@ -580,6 +589,34 @@ def main():
         check("D3 a delivery with no DEL still lands and deletes nothing",
               r.returncode == 0 and os.path.exists(os.path.join(repo, "MARKER")),
               f"rc={r.returncode}")
+
+    # ══ 🔴 R1 — THE ROLLBACK'S OWN RECOVERY MUST ACTUALLY RECOVER (r293) ══
+    # ⚠️ IT MUST BE READ FROM THE ROLLED-BACK REPO. The half that FAILED never
+    # committed and never staged, so `git checkout -- .` works there; only the
+    # half that was rolled back with `reset --soft` holds a staged payload.
+    with tempfile.TemporaryDirectory() as tmp:
+        home, repo, r2, arc, bare1, bare2 = _two_half_world(
+            tmp, second_check="import sys; sys.exit(1)\n")
+        env = _clean_env(HOME=home, LAND_STAGE=os.path.join(tmp, "sd2"))
+        out = _run(f'bash "{DEPLOY}"', env=env).stdout
+        check("R1 a rolled-back half is described as STAGED, not merely "
+              "uncommitted", "STAGED" in out,
+              [l for l in out.splitlines() if "soft:" in l][:1])
+        staged = _run("git diff --cached --name-only", cwd=repo).stdout.strip()
+        check("R1b ...because it demonstrably is", bool(staged),
+              staged.replace("\n", " ")[:60])
+        line = ""
+        for ln in out.splitlines():
+            if ln.strip().startswith("cd ") and "clean -fd" in ln:
+                line = ln.strip()
+        check("R1c ...and a command is offered for it", bool(line), line[:64])
+        if line:
+            _run(line)
+            # 🔑 ASSERTED ON THE REPO, NOT THE WORDING. Grepping the message for
+            # "reset" would pass against any sentence containing the word.
+            check("R1d ...and running exactly that leaves it clean — nothing "
+                  "staged, nothing in the tree",
+                  _dirty(repo) == "", f"still: {_dirty(repo)!r}")
 
     print()
     if _fails:
