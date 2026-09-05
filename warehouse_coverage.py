@@ -1,5 +1,15 @@
 #!/usr/bin/env python3
-# day_trader_pro/warehouse_coverage.py — v1.4
+# day_trader_pro/warehouse_coverage.py — v1.5
+# v1.5 (2026-09-05) — dtp r292 / ASK.1. `character_axis_sample` declared,
+#   with the otv4 r270 push that ships it. CONDITIONAL rather than EVERY:
+#   `character_engine` writes a sample only when an axis value is computable
+#   and the write is STRIDED, so a box with a thin session legitimately
+#   produces none — grading it EVERY would flag quiet boxes as gaps, which is
+#   the mistake r280 corrected for `trades` and `prints`.
+#   ⚠️ DECLARED IN THE SAME DELIVERY AS THE PUSH: an undeclared stream renders
+#   UNDECLARED and counts as a failure by design, so a push shipping without a
+#   policy row turns the board red on its first night — and a new alarm that
+#   cries wolf immediately is how an operator learns to stop reading it.
 # v1.4 (2026-09-05) — dtp r284. ACCEPTED LOSS: a fourth explanation for an
 #      absence, so a permanent gap stops reading as a permanent fault.
 #      🔴 THE CASE IT EXISTS FOR, and it is closed rather than hypothetical.
@@ -231,6 +241,18 @@ STREAM_POLICY = {
     "indicator_series":  ("EVERY", "batch",  "ADX/ATR/EMA/VWAP  (ns=dseries)"),
     "fork_series":       ("EVERY", "batch",  "pitchfork state    (ns=dseries)"),
     "surface_series":    ("EVERY", "batch",  "charm/vanna/GEX   (ns=dseries)"),
+    # 🔴 r270 / ASK.1 — NEW STREAM, DECLARED WITH ITS PUSH. An undeclared
+    # stream renders UNDECLARED and counts as a failure (by design), so a push
+    # that ships without a policy row turns the board red on its first night —
+    # which is how a new alarm teaches an operator to stop reading it.
+    # ⚠️ CONDITIONAL, NOT EVERY: `character_engine` writes a sample only when
+    # an axis value is computable, and it is STRIDED (`BASELINE_STRIDE_S`), so
+    # a box with a thin session legitimately produces none. Grading it EVERY
+    # would flag quiet boxes as gaps — the exact mistake r280 corrected for
+    # `trades` and `prints`.
+    "character_axis_sample": ("CONDITIONAL", "batch",
+                              "raw character axis readings — the corpus the "
+                              "bands get fitted from while BANDS_SET=False"),
     "derived_plan_tick":        ("EVERY", "pusher", "the plan spine"),
     "derived_plan_check":       ("EVERY", "pusher", "one row per VARIABLE per plan per tick"),
     "derived_strategy_note":    ("EVERY", "pusher", "one row per strategy EVALUATION"),
