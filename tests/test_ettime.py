@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""day_trader_pro/tests/test_ettime.py — v1.0
+"""day_trader_pro/tests/test_ettime.py — v1.1
+v1.1  2026-09-05 — dtp r288. 🔴 THE SWEEP NOW READS SHELL TOO. v1.0 walked
+`*.py` and I called it the repo — three menu prompts fell back to
+`$(date +%F)`, which is UTC, and handed a script tomorrow's date BEFORE any
+Python default could apply. The guard missed them because the gap was in the
+language it did not read, which is the same shape as the defect it exists to
+catch. T6 covers `.sh`.
+
 v1.0  2026-09-05 — dtp r287. THE ET/UTC BOUNDARY, AND THE SWEEP THAT KEEPS IT.
 
 🔴 THE OPERATOR'S SYMPTOM, WHICH THIS EXISTS TO END: *"I run a report for
@@ -122,6 +129,32 @@ def main():
           and bool(NAIVE.search("x = datetime.now()"))
           and not NAIVE.search("x = datetime.now(ET)"))
 
+    # ══ 🔴 T6 — SHELL COUNTS. THE GUARD MISSED A WHOLE LANGUAGE. ═════════
+    # A prompt that falls back to `$(date +%F)` hands the script a UTC date
+    # before any Python default can apply, so r287's nine fixes were invisible
+    # behind three ENTER keys. `TZ=America/New_York date +%F` is the correct
+    # form and three sibling prompts in the same file already used it.
+    sh_bad = []
+    BARE_DATE = re.compile(r"(?<!America/New_York )\bdate \+%F\b")
+    for dirpath, dirnames, filenames in os.walk(_root):
+        dirnames[:] = [d for d in dirnames if d not in {".git", "__pycache__", "venv"}]
+        for fn in filenames:
+            if not fn.endswith(".sh"):
+                continue
+            full = os.path.join(dirpath, fn)
+            for i, line in enumerate(open(full, encoding="utf-8").read().splitlines(), 1):
+                bare = line.split("#", 1)[0]
+                if BARE_DATE.search(bare):
+                    sh_bad.append(f"{os.path.relpath(full, _root)}:{i}")
+    check("T6 no shell date default bypasses the boundary",
+          not sh_bad, f"{len(sh_bad)}: {sh_bad[:4]}")
+    # ⚠️ AND IT CAN FAIL. A guard never proven red against a planted fault is a
+    # guard nobody has tested — which is precisely how v1.0 shipped blind to
+    # three of these.
+    check("T6b ...and the shell sweep detects one when it is there",
+          bool(BARE_DATE.search('D="${D:-$(date +%F)}"'))
+          and not BARE_DATE.search('d=$(TZ=America/New_York date +%F)'))
+
     # ══ T5 — THE CALLERS ACTUALLY USE IT ═════════════════════════════════
     # ⚠️ A module nobody imports is r230's defect. The nine repointed sites are
     # the whole delivery; asserting the module exists proves nothing.
@@ -143,7 +176,7 @@ def main():
     if FAILED:
         print(f"RED — {len(FAILED)} failed: {', '.join(FAILED)}")
         return 1
-    print(f"GREEN — {13} checks")
+    print(f"GREEN — {15} checks")
     return 0
 
 

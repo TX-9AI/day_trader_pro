@@ -1,4 +1,15 @@
-# day_trader_pro/menu_functions.sh — v1.52
+# day_trader_pro/menu_functions.sh — v1.53
+# — v1.53 (2026-09-05) — dtp r288 / TZ.1. 🔴 THREE PROMPTS FELL BACK TO SHELL
+#   `date +%F`, WHICH IS UTC ON THIS BOX. r287 put every Python default behind
+#   `ettime`, and these three hand the script a date BEFORE it can apply one —
+#   so pressing ENTER at "ENTER=today" after 20:00 ET (19:00 in winter) asked
+#   for tomorrow and got an empty report, exactly the symptom r287 was meant to
+#   end. Three sibling prompts in this same file already used
+#   `TZ=America/New_York date +%F`; these did not.
+#   ⚠️ THE MISS WAS THE SWEEP'S SCOPE, NOT THE FIX: r287's guard walked `*.py`
+#   and I called it the repo. The gap was hiding in the language the checker
+#   did not read, which is why r288 extends the sweep to `.sh` rather than
+#   just editing three lines.
 # — v1.52 (2026-09-05) — dtp r283. 🔴 SIX CONFIRMS ACCEPTED LOWERCASE `y` AND
 #   NOTHING ELSE. The operator answered the LIVE backfill prompt with `Y` on
 #   2026-09-05 and the run silently did not happen — no error, no message, just
@@ -217,7 +228,7 @@ mi_pull_trades_db_one_all_some() {
 
 # Pull OHLC for a day       (one/all/some)
 mi_pull_ohlc_for_a_day_one_all_some() {
-    echo; SC=$(ask_scope); read -rp "Day (YYYY-MM-DD, ENTER=today): " D; D="${D:-$(date +%F)}"; $PY fleet.py pull ohlc --day "$D" $SC; pause
+    echo; SC=$(ask_scope); read -rp "Day (YYYY-MM-DD, ENTER=today): " D; D="${D:-$(TZ=America/New_York date +%F)}"; $PY fleet.py pull ohlc --day "$D" $SC; pause
 }
 
 # ORB budget & spot (every running box)
@@ -392,7 +403,7 @@ mi_pull_github_force_github_is_source_of_truth() {
 
 # Re-run consolidation -> fleet_trades_<date>.json (+ .csv)
 mi_re_run_consolidation_fleet_trades_date_json() {
-    echo; read -rp "Day to consolidate (YYYY-MM-DD, ENTER=today): " D; D="${D:-$(date +%F)}"; $PY consolidate_trades.py --date "$D"; pause
+    echo; read -rp "Day to consolidate (YYYY-MM-DD, ENTER=today): " D; D="${D:-$(TZ=America/New_York date +%F)}"; $PY consolidate_trades.py --date "$D"; pause
 }
 
 # Excursion report (MFE/MAE) -> reports/excursions_<date>.txt
@@ -574,7 +585,7 @@ mi_pnl_from_warehouse() {
 # as one batch of two rather than padding to five.
 mi_backfill_missing_ohlc_auto_batched() {
     echo
-    read -rp "Backfill date (YYYY-MM-DD, ENTER=today): " D; D="${D:-$(date +%F)}"
+    read -rp "Backfill date (YYYY-MM-DD, ENTER=today): " D; D="${D:-$(TZ=America/New_York date +%F)}"
     echo
     echo "  Which boxes?"
     echo "    ENTER  = ALL symbols missing candles for that date"
