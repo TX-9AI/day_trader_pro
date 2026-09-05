@@ -1,5 +1,16 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/test_fit_readiness_memory.py — v1.1
+# day_trader_pro/tests/test_fit_readiness_memory.py — v1.3
+# v1.3 (2026-09-05) — dtp r286. M3 RE-DERIVED AGAIN, FOR THE SAME REASON IT
+#      MOVED AT r266: it asserted the LITERAL banner text "after collapse by
+#      (_rid, ts)", and r286 removed that sentence because it was FALSE — the
+#      collapse it named never touched this report's rows, which came from
+#      `WarehouseCache.load` and were never collapsed at all. Keeping the
+#      assertion would have held the false wording green and pushed the next
+#      reader to restore it. ⚠️ WHAT SURVIVES IS THE PROPERTY, NOT THE STRING:
+#      a per-stream SOURCE line exists and it NAMES THE RULE THAT ACTUALLY RAN
+#      — "collapsed on <key>" or "NOT COLLAPSED" — rather than one the report
+#      assumed. M4, which pins that the collapse itself still happens, is
+#      untouched and is what would catch a regression here.
 # v1.1 (2026-09-04) — dtp r266. M3 RE-DERIVED. It matched the banner string
 #      "after collapse by _rid" — the label for a collapse that was WRONG,
 #      because `_rid` is the source table's sqlite rowid and repeats across
@@ -126,9 +137,18 @@ def main():
     # the butterfly read 2 fires against 20 real trades. The collapse now runs
     # ONCE, upstream, scoped to its partition. Asserting the old string would
     # have kept the defect green.
-    check("M3 a SOURCE line still prints per stream",
+    # 🔴 M3 RE-DERIVED AGAIN AT dtp-r286, AND THE REASON IS THE SAME ONE THAT
+    # MOVED IT AT r266: it asserted the LITERAL banner text
+    # "after collapse by (_rid, ts)", which r286 removed because that sentence
+    # was FALSE — the collapse it named never touched this report's rows.
+    # Leaving the assertion would have kept the false wording green and forced
+    # the next reader to restore it. What survives is the property that
+    # mattered: a per-stream SOURCE line exists, and it NAMES the rule that
+    # actually ran rather than one the report assumed.
+    check("M3 a SOURCE line still prints per stream, naming the real rule",
           out.count("SOURCE: s3 [") == 3
-          and "after collapse by (_rid, ts)" in out)
+          and ("collapsed on " in out or "NOT COLLAPSED" in out),
+          out.split("SOURCE: s3 [")[1][:70] if "SOURCE: s3 [" in out else out[:70])
 
     # ── M4 — the CDC collapse is preserved ──────────────────────────────
     # Dropping it would double-count anything pushed twice and inflate every

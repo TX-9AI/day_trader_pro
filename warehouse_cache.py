@@ -1,5 +1,30 @@
 #!/usr/bin/env python3
-# day_trader_pro/warehouse_cache.py — v1.4
+# day_trader_pro/warehouse_cache.py — v1.5
+# v1.5 (2026-09-05) — dtp r286 / S3.11. 🔴 THE CDC COLLAPSE NOW RUNS HERE,
+#   WHERE THE DATA ACTUALLY COMES FROM. `warehouse_reader.load_derived` has
+#   carried the natural-key collapse since r276 and HAS NO PRODUCTION CALLERS:
+#   its only references outside its own definition are three test files and one
+#   `fit_readiness` docstring describing an architecture that changed. Every
+#   report reaches the warehouse through THIS method, which streamed the raw
+#   objects uncollapsed — a correct fix on a road nobody drives, which is r230's
+#   shape, and `test_natural_key` stayed green the whole time because it calls
+#   `load_derived` directly.
+#   🔑 O(ONE OBJECT) IS PRESERVED: sqlite dedupes on disk through a UNIQUE index
+#   on the natural key, so nothing accumulates in Python — this class's entire
+#   reason for existing after r242's OOM. The winner rule is `load_derived`'s
+#   rather than a new one: a later push replaces an earlier one for the same
+#   key, because these are CDC rows and the last state written is the true one.
+#   🔴 AND IT REFUSES A PARTIAL KEY. `load()` keeps only the columns a caller
+#   asks for, and collapsing on a SUBSET of a primary key folds genuinely
+#   distinct rows together — silently, and in the direction that makes a report
+#   look tidier. Measured: `fit_readiness` requested `plan_ledger` without
+#   `plan_id`, which IS that table's whole key. A table whose key does not
+#   survive the projection loads UNCOLLAPSED and `collapse_note()` says so.
+#   ⚠️ WHICH IS WHY THE NOTE EXISTS AT ALL: a report must not describe a
+#   collapse it did not get. fit_readiness printed "N after collapse by
+#   (_rid, ts)" while its rows came from here and were never collapsed — the
+#   number was real and the sentence was false, and the sentence is the worse
+#   half.
 # v1.4 (2026-09-02) — dtp r253. 🔴 `load()` IGNORED EVERY PARTITION BELOW THE
 #   DATE. Keys are raw/<datatype>/dt=<day>/sym=<SYM>/[interval=<iv>/]file and
 #   this listed only down to dt=, so the sweep forensics report queued 48,305
@@ -81,6 +106,26 @@ _ET = ZoneInfo("US/Eastern")
 
 import config
 import warehouse_reader as WR
+
+
+def _collapsible(table, cols):
+    """The natural key for `table` IF every column of it survives the
+    projection, else () — meaning load uncollapsed and say so.
+
+    🔴 NEVER A PARTIAL KEY. `cache.load` keeps only the columns a caller asks
+    for, and collapsing on a subset of a primary key folds genuinely DISTINCT
+    rows together — silently, and in the direction that makes a report look
+    tidier. Measured 2026-09-05: `fit_readiness` requests `plan_ledger` without
+    `plan_id`, whose key IS `plan_id`; collapsing that on what it does have
+    would have merged every plan in the range.
+    ⚠️ `symbol` IS ALWAYS AVAILABLE because `load` injects it, so it counts as
+    present even though no caller lists it.
+    """
+    nat = WR.DERIVED_NATURAL_KEY.get(table)
+    if not nat:
+        return ()
+    have = set(cols) | {"symbol"}
+    return tuple(nat) if all(c in have for c in nat) else ()
 
 _ACTIVE: list = []          # dirs to remove if we die unexpectedly
 
@@ -181,6 +226,10 @@ class WarehouseCache:
         self.conn.row_factory = sqlite3.Row
         self.objects = 0
         self.rows = 0
+        # r286 — {table: natural-key tuple that ran, or () if it could not}.
+        # A report asks `collapse_note()` rather than describing a rule it
+        # assumes; that assumption is exactly what went wrong in fit_readiness.
+        self.collapsed: dict = {}
         self.bytes_seen = 0
 
     # ── lifecycle ──────────────────────────────────────────────────────
@@ -201,6 +250,22 @@ class WarehouseCache:
             _ACTIVE.remove(self.root)
 
     # ── fill ───────────────────────────────────────────────────────────
+    def collapse_note(self, table: str) -> str:
+        """One line naming which rule ran for `table`, for a report banner.
+
+        ⚠️ A REPORT MUST NOT DESCRIBE A COLLAPSE IT DID NOT GET. `fit_readiness`
+        printed "N after collapse by (_rid, ts)" while its rows came from this
+        class, which collapsed nothing — the number was real and the sentence
+        was false. Callers ask here instead of asserting.
+        """
+        nat = self.collapsed.get(table)
+        if nat is None:
+            return "not loaded"
+        if not nat:
+            return ("NOT COLLAPSED — the projection is missing part of this "
+                    "table's primary key; counts may include CDC duplicates")
+        return "collapsed on " + ", ".join(nat)
+
     def load(self, table: str, dates, columns, s3=None, datatype=None,
              syms=None, part=None, keep=None) -> int:
         # ⚠️ AN EMPTY DATE LIST IS A LEGITIMATE INPUT, NOT A CRASH SITE. A
@@ -226,8 +291,41 @@ class WarehouseCache:
         ddl = ", ".join(f'"{c}"' for c in cols)
         self.conn.execute(f'CREATE TABLE IF NOT EXISTS "{table}" '
                           f'(symbol TEXT, {ddl})')
-        ins = (f'INSERT INTO "{table}" (symbol, {ddl}) '
-               f'VALUES ({",".join("?" * (len(cols) + 1))})')
+        # ── 🔴 r286 / S3.11 — THE CDC COLLAPSE RUNS HERE, WHERE THE DATA
+        # ACTUALLY COMES FROM. `warehouse_reader.load_derived` carries the
+        # natural-key collapse from r276 and HAS NO PRODUCTION CALLERS: every
+        # report reaches the warehouse through this method, which streamed the
+        # raw objects uncollapsed. A correct fix on a road nobody drives — the
+        # r230 shape — and `test_natural_key` stayed green throughout because
+        # it calls `load_derived` directly.
+        # 🔑 O(ONE OBJECT) IS PRESERVED. sqlite dedupes on disk through a
+        # UNIQUE index; nothing accumulates in Python, which is this class's
+        # whole reason for existing (r242's OOM).
+        # ⚠️ AND THE WINNER RULE IS `load_derived`'s, NOT A NEW ONE: a later
+        # push replaces an earlier one for the same key, because these are CDC
+        # rows and the last state written is the true one.
+        nat = _collapsible(table, cols)
+        if nat:
+            self.conn.execute(
+                f'CREATE UNIQUE INDEX IF NOT EXISTS "ux_{table}" '
+                f'ON "{table}" ({", ".join(chr(34) + c + chr(34) for c in nat)})')
+            ins = (f'INSERT OR REPLACE INTO "{table}" (symbol, {ddl}) '
+                   f'VALUES ({",".join("?" * (len(cols) + 1))})')
+        else:
+            ins = (f'INSERT INTO "{table}" (symbol, {ddl}) '
+                   f'VALUES ({",".join("?" * (len(cols) + 1))})')
+        self.collapsed[table] = nat
+        # 🔴 r286 — THE RETURN VALUE MUST BE WHAT THE TABLE HOLDS, NOT WHAT WAS
+        # ATTEMPTED. With the collapse in place `n` counted INSERTS, so a load
+        # of four objects carrying two logical rows returned 4 — and every
+        # caller prints that number next to "collapsed on ...", which is the
+        # same false sentence r286 exists to remove. Caught by this revision's
+        # own checker showing 2 rows in the table and 4 in the ticker.
+        try:
+            before = self.conn.execute(
+                f'SELECT COUNT(*) FROM "{table}"').fetchone()[0]
+        except Exception:                                      # noqa: BLE001
+            before = 0
         from progress import Ticker
         n = 0
         pg = s3.get_paginator("list_objects_v2")
@@ -322,6 +420,13 @@ class WarehouseCache:
                 del env, body, batch          # explicit: nothing carries over
                 tk.step(1, size)
             self.conn.commit()
+        if nat:
+            # Re-count rather than track: INSERT OR REPLACE gives no signal
+            # about which rows merged, and a running estimate would be a second
+            # number to keep true.
+            after = self.conn.execute(
+                f'SELECT COUNT(*) FROM "{table}"').fetchone()[0]
+            n = after - before
         tk.done(f"{n:,} rows")
         self.rows += n
         return n

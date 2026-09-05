@@ -1,6 +1,22 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/fit_readiness.py — v1.4
+day_trader_pro/fit_readiness.py — v1.5
+v1.5  2026-09-05 — dtp r286 / S3.11. 🔴 THE SOURCE BANNER DESCRIBED A COLLAPSE
+      THAT NEVER TOUCHED THIS REPORT'S DATA. It printed "N after collapse by
+      (_rid, ts)" — a number computed over the cache — while the docstring
+      above claimed the real collapse ran upstream in
+      `warehouse_reader.load_derived`. NEITHER WAS TRUE: `load_derived` has no
+      production callers, and `WarehouseCache.load`, the path this report
+      actually takes, collapsed nothing. The count was real and the sentence
+      was false, which is the worse half of the two.
+      🔑 THE COLLAPSE MOVED INTO THE CACHE (dtp r286), so `n` is already the
+      post-collapse count, and the banner now ASKS which rule ran through
+      `collapse_note()` instead of asserting one.
+      🔴 AND `plan_ledger` GAINS `plan_id` — not cosmetic. It is that table's
+      entire primary key, and without it in the projection the cache cannot
+      collapse plan_ledger at all; it would have to fold on a subset and merge
+      every plan in the range. One column buys correct de-duplication.
+
 v1.4  2026-09-04 — dtp r267. TWO WRONG POPULATIONS, NEITHER A DATA
       PROBLEM. (1) STRATEGY_ALIAS canonicalises on READ: otv4 stamped the raw
       dispatch label on strategy_note while plans and gates used the class
@@ -47,7 +63,10 @@ v1.1  2026-08-29  r184 / dtp r226 — THE WAREHOUSE IS THE SOURCE (backlog S3.2)
   derived store at ..." unless somebody hand-scp'd a copy, which nobody did.
   It failed loudly, which is why it was never mistaken for a flat result —
   and also why it sat unnoticed as a menu item that could not work.
-  Now: `warehouse_reader.load_derived()` for each of the three tables,
+  Now: `WarehouseCache.load()` for each of the three tables — and NOT
+  `warehouse_reader.load_derived()`, which this line used to name. That
+  function carries the same natural-key collapse and has no production
+  callers; r286 moved the collapse into the cache, where the data is,
   defaulting to S3. `--db` survives as the EXPLICIT local escape hatch, for
   running this on a box against the live store.
   ⚠️ THE ET-DAY BOUND IS A CORRECTNESS FIX, NOT A PORT ARTIFACT. v1.0 built
@@ -212,7 +231,11 @@ _NEED = {
     "strategy_note":    ["_rid", "ts_epoch", "strategy", "fired", "outcome",
                          "payload"],
     "gate_disposition": ["_rid", "ts_epoch", "strategy", "gate", "event"],
-    "plan_ledger":      ["_rid", "created_ts", "strategy", "terminal_reason"],
+    # 🔴 r286 — `plan_id` ADDED, AND IT IS NOT COSMETIC. It is this table's whole
+    # primary key, and without it in the projection the cache CANNOT collapse
+    # plan_ledger — it would have to fold on a subset, merging every plan in
+    # the range. One column buys the correct de-duplication.
+    "plan_ledger":      ["plan_id", "_rid", "created_ts", "strategy", "terminal_reason"],
 }
 _DEDUP_TS = {"strategy_note": "ts_epoch", "gate_disposition": "ts_epoch",
              "plan_ledger": "created_ts"}
@@ -260,10 +283,19 @@ def _rows_warehouse(dates, cache):
         # cannot carry the partition would undo that fix silently — so the
         # banner reports what was LOADED and names where the collapse ran,
         # rather than recomputing it against a key that does not identify a row.
-        uniq = cache.query(f'SELECT COUNT(*) c FROM (SELECT 1 FROM "{t}"'
-                           f' GROUP BY _rid, {_DEDUP_TS[t]})')[0]["c"]
+        # 🔴 r286 — THIS LINE USED TO DESCRIBE A COLLAPSE THAT NEVER TOUCHED
+        # THIS DATA. It computed `GROUP BY _rid, ts` over the cache and printed
+        # it as "after collapse", while the docstring above claimed the real
+        # collapse happened upstream in `warehouse_reader.load_derived`.
+        # Neither was true: `load_derived` has NO production callers, and
+        # `WarehouseCache.load` — the path every report actually takes —
+        # collapsed nothing at all. The number was real and the sentence was
+        # false, which is the worse half.
+        # ⚠️ IT NOW ASKS THE CACHE WHICH RULE RAN rather than asserting one.
+        # `n` is already the post-collapse count, because the cache dedupes at
+        # insert through a UNIQUE index on the natural key.
         notes.append(f"SOURCE: s3 [{t}] — {n:,} row(s), "
-                     f"{uniq:,} after collapse by (_rid, ts)")
+                     f"{cache.collapse_note(t)}")
         # ⚠️ PLAIN DICTS, NOT sqlite3.Row. `collect()`'s own docstring says it
         # "takes plain dicts and knows nothing about the source", and that is
         # what keeps the local and warehouse runs from drifting into two
