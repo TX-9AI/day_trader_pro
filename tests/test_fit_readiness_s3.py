@@ -1,5 +1,25 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/test_fit_readiness_s3.py — v1.0
+# day_trader_pro/tests/test_fit_readiness_s3.py — v1.1
+# v1.1 (2026-09-05) — dtp r294 / RPT.14. 🔴 THIS FILE HAS BEEN DEAD, NOT
+#   PASSING. It raised a TypeError before its first assertion — verified at
+#   HEAD, not inferred — and had done since the streaming rewrite. TWO
+#   generations of API drift, both silent:
+#     · `_rows_warehouse(dates)` became `_rows_warehouse(dates, cache)`;
+#     · `collect()`'s `fired`/`declined` became COUNTERS at r245's OOM fix,
+#       so `shape()`'s `len(v["fired"])` could not work either.
+#   ⚠️ A FILE WHOSE PRESENCE READS AS COVERAGE WHILE IT CANNOT RUN IS THE
+#   EXACT FAILURE §0.6 NAMES, and it cost something real: case C is a
+#   forward-scan POSITIVE CONTROL, and `WarehouseCache.load` shipped without a
+#   forward scan or an ET-day filter for months (S3.21). The control existed
+#   and could not execute.
+#   🔑 CASES A AND B NOW DRIVE THE LIVE PATH — `WarehouseCache` over a fake S3
+#   CLIENT — because `_rows_warehouse` stopped going through `read_prefix`.
+#   Testing the old entrypoint is what let this rot unseen.
+#   ⚠️ C-F ARE RELABELLED, NOT DELETED: they exercise `load_derived`, which is
+#   the REFERENCE implementation with no production callers (S3.11). Their
+#   claims are still true of it, and `tests/test_cache_window.py` now pins the
+#   same properties on the path production takes. Keeping both is deliberate —
+#   the reference is where the behaviour is defined.
 # v1.0 (2026-08-29) — r184 / dtp r226. Proves S3.2: fit_readiness reads the
 #   warehouse, the two sources agree, and the forward partition scan is load
 #   bearing rather than decorative.
@@ -99,6 +119,39 @@ BUCKET_FIXTURE = {
 }
 
 
+class _FakeS3:
+    """A paginator+getter over BUCKET_FIXTURE, in the shape `WarehouseCache`
+    expects: `raw/<datatype>/dt=<day>/sym=<SYM>/<n>.json`, one envelope per key.
+
+    ⚠️ THE CACHE DOES ITS OWN LISTING AND FETCHING — it never calls
+    `read_prefix`. Serving the same fixture through the interface the report
+    actually uses is the whole repair; the old fake tested a path the report
+    had stopped taking.
+    """
+
+    def __init__(self):
+        self.objs = {}
+        for (table, date), envs in BUCKET_FIXTURE.items():
+            for i, env in enumerate(envs):
+                key = f"raw/derived_{table}/dt={date}/sym=NVDA/{i}.json"
+                self.objs[key] = env
+
+    def get_paginator(self, _op):
+        outer = self
+
+        class _P:
+            def paginate(self, **kw):
+                pre = kw.get("Prefix", "")
+                yield {"Contents": [{"Key": k, "Size": 1}
+                                    for k in sorted(outer.objs)
+                                    if k.startswith(pre)]}
+        return _P()
+
+    def get_object(self, Bucket=None, Key=None):
+        import io
+        return {"Body": io.BytesIO(json.dumps(self.objs[Key]).encode())}
+
+
 def fake_read_prefix(_s3, datatype, date):
     table = datatype[len("derived_"):]
     return [("NVDA", e) for e in BUCKET_FIXTURE.get((table, date), [])]
@@ -136,7 +189,10 @@ def sqlite_fixture(path):
 
 def shape(data):
     """A comparable summary: the numbers the report is built from."""
-    return {s: (len(v["fired"]), len(v["declined"]),
+    # ⚠️ r294 — `fired`/`declined` ARE COUNTERS, NOT LISTS. r245 made them ints
+    # to fix the OOM; this helper still called `len()` on them, which is the
+    # second of the two staleness layers that kept this file from running.
+    return {s: (int(v["fired"]), int(v["declined"]),
                 dict(v["rungs"]), dict(v["plans"]))
             for s, v in sorted(data.items())}
 
@@ -147,7 +203,13 @@ def main():
     wr.read_prefix = fake_read_prefix
     try:
         # ── A. the warehouse path loads and files rows by their OWN ET day ──
-        src_wh, notes = fr._rows_warehouse([DAY])
+        # 🔴 r294 — THROUGH THE CACHE, WHICH IS WHAT PRODUCTION USES.
+        # `_rows_warehouse` stopped going via `read_prefix` at the streaming
+        # rewrite; patching that function tested an entrypoint the report no
+        # longer takes, which is how this file rotted without anyone noticing.
+        import warehouse_cache as WC
+        WC.WR._client = lambda *a, **k: _FakeS3()
+        src_wh, notes = fr._rows_warehouse([DAY], WC.WarehouseCache("t_s3"))
         wh = shape(collect_or_none(src_wh, [DAY], problems))
         if wh:
             f, d, rungs, plans = wh.get("ORBStrategy", (0, 0, {}, {}))
@@ -161,8 +223,18 @@ def main():
                                 % rungs.get("MIN_ADX"))
             if plans != {"FILLED": 1, "MISSED": 1}:
                 problems.append("A: expected both plans, got %s" % plans)
-        if not any("derived_strategy_note" in n for n in notes):
+        # ⚠️ r294 — RE-DERIVED. This demanded the literal `derived_strategy_note`,
+        # the DATATYPE prefix; the banner names the TABLE (`SOURCE: s3
+        # [strategy_note] — …`). The property that matters is unchanged and is
+        # this report's own stated contract: an unreachable bucket and a
+        # session with no evaluations must never render the same, so every
+        # stream gets a line that NAMES it and says which collapse rule ran.
+        if not any("[strategy_note]" in n for n in notes):
             problems.append("A: the SOURCE banner did not name the stream")
+        if not any(("collapsed on" in n or "NOT COLLAPSED" in n) for n in notes):
+            problems.append("A: the SOURCE banner did not say which collapse "
+                            "rule ran — a report must not describe a collapse "
+                            "it did not get (r286)")
 
         # ── B. sqlite and warehouse must agree, row for row ────────────────
         with tempfile.TemporaryDirectory() as d:
@@ -174,7 +246,15 @@ def main():
             problems.append("B: PARITY BROKEN — sqlite %s vs warehouse %s"
                             % (lo, wh))
 
-        # ── C. POSITIVE CONTROL for the forward scan ───────────────────────
+        # ══ C-F EXERCISE `load_derived`, THE REFERENCE IMPLEMENTATION ═══════
+        # ⚠️ IT HAS NO PRODUCTION CALLERS (S3.11). These claims are true of it
+        # and worth pinning — it is where the behaviour is DEFINED — but they
+        # are not claims about what a report does. `tests/test_cache_window.py`
+        # pins the same properties on `WarehouseCache`, the path production
+        # takes. Keeping both is deliberate; keeping only these is what let
+        # `WarehouseCache` ship for months with no forward scan at all.
+
+        # ── C. POSITIVE CONTROL for the forward scan (reference impl) ───────
         # Without it the late-pushed plan is lost, and the report would show a
         # smaller, plausible number with nothing to indicate anything is wrong.
         narrow, _ = wr.load_derived("plan_ledger", [DAY], s3=object(), forward=0)
