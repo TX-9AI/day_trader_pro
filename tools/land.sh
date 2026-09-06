@@ -1,5 +1,22 @@
 #!/usr/bin/env bash
-# day_trader_pro/tools/land.sh — v1.5
+# day_trader_pro/tools/land.sh — v1.6
+# v1.6 (2026-09-05) — dtp r298 / LAND.4. 🔴 `DEL` RAN AFTER THE MAPS WERE
+#   REGENERATED, SO EVERY DELETION SHIPPED A STALE FILE_MAP. v1.4 put the
+#   removal in the staging block, which sits BELOW `gen_file_map.py`. Landing
+#   otv4 r278 — which deletes `tests/check_no_regime.py` — the map was rebuilt
+#   while the file still existed, the file was then removed, and the repo's own
+#   PRE-COMMIT hook regenerated, found drift and refused the commit. **The land
+#   command's own artifact disagreed with the tree it was committing.**
+#   ⚠️ AND THE SANDBOX COULD NOT SEE IT. `check_land_sh`'s fixtures are fresh
+#   `git init` repos with NO pre-commit hook, so nothing regenerates after the
+#   staging block and the drift never surfaces. The r269 docs purge did not
+#   expose it either, because `.md` files are not in the import graph. The DEL
+#   now runs BEFORE the maps, so they are generated against the tree that is
+#   actually committed.
+#   ⚠️ AND `die()`'s RECOVERY LINE IS FIXED HERE TOO. r293 corrected the
+#   ROLLBACK message and left this one, on the reasoning that a gate refusal
+#   stages nothing. A COMMIT failure stages everything — which is what r278
+#   hit — so this line needed the unstage as much as the other did.
 # v1.5 (2026-09-05) — dtp r293 / LAND.3. 🔴 A ROLLED-BACK HALF SAID "the files
 #   are still in the tree, uncommitted" — TRUE, AND MISLEADING. `reset --soft`
 #   leaves the payload STAGED, and the habitual cleanup `git checkout -- .`
@@ -213,7 +230,13 @@ die() {
     local n; n="$(cd "$repo" && git status --porcelain | wc -l)"
     if [ "$n" != "0" ]; then
       echo "  ⚠️ $repo has $n uncommitted file(s) from the extract."
-      echo "     To discard them:  cd $repo && git checkout -- . && git clean -fd"
+      # 🔴 v1.6 — `git reset HEAD --` FIRST, AND THE OMISSION WAS MEASURED.
+      # I decided at r293 that this line was safe because a CONTENT-GATE
+      # refusal stages nothing. **A COMMIT failure does** — the payload is
+      # staged by then — and that is exactly what the r278 land hit. Without
+      # the unstage, `git checkout -- .` copies the INDEX back into the tree
+      # and restores what the operator meant to discard.
+      echo "     To discard them:  cd $repo && git reset -q HEAD -- . && git checkout -- . && git clean -fd"
     fi
   fi
   FAILED=1
@@ -328,6 +351,30 @@ land_one() {
   # ── generated maps regenerate INSIDE the land command (§33) ─────────────
   # Detected, not assumed: dtp carries neither, and "not applicable" must
   # never look like "passed" (the CV.1 failure).
+  # ── DEL (v1.4) — A DELIVERY CAN REMOVE A FILE ───────────────────────────
+  # 🔴 UNTIL NOW IT COULD NOT. A payload only ADDS or overwrites, so retiring a
+  # document meant the operator deleting it by hand afterwards — outside the
+  # gate, outside the commit, and outside the record. r269 needed to remove
+  # eight spent thread contracts and had nowhere to say so.
+  # ⚠️ ONE PATH PER DIRECTIVE, NEVER A GLOB. A pattern here would delete
+  # whatever happened to match at land time, which is the same class as the
+  # `ls | head -1` archive guess v1.1 removed and the BRE gate v1.3 removed.
+  # ⚠️ AND A MISSING TARGET IS A REFUSAL, NOT A NO-OP. If the file is already
+  # gone the spec is describing a repo that does not exist, and landing it
+  # would record a deletion that never happened.
+  local deleted=0
+  while IFS= read -r line; do
+    local target="${line#DEL }"
+    [ -z "$target" ] && continue
+    if [ ! -e "$repo/$target" ]; then
+      die "DEL $target — not present in $repo. The spec describes a repo this is not."
+      return 1
+    fi
+    git rm -q -- "$target" || { die "DEL $target failed"; return 1; }
+    deleted=$((deleted+1))
+  done < <(grep '^DEL ' "$spec" 2>/dev/null || true)
+  [ "$deleted" -gt 0 ] && echo "  removed $deleted file(s) named by DEL"
+
   if [ -f "$repo/tests/gen_file_map.py" ]; then
     python3 tests/gen_file_map.py >/dev/null 2>&1 || { die "FILE MAP regeneration failed"; return 1; }
     echo "  file map: regenerated"
@@ -370,29 +417,6 @@ land_one() {
     git add -- "$rel" && staged=$((staged+1))
   done < <(cd "$d" && find . -type f ! -name land.spec -printf '%P\n')
 
-  # ── DEL (v1.4) — A DELIVERY CAN REMOVE A FILE ───────────────────────────
-  # 🔴 UNTIL NOW IT COULD NOT. A payload only ADDS or overwrites, so retiring a
-  # document meant the operator deleting it by hand afterwards — outside the
-  # gate, outside the commit, and outside the record. r269 needed to remove
-  # eight spent thread contracts and had nowhere to say so.
-  # ⚠️ ONE PATH PER DIRECTIVE, NEVER A GLOB. A pattern here would delete
-  # whatever happened to match at land time, which is the same class as the
-  # `ls | head -1` archive guess v1.1 removed and the BRE gate v1.3 removed.
-  # ⚠️ AND A MISSING TARGET IS A REFUSAL, NOT A NO-OP. If the file is already
-  # gone the spec is describing a repo that does not exist, and landing it
-  # would record a deletion that never happened.
-  local deleted=0
-  while IFS= read -r line; do
-    local target="${line#DEL }"
-    [ -z "$target" ] && continue
-    if [ ! -e "$repo/$target" ]; then
-      die "DEL $target — not present in $repo. The spec describes a repo this is not."
-      return 1
-    fi
-    git rm -q -- "$target" || { die "DEL $target failed"; return 1; }
-    deleted=$((deleted+1))
-  done < <(grep '^DEL ' "$spec" 2>/dev/null || true)
-  [ "$deleted" -gt 0 ] && echo "  removed $deleted file(s) named by DEL"
   for gen in docs/FILE_MAP.md docs/WRITE_MAP.md docs/GENESIS.md; do
     [ -f "$repo/$gen" ] && git add -- "$gen"
   done

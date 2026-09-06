@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/check_land_sh.py — v1.5
+# day_trader_pro/tests/check_land_sh.py — v1.6
+# v1.6 (2026-09-05) — dtp r298 / LAND.4. 🔴 THE FIXTURE HAD NO PRE-COMMIT HOOK,
+#   SO IT COULD NOT SEE THE DEFECT IT WAS SUPPOSED TO GUARD. `_world` builds a
+#   fresh `git init` repo; the real one carries a hook that re-runs
+#   `check_land_discipline` at commit time. `DEL` ran AFTER the maps were
+#   regenerated, so a deletion shipped a stale FILE_MAP — invisible here,
+#   refused on the real repo. G1 installs the hook and G2 drives a DEL through
+#   it. A fixture simpler than production passes for the wrong reason.
 # v1.5 (2026-09-05) — dtp r293 / LAND.3. R1 RUNS THE RECOVERY THE ROLLBACK
 #   PRINTS, on the ROLLED-BACK repo. `reset --soft` leaves the payload staged,
 #   and `git checkout -- .` copies the INDEX back into the tree — so the old
@@ -617,6 +624,42 @@ def main():
             check("R1d ...and running exactly that leaves it clean — nothing "
                   "staged, nothing in the tree",
                   _dirty(repo) == "", f"still: {_dirty(repo)!r}")
+
+    # ══ 🔴 G1/G2 — THE MAPS MUST DESCRIBE THE TREE THAT IS COMMITTED ══════
+    # r278 deleted `tests/check_no_regime.py`. The map was regenerated while
+    # the file still existed, DEL then removed it, and the repo's pre-commit
+    # hook regenerated, found drift and refused. The land command's own
+    # artifact disagreed with the tree it was committing.
+    # ⚠️ THIS FIXTURE INSTALLS A PRE-COMMIT HOOK, because the absence of one is
+    # the reason the sandbox certified a broken lander. A fixture simpler than
+    # production passes for the wrong reason.
+    with tempfile.TemporaryDirectory() as tmp:
+        spec = GOOD + ["DEL MARKER"]
+        home, repo, stage = _world(tmp, spec, extra=PASS_CHK)
+        hook = os.path.join(repo, ".git", "hooks", "pre-commit")
+        with open(hook, "w") as f:
+            # Stands in for check_land_discipline's FILE_MAP arm: refuse the
+            # commit if a DEL'd path is still named in the generated artifact.
+            f.write("#!/bin/sh\n"
+                    "if [ -f generated_map.txt ] && grep -q MARKER generated_map.txt; then\n"
+                    "  echo 'pre-commit: map names a file that is gone'; exit 1\n"
+                    "fi\nexit 0\n")
+        os.chmod(hook, 0o755)
+        # A stand-in generator: the lander runs it, and it must see the tree
+        # AFTER the DEL.
+        gen = os.path.join(repo, "tests", "gen_file_map.py")
+        os.makedirs(os.path.dirname(gen), exist_ok=True)
+        with open(gen, "w") as f:
+            f.write("import os\n"
+                    "open('generated_map.txt','w').write("
+                    "'\\n'.join(sorted(os.listdir('.'))))\n")
+        _run("git add -A && git commit -q -m hook", cwd=repo)
+        r = _land(home, stage)
+        check("G1 a delivery that DELETES a file still commits — the map is "
+              "generated after the removal",
+              r.returncode == 0, f"rc={r.returncode} {r.stdout[-90:]!r}")
+        check("G2 ...and the generated artifact does not name the deleted file",
+              "MARKER" not in open(os.path.join(repo, "generated_map.txt")).read())
 
     print()
     if _fails:
