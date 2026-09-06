@@ -1,4 +1,16 @@
-# day_trader_pro/menu_functions.sh — v1.58
+# day_trader_pro/menu_functions.sh — v1.59
+# v1.59 (2026-09-06) — dtp r308 / DEV.9. 🔴 THE DISK DRILL IS A SENTINEL FILE.
+#   Two earlier versions ran it over SSH and BOTH reported success while
+#   delivering nothing — a plain `venv/bin/python` has no credentials, because
+#   `setup_ec2.sh` writes `Environment=TELEGRAM_TOKEN=` into the systemd UNIT.
+#   v1.58's fix sourced `.env`, a mechanism `optionsbot` does not use, and the
+#   box answered `CONFIGURED=False`.
+#   🔑 A REHEARSAL THAT TAKES A DIFFERENT PATH FROM THE LIVE ALERT IS NOT A
+#   REHEARSAL. Touching `data/DRILL_DISK` makes the RUNNING feed send it, in its
+#   own environment, by the real code — the FEED_MAINTENANCE idiom, which
+#   main.py describes as "no restart, and it survives a bake".
+#   ⚠️ NOT INSTANT (up to OT_DISK_CHECK_S), and the item says so instead of
+#   claiming a delivery it cannot see.
 # v1.58 (2026-09-06) — dtp r307 / DEV.8. 🔴 THE DISK-ALERT TEST SENT NOTHING AND
 #   SAID IT SUCCEEDED. Telegram credentials reach the bot through systemd's
 #   `EnvironmentFile=.../options-trader/.env`; `config` reads them from
@@ -899,50 +911,37 @@ mi_debug_log_toggle() {
 # box with an unreadable path still reports what it CAN see rather than having
 # its output discarded by the runner (the 2026-07-29 grep -c lesson).
 mi_disk_alert_test() {
-    # r306 — ONE ITEM, NOT TWO. Operator: *"build it with a test flag so we can
-    # see the message, but don't ship 2 menu options, just prompt for the
-    # test."* The live guard is not a menu item at all — it runs inside the
-    # feed's own loop on each box and PAGES ON THE CROSSING, so there is
-    # nothing here to "run". This item exists only to prove the path.
-    # ⚠️ THE ALERT PATH IS EXERCISED ON A QUIET DAY. Without this the first real
-    # send is the morning a box is at 92% — an untested path at the worst
-    # moment. Marked TEST, on the fleet blind-alert drill's model, so a test
-    # page can never be mistaken for a live one.
+    # 🔴 r308 — THE DRILL IS A SENTINEL FILE. Two earlier versions ran the test
+    # over SSH and BOTH reported success while delivering nothing: a plain
+    # `venv/bin/python` has no credentials, because `setup_ec2.sh` writes
+    # `Environment=TELEGRAM_TOKEN=` into the systemd UNIT. Sourcing `.env` was
+    # fixing a mechanism `optionsbot` does not use — it returned
+    # `CONFIGURED=False`.
+    # 🔑 A REHEARSAL THAT TAKES A DIFFERENT PATH FROM THE LIVE ALERT IS NOT A
+    # REHEARSAL. This touches `data/DRILL_DISK`; the RUNNING feed picks it up on
+    # its next cycle and sends through the real sender, in the real process, by
+    # the real code path — the same idiom as FEED_MAINTENANCE, which main.py
+    # describes as "no restart, and it survives a bake".
+    # ⚠️ IT IS NOT INSTANT, and this says so rather than implying otherwise.
     echo
     echo "  Disk alerts fire FROM THE BOX when / crosses 92%, once per episode,"
     echo "  re-arming when it drops back. Nothing polls; the box states it."
     echo "  The alert carries the five largest files, WAL marked."
     echo
-    read -rp "  Send a REAL test alert to Telegram (marked TEST)? [y/N]: " GO
-    if _yes "$GO"; then
-        # ⚠️ THE BOX IS ASKED FOR SEPARATELY. A first cut put a `read` inside a
-        # `$(...)` for --only, which captures its OWN prompt and reads from the
-        # wrong stdin — the prompt never appears and the answer is the prompt.
-        read -rp "  Which box (ENTER = QQQ): " B; B="${B:-QQQ}"
-        # ⚠️ `; true` — a non-zero exit DISCARDS a fleet command's stdout, and
-        # the whole point here is to SEE the message.
-        # 🔴 r307 — THE ENVIRONMENT MUST BE SOURCED FIRST, AND THE FIRST CUT
-        # DID NOT. Telegram credentials reach the bot through systemd's
-        # `EnvironmentFile=/home/ubuntu/options-trader/.env` — `config` reads
-        # them straight from `os.environ` and loads no dotenv itself. A bare
-        # `venv/bin/python -c` over SSH therefore has NO token, and
-        # `TelegramSender.send()` RETURNS FALSE SILENTLY: the 2026-09-06 test
-        # printed the message, exited 0, reported "1/1 succeeded" and delivered
-        # NOTHING. Sourcing is not printing, so §18a is satisfied.
-        # ⚠️ AND THE RESULT IS NOW REPORTED. `send()` returning False was
-        # invisible; the drill has to prove DELIVERY, not that a process
-        # exited — a drill that cannot fail proves nothing, which is exactly
-        # what happened.
-        $PY fleet.py run "set -a; . $INSTALL_DIR/.env; set +a; cd $INSTALL_DIR && venv/bin/python -c \"from data.disk_watch import test_message as t; from notifications.telegram_sender import TelegramSender as S; from config import telegram_configured as C; m=t(); print(m); print('CONFIGURED=' + str(C())); print('DELIVERED=' + str(S().send(m)))\" 2>&1 | tail -10; true" --only "$B"
-    else
-        echo "  Not sent. The message would read:"
-        echo
-        echo "    TEST - NOT REAL"
-        echo "    🔴 DISK 93% on QQQ — act before the close."
-        echo "         1.4GB  feed_store.db"
-        echo "       820.0MB  feed_store.db-wal  <-- WAL"
-        echo "      a WAL that large means checkpoints are not landing."
-    fi
+    echo "  The drill drops a sentinel the RUNNING feed consumes on its next"
+    echo "  cycle, so the message travels the SAME path as a real alert."
+    echo "  It is NOT instant — allow up to OT_DISK_CHECK_S (default 300s)."
+    echo
+    read -rp "  Arm a REAL test alert (marked TEST)? [y/N]: " GO
+    if ! _yes "$GO"; then echo "  Not armed."; pause; return 0; fi
+    read -rp "  Which box (ENTER = QQQ): " B; B="${B:-QQQ}"
+    # ⚠️ `; true` — a non-zero exit DISCARDS a fleet command's stdout, and the
+    # whole point here is to SEE whether the flag landed.
+    $PY fleet.py run "touch $INSTALL_DIR/data/DRILL_DISK && echo armed=yes; true" --only "$B"
+    echo
+    echo "  Armed. The feed sends on its next cycle. Confirm it was CONSUMED:"
+    echo "    the flag should be GONE, and the journal should show DRILL"
+    echo "    delivered=True."
     pause
 }
 
