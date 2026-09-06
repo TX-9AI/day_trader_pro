@@ -1,4 +1,21 @@
-# day_trader_pro/wake_and_bake.py — v1.4
+# day_trader_pro/wake_and_bake.py — v1.5
+# v1.5 (2026-09-06) — dtp r301. 🔴 THE `--bake-only` DOCSTRING SAID IT STOPS THE
+#   FLEET. IT DOES NOT, AND NEVER DID. The Modes block read "PING → BAKE →
+#   VERIFY, then STOP"; the `finally` block stops boxes only when
+#   `mode == "full"`, with the comment beside it reading "wake/bake modes
+#   intentionally leave the fleet up", and bake's last act is to log "files
+#   synced to disk — bots NOT restarted (bake-only)".
+#   ⚠️ WRONG IN THE DIRECTION THAT COSTS SOMETHING. It does not misdescribe
+#   something harmless: a reader under pressure would believe a helper-script
+#   sync takes the fleet down mid-session, and reach for something heavier or
+#   for nothing at all. Operator's intent for the mode: "update helper scripts
+#   without restarting services."
+#   ⚠️ STRUCK, NOT SILENTLY REWRITTEN, following this file's own 2026-08-25
+#   precedent for the RTH-guard sentence — the correction stays attached so the
+#   next reader sees that the claim was made and why it was false.
+#   📊 Found while ordering the MAINTENANCE menu by prerequisite: `--bake-only`
+#   sits between Wake and Hotfix, and a mode that stopped the boxes there would
+#   have broken the chain for everything below it.
 # v1.4 (2026-08-18) — VERIFY IS NOW REPO-AWARE, because the fleet no longer
 #   shares one repo: the QQQ box runs the options_trader_smc fork while the
 #   other 28 stay on options_trader_v3. VERIFY required ONE commit across ALL
@@ -41,10 +58,23 @@ Modes:
   (default)         full pipeline above
   --wake-only       WAKE + PING only, fleet is left running. No sync, no
                     restart, no shutdown.
-  --bake-only       fleet already awake: PING → BAKE → VERIFY, then STOP. Syncs
-                    files to disk and does NOT restart anything — running bots
-                    keep their in-memory code until a later restart. Safe to run
-                    inside RTH (mirrors `fleet.py update --no-restart`).
+  --bake-only       fleet already awake: PING → BAKE → VERIFY. Syncs files to
+                    disk and does NOT restart anything — running bots keep their
+                    in-memory code until a later restart. Safe to run inside RTH
+                    (mirrors `fleet.py update --no-restart`).
+                    ⚠️ CORRECTION 2026-09-06: THIS LINE READ "…VERIFY, then
+                    STOP" AND HAS BEEN WRONG SINCE IT WAS WRITTEN. Bake does
+                    NOT stop the fleet. The `finally` block stops boxes only
+                    when `mode == "full"`, and its own comment beside it reads
+                    "wake/bake modes intentionally leave the fleet up"; bake's
+                    last act is to log "files synced to disk — bots NOT
+                    restarted (bake-only)". The words are struck here rather
+                    than the sentence silently rewritten, per the same
+                    reasoning as the 2026-08-25 correction below: a reader who
+                    believed it would think a HELPER-SCRIPT SYNC TAKES THE
+                    FLEET DOWN, and would reach for something heavier — or for
+                    nothing — mid-session. Operator's stated intent for this
+                    mode: "update helper scripts without restarting services." 
   --leave-running   full pipeline ("leave on"): pycache clear + restart still
                     happen, final SHUTDOWN is skipped.
   --shutdown-only   PING → clear __pycache__ on every reachable box → hand off
