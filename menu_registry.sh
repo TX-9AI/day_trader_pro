@@ -1,5 +1,26 @@
 #!/usr/bin/env bash
-# day_trader_pro/menu_registry.sh — v1.13
+# day_trader_pro/menu_registry.sh — v1.15
+# v1.15 (2026-09-06) — dtp r306 / DEV.6+DEV.7. TWO NEW ITEMS, BOTH BELOW LAND (still 42).
+#   · `Largest files on / (WAL ranks in place)` — `Disk usage` above reports
+#     `du -xsh /*`, TOP-LEVEL DIRECTORIES, so a 400MB file inside /home is one
+#     number for /home and never appears as itself. WAL files rank naturally and
+#     are marked; a grown WAL means CHECKPOINTS ARE NOT LANDING, since one
+#     cannot complete while a connection holds a read.
+#   · `Disk alert — how it fires, and send a TEST` — ONE item that PROMPTS, not
+#     two items. The live guard is not on this menu at all: it runs inside the
+#     candle feed's loop on each box (otv4 r285) and pages on the CROSSING.
+#     Operator: *"it should be a statement, not the answer to a question that
+#     we're constantly asking."*
+#   ⚠️ `|| true` / `; true` on both fleet lines: a non-zero exit DISCARDS a
+#   fleet command's stdout, so a FULL DISK would have reported as a dead box.
+# v1.14 (2026-09-06) — dtp r306 / DEV.6. New item `Largest files on / (WAL ranks
+#   in place)`, directly after `Disk usage` in S3 WAREHOUSE, and
+#   `Disk alert — how it fires, and send a TEST` after it. 🔑 BOTH SIT BELOW THE
+#   LAND ITEM, so LAND DOES NOT MOVE — still 42. Count 71 -> 73.
+#   ⚠️ THE LIVE DISK GUARD IS NOT A MENU ITEM AT ALL. It runs inside the candle
+#   feed's own loop on each box (otv4 r285) and PAGES ON THE CROSSING — the
+#   operator's framing: *"it should be a statement, not the answer to a question
+#   that we're constantly asking."* The menu item only proves the path.
 # v1.13 (2026-09-06) — dtp r305 / DEV.5. TWO MOVES AND A RENAME, operator's.
 #   · ORB budget & spot -> FLEET, directly after status.py + query.py. It reads
 #     LIVE box state, so it sat oddly in DIAGNOSTICS beside an external data
@@ -243,6 +264,8 @@ MENU=(
   "ITEM|Explain a date's divergence (lists trade_ids)|mi_warehouse_explain_date"
   "ITEM|REPORT PARITY - trade breakdown from BOTH sources, diff OUTPUTS|mi_warehouse_report_parity"
   "ITEM|Disk usage — top consumers per box (one/all/some)|mi_disk_usage"
+  "ITEM|Largest files on / (WAL ranks in place)|mi_largest_files"
+  "ITEM|Disk alert — how it fires, and send a TEST|mi_disk_alert_test"
 )
 
 # ── render + dispatch, the whole of it ──────────────────────────────

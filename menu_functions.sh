@@ -1,4 +1,28 @@
-# day_trader_pro/menu_functions.sh — v1.55
+# day_trader_pro/menu_functions.sh — v1.57
+# v1.57 (2026-09-06) — dtp r306 / DEV.6+DEV.7. TWO NEW ITEMS, BOTH BELOW LAND (still 42).
+#   · `Largest files on / (WAL ranks in place)` — `Disk usage` above reports
+#     `du -xsh /*`, TOP-LEVEL DIRECTORIES, so a 400MB file inside /home is one
+#     number for /home and never appears as itself. WAL files rank naturally and
+#     are marked; a grown WAL means CHECKPOINTS ARE NOT LANDING, since one
+#     cannot complete while a connection holds a read.
+#   · `Disk alert — how it fires, and send a TEST` — ONE item that PROMPTS, not
+#     two items. The live guard is not on this menu at all: it runs inside the
+#     candle feed's loop on each box (otv4 r285) and pages on the CROSSING.
+#     Operator: *"it should be a statement, not the answer to a question that
+#     we're constantly asking."*
+#   ⚠️ `|| true` / `; true` on both fleet lines: a non-zero exit DISCARDS a
+#   fleet command's stdout, so a FULL DISK would have reported as a dead box.
+# v1.56 (2026-09-06) — dtp r306 / DEV.6. NEW: `Largest files (WAL ranks in
+#   place)`, directly after `Disk usage`. That item reports `du -xsh /*` — TOP
+#   LEVEL DIRECTORIES — so a 400 MB file inside /home is folded into one number
+#   and never appears as itself. This names the five largest FILES.
+#   🔑 WAL files rank naturally and are marked: a `-wal` is just a file.
+#   ⚠️ A grown WAL means CHECKPOINTS ARE NOT LANDING — SQLite folds the WAL back
+#   into the db only at a checkpoint, and a checkpoint cannot complete while a
+#   connection holds a read. That is why the nightly reclaim stops services
+#   first, and why 13 of 15 WALs went to zero once it did.
+#   ⚠️ `|| true`: a non-zero exit DISCARDS a fleet command's stdout, so a full
+#   disk would have reported as a dead box.
 # v1.55 (2026-09-06) — dtp r304 / DEV.4 — THE MENU REORGANISED: 86 ITEMS -> 71.
 #   A full pass with the operator, item by item. TEN CUT: the four mock/offline
 #   items (spool-up, EOD aggregate, reset mock state, repoint mock preview, test
@@ -861,6 +885,68 @@ mi_debug_log_toggle() {
 # directories even root skips, and the pipeline's status comes from head — so a
 # box with an unreadable path still reports what it CAN see rather than having
 # its output discarded by the runner (the 2026-07-29 grep -c lesson).
+mi_disk_alert_test() {
+    # r306 — ONE ITEM, NOT TWO. Operator: *"build it with a test flag so we can
+    # see the message, but don't ship 2 menu options, just prompt for the
+    # test."* The live guard is not a menu item at all — it runs inside the
+    # feed's own loop on each box and PAGES ON THE CROSSING, so there is
+    # nothing here to "run". This item exists only to prove the path.
+    # ⚠️ THE ALERT PATH IS EXERCISED ON A QUIET DAY. Without this the first real
+    # send is the morning a box is at 92% — an untested path at the worst
+    # moment. Marked TEST, on the fleet blind-alert drill's model, so a test
+    # page can never be mistaken for a live one.
+    echo
+    echo "  Disk alerts fire FROM THE BOX when / crosses 92%, once per episode,"
+    echo "  re-arming when it drops back. Nothing polls; the box states it."
+    echo "  The alert carries the five largest files, WAL marked."
+    echo
+    read -rp "  Send a REAL test alert to Telegram (marked TEST)? [y/N]: " GO
+    if _yes "$GO"; then
+        # ⚠️ THE BOX IS ASKED FOR SEPARATELY. A first cut put a `read` inside a
+        # `$(...)` for --only, which captures its OWN prompt and reads from the
+        # wrong stdin — the prompt never appears and the answer is the prompt.
+        read -rp "  Which box (ENTER = QQQ): " B; B="${B:-QQQ}"
+        # ⚠️ `; true` — a non-zero exit DISCARDS a fleet command's stdout, and
+        # the whole point here is to SEE the message.
+        $PY fleet.py run "cd $INSTALL_DIR && venv/bin/python -c \"from data.disk_watch import test_message as t; from notifications.telegram_sender import TelegramSender as S; m=t(); print(m); S().send(m)\" 2>&1 | tail -8; true" --only "$B"
+    else
+        echo "  Not sent. The message would read:"
+        echo
+        echo "    TEST - NOT REAL"
+        echo "    🔴 DISK 93% on QQQ — act before the close."
+        echo "         1.4GB  feed_store.db"
+        echo "       820.0MB  feed_store.db-wal  <-- WAL"
+        echo "      a WAL that large means checkpoints are not landing."
+    fi
+    pause
+}
+
+mi_largest_files() {
+    # r306 — WHICH FILE, NOT WHICH DIRECTORY. `Disk usage` above reports
+    # `du -xsh /*`, so a 400 MB file inside /home is folded into one number for
+    # /home and never appears as itself. This names the five.
+    #
+    # 🔑 WAL FILES RANK IN PLACE, MARKED. Operator: *"I want the WAL part
+    # included in the largest files search and ordered where it stands,
+    # size-wise."* A `-wal` is just a file, so it sorts naturally; the marker
+    # only saves reading the suffix.
+    # ⚠️ A GROWN WAL MEANS CHECKPOINTS ARE NOT LANDING. SQLite appends every
+    # write to `<db>-wal` and folds it back only at a checkpoint, and a
+    # checkpoint CANNOT COMPLETE WHILE A CONNECTION HOLDS A READ — which is why
+    # the nightly reclaim stops services first, and why 13 of 15 WALs went to
+    # zero once it did. A `-wal` persistently large against a `.db` that is not
+    # growing means something is holding a read open.
+    # ⚠️ `|| true` — a non-zero exit DISCARDS the output, so a full disk would
+    # report as a dead box. `sudo` to reach every path, stderr dropped for the
+    # permission noise.
+    echo
+    SC=$(ask_scope)
+    echo "Five largest files on /, largest first. WAL files rank in place."
+    echo
+    $PY fleet.py run 'sudo find / -xdev -type f -printf "%s\t%p\n" 2>/dev/null | sort -rn | head -5 | numfmt --field=1 --to=iec --suffix=B --padding=9 | sed "s/-wal$/-wal   <-- WAL/" || true' $SC
+    pause
+}
+
 mi_disk_usage() {
     echo
     SC=$(ask_scope)
