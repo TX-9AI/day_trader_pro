@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
-# day_trader_pro/devtools.sh — v1.62
+# day_trader_pro/devtools.sh — v1.63
+# v1.63 (2026-09-06) — dtp r310. Banner bump. ⚠️ THE BANNER TRACKS THIS FILE, so
+#   registry-only changes (r306, r309) left it reading v1.62 while the menu had
+#   gained items and changed a label. If the number is to mean "the menu you are
+#   looking at", it must move whenever the REGISTRY does — noted here because it
+#   has now drifted twice.
 # v1.62 (2026-09-06) — dtp r304 / DEV.4 — THE MENU REORGANISED: 86 ITEMS -> 71.
 #   A full pass with the operator, item by item. TEN CUT: the four mock/offline
 #   items (spool-up, EOD aggregate, reset mock state, repoint mock preview, test

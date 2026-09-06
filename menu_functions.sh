@@ -1,4 +1,7 @@
-# day_trader_pro/menu_functions.sh — v1.59
+# day_trader_pro/menu_functions.sh — v1.60
+# v1.60 (2026-09-06) — dtp r310 / DEV.10. The blind-alert drill function goes
+#   with its menu item: the script it shelled does not exist in otv4, and the
+#   alert it rehearsed has already fired for real.
 # v1.59 (2026-09-06) — dtp r308 / DEV.9. 🔴 THE DISK DRILL IS A SENTINEL FILE.
 #   Two earlier versions ran it over SSH and BOTH reported success while
 #   delivering nothing — a plain `venv/bin/python` has no credentials, because
@@ -751,18 +754,6 @@ mi_verify_control_iam_role_sees_the_fleet_read() {
 }
 
 # Blind-alert DRILL on the fleet (sends REAL Telegram, marked DRILL)
-mi_blind_alert_drill_on_the_fleet_sends_real_te() {
-    echo; echo "Fires the REAL blind-alert path on every RUNNING box."; \
-        echo "Each box sends TWO Telegram messages, both prefixed DRILL - NOT REAL."; \
-        echo "READ THE PER-BOX 'DRILL PASSED/FAILED' LINE, NOT the 29/29 tally —"; \
-        echo "the tally cannot see the drill's exit code (v1.26)."; \
-        read -rp "Send for real? (n = dry-run, no Telegram) [y/N]: " GO; \
-        if _yes "$GO"; then \
-          $PY fleet.py run "cd ~/options-trader && venv/bin/python tests/blind_alert_selftest.py 2>&1 | tail -4; true"; \
-        else \
-          $PY fleet.py run "cd ~/options-trader && venv/bin/python tests/blind_alert_selftest.py --no-send 2>&1 | tail -4; true"; \
-        fi; pause
-}
 
 # Feed maintenance window (fleet up, nothing on the wire) - currently OFF
 mi_feed_maintenance_window_fleet_up_nothing_on() {

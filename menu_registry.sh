@@ -1,5 +1,16 @@
 #!/usr/bin/env bash
-# day_trader_pro/menu_registry.sh — v1.15
+# day_trader_pro/menu_registry.sh — v1.16
+# v1.16 (2026-09-06) — dtp r310 / DEV.10. `Blind-alert DRILL` REMOVED. The
+#   script it called, `tests/blind_alert_selftest.py`, DOES NOT EXIST in otv4 —
+#   every box answered "can't open file" and the item still reported 15/15,
+#   because of its own `; true`.
+#   🔑 AND IT IS NOT WORTH REBUILDING. The blind alert has FIRED FOR REAL — QQQ,
+#   when it seized up from a full disk — which is better evidence than any drill
+#   produces: real conditions, real path, real delivery. A rehearsal proves a
+#   path BEFORE you need it; this one was proven BY needing it.
+#   ⚠️ AND THE 92% DISK GUARD (r285-r290) NOW COVERS THE CAUSE, so the box is
+#   paged well before the feed chokes.
+#   ⚠️ Count 73 -> 72. It sits BELOW the LAND item, so LAND stays at 42.
 # v1.15 (2026-09-06) — dtp r306 / DEV.6+DEV.7. TWO NEW ITEMS, BOTH BELOW LAND (still 42).
 #   · `Largest files on / (WAL ranks in place)` — `Disk usage` above reports
 #     `du -xsh /*`, TOP-LEVEL DIRECTORIES, so a 400MB file inside /home is one
@@ -247,7 +258,6 @@ MENU=(
 
   "SECTION|EXTERNAL RESOURCES (Telegram, market data — prove the path)"
   "ITEM|Test Telegram (real)|mi_test_telegram_real"
-  "ITEM|Blind-alert DRILL on the fleet (sends REAL Telegram, marked DRILL)|mi_blind_alert_drill_on_the_fleet_sends_real_te"
   "ITEM|OHLC 21-day fetch from yfinance (prompts symbol, default ^VIX)|mi_ohlc_21_day_fetch_from_yfinance_prompts_symb"
 
   "SECTION|SESSION TOGGLES"
