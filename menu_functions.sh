@@ -1,4 +1,13 @@
-# day_trader_pro/menu_functions.sh — v1.53
+# day_trader_pro/menu_functions.sh — v1.54
+# — v1.54 (2026-09-06) — dtp r303. SERVICE STATUS REPORTS ALL THREE UNITS.
+#   Every box runs `optionsbot`, `candle-feed` and `shadow-observer`; this item
+#   reported the first two, so a wedged shadow observer was invisible here and
+#   the first sign would have been the 09:40 guard paging.
+#   ⚠️ Each `is-active` is `|| true`d: it exits non-zero for an inactive unit,
+#   and a non-zero fleet command has its STDOUT DISCARDED, so a dead SERVICE
+#   would have reported as a dead BOX.
+#   ⚠️ LABEL-ONLY CHANGE IN THE REGISTRY — no item added or removed, so NOTHING
+#   RENUMBERS and the LAND item stays where it is.
 # — v1.53 (2026-09-05) — dtp r288 / TZ.1. 🔴 THREE PROMPTS FELL BACK TO SHELL
 #   `date +%F`, WHICH IS UTC ON THIS BOX. r287 put every Python default behind
 #   `ettime`, and these three hand the script a date BEFORE it can apply one —
@@ -254,7 +263,16 @@ mi_orb_budget_fleet() {
 
 # Service status (bot + candle-feed)
 mi_service_status_bot_candle_feed() {
-    echo; SC=$(ask_scope); $PY fleet.py run 'echo "optionsbot=$(systemctl is-active optionsbot) candle-feed=$(systemctl is-active candle-feed)"' $SC; pause
+    # 🔴 r303 — SHADOW ADDED. Every box runs THREE units and this reported two.
+    # `shadow-observer` writes the fitting corpus and is what the 09:40 guard
+    # (`tools/shadow_watch.py`, dtp r299) watches — so if it wedged, nothing on
+    # this menu would show it and the first sign would be a page.
+    # ⚠️ EACH `is-active` IS `|| true`d. It exits non-zero for an inactive unit,
+    # and a fleet command that exits non-zero has its STDOUT DISCARDED — so one
+    # dead service would have reported as a dead BOX, which is the wrong fault
+    # entirely. 📊 Verified: `is-active` PRINTS `inactive` and exits 3, so the
+    # word survives; only the exit code needed fixing.
+    echo; SC=$(ask_scope); $PY fleet.py run 'echo "optionsbot=$(systemctl is-active optionsbot || true) candle-feed=$(systemctl is-active candle-feed || true) shadow=$(systemctl is-active shadow-observer || true)"' $SC; pause
 }
 
 # Journal tail (last N)

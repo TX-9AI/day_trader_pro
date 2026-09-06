@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
-# day_trader_pro/menu_registry.sh — v1.10
+# day_trader_pro/menu_registry.sh — v1.11
+# — v1.11 (2026-09-06) — dtp r303. Label only: "(bot + candle-feed)" ->
+#   "(bot + feed + shadow)". 🔑 NO ITEM ADDED OR REMOVED, so `menu_render`
+#   assigns exactly the same numbers as before — **the LAND item does not
+#   move.** The function name is unchanged too: renaming it would touch the
+#   registry, the dispatcher and every citation for a cosmetic gain, and the
+#   operator cites items BY LABEL, which is what changed.
 # — v1.10 (2026-09-05) — dtp r278. LAND A TARBALL, and its dry run, in the
 #   CONTROL REPO section beside the two GitHub force-syncs — the same
 #   subject: this checkout against the remote.
@@ -132,7 +138,7 @@ MENU=(
   "ITEM|Levels                (touches + retirements)|mi_sensor_levels"
   "ITEM|Order flow            (aggression + depth)|mi_sensor_order_flow"
   "SECTION|DEBUG / LOGS (remote; one/all/some)"
-  "ITEM|Service status (bot + candle-feed)|mi_service_status_bot_candle_feed"
+  "ITEM|Service status (bot + feed + shadow)|mi_service_status_bot_candle_feed"
   "ITEM|Journal tail (last N)|mi_journal_tail_last_n"
   "ITEM|Feed health (store freshness)|mi_feed_health_store_freshness"
   "ITEM|Bot log tail (last 20)|mi_bot_log_tail_last_20"
