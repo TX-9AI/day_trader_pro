@@ -1,4 +1,19 @@
-# day_trader_pro/wake_and_bake.py — v1.5
+# day_trader_pro/wake_and_bake.py — v1.6
+# v1.6 (2026-09-06) — dtp r302. DISPLAY ONLY — NO BEHAVIOUR CHANGE. Operator on
+#   the wake item: "all I want is an IAM-based wake and then an SSH ping
+#   confirming they're all up" — which is exactly what it does; the prose was
+#   the problem. Four strings:
+#     · the `wake` mode label loses "(and leave running)" — a wake has no other
+#       outcome, so it said nothing, on every line of every wake run;
+#     · the START banner loses the `wake_and_bake` prefix, which announced a
+#       BAKE the run does not perform;
+#     · the confirm loses its "This will …" preamble — the verb carries it;
+#     · the wake summary loses ", left running".
+#   🔑 THE FULL-LEAVE-ON SUMMARY IS UNTOUCHED. There "left running" is the
+#   DISTINGUISHING FACT rather than a redundancy: that mode is the same cycle as
+#   `full`, and `full` RETIRES the boxes after the sync. Redundant on a wake,
+#   essential on leave-on.
+#   📊 Verified nothing parses these lines before touching them.
 # v1.5 (2026-09-06) — dtp r301. 🔴 THE `--bake-only` DOCSTRING SAID IT STOPS THE
 #   FLEET. IT DOES NOT, AND NEVER DID. The Modes block read "PING → BAKE →
 #   VERIFY, then STOP"; the `finally` block stops boxes only when
@@ -433,7 +448,12 @@ def stage_shutdown(mapping, dry):
 
 _MODE_DESC = {
     "full":     "WAKE, resync, restart, and STOP",
-    "wake":     "WAKE (and leave running)",
+    # r302 — "(and leave running)" DROPPED. A wake has no other outcome, so the
+    # parenthetical said nothing and said it on every line of every wake run.
+    # ⚠️ NOT dropped from the full-leave-on summary further down, where "left
+    # running" is the DISTINGUISHING FACT: that mode is the same cycle as `full`
+    # and `full` RETIRES the boxes after the sync.
+    "wake":     "WAKE",
     "bake":     "resync files (no restart, no wake, no stop)",
     "shutdown": "EMERGENCY STOP the fleet NOW (no EOD, no pycache, RTH-exempt)",
 }
@@ -445,7 +465,11 @@ def run(only=None, assume_yes=False, dry=False, leave_running=False,
     now = datetime.now(_ET)
     mode_label = "full-leave-on" if (mode == "full" and leave_running) else mode
     tags = (" [DRY-RUN]" if dry else "") + (" [MOCK]" if config.MOCK_AWS else "")
-    _log("START", f"wake_and_bake [{mode_label}] — {expected} box(es) — "
+    # r302 — the TOOL NAME dropped from the operator's line. A wake run
+    # announced itself as `wake_and_bake [wake]`, promising a bake it does not
+    # perform. The file is still named wake_and_bake.py; the banner now says
+    # which MODE is running, which is the only part that varies.
+    _log("START", f"{mode_label} — {expected} box(es) — "
                   f"{now:%Y-%m-%d %H:%M ET}{tags}")
 
     # RTH guard: only modes that RESTART services or STOP boxes are blocked
@@ -492,8 +516,9 @@ def run(only=None, assume_yes=False, dry=False, leave_running=False,
             desc = ("WAKE, resync, restart, and LEAVE RUNNING (no stop)"
                     if (mode == "full" and leave_running)
                     else _MODE_DESC[mode])
-            ans = input(f"This will {desc} {expected} servers.\n"
-                        f"Press ENTER to proceed, or Ctrl-C to cancel: ").strip()
+            # r302 — "This will …" preamble dropped; the verb carries it.
+            ans = input(f"{desc} {expected} servers. "
+                        f"ENTER to proceed, Ctrl-C to cancel: ").strip()
             if ans.lower() in ("n", "no", "q", "quit", "cancel"):
                 _log("ABORT", "cancelled; nothing done.")
                 return 2
@@ -552,8 +577,11 @@ def run(only=None, assume_yes=False, dry=False, leave_running=False,
                     raise _Abort(f"unreachable: {', '.join(missing)}")
 
         if mode == "wake":
+            # r302 — ", left running" dropped here ONLY. See the note on the
+            # "wake" label above: redundant on a wake, essential on
+            # full-leave-on, which keeps its own wording untouched.
             summary.append(f"{len(targets) if not dry else expected} box(es) "
-                           f"awake + reachable, left running")
+                           f"awake + reachable")
             return rc_final  # finally-block still runs (no shutdown in wake mode)
 
         if mode == "shutdown":
