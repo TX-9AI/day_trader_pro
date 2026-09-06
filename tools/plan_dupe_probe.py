@@ -1,5 +1,22 @@
 #!/usr/bin/env python3
-# day_trader_pro/tools/plan_dupe_probe.py — v1.0
+# day_trader_pro/tools/plan_dupe_probe.py — v1.1
+# v1.1 (2026-09-05) — dtp r296. 🔴 v1.0 CLUSTERED ON THE WRONG KEY AND REPORTED
+#   THE TRADE LOG AS A DEFECT. It grouped on (symbol, strategy, trigger_price),
+#   assuming a trigger price identifies an EVENT. It does not — **it is a
+#   SESSION LEVEL.** ORB's opening range and Runaway's breakout level are fixed
+#   for the day, so every re-entry shares one. First real run, 2026-09-01..04:
+#   32 clusters "unexplained", including META RunawayContinuation @ 594.10 with
+#   27 rows — **27 separate completed trades**, each with its own exit and its
+#   own P&L, reported as duplication. Zero of the 32 were the double-write
+#   RPT.5 asks about.
+#   🔑 THE KEY IS AN OVERLAP, NOT A PRICE. `plan_ledger.live_plans()` selects on
+#   `closed_ts IS NULL`, so "two intents at once" means one plan opened while
+#   another of the SAME strategy was still live. That is the question RPT.5
+#   actually poses, and it is answerable without guessing what a trigger means.
+#   ⚠️ THE TRIGGER PRICE IS KEPT AS CONTEXT, NEVER AS THE KEY — re-entering the
+#   same level is what these strategies DO.
+# v1.0 (2026-09-05) — dtp r295 / RPT.5. WHY DOES ONE TRIGGER LEAVE TWO
+#   PLAN-LEDGER ROWS? (superseded above)
 # v1.0 (2026-09-05) — dtp r295 / RPT.5. WHY DOES ONE TRIGGER LEAVE TWO
 #   PLAN-LEDGER ROWS?
 #
@@ -34,7 +51,7 @@
 #
 # Run:  python3 tools/plan_dupe_probe.py --from 2026-09-01 --to 2026-09-04
 #       python3 tools/plan_dupe_probe.py --from 2026-09-04 --sym CRM
-"""Cluster plan_ledger rows that share a trigger, and name the mechanism."""
+"""Find plans that were live at the same time as another of their own strategy."""
 from __future__ import annotations
 
 import argparse
@@ -50,8 +67,10 @@ import warehouse_cache as WCACHE                         # noqa: E402
 # `plan_id` is the table's whole primary key — without it the cache cannot
 # collapse this table at all and would report CDC duplicates as findings
 # (dtp r286). `terminal_reason` is what distinguishes the two verdicts.
-NEED = ["plan_id", "strategy", "state", "created_ts", "trigger_price",
-        "direction", "terminal_reason"]
+# `closed_ts` IS THE WHOLE POINT of v1.1 — it is what `live_plans()` keys on,
+# and without it an overlap cannot be seen at all.
+NEED = ["plan_id", "strategy", "state", "created_ts", "closed_ts",
+        "trigger_price", "direction", "terminal_reason"]
 
 SUPERSEDED = "superseded"
 
@@ -89,62 +108,55 @@ def main(argv=None) -> int:
         print("  no plans in range (a real empty result, not a missing path)")
         return 0
 
-    rows = cache.query('SELECT symbol, strategy, state, created_ts, '
+    rows = cache.query('SELECT symbol, strategy, state, created_ts, closed_ts, '
                        'trigger_price, direction, terminal_reason '
                        'FROM "plan_ledger" ORDER BY created_ts')
-    clusters = defaultdict(list)
-    for r in rows:
-        tp = r["trigger_price"]
-        if tp is None:
-            continue
-        # Round to the cent: a trigger is a price, and float equality on a
-        # price is a way to miss the thing you are looking for.
-        clusters[(r["symbol"], r["strategy"], round(float(tp), 2))].append(r)
 
-    dupes = {k: v for k, v in clusters.items() if len(v) > 1}
-    print(f"  {len(clusters):,} distinct trigger(s); "
-          f"{len(dupes):,} with more than one row")
-    if not dupes:
-        print("  ✅ no duplicate-trigger clusters in this range")
+    # ── OVERLAP, NOT PRICE ──────────────────────────────────────────────────
+    # Two intents at once for one strategy = a plan opened while an earlier one
+    # of the same strategy was still live (`closed_ts IS NULL` is what
+    # `live_plans()` selects on). Re-entering the same LEVEL is what these
+    # strategies do all session; it is context, never the key.
+    by_strat = defaultdict(list)
+    for r in rows:
+        by_strat[(r["symbol"], r["strategy"])].append(r)
+
+    overlaps, live_at_end = [], 0
+    for (sym, strat), rs in sorted(by_strat.items()):
+        rs.sort(key=lambda r: r["created_ts"] or 0)
+        for i, later in enumerate(rs):
+            for earlier in rs[:i]:
+                c0 = earlier["closed_ts"]
+                if c0 is None:
+                    # ⚠️ NEVER CLOSED AT ALL. r212's `close_unfilled` exists so
+                    # this cannot happen; a plan still live when the next one
+                    # opens is the leak it was written to stop.
+                    overlaps.append((sym, strat, earlier, later, None))
+                elif (later["created_ts"] or 0) < c0:
+                    overlaps.append((sym, strat, earlier, later,
+                                     c0 - (later["created_ts"] or 0)))
+        live_at_end += sum(1 for r in rs if r["closed_ts"] is None)
+
+    print(f"  {len(by_strat):,} (symbol, strategy) series; "
+          f"{len(rows):,} plans; {live_at_end:,} never closed")
+    if not overlaps:
+        print("  ✅ no overlapping live plans — every intent closed before the "
+              "next of its strategy opened")
         return 0
 
-    worked = broken = 0
-    for (sym, strat, price), rs in sorted(dupes.items()):
-        rs.sort(key=lambda r: r["created_ts"] or 0)
-        gap = (rs[-1]["created_ts"] or 0) - (rs[0]["created_ts"] or 0)
-        earlier = rs[0]
-        reason = (earlier["terminal_reason"] or "").lower()
-        if SUPERSEDED in reason:
-            verdict = "r212 supersession — the ledger is doing its job"
-            worked += 1
-        elif not reason and (earlier["state"] or "").upper() not in ("CLOSED",):
-            verdict = ("🔴 EARLIER ROW STILL LIVE — a genuine double-write, "
-                       "not supersession")
-            broken += 1
-        else:
-            verdict = (f"🔴 earlier row terminal for another reason "
-                       f"({earlier['terminal_reason']!r})")
-            broken += 1
-        print(f"\n  {sym} {strat} @ {price} — {len(rs)} rows, "
-              f"{gap:.1f}s apart")
-        print(f"    {verdict}")
-        for r in rs:
-            print(f"      {ettime.stamp_et(r['created_ts'])}  "
-                  f"{(r['state'] or '?'):<12} {(r['direction'] or '?'):<5} "
-                  f"{r['terminal_reason'] or '—'}")
-        # ⚠️ A ZERO GAP CONTRADICTS r212's OWN REASONING — "take() and the entry
-        # attempt happen on the SAME tick, so by the time the next one fires
-        # the previous has resolved." Two rows in the same second means that
-        # assumption does not hold, whatever the states say.
-        if gap < 1.0:
-            print("      ⚠️ SAME-SECOND: r212 assumes the previous plan has "
-                  "resolved before the next fires. It had not.")
-
-    print(f"\n  {worked} cluster(s) explained by supersession, "
-          f"{broken} unexplained")
-    # Non-zero only for the unexplained ones: supersession is the designed
-    # path and must not read as a failure.
-    return 1 if broken else 0
+    print(f"  🔴 {len(overlaps)} overlapping pair(s) — two live intents for one "
+          f"strategy")
+    for sym, strat, e, l, secs in overlaps[:40]:
+        span = "earlier NEVER CLOSED" if secs is None else f"overlap {secs:.1f}s"
+        print(f"\n  {sym} {strat} — {span}")
+        print(f"    earlier {ettime.stamp_et(e['created_ts'])} "
+              f"{(e['state'] or '?'):<10} @ {e['trigger_price']} "
+              f"{e['terminal_reason'] or '— still live'}")
+        print(f"    later   {ettime.stamp_et(l['created_ts'])} "
+              f"{(l['state'] or '?'):<10} @ {l['trigger_price']}")
+    if len(overlaps) > 40:
+        print(f"\n  … {len(overlaps) - 40} more")
+    return 1
 
 
 if __name__ == "__main__":
