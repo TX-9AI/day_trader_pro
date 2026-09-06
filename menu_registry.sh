@@ -1,5 +1,18 @@
 #!/usr/bin/env bash
-# day_trader_pro/menu_registry.sh — v1.12
+# day_trader_pro/menu_registry.sh — v1.13
+# v1.13 (2026-09-06) — dtp r305 / DEV.5. TWO MOVES AND A RENAME, operator's.
+#   · ORB budget & spot -> FLEET, directly after status.py + query.py. It reads
+#     LIVE box state, so it sat oddly in DIAGNOSTICS beside an external data
+#     fetch; next to the per-box status view it is the same kind of question.
+#   · OHLC 21-day fetch (yfinance) -> the alert-path section, which is RENAMED
+#     **EXTERNAL RESOURCES**. 🔑 The rename is the point: Telegram and yfinance
+#     are both THIRD PARTIES the fleet depends on, and the section now means
+#     "prove an outside path still works" rather than "alerting".
+#   · DIAGNOSTICS is REMOVED — both its items moved out and an empty heading is
+#     a line on a menu scrolled on a phone.
+#   🔴 THE LAND ITEM MOVES AGAIN: 41 -> 42. Item count is unchanged at 71, but
+#   ORB crossed from BELOW LAND to ABOVE it, so everything from LAND down shifts
+#   by one. (yfinance moved entirely below LAND and changes nothing.)
 # v1.12 (2026-09-06) — dtp r304 / DEV.4 — THE MENU REORGANISED: 86 ITEMS -> 71.
 #   A full pass with the operator, item by item. TEN CUT: the four mock/offline
 #   items (spool-up, EOD aggregate, reset mock state, repoint mock preview, test
@@ -144,6 +157,7 @@ MENU=(
   "ITEM|Fleet ping|mi_fleet_ping"
   "ITEM|Run command (all running)|mi_run_command_all_running"
   "ITEM|status.py + query.py      (one/all/some)|mi_status_py_query_py_one_all_some"
+  "ITEM|ORB budget & spot (every running box)|mi_orb_budget_fleet"
   "ITEM|Dry-run spool-up (real reads)|mi_dry_run_spool_up_real_reads"
 
   "SECTION|SENSORS (derived stores; read-only, one/all/some)"
@@ -210,18 +224,16 @@ MENU=(
   "ITEM|Verify control IAM role sees the fleet (read-only; no start/stop)|mi_verify_control_iam_role_sees_the_fleet_read"
   "ITEM|Rotate fleet tokens/secrets (pushes to running boxes)|mi_rotate_fleet_tokens_secrets_pushes_to_runnin"
 
-  "SECTION|ALERT PATHS (prove a page actually fires)"
+  "SECTION|EXTERNAL RESOURCES (Telegram, market data — prove the path)"
   "ITEM|Test Telegram (real)|mi_test_telegram_real"
   "ITEM|Blind-alert DRILL on the fleet (sends REAL Telegram, marked DRILL)|mi_blind_alert_drill_on_the_fleet_sends_real_te"
+  "ITEM|OHLC 21-day fetch from yfinance (prompts symbol, default ^VIX)|mi_ohlc_21_day_fetch_from_yfinance_prompts_symb"
 
   "SECTION|SESSION TOGGLES"
   "ITEM|Feed maintenance window (fleet up, nothing on the wire) - currently OFF|mi_feed_maintenance_window_fleet_up_nothing_on"
   "ITEM|Pre-open rehearsal — ask the fleet, then turn it on/off|mi_rehearsal_toggle"
   "ITEM|Debug logging — ask the fleet, then turn it on/off|mi_debug_log_toggle"
 
-  "SECTION|DIAGNOSTICS"
-  "ITEM|OHLC 21-day fetch from yfinance (prompts symbol, default ^VIX)|mi_ohlc_21_day_fetch_from_yfinance_prompts_symb"
-  "ITEM|ORB budget & spot (every running box)|mi_orb_budget_fleet"
 
   "SECTION|S3 WAREHOUSE (inventory, hygiene, rebuilds and parity)"
   "ITEM|S3 SWEEP — hygiene (dups / culled symbols; lists first)|mi_s3_sweep"
