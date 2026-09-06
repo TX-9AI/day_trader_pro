@@ -1,5 +1,34 @@
 #!/usr/bin/env bash
-# day_trader_pro/devtools.sh — v1.61
+# day_trader_pro/devtools.sh — v1.62
+# v1.62 (2026-09-06) — dtp r304 / DEV.4 — THE MENU REORGANISED: 86 ITEMS -> 71.
+#   A full pass with the operator, item by item. TEN CUT: the four mock/offline
+#   items (spool-up, EOD aggregate, reset mock state, repoint mock preview, test
+#   selection) which prove the code runs and say nothing about the fleet; the
+#   dry-run EOD aggregate, which dry-ran a report DISABLED in the live chain;
+#   the two box->control PULLS, on the operator's *"it would be a strange thing
+#   to pull candles onto control after we spent so much time severing those
+#   connections"* — the S3-native rebuild already exists; RETIRE, which ran the
+#   BYTE-IDENTICAL command to EMERGENCY STOP; and the LAND dry run.
+#   THREE MERGES, each a flag matrix rendered as menu lines: four repoint items
+#   (FULL / +wake / no-restart / scoped) -> one that prompts; two S3 compares
+#   (one date / every date) -> one where ENTER means every; and the warehouse
+#   trade breakdown, which passed `--bundles-dir` explicitly — r187 had ALREADY
+#   MADE THE WAREHOUSE THE DEFAULT, so it was the same report with a redundant
+#   argument, not a second source.
+#   🔑 MAINTENANCE IS NOW IN PREREQUISITE ORDER, not by force: Wake -> Bake ->
+#   Leave-on -> Hotfix -> FULL -> EMERGENCY STOP. Operator: *"they have to be
+#   awake to synch, hence wake is before them."* Reading top to bottom now tells
+#   you what each item ASSUMES.
+#   ⚠️ NINE MENU-NUMBER CITATIONS FIXED, AND EVERY ONE WAS ALREADY WRONG —
+#   labels and comments citing "option 33", "option 38", "option 14", "run 40 &
+#   41". Numbers are assigned by `menu_render` from a loop and are guaranteed to
+#   move; items now cite each other BY LABEL. REPORT PARITY's label no longer
+#   names two numbers that had rotted twice over.
+#   ⚠️ UTILITIES WAS A DUMPING GROUND — eleven items across four subjects. It is
+#   now CREDENTIALS (read first, write last), ALERT PATHS, SESSION TOGGLES and
+#   DIAGNOSTICS, with disk usage moved to S3 WAREHOUSE where the disk ceiling
+#   work lives.
+#   🔴 THE LAND ITEM MOVES: 54 -> 41. Everything cut sat above it.
 # v1.61 (2026-09-05) — dtp r283. NEW `_yes()`, beside `pause()`: ONE reader for
 #   every yes/no answer in the menu. Six sites compared against lowercase "y"
 #   and nothing else, so a `Y` at the LIVE backfill prompt silently did nothing

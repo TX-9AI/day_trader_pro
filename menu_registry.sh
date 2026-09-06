@@ -1,5 +1,34 @@
 #!/usr/bin/env bash
-# day_trader_pro/menu_registry.sh — v1.11
+# day_trader_pro/menu_registry.sh — v1.12
+# v1.12 (2026-09-06) — dtp r304 / DEV.4 — THE MENU REORGANISED: 86 ITEMS -> 71.
+#   A full pass with the operator, item by item. TEN CUT: the four mock/offline
+#   items (spool-up, EOD aggregate, reset mock state, repoint mock preview, test
+#   selection) which prove the code runs and say nothing about the fleet; the
+#   dry-run EOD aggregate, which dry-ran a report DISABLED in the live chain;
+#   the two box->control PULLS, on the operator's *"it would be a strange thing
+#   to pull candles onto control after we spent so much time severing those
+#   connections"* — the S3-native rebuild already exists; RETIRE, which ran the
+#   BYTE-IDENTICAL command to EMERGENCY STOP; and the LAND dry run.
+#   THREE MERGES, each a flag matrix rendered as menu lines: four repoint items
+#   (FULL / +wake / no-restart / scoped) -> one that prompts; two S3 compares
+#   (one date / every date) -> one where ENTER means every; and the warehouse
+#   trade breakdown, which passed `--bundles-dir` explicitly — r187 had ALREADY
+#   MADE THE WAREHOUSE THE DEFAULT, so it was the same report with a redundant
+#   argument, not a second source.
+#   🔑 MAINTENANCE IS NOW IN PREREQUISITE ORDER, not by force: Wake -> Bake ->
+#   Leave-on -> Hotfix -> FULL -> EMERGENCY STOP. Operator: *"they have to be
+#   awake to synch, hence wake is before them."* Reading top to bottom now tells
+#   you what each item ASSUMES.
+#   ⚠️ NINE MENU-NUMBER CITATIONS FIXED, AND EVERY ONE WAS ALREADY WRONG —
+#   labels and comments citing "option 33", "option 38", "option 14", "run 40 &
+#   41". Numbers are assigned by `menu_render` from a loop and are guaranteed to
+#   move; items now cite each other BY LABEL. REPORT PARITY's label no longer
+#   names two numbers that had rotted twice over.
+#   ⚠️ UTILITIES WAS A DUMPING GROUND — eleven items across four subjects. It is
+#   now CREDENTIALS (read first, write last), ALERT PATHS, SESSION TOGGLES and
+#   DIAGNOSTICS, with disk usage moved to S3 WAREHOUSE where the disk ceiling
+#   work lives.
+#   🔴 THE LAND ITEM MOVES: 54 -> 41. Everything cut sat above it.
 # — v1.11 (2026-09-06) — dtp r303. Label only: "(bot + candle-feed)" ->
 #   "(bot + feed + shadow)". 🔑 NO ITEM ADDED OR REMOVED, so `menu_render`
 #   assigns exactly the same numbers as before — **the LAND item does not
@@ -101,12 +130,7 @@
 # verbatim there, so multi-line handlers are not flattened.
 
 MENU=(
-  "SECTION|ORCHESTRATION"
-  "ITEM|Full spool-up (mock)|mi_full_spool_up_mock"
-  "ITEM|EOD aggregate (mock)|mi_eod_aggregate_mock"
-  "ITEM|Reset mock state|mi_reset_mock_state"
-  "ITEM|Dry-run spool-up (real reads)|mi_dry_run_spool_up_real_reads"
-  "ITEM|Dry-run EOD aggregate (real reads)|mi_dry_run_eod_aggregate_real_reads"
+
   "SECTION|REGISTRY & MASTER SWITCH"
   "ITEM|Instance map|mi_instance_map"
   "ITEM|Reconcile map|mi_reconcile_map"
@@ -114,14 +138,14 @@ MENU=(
   "ITEM|Control status|mi_control_status"
   "ITEM|ENABLE control|mi_enable_control"
   "ITEM|DISABLE control|mi_disable_control"
+
   "SECTION|FLEET (inspect & fan-out)"
   "ITEM|Fleet list|mi_fleet_list"
   "ITEM|Fleet ping|mi_fleet_ping"
   "ITEM|Run command (all running)|mi_run_command_all_running"
   "ITEM|status.py + query.py      (one/all/some)|mi_status_py_query_py_one_all_some"
-  "ITEM|Pull trades.db            (one/all/some)|mi_pull_trades_db_one_all_some"
-  "ITEM|Pull OHLC for a day       (one/all/some)|mi_pull_ohlc_for_a_day_one_all_some"
-  "ITEM|Hotfix launcher (repo synch & flush)|mi_hotfix_launcher_repo_synch_flush"
+  "ITEM|Dry-run spool-up (real reads)|mi_dry_run_spool_up_real_reads"
+
   "SECTION|SENSORS (derived stores; read-only, one/all/some)"
   "ITEM|Manifold health board|mi_manifold_health_board"
   "ITEM|Strategy notes        (what each engine SAW - signals, not trades)|mi_sensor_strategy_notes"
@@ -137,69 +161,76 @@ MENU=(
   "ITEM|Forks                 (built vs reject reason)|mi_sensor_forks"
   "ITEM|Levels                (touches + retirements)|mi_sensor_levels"
   "ITEM|Order flow            (aggression + depth)|mi_sensor_order_flow"
+
   "SECTION|DEBUG / LOGS (remote; one/all/some)"
   "ITEM|Service status (bot + feed + shadow)|mi_service_status_bot_candle_feed"
   "ITEM|Journal tail (last N)|mi_journal_tail_last_n"
   "ITEM|Feed health (store freshness)|mi_feed_health_store_freshness"
   "ITEM|Bot log tail (last 20)|mi_bot_log_tail_last_20"
-  "SECTION|MAINTENANCE (wake_and_bake)"
-  "ITEM|Retire — off-hours stop (one/all/some)|mi_retire_one_all_some"
-  "ITEM|FULL (wake->bake->restart->STOP)|mi_full_wake_bake_restart_stop"
+
+  "SECTION|MAINTENANCE (wake_and_bake) - prerequisite order"
   "ITEM|Wake|mi_wake_one_all_some"
   "ITEM|Bake only (sync, no restart - RTH-safe)|mi_bake_only_sync_no_restart_rth_safe"
-  "ITEM|Leave on (skip shutdown)|mi_leave_on_skip_shutdown"
+  "ITEM|Leave on (wake, sync, restart - fleet stays up)|mi_leave_on_skip_shutdown"
+  "ITEM|Hotfix launcher (repo synch & flush)|mi_hotfix_launcher_repo_synch_flush"
+  "ITEM|FULL (wake->bake->restart->STOP)|mi_full_wake_bake_restart_stop"
   "ITEM|EMERGENCY STOP — mid-session, abandons positions (one/all/some)|mi_emergency_stop_no_eod_no_pycache_rth_exempt"
+
   "SECTION|REPOINT (migrate fleet -> new repo)"
+  "ITEM|Snapshot dir -> tarball (the held state before a repoint)|mi_snapshot_dir_repo_ready_tarball"
   "ITEM|Check only|mi_check_only"
-  "ITEM|FULL|mi_full"
-  "ITEM|Full + wake|mi_full_wake"
-  "ITEM|No restart|mi_no_restart"
-  "ITEM|Scoped|mi_scoped"
-  "ITEM|Mock preview|mi_mock_preview"
-  "SECTION|SNAPSHOT & TESTS"
-  "ITEM|Snapshot dir -> repo-ready tarball|mi_snapshot_dir_repo_ready_tarball"
-  "ITEM|Test selection (mock)|mi_test_selection_mock"
-  "ITEM|Test Telegram (real)|mi_test_telegram_real"
+  "ITEM|REPOINT the fleet (asks scope, wake, restart)|mi_repoint"
+
   "SECTION|CONTROL REPO (this checkout <-> GitHub, force sync)"
   "ITEM|PUSH -> GitHub  (FORCE; this server is source of truth)|mi_push_github_force_this_server_is_source_of_t"
   "ITEM|PULL <- GitHub  (FORCE; GitHub is source of truth)|mi_pull_github_force_github_is_source_of_truth"
   "ITEM|LAND a tarball from /home/ubuntu (verify -> commit -> push -> clean)|mi_land_tarball"
-  "ITEM|LAND a tarball — DRY RUN (show the halves, touch nothing)|mi_land_tarball_dry"
-  "SECTION|TRADES DATA & R SUITE"
-  "ITEM|Re-run consolidation -> fleet_trades_<date>.json (+ .csv)|mi_re_run_consolidation_fleet_trades_date_json"
-  "ITEM|Trade breakdown (cross-day, warehouse, day one onward)|mi_trade_breakdown_cross_day"
+
+  "SECTION|TRADE REPORTS"
+  "ITEM|Trade breakdown FROM THE WAREHOUSE (cross-day, day one onward)|mi_trade_breakdown_cross_day"
   "ITEM|TRADES TAKEN  (one line per trade, phone width)|mi_trades_taken"
+  "ITEM|Live P&L standings (reads the BOXES; must be up)|mi_live_p_l_standings_read_only"
+  "ITEM|P&L from WAREHOUSE (day or range; boxes off)|mi_pnl_from_warehouse"
+
+  "SECTION|R SUITE (fitting)"
   "ITEM|FIT READINESS — per setup: taken vs skipped, is it fittable yet|mi_fit_readiness"
   "ITEM|Stop / TP sweep       (R surface over excursions)|mi_r_stop_sweep"
   "ITEM|Exit replay           (trail fit on real premium paths)|mi_r_exit_replay"
   "ITEM|R LEDGER              (R, expectancy, capture + selection vs extension)|mi_r_ledger"
-  "SECTION|EOD CONDUCTOR, BACKFILL & LIVE P&L"
-  "ITEM|Live P&L standings (reads the BOXES; must be up)|mi_live_p_l_standings_read_only"
-  "ITEM|P&L from WAREHOUSE (day or range; boxes off)|mi_pnl_from_warehouse"
+
+  "SECTION|EOD & DATA REPAIR"
+  "ITEM|Re-run consolidation -> fleet_trades_<date>.json (+ .csv)|mi_re_run_consolidation_fleet_trades_date_json"
   "ITEM|EOD analysis — all reports from S3 (boxes off)|mi_eod_analysis"
   "ITEM|Backfill missing OHLC (auto-batched)|mi_backfill_missing_ohlc_auto_batched"
   "ITEM|EOD conductor v2 (verify one box / live close / plumbing)|mi_eod_conductor_full_gated_eod_dry_run_preview"
-  "SECTION|UTILITIES"
-  "ITEM|OHLC 21-day fetch from yfinance (prompts symbol, default ^VIX)|mi_ohlc_21_day_fetch_from_yfinance_prompts_symb"
-  "ITEM|Rotate fleet tokens/secrets (pushes to running boxes)|mi_rotate_fleet_tokens_secrets_pushes_to_runnin"
+
+  "SECTION|CREDENTIALS (read first, write last)"
   "ITEM|Audit fleet credentials (read-only; shows which vars are set, no values)|mi_audit_fleet_credentials_read_only_shows_whic"
-  "ITEM|ORB budget & spot (every running box)|mi_orb_budget_fleet"
   "ITEM|Verify fleet credentials WORK (TT SDK, Telegram, GitHub)|mi_verify_fleet_credentials_work_tt_sdk_telegra"
   "ITEM|Verify control IAM role sees the fleet (read-only; no start/stop)|mi_verify_control_iam_role_sees_the_fleet_read"
+  "ITEM|Rotate fleet tokens/secrets (pushes to running boxes)|mi_rotate_fleet_tokens_secrets_pushes_to_runnin"
+
+  "SECTION|ALERT PATHS (prove a page actually fires)"
+  "ITEM|Test Telegram (real)|mi_test_telegram_real"
   "ITEM|Blind-alert DRILL on the fleet (sends REAL Telegram, marked DRILL)|mi_blind_alert_drill_on_the_fleet_sends_real_te"
+
+  "SECTION|SESSION TOGGLES"
   "ITEM|Feed maintenance window (fleet up, nothing on the wire) - currently OFF|mi_feed_maintenance_window_fleet_up_nothing_on"
   "ITEM|Pre-open rehearsal — ask the fleet, then turn it on/off|mi_rehearsal_toggle"
   "ITEM|Debug logging — ask the fleet, then turn it on/off|mi_debug_log_toggle"
-  "ITEM|Disk usage — top consumers per box (one/all/some)|mi_disk_usage"
+
+  "SECTION|DIAGNOSTICS"
+  "ITEM|OHLC 21-day fetch from yfinance (prompts symbol, default ^VIX)|mi_ohlc_21_day_fetch_from_yfinance_prompts_symb"
+  "ITEM|ORB budget & spot (every running box)|mi_orb_budget_fleet"
+
   "SECTION|S3 WAREHOUSE (inventory, hygiene, rebuilds and parity)"
   "ITEM|S3 SWEEP — hygiene (dups / culled symbols; lists first)|mi_s3_sweep"
   "ITEM|Warehouse inventory & cost (asks about noncurrent versions)|mi_warehouse_inventory_cost"
   "ITEM|Rebuild a day's bundle FROM S3 -> reports/warehouse/|mi_warehouse_rebuild_bundle"
-  "ITEM|Compare S3 vs local - one date|mi_warehouse_compare_date"
-  "ITEM|Compare S3 vs local - EVERY in-coverage date|mi_warehouse_compare_all"
+  "ITEM|Compare S3 vs local (ENTER = every in-coverage date)|mi_warehouse_compare"
   "ITEM|Explain a date's divergence (lists trade_ids)|mi_warehouse_explain_date"
-  "ITEM|Trade breakdown FROM THE WAREHOUSE (cross-day)|mi_warehouse_trade_report"
-  "ITEM|REPORT PARITY - run 40 & 41 both sources, diff OUTPUTS|mi_warehouse_report_parity"
+  "ITEM|REPORT PARITY - trade breakdown from BOTH sources, diff OUTPUTS|mi_warehouse_report_parity"
+  "ITEM|Disk usage — top consumers per box (one/all/some)|mi_disk_usage"
 )
 
 # ── render + dispatch, the whole of it ──────────────────────────────

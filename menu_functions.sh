@@ -1,4 +1,33 @@
-# day_trader_pro/menu_functions.sh — v1.54
+# day_trader_pro/menu_functions.sh — v1.55
+# v1.55 (2026-09-06) — dtp r304 / DEV.4 — THE MENU REORGANISED: 86 ITEMS -> 71.
+#   A full pass with the operator, item by item. TEN CUT: the four mock/offline
+#   items (spool-up, EOD aggregate, reset mock state, repoint mock preview, test
+#   selection) which prove the code runs and say nothing about the fleet; the
+#   dry-run EOD aggregate, which dry-ran a report DISABLED in the live chain;
+#   the two box->control PULLS, on the operator's *"it would be a strange thing
+#   to pull candles onto control after we spent so much time severing those
+#   connections"* — the S3-native rebuild already exists; RETIRE, which ran the
+#   BYTE-IDENTICAL command to EMERGENCY STOP; and the LAND dry run.
+#   THREE MERGES, each a flag matrix rendered as menu lines: four repoint items
+#   (FULL / +wake / no-restart / scoped) -> one that prompts; two S3 compares
+#   (one date / every date) -> one where ENTER means every; and the warehouse
+#   trade breakdown, which passed `--bundles-dir` explicitly — r187 had ALREADY
+#   MADE THE WAREHOUSE THE DEFAULT, so it was the same report with a redundant
+#   argument, not a second source.
+#   🔑 MAINTENANCE IS NOW IN PREREQUISITE ORDER, not by force: Wake -> Bake ->
+#   Leave-on -> Hotfix -> FULL -> EMERGENCY STOP. Operator: *"they have to be
+#   awake to synch, hence wake is before them."* Reading top to bottom now tells
+#   you what each item ASSUMES.
+#   ⚠️ NINE MENU-NUMBER CITATIONS FIXED, AND EVERY ONE WAS ALREADY WRONG —
+#   labels and comments citing "option 33", "option 38", "option 14", "run 40 &
+#   41". Numbers are assigned by `menu_render` from a loop and are guaranteed to
+#   move; items now cite each other BY LABEL. REPORT PARITY's label no longer
+#   names two numbers that had rotted twice over.
+#   ⚠️ UTILITIES WAS A DUMPING GROUND — eleven items across four subjects. It is
+#   now CREDENTIALS (read first, write last), ALERT PATHS, SESSION TOGGLES and
+#   DIAGNOSTICS, with disk usage moved to S3 WAREHOUSE where the disk ceiling
+#   work lives.
+#   🔴 THE LAND ITEM MOVES: 54 -> 41. Everything cut sat above it.
 # — v1.54 (2026-09-06) — dtp r303. SERVICE STATUS REPORTS ALL THREE UNITS.
 #   Every box runs `optionsbot`, `candle-feed` and `shadow-observer`; this item
 #   reported the first two, so a wedged shadow observer was invisible here and
@@ -113,7 +142,7 @@
 # `query.py --decisions` across the chosen scope — one formatter, on the box,
 # shared with anyone standing in a shell there. Registry gains the item under
 # SENSORS after PLAN BOARD; numbers assign at render as ever.
-# ── v1.38 (2026-08-27) — OPTION 60 ASKS WHICH SYMBOLS (one / some / all) ─────
+# ── v1.38 (2026-08-27) — DEBUG LOGGING ASKS WHICH SYMBOLS (one/some/all) ────
 # The OHLC backfill handler only ever asked for a BATCH SIZE, so a two-symbol
 # gap woke five boxes. Operator: *"It wants to do them in groups of 5. We're not
 # doing that. I just want those 2 only."* `eod_backfill.py --only` has existed
@@ -156,19 +185,10 @@
 # v1.0  2026-08-16  Extracted from devtools.sh v1.32 (the menu is data).
 
 # Full spool-up (mock)
-mi_full_spool_up_mock() {
-    echo; DTP_MOCK=1 $PY orchestrator.py --mock --no-gate; pause
-}
 
 # EOD aggregate (mock)
-mi_eod_aggregate_mock() {
-    echo; DTP_MOCK=1 $PY eod_report.py --mock; pause
-}
 
 # Reset mock state
-mi_reset_mock_state() {
-    echo; reset_mock_state; pause
-}
 
 # Dry-run spool-up (real reads)
 mi_dry_run_spool_up_real_reads() {
@@ -176,9 +196,6 @@ mi_dry_run_spool_up_real_reads() {
 }
 
 # Dry-run EOD aggregate (real reads)
-mi_dry_run_eod_aggregate_real_reads() {
-    echo; $PY eod_report.py --dry-run; pause
-}
 
 # Instance map
 mi_instance_map() {
@@ -231,14 +248,8 @@ mi_status_py_query_py_one_all_some() {
 }
 
 # Pull trades.db            (one/all/some)
-mi_pull_trades_db_one_all_some() {
-    echo; SC=$(ask_scope); $PY fleet.py pull db $SC; pause
-}
 
 # Pull OHLC for a day       (one/all/some)
-mi_pull_ohlc_for_a_day_one_all_some() {
-    echo; SC=$(ask_scope); read -rp "Day (YYYY-MM-DD, ENTER=today): " D; D="${D:-$(TZ=America/New_York date +%F)}"; $PY fleet.py pull ohlc --day "$D" $SC; pause
-}
 
 # ORB budget & spot (every running box)
 mi_orb_budget_fleet() {
@@ -292,29 +303,6 @@ mi_bot_log_tail_last_20() {
 
 # Dry-run
 # Retire (stop the fleet)   (one/all/some)
-mi_retire_one_all_some() {
-    # r202 (2026-08-25) — REPLACES "Dry-run", which the operator never used.
-    # ⚠️ THE OPERATOR WAS FORCED THROUGH OPTION 34 (FULL wake->bake->restart->
-    # STOP) TO DO NOTHING BUT STOP THE FLEET — a whole cycle, including a
-    # resync and a restart of every box, when all he wanted was the shutdown at
-    # the end of it. `--shutdown-only` ALREADY EXISTED in wake_and_bake.py and
-    # had no menu item, so the capability was there and unreachable.
-    #
-    # ⚠️ THIS IS NOT THE EOD PATH. --shutdown-only clears pycache and stops the
-    # boxes cleanly with NO EOD and NO P&L harvest. Use it after maintenance or
-    # a check, not at the close — the conductor owns the close because
-    # chain_snapshots cannot be reconstructed after 16:00.
-    echo
-    echo "  RETIRE — OFF-HOURS clean stop. No EOD, no P&L harvest, no resync."
-    echo "  For after maintenance or a check, outside the session."
-    echo "  During RTH use option 38 (EMERGENCY STOP) — same mechanism,"
-    echo "  different intent, and it warns about open positions."
-    echo "  The CONDUCTOR owns the close: chain_snapshots cannot be"
-    echo "  reconstructed after 16:00, so never use this at 15:59."
-    SC=$(ask_scope)
-    $PY wake_and_bake.py --shutdown-only $SC
-    pause
-}
 
 # FULL (wake->bake->restart->STOP)
 mi_full_wake_bake_restart_stop() {
@@ -358,7 +346,11 @@ mi_emergency_stop_no_eod_no_pycache_rth_exempt() {
     echo "  ⚠️ NO EOD. NO P&L HARVEST. ANY OPEN POSITION IS ABANDONED AT THE"
     echo "     BROKER — it does not get flattened, it is simply no longer"
     echo "     watched. You own it manually from that moment."
-    echo "  For an orderly off-hours stop use option 33 (Retire) instead."
+    # r304 — CITED BY LABEL, NOT BY NUMBER. This read "option 33 (Retire)";
+    # numbers are assigned by menu_render from a loop and had ALREADY rotted
+    # twice, and Retire is CUT this revision (it ran the identical command).
+    echo "  For an orderly off-hours stop, wake/sync items leave the fleet up;"
+    echo "  this one takes it down from anywhere, including mid-session."
     SC=$(ask_scope)
     $PY wake_and_bake.py --shutdown-only $SC
     pause
@@ -370,29 +362,38 @@ mi_check_only() {
 }
 
 # FULL
-mi_full() {
-    echo; U=$(ask_url) || { pause; return 0; }; $PY fleet.py repoint "$U"; pause
+mi_repoint() {
+    # 🔴 r304 — MERGE of the four repoint items (FULL / Full+wake / No restart /
+    # Scoped). All four were `fleet.py repoint "$U"` differing by ONE FLAG — a
+    # flag matrix rendered as four menu lines, on a menu the operator scrolls on
+    # a phone. The flags are now three prompts, each defaulting to the common
+    # answer.
+    # ⚠️ SURVEY IS STILL ITS OWN ITEM (`Check only`). `cmd_repoint`'s guard is
+    # titled "survey before mutating", and folding a read-only preview into the
+    # same prompt chain as a mutation would put them one keystroke apart.
+    echo
+    U=$(ask_url) || { pause; return 0; }
+    local SY WK NR ARGS=""
+    read -rp "  Symbols (ENTER = ALL, or comma-sep e.g. SPX,QQQ): " SY
+    [ -n "$SY" ] && ARGS="$ARGS --only $SY"
+    read -rp "  Wake stopped boxes first? [y/N]: " WK
+    _yes "$WK" && ARGS="$ARGS --wake"
+    read -rp "  Restart services after repointing? [Y/n]: " NR
+    # ⚠️ DEFAULT YES. The old menu had a dedicated "No restart" item, so the
+    # SAFE-LOOKING choice was the explicit one; here the default matches what a
+    # repoint is FOR — boxes running the new repo's code.
+    case "$NR" in [nN]*) ARGS="$ARGS --no-restart" ;; esac
+    $PY fleet.py repoint "$U" $ARGS
+    pause
 }
 
 # Full + wake
-mi_full_wake() {
-    echo; U=$(ask_url) || { pause; return 0; }; $PY fleet.py repoint "$U" --wake; pause
-}
 
 # No restart
-mi_no_restart() {
-    echo; U=$(ask_url) || { pause; return 0; }; $PY fleet.py repoint "$U" --no-restart; pause
-}
 
 # Scoped
-mi_scoped() {
-    echo; U=$(ask_url) || { pause; return 0; }; read -rp "Symbols (comma-sep, e.g. SPX,QQQ): " SY; $PY fleet.py repoint "$U" --only "$SY"; pause
-}
 
 # Mock preview
-mi_mock_preview() {
-    echo; U=$(ask_url) || { pause; return 0; }; $PY fleet.py repoint "$U" --mock --yes; pause
-}
 
 # Snapshot dir -> repo-ready tarball
 mi_snapshot_dir_repo_ready_tarball() {
@@ -400,9 +401,6 @@ mi_snapshot_dir_repo_ready_tarball() {
 }
 
 # Test selection (mock)
-mi_test_selection_mock() {
-    echo; $PY selector.py --test; pause
-}
 
 # Test Telegram (real)
 mi_test_telegram_real() {
@@ -440,7 +438,7 @@ mi_trades_taken() {
     # r202 — the trades themselves. Every other report in this suite
     # aggregates; this is the only one that lists a row per trade.
     # ⚠️ 43 characters wide, for Termius on a phone. Exit reason is
-    # deliberately absent — BY EXIT REASON in option 53 covers it.
+    # deliberately absent — the BY EXIT REASON report covers it.
     local SD
     read -rp "  Since [ENTER = day one / YYYY-MM-DD / all]: " SD
     case "$SD" in
@@ -647,7 +645,7 @@ mi_eod_conductor_full_gated_eod_dry_run_preview() {
     # verifies for real and stops NOTHING, so it can be run mid-session
     # without consequence — except that it stops the BOT on each box it
     # touches, which is why it is scoped to one symbol here.
-    # ⚠️ VERIFY-ONLY IS OPTION 1 BECAUSE IT IS THE REAL PREVIEW. --dry-run
+    # ⚠️ VERIFY-ONLY IS THE FIRST CHOICE BECAUSE IT IS THE REAL PREVIEW. --dry-run
     # never SSHes, so it stamps "OK short=0" on every box whatever the truth
     # is — measured 2026-08-22: it reported 15/15 verified minutes before a
     # real run on NVDA came back SHORT. Leaving the fabricated one in the
@@ -662,7 +660,7 @@ mi_eod_conductor_full_gated_eod_dry_run_preview() {
          $PY eod_conductor_v2.py --no-takedown --only "$S" ;;
       # ⚠️ NO FAKE PREVIEW BEFORE THE LIVE RUN. Printing a fabricated OK and
       # then disclaiming it is theatre — it trains the operator to click past
-      # a green screen. Option 1 is the preview; this asks for the word.
+      # a green screen. Verify-only is the preview; this asks for the word.
       2) echo
          echo "  This STOPS TRADING on every running box, drains to S3,"
          echo "  verifies, and takes down the ones that verified."
@@ -732,7 +730,7 @@ mi_feed_maintenance_window_fleet_up_nothing_on() {
           fi; \
         else \
           echo "Brings the fleet into a MAINTENANCE window: boxes can be up and"; \
-          echo "worked on (option 14, bakes, pushes) with NOTHING on the wire."; \
+          echo "worked on (fan-out, bakes, pushes) with NOTHING on the wire."; \
           echo; \
           echo "The flag is checked live by candle_feed - no restart needed, and"; \
           echo "it SURVIVES a bake. Nothing removes it but you."; \
@@ -916,16 +914,23 @@ mi_warehouse_rebuild_bundle() {
 }
 
 # Compare S3 vs local for ONE date
-mi_warehouse_compare_date() {
-    echo; read -rp "Date (YYYY-MM-DD): " WD
-    if [ -n "$WD" ]; then $PY warehouse_reader.py --date "$WD" --compare; fi
+mi_warehouse_compare() {
+    # 🔴 r304 — MERGE of "Compare S3 vs local - one date" and "- EVERY
+    # in-coverage date". Same tool, same comparison, differing only in SCOPE:
+    # `--date X --compare` vs `--all`. The date prompt already existed; an empty
+    # answer now means every in-coverage date, the convention this menu already
+    # uses elsewhere.
+    echo
+    read -rp "  Date (YYYY-MM-DD, ENTER = every in-coverage date): " WD
+    if [ -n "$WD" ]; then
+        $PY warehouse_reader.py --date "$WD" --compare
+    else
+        $PY warehouse_reader.py --all
+    fi
     pause
 }
 
 # Compare EVERY in-coverage date
-mi_warehouse_compare_all() {
-    echo; $PY warehouse_reader.py --all; pause
-}
 
 # Explain a date's divergence (lists the differing trade_ids)
 mi_warehouse_explain_date() {
@@ -937,10 +942,6 @@ mi_warehouse_explain_date() {
 # Excursion report FROM THE WAREHOUSE (forces the bundle source)
 
 # Trade breakdown FROM THE WAREHOUSE (cross-day)
-mi_warehouse_trade_report() {
-    echo; echo "Reads reports/warehouse/ — run the rebuild for the dates you want first."
-    $PY trade_report.py --bundles-dir "$SCRIPT_DIR/reports/warehouse"; pause
-}
 
 # Report PARITY - run 40 & 41 from BOTH sources and diff the OUTPUTS
 mi_warehouse_report_parity() {
@@ -956,7 +957,7 @@ mi_warehouse_report_parity() {
 
 mi_hotfix_launcher_repo_synch_flush() {
     # v1.37 (2026-08-22) — promoted from a notepad paste the operator ran
-    # through option 14 nearly every session. A command typed by hand daily is
+    # through the fan-out item nearly every session. A command typed by hand daily is
     # a command that will eventually be typed WRONG on the day it matters, and
     # this one stops trading services on 15 live boxes.
     #
@@ -1315,11 +1316,3 @@ mi_land_tarball() {
 }
 
 # Land a tarball — DRY RUN
-mi_land_tarball_dry() {
-    # ⚠️ A SEPARATE ITEM RATHER THAN A PROMPT ON THE ONE ABOVE. MEN.1 merged
-    # two items that were one flag apart, and this looks like that case and is
-    # not: the destructive item must not have a path where a mis-keyed answer
-    # commits and pushes. The prompt there is WHICH ARCHIVE, never whether to
-    # land.
-    echo; bash tools/deploy.sh --dry; pause
-}
