@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""day_trader_pro/tests/test_plan_dupe_probe.py — v1.1
+"""day_trader_pro/tests/test_plan_dupe_probe.py — v1.2
+v1.2  2026-09-05 — dtp r297. P5 pins that a restart wipe is reported but does
+not set the exit code. All 31 overlaps in the first real run were
+`WIPED_BY_RESTART` on one session, spanning five to six hours, because a wipe
+stamps `closed_ts` on every live plan at one instant — five wiped plans make ten
+pairs. ⚠️ REPORTED, NOT SUPPRESSED: r199's lesson is that hiding duplication is
+what left RPT.5 open for weeks.
+
 v1.1  2026-09-05 — dtp r296. RE-DERIVED ONTO OVERLAP, BECAUSE v1.0's KEY WAS
 WRONG AND THESE CASES CERTIFIED IT.
 
@@ -161,11 +168,24 @@ def main():
     check("P4 two DIFFERENT strategies live at once is not an overlap",
           "no overlapping live plans" in out4 and rc4 == 0, f"rc={rc4}")
 
+    # ══ 🔴 P5 — A RESTART WIPE IS AN ARTIFACT, NOT A FINDING ═════════════
+    t2 = _ts("10:16")
+    wipe_close = _ts("16:08")
+    wiped = [_row(f"w{i}", "QQQ", "RunawayContinuation", "CANCELLED",
+                  t2 + i * 420, 708.43, "WIPED_BY_RESTART", closed=wipe_close)
+             for i in range(5)]
+    rc5, out5 = _run(wiped)
+    check("P5 wipe-closed pairs do not set the exit code", rc5 == 0, f"rc={rc5}")
+    # ⚠️ AND THEY STILL PRINT. Hiding duplication is what left RPT.5 open.
+    check("P5b ...but are reported, with the count and the boxes",
+          "WIPED_BY_RESTART" in out5 and "pair(s)" in out5,
+          [l for l in out5.splitlines() if "WIPED" in l][:1])
+
     print()
     if FAILED:
         print(f"RED — {len(FAILED)} failed: {', '.join(FAILED)}")
         return 1
-    print("GREEN — 5 checks")
+    print("GREEN — 7 checks")
     return 0
 
 

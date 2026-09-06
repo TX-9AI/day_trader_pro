@@ -1,5 +1,23 @@
 #!/usr/bin/env python3
-# day_trader_pro/tools/plan_dupe_probe.py — v1.1
+# day_trader_pro/tools/plan_dupe_probe.py — v1.2
+# v1.2 (2026-09-05) — dtp r297. A BULK RESTART WIPE IS NOT AN OVERLAP, AND THE
+#   ARITHMETIC SAYS SO. First v1.1 run over 09-01..09-04: 262 plans, 41 series,
+#   ZERO never closed, and **all 31 overlaps were `WIPED_BY_RESTART` on
+#   2026-09-01** — the session the operator had already stopped and hotfixed by
+#   hand. Their spans ran 18,000-20,700s, five to six HOURS, because a wipe
+#   stamps `closed_ts` on every live plan at the moment of the restart: plans
+#   opened at 10:16, 10:23, 10:48 and 10:50 all take the same late close time
+#   and therefore all overlap each other. **Five wiped plans produce ten
+#   pairs.** That is arithmetic, not a double-write.
+#   🔑 SO THE VERDICT IS SEPARATED, NOT SUPPRESSED. Wipe-closed pairs still
+#   print, under their own heading and with the count, because r199's whole
+#   lesson is that hiding duplication is what left this question open for
+#   weeks. They just do not set the exit code.
+#   ⚠️ AND THE ANSWER TO RPT.5 IS IN THIS FILE'S HISTORY: outside the wipes
+#   there are NO overlapping live plans. r212's supersession works,
+#   `close_unfilled` leaves nothing open, and CRM's two rows at 259.38 were two
+#   genuine intents.
+# v1.1 (2026-09-05) — dtp r296.
 # v1.1 (2026-09-05) — dtp r296. 🔴 v1.0 CLUSTERED ON THE WRONG KEY AND REPORTED
 #   THE TRADE LOG AS A DEFECT. It grouped on (symbol, strategy, trigger_price),
 #   assuming a trigger price identifies an EVENT. It does not — **it is a
@@ -121,13 +139,23 @@ def main(argv=None) -> int:
     for r in rows:
         by_strat[(r["symbol"], r["strategy"])].append(r)
 
-    overlaps, live_at_end = [], 0
+    # 🔴 A WIPE CLOSES EVERY LIVE PLAN AT ONE INSTANT, so wiped plans overlap
+    # each other by construction. Kept and counted, never silently dropped.
+    def _wiped(r):
+        # ⚠️ INDEXED, NOT `.get()` — `cache.query` returns `sqlite3.Row`, which
+        # has no `.get`. `fit_readiness` documents this exact hazard and I hit
+        # it anyway.
+        return "WIPED_BY_RESTART" in (r["terminal_reason"] or "")
+
+    overlaps, wiped_pairs, live_at_end = [], [], 0
     for (sym, strat), rs in sorted(by_strat.items()):
         rs.sort(key=lambda r: r["created_ts"] or 0)
         for i, later in enumerate(rs):
             for earlier in rs[:i]:
                 c0 = earlier["closed_ts"]
-                if c0 is None:
+                if _wiped(earlier) or _wiped(later):
+                    wiped_pairs.append((sym, strat, earlier, later))
+                elif c0 is None:
                     # ⚠️ NEVER CLOSED AT ALL. r212's `close_unfilled` exists so
                     # this cannot happen; a plan still live when the next one
                     # opens is the leak it was written to stop.
@@ -139,6 +167,12 @@ def main(argv=None) -> int:
 
     print(f"  {len(by_strat):,} (symbol, strategy) series; "
           f"{len(rows):,} plans; {live_at_end:,} never closed")
+    if wiped_pairs:
+        boxes = sorted({p[0] for p in wiped_pairs})
+        print(f"  ▪ {len(wiped_pairs)} pair(s) involve WIPED_BY_RESTART "
+              f"({', '.join(boxes)}) — a bulk wipe closes every live plan at "
+              f"one instant, so those overlap each other by construction. "
+              f"Reported, not counted.")
     if not overlaps:
         print("  ✅ no overlapping live plans — every intent closed before the "
               "next of its strategy opened")
