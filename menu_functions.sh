@@ -1,4 +1,17 @@
-# day_trader_pro/menu_functions.sh — v1.57
+# day_trader_pro/menu_functions.sh — v1.58
+# v1.58 (2026-09-06) — dtp r307 / DEV.8. 🔴 THE DISK-ALERT TEST SENT NOTHING AND
+#   SAID IT SUCCEEDED. Telegram credentials reach the bot through systemd's
+#   `EnvironmentFile=.../options-trader/.env`; `config` reads them from
+#   `os.environ` and loads no dotenv, so a bare `venv/bin/python -c` over SSH
+#   has NO token — and `TelegramSender.send()` returns False SILENTLY. The test
+#   printed the message, exited 0, reported "1/1 succeeded", and delivered
+#   nothing.
+#   🔑 THE LIVE GUARD WAS NEVER AFFECTED: it runs inside `candle-feed`, a
+#   systemd unit with the same EnvironmentFile, so the token is present. Only
+#   the harness lacked the environment — which is worse than it sounds, because
+#   a drill that cannot fail proves nothing.
+#   ⚠️ The item now sources `.env` (sourcing is not printing, so §18a holds) and
+#   PRINTS `CONFIGURED=` and `DELIVERED=` so a false return is visible.
 # v1.57 (2026-09-06) — dtp r306 / DEV.6+DEV.7. TWO NEW ITEMS, BOTH BELOW LAND (still 42).
 #   · `Largest files on / (WAL ranks in place)` — `Disk usage` above reports
 #     `du -xsh /*`, TOP-LEVEL DIRECTORIES, so a 400MB file inside /home is one
@@ -908,7 +921,19 @@ mi_disk_alert_test() {
         read -rp "  Which box (ENTER = QQQ): " B; B="${B:-QQQ}"
         # ⚠️ `; true` — a non-zero exit DISCARDS a fleet command's stdout, and
         # the whole point here is to SEE the message.
-        $PY fleet.py run "cd $INSTALL_DIR && venv/bin/python -c \"from data.disk_watch import test_message as t; from notifications.telegram_sender import TelegramSender as S; m=t(); print(m); S().send(m)\" 2>&1 | tail -8; true" --only "$B"
+        # 🔴 r307 — THE ENVIRONMENT MUST BE SOURCED FIRST, AND THE FIRST CUT
+        # DID NOT. Telegram credentials reach the bot through systemd's
+        # `EnvironmentFile=/home/ubuntu/options-trader/.env` — `config` reads
+        # them straight from `os.environ` and loads no dotenv itself. A bare
+        # `venv/bin/python -c` over SSH therefore has NO token, and
+        # `TelegramSender.send()` RETURNS FALSE SILENTLY: the 2026-09-06 test
+        # printed the message, exited 0, reported "1/1 succeeded" and delivered
+        # NOTHING. Sourcing is not printing, so §18a is satisfied.
+        # ⚠️ AND THE RESULT IS NOW REPORTED. `send()` returning False was
+        # invisible; the drill has to prove DELIVERY, not that a process
+        # exited — a drill that cannot fail proves nothing, which is exactly
+        # what happened.
+        $PY fleet.py run "set -a; . $INSTALL_DIR/.env; set +a; cd $INSTALL_DIR && venv/bin/python -c \"from data.disk_watch import test_message as t; from notifications.telegram_sender import TelegramSender as S; from config import telegram_configured as C; m=t(); print(m); print('CONFIGURED=' + str(C())); print('DELIVERED=' + str(S().send(m)))\" 2>&1 | tail -10; true" --only "$B"
     else
         echo "  Not sent. The message would read:"
         echo
