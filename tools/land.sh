@@ -1,5 +1,15 @@
 #!/usr/bin/env bash
-# day_trader_pro/tools/land.sh — v1.6
+# day_trader_pro/tools/land.sh — v1.7
+# v1.7 (2026-09-06) — dtp r309 / LAND.5. A PROGRESS BAR OVER THE SLOW STRETCH.
+#   Operator: "this part always takes a long time — can we add a clever progress
+#   bar?" 🔑 IT COUNTS REAL STAGES RATHER THAN ESTIMATING TIME: the CHECK count
+#   is read from the spec before anything slow runs, plus a fixed tail. A
+#   timer-based bar would be inventing a number, and this repo has spent a day
+#   removing things that report confidence they do not have.
+#   ⚠️ IT NAMES THE STAGE — a bar says it is alive, the label says WHICH check
+#   is slow, which is the part worth knowing on a phone.
+#   ⚠️ NOT A TTY -> SILENT, or the escape codes land in a log; and the line is
+#   cleared before every durable line so nothing printed is overwritten.
 # v1.6 (2026-09-05) — dtp r298 / LAND.4. 🔴 `DEL` RAN AFTER THE MAPS WERE
 #   REGENERATED, SO EVERY DELETION SHIPPED A STALE FILE_MAP. v1.4 put the
 #   removal in the staging block, which sits BELOW `gen_file_map.py`. Landing
@@ -242,6 +252,39 @@ die() {
   FAILED=1
 }
 
+
+# ── PROGRESS BAR (v1.7) ──────────────────────────────────────────────────────
+# 🔑 IT COUNTS REAL STAGES, IT DOES NOT ESTIMATE TIME. Operator: "this part
+# always takes a long time — can we add a clever progress bar?" The honest
+# version is a COUNT, because the stage list is known before the run starts:
+# every CHECK named in the spec, plus a fixed tail. A timer-based bar would be
+# inventing a number, and this repo has spent a day removing things that report
+# confidence they do not have.
+# ⚠️ IT NAMES THE STAGE. A bar alone says it is alive; the label says WHICH
+# check is slow, which is the part worth knowing on a phone.
+# ⚠️ NOT A TTY -> SILENT. Under a pipe the escape codes would land in a log, and
+# a bar that corrupts a transcript is worse than no bar. The line is cleared
+# before every durable line, so nothing printed is ever overwritten.
+_PB_TOTAL=0
+_PB_DONE=0
+
+pb_init() { _PB_TOTAL="${1:-0}"; _PB_DONE=0; }
+
+pb_step() {
+  _PB_DONE=$((_PB_DONE+1))
+  [ -t 1 ] || return 0
+  [ "$_PB_TOTAL" -gt 0 ] || return 0
+  local pct=$(( _PB_DONE * 100 / _PB_TOTAL ))
+  [ "$pct" -gt 100 ] && pct=100
+  local fill=$(( pct * 24 / 100 )) bar="" i=0
+  while [ "$i" -lt "$fill" ]; do bar="${bar}="; i=$((i+1)); done
+  [ "$fill" -lt 24 ] && bar="${bar}>"
+  while [ ${#bar} -lt 24 ]; do bar="${bar}."; done
+  printf '\r  [%s] %3d%%  %-26.26s' "$bar" "$pct" "${1:-}"
+}
+
+pb_clear() { [ -t 1 ] && printf '\r%*s\r' 58 ''; return 0; }
+
 land_one() {
   local half="$1" d="$STAGE/$half" spec="$STAGE/$half/land.spec"
   echo
@@ -309,6 +352,15 @@ land_one() {
   fi
   echo "  content gate: pass"
 
+  # ⚠️ SIZED FROM THE SPEC, BEFORE ANYTHING SLOW RUNS. The CHECK count is known
+  # here; the tail is fixed (maps, GENESIS, staging, commit).
+  # ⚠️ `|| true`, NOT `|| echo 0`. `grep -c` PRINTS 0 AND EXITS 1 on no match,
+  # so `|| echo 0` appended a SECOND zero and the arithmetic died — taking the
+  # docs-only path with it. The same grep-counts-are-not-exit-codes trap the
+  # fleet commands have, in a new costume.
+  _nc=$(grep -c '^CHECK ' "$spec" 2>/dev/null || true); _nc=${_nc:-0}
+  pb_init $(( _nc + 4 ))
+
   # ── THE CHECKS: EXECUTED, NOT GREPPED (v1.1) ────────────────────────────
   # WA §0.6 — "the land gate RUNS the thing and requires its output, not its
   # presence." §21 says the same one level up: a test that reads source text
@@ -327,9 +379,12 @@ land_one() {
     # because it looks like a flaky test rather than a leak.
     # The general rule: a CHECK is arbitrary code and gets a clean slate of
     # everything that names this delivery.
+    pb_step "$(basename "$chk")"
     if ( cd "$repo" && env -u LAND_ARCHIVE -u LAND_STAGE python3 "$chk" ) >/dev/null 2>&1; then
+      pb_clear
       echo "  check: $chk PASS"
     else
+      pb_clear
       echo "  🔴 CHECK FAILED: $chk"
       echo "     re-run it yourself:  cd $repo && python3 $chk"
       die "A DECLARED CHECK DID NOT PASS"; return 1
@@ -377,10 +432,12 @@ land_one() {
 
   if [ -f "$repo/tests/gen_file_map.py" ]; then
     python3 tests/gen_file_map.py >/dev/null 2>&1 || { die "FILE MAP regeneration failed"; return 1; }
+    pb_step "file map"; pb_clear
     echo "  file map: regenerated"
   fi
   if [ -f "$repo/tests/gen_write_map.py" ]; then
     python3 tests/gen_write_map.py >/dev/null 2>&1 || { die "WRITE MAP regeneration failed"; return 1; }
+    pb_step "write map"; pb_clear
     echo "  write map: regenerated"
   fi
 
@@ -388,6 +445,7 @@ land_one() {
   #    commit it describes (§35). One string becomes both.
   if [ -f "$repo/docs/GENESIS.md" ]; then
     printf '| **%s** | %s |\n' "$rev" "$desc" >> "$repo/docs/GENESIS.md"
+    pb_step "GENESIS"; pb_clear
     echo "  GENESIS: appended"
   fi
 
@@ -420,6 +478,7 @@ land_one() {
   for gen in docs/FILE_MAP.md docs/WRITE_MAP.md docs/GENESIS.md; do
     [ -f "$repo/$gen" ] && git add -- "$gen"
   done
+  pb_step "staging"; pb_clear
   echo "  staged $staged payload file(s) by name"
   git commit -q -m "$rev: $desc" || { die "COMMIT FAILED"; return 1; }
   # v1.2 — COMMITTED, NOT PUSHED. Phase 2 pushes, and only if every half got

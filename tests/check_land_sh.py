@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/check_land_sh.py — v1.6
+# day_trader_pro/tests/check_land_sh.py — v1.7
+# v1.7 (2026-09-06) — dtp r309 / LAND.5. B1 pins the progress bar's ONE
+#   dangerous property: under a pipe it must emit NOTHING. Every land in this
+#   project is read through `deploy.sh`'s output, and a bar that wrote escape
+#   codes into that would corrupt the transcript the operator reads.
 # v1.6 (2026-09-05) — dtp r298 / LAND.4. 🔴 THE FIXTURE HAD NO PRE-COMMIT HOOK,
 #   SO IT COULD NOT SEE THE DEFECT IT WAS SUPPOSED TO GUARD. `_world` builds a
 #   fresh `git init` repo; the real one carries a hook that re-runs
@@ -7,6 +11,7 @@
 #   regenerated, so a deletion shipped a stale FILE_MAP — invisible here,
 #   refused on the real repo. G1 installs the hook and G2 drives a DEL through
 #   it. A fixture simpler than production passes for the wrong reason.
+
 # v1.5 (2026-09-05) — dtp r293 / LAND.3. R1 RUNS THE RECOVERY THE ROLLBACK
 #   PRINTS, on the ROLLED-BACK repo. `reset --soft` leaves the payload staged,
 #   and `git checkout -- .` copies the INDEX back into the tree — so the old
@@ -660,6 +665,22 @@ def main():
               r.returncode == 0, f"rc={r.returncode} {r.stdout[-90:]!r}")
         check("G2 ...and the generated artifact does not name the deleted file",
               "MARKER" not in open(os.path.join(repo, "generated_map.txt")).read())
+
+    # ══ 🔴 P1 — THE BAR IS SILENT WHEN STDOUT IS NOT A TTY ═══════════════
+    # Every land is read through a pipe. A bar that wrote `\r` and padding into
+    # that would corrupt the very output the operator uses to judge the land —
+    # worse than having no bar at all.
+    with tempfile.TemporaryDirectory() as tmp:
+        home, repo, stage = _world(tmp, GOOD, extra=PASS_CHK)
+        r = _land(home, stage)
+        out = r.stdout + r.stderr
+        check("B1 a piped land emits no carriage returns", "\r" not in out,
+              repr(out[:40]))
+        check("B1b ...and no bar characters leak into the transcript",
+              "[====" not in out and "....]" not in out)
+        # ⚠️ AND THE LAND STILL SUCCEEDS — the bar must be decoration only.
+        check("B1c ...and the land itself is unaffected", r.returncode == 0,
+              f"rc={r.returncode}")
 
     print()
     if _fails:
