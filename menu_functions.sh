@@ -1,4 +1,9 @@
-# day_trader_pro/menu_functions.sh — v1.61
+# day_trader_pro/menu_functions.sh — v1.62
+# v1.62 (2026-09-07) - dtp r315 / S3.22. THE PROMPTS NO LONGER NAME THE EPOCH
+#   DATE. Three menu strings hardcoded 2026-08-25 and would have gone stale the
+#   moment the epoch moved to 09-01 - a prompt that names a constant is a second
+#   place the constant lives (C.30). They now say "the engine epoch"; the tools
+#   themselves print the actual date, which is the only copy that can be right.
 # v1.61 (2026-09-07) - dtp r313 / RPT.16. `_r_tool` asks START then END, the
 #   way `P&L from WAREHOUSE` does, and ENTER means DAY ONE ONWARD, not today.
 #   The single `A..B` field diverged from every other dated report and the
@@ -178,7 +183,7 @@
 # ── v1.41 (2026-08-29) — ITEM 56 IS WAREHOUSE-SOURCED AND EPOCH-FLOORED ──
 # (r187 / dtp r228, backlog S3.5). The old prompt offered "Since date (ENTER =
 # all)", and "all" pooled July's v3 records with v4's in one table. trade_report
-# v1.9 floors at the 2026-08-25 engine epoch by default and prints what it
+# v1.9 floors at the engine epoch by default and prints what it
 # excluded; the prompt now offers DAY ONE, a custom date, or ALL HISTORY as an
 # explicit choice, and says which is which. Source is reports/warehouse.
 # day_trader_pro/menu_functions.sh — v1.40
@@ -512,7 +517,7 @@ mi_trades_taken() {
 mi_trade_breakdown_cross_day() {
     echo
     echo "  Cross-day breakdown from the S3-sourced bundles in reports/warehouse."
-    echo "  Default window is DAY ONE (2026-08-25) — anything earlier is the OLD"
+    echo "  Default window is the ENGINE EPOCH — anything earlier is an OLD"
     echo "  engines and pooling it mixes two systems in one table."
     echo "    ENTER  = day one onward (the honest default)"
     echo "    a date = from that date (flagged if it predates day one)"
@@ -1143,10 +1148,10 @@ _r_tool() {  # $1 = tool filename under otv4 tests/
     # produced an S3 prefix that cannot exist, and the SOURCE banner called it
     # "a real, empty result". One field that must hold two values is a field
     # that will eventually hold two values.
-    # ⚠️ ENTER = DAY ONE ONWARD (the 2026-08-25 engine epoch), not today and
+    # ⚠️ ENTER = THE ENGINE EPOCH ONWARD, not today and
     # not literally all time. `all` is the explicit override and reaches back
     # through the v3 engines, exactly as the trade breakdown does.
-    echo "    ENTER  = day one (2026-08-25) onward"
+    echo "    ENTER  = the engine epoch onward"
     echo "    a date = single session, or START of a range"
     echo "    all    = every session ever, v3 records included"
     read -rp "  Date (YYYY-MM-DD, ENTER = day one onward, or 'all'): " d

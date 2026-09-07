@@ -1,4 +1,8 @@
-# day_trader_pro/trade_report.py — v1.17
+# day_trader_pro/trade_report.py — v1.18
+# v1.18 (2026-09-07) — dtp r315 / S3.22. ENGINE_EPOCH 2026-08-25 -> 2026-09-01,
+#   epoch 3, after r314 stripped every pre-09-01 trade object. The floor and
+#   the bucket now agree; leaving it would default to a window whose first six
+#   sessions no longer exist.
 # v1.17 (2026-09-07) — dtp r312 / FEE.7. The inlined fee bridge moves to
 #   `fees_bridge.py` so report 46 shares it rather than copying it. No
 #   behaviour change; `bucket_fees` is imported instead of defined.
@@ -275,7 +279,18 @@ WAREHOUSE_DIR = os.path.join(REPORTS_DIR, "warehouse")
 # we do." Overridable by env for a deliberate archaeology run, but the DEFAULT
 # must be the honest one — a contaminated pool is the one mistake this report
 # has already been used to make.
-ENGINE_EPOCH = os.environ.get("DTP_ENGINE_EPOCH", "2026-08-25")
+# 🔴 EPOCH 3 — 2026-09-01 (dtp r315). The 08-25 floor was epoch 2, the v4
+# engines' day one. Operator, 2026-09-07, after r314 stripped every pre-09-01
+# trade object from the warehouse: *"I'd like to make 09/01 the start of the
+# 3rd epoch for our all time trades report."* The reason is r208 and its
+# neighbours — the butterfly's searched wing, the removal of relaxation from
+# that strategy, the ORB one-order latch — all of which landed 09-01, so rows
+# before it were taken by code that no longer exists.
+# ⚠️ THE FLOOR AND THE BUCKET NOW AGREE. Leaving this at 08-25 after the strip
+# would default every unqualified run to a window whose first six sessions are
+# gone, which reads as six quiet days rather than as a filter meeting an empty
+# prefix — the exact confusion r297 fixed one layer down.
+ENGINE_EPOCH = os.environ.get("DTP_ENGINE_EPOCH", "2026-09-01")
 
 try:
     from zoneinfo import ZoneInfo
