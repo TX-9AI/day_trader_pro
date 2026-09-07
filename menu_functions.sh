@@ -1,4 +1,12 @@
-# day_trader_pro/menu_functions.sh — v1.60
+# day_trader_pro/menu_functions.sh — v1.61
+# v1.61 (2026-09-07) - dtp r313 / RPT.16. `_r_tool` asks START then END, the
+#   way `P&L from WAREHOUSE` does, and ENTER means DAY ONE ONWARD, not today.
+#   The single `A..B` field diverged from every other dated report and the
+#   operator typed a SPACE-separated pair into it: that reached `--date`
+#   verbatim and the SOURCE banner called the empty result real.
+#   SHARED BY THREE ITEMS - stop_sweep, r_ledger, exit_replay. Neither of the
+#   other two declared `--all-history`, so otv4 r297 adds it to both; without
+#   that, this prompt would have broken two working items.
 # v1.60 (2026-09-06) — dtp r310 / DEV.10. The blind-alert drill function goes
 #   with its menu item: the script it shelled does not exist in otv4, and the
 #   alert it rehearsed has already fired for real.
@@ -1129,10 +1137,27 @@ _r_tool() {  # $1 = tool filename under otv4 tests/
         echo "  🔴 $TOOL missing — set DTP_OTV4_DIR (path fault, not an empty day)"
         pause; return
     fi
-    read -rp "  Date (YYYY-MM-DD, blank = today) or range (A..B): " d
+    # r313 — TWO PROMPTS, MATCHING `P&L from WAREHOUSE`. The single `A..B`
+    # field diverged from every other dated report here, and the operator
+    # typed a SPACE-separated pair into it: that went to `--date` verbatim,
+    # produced an S3 prefix that cannot exist, and the SOURCE banner called it
+    # "a real, empty result". One field that must hold two values is a field
+    # that will eventually hold two values.
+    # ⚠️ ENTER = DAY ONE ONWARD (the 2026-08-25 engine epoch), not today and
+    # not literally all time. `all` is the explicit override and reaches back
+    # through the v3 engines, exactly as the trade breakdown does.
+    echo "    ENTER  = day one (2026-08-25) onward"
+    echo "    a date = single session, or START of a range"
+    echo "    all    = every session ever, v3 records included"
+    read -rp "  Date (YYYY-MM-DD, ENTER = day one onward, or 'all'): " d
+    local d2=""
+    if [ -n "$d" ] && [ "$d" != "all" ] && [ "$d" != "ALL" ]; then
+        read -rp "  END of range (ENTER = single day): " d2
+    fi
     local ARGS=()
-    if [[ "$d" == *..* ]]; then ARGS=(--from "${d%%..*}" --to "${d##*..}");
-    elif [ -n "$d" ]; then ARGS=(--date "$d"); fi
+    if [ "$d" = "all" ] || [ "$d" = "ALL" ]; then ARGS=(--all-history)
+    elif [ -n "$d" ] && [ -n "$d2" ];             then ARGS=(--from "$d" --to "$d2")
+    elif [ -n "$d" ];                             then ARGS=(--date "$d"); fi
     "$PY" "$TOOL" "${ARGS[@]}"
     pause
 }
