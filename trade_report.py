@@ -1,4 +1,7 @@
-# day_trader_pro/trade_report.py — v1.16
+# day_trader_pro/trade_report.py — v1.17
+# v1.17 (2026-09-07) — dtp r312 / FEE.7. The inlined fee bridge moves to
+#   `fees_bridge.py` so report 46 shares it rather than copying it. No
+#   behaviour change; `bucket_fees` is imported instead of defined.
 # v1.16 (2026-09-07) — dtp r311 / FEE.6. THE `<- thin` MARKER IS REPLACED BY A
 #   FEES COLUMN, in every dimension table at once because `show()` is the one
 #   renderer for all seven. Operator: *"the thin remark is useless. No shit
@@ -466,35 +469,12 @@ def bucket(trades: List[dict], key: str) -> Dict[str, dict]:
     return {k: stats_of(v) for k, v in agg.items()}
 
 
-# ── r294 — THE FEE MODEL, BRIDGED FROM otv4 ────────────────────────────────
-# `fees.py` lives in otv4/tests (control-only, WA §34) and this report lives
-# here, so the import crosses repos exactly the way `_r_tool` already resolves
-# the R suite: `DTP_OTV4_DIR`, defaulting to ~/options-trader-v4.
-# 🔴 IT FAILS LOUD, NOT QUIET. If the model cannot be imported the FEES column
-# renders "n/a" on every row and the report says so ONCE at the top. It must
-# never render 0.00, because a fee total of zero and a fee model that is not
-# there are different facts and the second one silently flatters the book —
-# the plausible-silence class this suite is built against.
-_OTV4 = os.environ.get("DTP_OTV4_DIR", os.path.expanduser("~/options-trader-v4"))
-if os.path.join(_OTV4, "tests") not in sys.path:
-    sys.path.insert(0, os.path.join(_OTV4, "tests"))
-try:
-    import fees as _fees
-    FEES_ERR = None
-except Exception as _e:                                          # noqa: BLE001
-    _fees = None
-    FEES_ERR = f"{type(_e).__name__}: {_e}"
-
-
-def bucket_fees(rows: List[dict]):
-    """-> (total_fees_usd, n_unpriced) or (None, len(rows)) if unavailable.
-
-    ⚠️ None IS NOT ZERO and callers must render it as such.
-    """
-    if _fees is None:
-        return None, len(rows)
-    roll = _fees.total_fees_usd(rows)
-    return roll["total_fees"], roll["unpriced"]
+# ── r311/r312 — THE FEE MODEL, VIA THE ONE BRIDGE ──────────────────────────
+# The path resolution and the None-safe wrapper were inlined here at r311 and
+# moved to `fees_bridge` at r312 when report 46 needed the identical two
+# things. One owner; a second copy of a path resolution is how two callers
+# come to disagree about where a module lives.
+from fees_bridge import bucket_fees, FEES_ERR                    # noqa: E402,F401
 
 
 def stats_of(rows: List[dict]) -> dict:

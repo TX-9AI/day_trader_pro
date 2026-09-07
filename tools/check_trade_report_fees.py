@@ -1,6 +1,16 @@
 #!/usr/bin/env python3
 """
-tools/check_trade_report_fees.py  v1.0
+tools/check_trade_report_fees.py  v1.1
+v1.1  2026-09-07  dtp r312 / FEE.7 — T3 RETARGETED AT THE BRIDGE. r312 moved
+the fee import out of `trade_report` and into `fees_bridge`, and this check
+disabled the model by setting `tr._fees = None`. That attribute no longer
+exists, so T3 died on AttributeError — the check correctly noticing a real
+change rather than silently passing over it. `bucket_fees` reads its OWN
+module global at call time, so `fees_bridge._fees` is the only target that
+actually disables the model; patching the importer would have set a name
+nothing reads and T3 would have gone GREEN against a live model, proving
+nothing. That is the shape worth recording: a patch target that moves with a
+refactor turns a real assertion into a decorative one.
 v1.0  2026-09-07  dtp r311 / FEE.6 — the land gate for the fees column.
 
 Pins the four properties that make this change safe to look at and unsafe to
@@ -11,6 +21,7 @@ from __future__ import annotations
 import io, contextlib, os, sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import trade_report as tr                                        # noqa: E402
+import fees_bridge                                               # noqa: E402
 
 F: list = []
 def check(n, ok, d=""):
@@ -57,9 +68,14 @@ def main() -> int:
     # T3 — ABSENCE IS NEVER ZERO. With the model unavailable the column must
     # read n/a, never 0.00. Driven by removing the module, not by asserting a
     # branch exists.
-    saved = tr._fees
+    # ⚠️ PATCH THE BRIDGE, NOT THE REPORT. r312 moved the import to
+    # `fees_bridge`, and `bucket_fees` reads that module's global at CALL
+    # time — so this is the only target that actually disables the model.
+    # The first cut patched `tr._fees` and died on AttributeError the moment
+    # the bridge moved, which is the check correctly noticing a real change.
+    saved = fees_bridge._fees
     try:
-        tr._fees = None
+        fees_bridge._fees = None
         d2 = tr.bucket(_rows(4), "strategy")
         out2 = render(d2)
         # ⚠️ ASSERT ON THE FEE FIELD, NOT THE WHOLE LINE. A first cut checked
@@ -74,7 +90,7 @@ def main() -> int:
         check("T3b and the unpriced count is the WHOLE bucket, not zero",
               st2["fees_unpriced"] == 4, f"{st2['fees_unpriced']} of 4")
     finally:
-        tr._fees = saved
+        fees_bridge._fees = saved
 
     # T4 — fees are NEGATIVE and NET $ is untouched (still gross).
     st = tr.stats_of(_rows(4))

@@ -1,6 +1,21 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/pnl_s3.py  v1.1
+day_trader_pro/pnl_s3.py  v1.2
+v1.2  2026-09-07 - dtp r312 / FEE.7 - GROSS, FEES, NET AFTER FEES, side by side.
+      Operator: *"I want the fees next to the gross, then a column that shows
+      the net after that, keep the number of trades and w/l that are already a
+      part of this report."*
+      ⚠️ THE `net` KEY IS STILL THE GROSS SUM and is deliberately not renamed.
+      Every banked report, every prior screenshot and the Telegram history all
+      carry that number under that word; redefining it in place would make the
+      series discontinuous at exactly the revision that added the column. The
+      new figure is `net_after` and it is labelled as such.
+      🔴 FEES ARE ACCUMULATED PER TRADE, NOT RE-DERIVED FROM A TOTAL, so a row
+      the model cannot price is counted as unpriced rather than as zero-fee -
+      and `unpriced` prints whenever it is non-zero. A fee column that hides
+      how many rows it could not price understates itself silently.
+      ⚠️ TELEGRAM SAFE: the added lines carry no `<`, `>` or `&`. r290 cost a
+      day to a single less-than character in an HTML-parse-mode message.
 v1.1  2026-09-05 — dtp r287 / TZ.1 — the naive `today` here asked a UTC box and rolled at 20:00 ET (19:00 in winter), so a report run after that silently asked for
       TOMORROW and came back empty. It now goes through `ettime`, the one ET/UTC boundary.
 
@@ -49,6 +64,7 @@ from datetime import date as _date, datetime, timedelta
 import config                                                   # noqa: E402
 import warehouse_reader as wr                                   # noqa: E402
 import ettime                                            # noqa: E402
+from fees_bridge import trade_fee, FEES_ERR                      # noqa: E402
 
 try:
     import notify
@@ -62,6 +78,19 @@ def _money(v) -> str:
     except (TypeError, ValueError):
         return "—"
     return f"{'-' if v < 0 else '+'}${abs(v):,.2f}"
+
+
+def _fee(x) -> str:
+    """Fees as a NEGATIVE deduction, or n/a when no row could be priced."""
+    if FEES_ERR or (x["unpriced"] and not x["fees"]):
+        return "n/a"
+    return _money(-x["fees"])
+
+
+def _net_after(x) -> str:
+    if FEES_ERR or (x["unpriced"] and not x["fees"]):
+        return "n/a"
+    return _money(x["net"] - x["fees"])
 
 
 def _dates(a) -> list:
@@ -90,17 +119,20 @@ def collect(dates: list) -> tuple:
     """Return (per_day, per_symbol, totals). Reads S3 only."""
     s3 = wr._client()
     per_day, per_sym = {}, {}
-    tot = {"closed": 0, "open": 0, "net": 0.0, "wins": 0, "losses": 0}
+    tot = {"closed": 0, "open": 0, "net": 0.0, "wins": 0, "losses": 0,
+           "fees": 0.0, "unpriced": 0}
 
     for d in dates:
         objs = wr.read_prefix(s3, "trades", d)
         # ⚠️ DEDUPE FIRST, ALWAYS. See the header.
         trades = wr.latest_per_trade(objs)
-        day = {"closed": 0, "open": 0, "net": 0.0, "wins": 0, "losses": 0}
+        day = {"closed": 0, "open": 0, "net": 0.0, "wins": 0, "losses": 0,
+               "fees": 0.0, "unpriced": 0}
         for t in trades:
             sym = t.get("symbol") or t.get("_sym") or "?"
             st = (t.get("status") or "").lower()
-            s = per_sym.setdefault(sym, {"closed": 0, "open": 0, "net": 0.0})
+            s = per_sym.setdefault(sym, {"closed": 0, "open": 0, "net": 0.0,
+                                        "fees": 0.0, "unpriced": 0})
             if st == "open":
                 day["open"] += 1
                 s["open"] += 1
@@ -116,8 +148,19 @@ def collect(dates: list) -> tuple:
             day["wins" if p > 0 else "losses"] += 1
             s["closed"] += 1
             s["net"] += p
+            # ⚠️ PER TRADE, and None is counted as UNPRICED rather than as a
+            # zero fee. Summing a None into a running total is the exact
+            # coercion the model refuses to make on the way out.
+            _f = trade_fee(t)
+            if _f is None:
+                day["unpriced"] += 1
+                s["unpriced"] += 1
+            else:
+                day["fees"] += _f
+                s["fees"] += _f
         per_day[d] = day
-        for k in ("closed", "open", "net", "wins", "losses"):
+        for k in ("closed", "open", "net", "wins", "losses",
+                  "fees", "unpriced"):
             tot[k] += day[k]
     return per_day, per_sym, tot
 
@@ -128,6 +171,9 @@ def render(dates, per_day, per_sym, tot) -> str:
 
     if len(dates) > 1:
         L.append("*By day*")
+        # ⚠️ HEADER WIDTHS MIRROR THE ROW FORMAT EXACTLY. The first cut eyeballed
+        # them and sat 4 characters left of the column it labelled.
+        L.append(f"`{'':<10} {'GROSS':>11} {'FEES':>11} {'NET':>11}`")
         for d in dates:
             x = per_day[d]
             if not x["closed"] and not x["open"]:
@@ -135,23 +181,34 @@ def render(dates, per_day, per_sym, tot) -> str:
                 # missing session hides.
                 L.append(f"`{d}`  —  no trades in the warehouse")
                 continue
-            L.append(f"`{d}`  {_money(x['net']):>11}  "
+            L.append(f"`{d} {_money(x['net']):>11} {_fee(x):>11} "
+                     f"{_net_after(x):>11}`  "
                      f"({x['closed']}t, {x['wins']}W/{x['losses']}L)")
         L.append("")
 
     if per_sym:
         L.append("*By symbol*")
+        L.append(f"`{'':<5}{'GROSS':>11} {'FEES':>11} {'NET':>11}`")
         for sym in sorted(per_sym, key=lambda s: per_sym[s]["net"], reverse=True):
             x = per_sym[sym]
             if not x["closed"]:
                 continue
-            L.append(f"`{sym:<5}` {_money(x['net']):>11}  ({x['closed']}t)")
+            L.append(f"`{sym:<5}{_money(x['net']):>11} {_fee(x):>11} "
+                     f"{_net_after(x):>11}`  ({x['closed']}t)")
         L.append("")
 
     wr_pct = (100.0 * tot["wins"] / tot["closed"]) if tot["closed"] else 0.0
     L.append("──────────────")
-    L.append(f"*Net: {_money(tot['net'])}*   {tot['closed']} closed  "
+    L.append(f"*Gross: {_money(tot['net'])}*   {tot['closed']} closed  "
              f"({tot['wins']}W/{tot['losses']}L, {wr_pct:.0f}%)")
+    L.append(f"*Fees:  {_fee(tot)}*   *Net after fees: {_net_after(tot)}*")
+    if tot["unpriced"]:
+        # ⚠️ ALWAYS SAID WHEN NON-ZERO. A fee total that hides its unpriced
+        # count understates itself and looks precise doing it.
+        L.append(f"_{tot['unpriced']} trade(s) the fee model could not "
+                 f"price - excluded from Fees_")
+    if FEES_ERR:
+        L.append(f"_fee model unavailable: {FEES_ERR}_")
     if tot["open"]:
         # ⚠️ COUNTED, NEVER ADDED. Realised and unrealised are different units.
         L.append(f"_{tot['open']} still open — not included in Net_")
