@@ -1,4 +1,11 @@
-# day_trader_pro/orchestrator.py — v0.5.0
+# day_trader_pro/orchestrator.py — v0.6.0
+# v0.6.0 (2026-09-07) — dtp r319 / DEP.12. The morning brief carries a HALF DAY
+#   banner ABOVE the wake/strength list. 🔴 IT WARNS AND CHANGES NOTHING: every
+#   exit time is still keyed to a 16:00 bell — VERTICAL_HOLD_TO_ET 15:45, the
+#   15:40 flatten ladder, the butterfly's 15:45 hard close — so on a 13:00 day
+#   they fire after it. The banner says so in its own text; DEP.12 stays open.
+#   ⚠️ Telegram-safe: no angle brackets, no ampersand (r290 cost a day to one
+#   "<", and the failure is the WHOLE message failing to parse).
 # v0.5.0 (2026-09-05) — dtp r287 / TZ.1 — the naive `today` here asked a UTC box and rolled at 20:00 ET
 #   (19:00 in winter), so anything run after that silently asked for TOMORROW and came
 #   back empty. It now goes through `ettime`, the one ET/UTC boundary.
@@ -427,6 +434,22 @@ def _format_ack(wake_list, baseline, resolved, missing, reached, dry_run, sel):
     lines = [f"*day_trader_pro — morning wake (2 baseline + {len(disc)} discretionary)*"]
     if dry_run:
         lines.append("_(dry run — nothing was actually started)_")
+    # ── HALF-DAY BANNER (r319 / DEP.12) ────────────────────────────────────
+    # Operator, 2026-09-07: a banner in the market brief ABOVE the symbols
+    # strength list. It sits here, before the wake list, so it is the first
+    # thing under the title rather than something scrolled past.
+    # 🔴 IT WARNS; IT CHANGES NOTHING. Every exit time in the fleet is still
+    # keyed to a 16:00 close - VERTICAL_HOLD_TO_ET 15:45, the 15:40 flatten
+    # ladder, the butterfly's 15:45 hard close - so on a 13:00 day they all
+    # fire after the bell. That is DEP.12 and it is UNFIXED. This line exists
+    # so the operator knows before the open, not so the code copes.
+    # ⚠️ TELEGRAM-SAFE: no angle brackets and no ampersand. r290 cost a day to
+    # a single "<" in a sent message, and the failure is the whole message
+    # failing to parse rather than one character rendering oddly.
+    if market_calendar.is_half_day():
+        lines.append("⚠️ *HALF DAY — the market closes 13:00 ET.*")
+        lines.append("_Exit times are still set for a 16:00 close; "
+                     "they will fire after the bell._")
     lines.append(f"*{verb} {len(resolved)} server(s):*")
 
     ranked = sel.get("ranked", [])

@@ -1,4 +1,10 @@
-# day_trader_pro/market_calendar.py — v0.4.0
+# day_trader_pro/market_calendar.py — v0.5.0
+# v0.5.0 (2026-09-07) — dtp r319 / DEP.12. EARLY_CLOSES + is_half_day(), for the
+#   morning brief banner ONLY. 🔑 INFORMATIONAL — gates nothing, and a half day
+#   is still a trading day. Nothing in the fleet shortens its session; DEP.12
+#   stays open. A wrong date here costs a spurious Telegram line, not a missed
+#   session, which is why it ships best-effort rules rather than the same bar as
+#   HOLIDAYS_US.
 # v0.4.0 (2026-09-07) — dtp r318 / DEP.13. THE HORIZON GOES TO 2050, in lockstep
 #   with otv4 r310. 250 closures. 2035 was an arbitrary ten-year prior; the list
 #   is GENERATED and the oracle verifies every date, so extending costs bytes.
@@ -331,6 +337,110 @@ HOLIDAYS_US = {
 AD_HOC_CLOSURES: set = set()
 
 HOLIDAYS_US |= AD_HOC_CLOSURES
+
+# ── EARLY CLOSES (13:00 ET) ─────────────────────────────────────────────────
+# 🔑 THESE ARE INFORMATIONAL AND GATE NOTHING. `is_trading_day` returns True for
+# every one of them, because they ARE trading days. Nothing in the fleet
+# shortens its session on a half day — that is DEP.12 and it is unfixed. All
+# this set does is let the morning brief say so out loud.
+# ⚠️ WHICH IS WHY THE FAIL-SAFE MATH IS DIFFERENT HERE. A wrong date in
+# HOLIDAYS_US means the fleet sits out a real session; a wrong date HERE means
+# a spurious banner on a Telegram message. So this ships best-effort rules and
+# is corrected from observation, rather than being held to the same bar.
+# Rules used: the day after Thanksgiving, always; July 3 when July 4 falls
+# Tue-Fri; December 24 when it falls Mon-Thu and is not itself the observed
+# Christmas close. ⚠️ THE JULY AND DECEMBER RULES ARE THE SHAKY ONES — the
+# exchange has not always been consistent about the Friday-before cases, and I
+# have not verified them against a published NYSE calendar beyond the next few
+# years. Treat a banner as a prompt to check, not as an authority.
+EARLY_CLOSES = {
+    # 2026
+    date(2026, 11, 27),       # day after Thanksgiving
+    date(2026, 12, 24),       # Christmas Eve
+    # 2027
+    date(2027, 11, 26),       # day after Thanksgiving
+    # 2028
+    date(2028, 7, 3),         # July 3
+    date(2028, 11, 24),       # day after Thanksgiving
+    # 2029
+    date(2029, 7, 3),         # July 3
+    date(2029, 11, 23),       # day after Thanksgiving
+    date(2029, 12, 24),       # Christmas Eve
+    # 2030
+    date(2030, 7, 3),         # July 3
+    date(2030, 11, 29),       # day after Thanksgiving
+    date(2030, 12, 24),       # Christmas Eve
+    # 2031
+    date(2031, 7, 3),         # July 3
+    date(2031, 11, 28),       # day after Thanksgiving
+    date(2031, 12, 24),       # Christmas Eve
+    # 2032
+    date(2032, 11, 26),       # day after Thanksgiving
+    # 2033
+    date(2033, 11, 25),       # day after Thanksgiving
+    # 2034
+    date(2034, 7, 3),         # July 3
+    date(2034, 11, 24),       # day after Thanksgiving
+    # 2035
+    date(2035, 7, 3),         # July 3
+    date(2035, 11, 23),       # day after Thanksgiving
+    date(2035, 12, 24),       # Christmas Eve
+    # 2036
+    date(2036, 7, 3),         # July 3
+    date(2036, 11, 28),       # day after Thanksgiving
+    date(2036, 12, 24),       # Christmas Eve
+    # 2037
+    date(2037, 11, 27),       # day after Thanksgiving
+    date(2037, 12, 24),       # Christmas Eve
+    # 2038
+    date(2038, 11, 26),       # day after Thanksgiving
+    # 2039
+    date(2039, 11, 25),       # day after Thanksgiving
+    # 2040
+    date(2040, 7, 3),         # July 3
+    date(2040, 11, 23),       # day after Thanksgiving
+    date(2040, 12, 24),       # Christmas Eve
+    # 2041
+    date(2041, 7, 3),         # July 3
+    date(2041, 11, 29),       # day after Thanksgiving
+    date(2041, 12, 24),       # Christmas Eve
+    # 2042
+    date(2042, 7, 3),         # July 3
+    date(2042, 11, 28),       # day after Thanksgiving
+    date(2042, 12, 24),       # Christmas Eve
+    # 2043
+    date(2043, 11, 27),       # day after Thanksgiving
+    date(2043, 12, 24),       # Christmas Eve
+    # 2044
+    date(2044, 11, 25),       # day after Thanksgiving
+    # 2045
+    date(2045, 7, 3),         # July 3
+    date(2045, 11, 24),       # day after Thanksgiving
+    # 2046
+    date(2046, 7, 3),         # July 3
+    date(2046, 11, 23),       # day after Thanksgiving
+    date(2046, 12, 24),       # Christmas Eve
+    # 2047
+    date(2047, 7, 3),         # July 3
+    date(2047, 11, 29),       # day after Thanksgiving
+    date(2047, 12, 24),       # Christmas Eve
+    # 2048
+    date(2048, 11, 27),       # day after Thanksgiving
+    date(2048, 12, 24),       # Christmas Eve
+    # 2049
+    date(2049, 11, 26),       # day after Thanksgiving
+    # 2050
+    date(2050, 11, 25),       # day after Thanksgiving
+}
+
+
+def is_half_day(dd=None) -> bool:
+    """True if the market holds a SHORTENED session (13:00 ET close).
+
+    ⚠️ A half day is a TRADING day. This never makes `is_trading_day` False.
+    """
+    dd = dd or date.fromisoformat(ettime.today_et())
+    return dd in EARLY_CLOSES and is_trading_day(dd)
 
 def _via_library(d):
     try:
