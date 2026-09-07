@@ -1,5 +1,17 @@
 #!/usr/bin/env bash
-# day_trader_pro/tools/land.sh — v1.7
+# day_trader_pro/tools/land.sh — v1.8
+# v1.8 (2026-09-07) — dtp r316 / LAND.7. `BASE <sha>` — THE ARCHIVE DECLARES
+#   WHAT IT THINKS HEAD IS, AND A MISMATCH IS REFUSED BEFORE ANYTHING IS
+#   EXTRACTED. `tar` overwrites and git never merges a payload, so an archive
+#   built against an old clone silently reverts every file it carries — a
+#   near-miss three times now (r209, and twice on 2026-09-07). NOTHING refused
+#   it: the content gate greps strings a stale file still has, the discipline
+#   gate asserts a file agrees with ITSELF, and the maps regenerate after the
+#   extract. Every gate was self-consistent and every gate passed.
+#   🔑 It does NOT enumerate clobber types — it never looks at the files — so
+#   it also catches the case a version-monotonic check cannot: a stale copy of
+#   a file with no version header.
+#   ⚠️ Compared AFTER the pull; a missing BASE is REFUSED, not skipped.
 # v1.7 (2026-09-06) — dtp r309 / LAND.5. A PROGRESS BAR OVER THE SLOW STRETCH.
 #   Operator: "this part always takes a long time — can we add a clever progress
 #   bar?" 🔑 IT COUNTS REAL STAGES RATHER THAN ESTIMATING TIME: the CHECK count
@@ -177,6 +189,7 @@
 #
 # Spec format (one directive per line, `|` separates fields):
 #   REPO   <marker-file> <marker-file>     files that identify the target repo
+#   BASE   <sha>                            commit the payload was built against (v1.8)
 #   REV    r207                             revision id, for GENESIS + the gate
 #   DESC   <one line>                       GENESIS row AND commit subject
 #   DEL    <path>                            REMOVED from the repo (v1.4)
@@ -325,6 +338,46 @@ land_one() {
 
   # ── pull FIRST so the extract lands on true HEAD (§15) ──────────────────
   git pull --ff-only || { die "PULL FAILED — nothing extracted."; return 1; }
+
+  # ── BASE (v1.8) — THE ARCHIVE DECLARES WHAT IT THINKS HEAD IS ───────────
+  # 🔴 THE PROBLEM IT SOLVES, AND WHY THE ENUMERATED CHECKS DID NOT.
+  # `tar` OVERWRITES; git never merges a payload. So an archive built against
+  # an old clone silently reverts every file it carries. That has already been
+  # a near-miss three times: GENESIS r209 records `docs/BACKLOG.md` about to
+  # revert r207 and r208, and it was caught twice more on 2026-09-07 by a
+  # human noticing a version number.
+  # ⚠️ NOTHING IN THE PIPELINE REFUSED IT. The content gate greps for strings
+  # the stale file still contains; `check_land_discipline` asserts a file's
+  # title matches its own newest changelog entry, which a stale file does; and
+  # the maps are regenerated AFTER extraction, so they document whatever
+  # landed. Every gate was self-consistent and every gate passed.
+  # 🔑 SO THIS DOES NOT ENUMERATE CLOBBER TYPES. The operator's framing, and it
+  # is the better one: the package declares the commit it was BUILT AGAINST,
+  # and the lander refuses if the repo has moved. It catches a stale clone, a
+  # replayed archive, two archives cut in parallel, and — the case a
+  # version-monotonic check cannot see — a stale copy of a file that carries
+  # no version header at all. It never looks at the files.
+  # ⚠️ COMPARED AFTER THE PULL, DELIBERATELY. Against a pre-pull HEAD a stale
+  # archive would pass whenever the checkout happened to be behind too, which
+  # is exactly the situation this exists for.
+  # ⚠️ A MISSING `BASE` IS REFUSED, NOT SKIPPED. An absent line meaning "no
+  # check" leaves every archive that forgets it silently unprotected — the
+  # §36 docstring-check shape, where the gate only proved somebody wrote the
+  # right words. Operator, 2026-09-07: *"I could care less if we have to
+  # generate a new number to issue a correction."* Re-cut; do not warn.
+  local base_declared head_now
+  base_declared="$(grep -m1 '^BASE ' "$spec" | awk '{print $2}')"
+  head_now="$(git rev-parse HEAD 2>/dev/null)"
+  if [ -z "$base_declared" ]; then
+    die "$half declares no BASE. Every half must state the commit it was built against — re-cut it. (Nothing was extracted.)"
+    return 1
+  fi
+  # Short or full sha, either way: compare on the declared length.
+  if [ "${head_now:0:${#base_declared}}" != "$base_declared" ]; then
+    die "STALE ARCHIVE — $half was built against $base_declared but $repo is now at ${head_now:0:${#base_declared}}. This payload would OVERWRITE work landed since. Re-cut from a fresh clone. (Nothing was extracted.)"
+    return 1
+  fi
+  echo "  base: $base_declared — matches HEAD"
 
   # ── copy the payload in, spec excluded by name ──────────────────────────
   ( cd "$d" && find . -type f ! -name land.spec -print0 \
