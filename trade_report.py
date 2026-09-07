@@ -1,4 +1,21 @@
-# day_trader_pro/trade_report.py — v1.15
+# day_trader_pro/trade_report.py — v1.16
+# v1.16 (2026-09-07) — dtp r311 / FEE.6. THE `<- thin` MARKER IS REPLACED BY A
+#   FEES COLUMN, in every dimension table at once because `show()` is the one
+#   renderer for all seven. Operator: *"the thin remark is useless. No shit
+#   it's thin — it's a week of trades."* At this sample nearly every bucket
+#   tripped it, so it marked the ORDINARY case and trained the eye past a
+#   column that then said nothing.
+#   🔑 THE MARKER GOES, THE THRESHOLD STAYS. `min_n` still gates `rank()` and
+#   `exit_concentration`; this removes a DISPLAY artifact, not a guard, and
+#   conflating those is how a gate vanishes inside a cosmetic edit.
+#   ⚠️ `NET $` STAYS GROSS DELIBERATELY. It is the number every banked report
+#   and every prior screenshot carries; changing its meaning under the same
+#   header would make this delivery's own before/after incomparable. Fees
+#   render NEGATIVE so the arithmetic is visible without a second column.
+#   🔴 FAILS LOUD: if `fees.py` cannot be imported the column reads `n/a` on
+#   every row and the header says so once — never 0.00, because "no fees" and
+#   "no fee model" are different facts and the second flatters the book.
+#   ⚠️ A trailing `*` marks a bucket holding rows the model could not price.
 # v1.15 (2026-09-05) — dtp r287 / TZ.1 — the naive `today` here asked a UTC box and rolled at 20:00 ET (19:00 in winter), so a report run after that silently asked for TOMORROW and came back empty. It now goes through `ettime`, the one ET/UTC boundary.
 # v1.14  2026-09-04 — dtp r269. MODIFIED R — ON THE STOP THAT ACTUALLY ENDED
 #       THE TRADE. Operator, 2026-09-04: *"as a trader I am aware that a $1,000
@@ -449,6 +466,37 @@ def bucket(trades: List[dict], key: str) -> Dict[str, dict]:
     return {k: stats_of(v) for k, v in agg.items()}
 
 
+# ── r294 — THE FEE MODEL, BRIDGED FROM otv4 ────────────────────────────────
+# `fees.py` lives in otv4/tests (control-only, WA §34) and this report lives
+# here, so the import crosses repos exactly the way `_r_tool` already resolves
+# the R suite: `DTP_OTV4_DIR`, defaulting to ~/options-trader-v4.
+# 🔴 IT FAILS LOUD, NOT QUIET. If the model cannot be imported the FEES column
+# renders "n/a" on every row and the report says so ONCE at the top. It must
+# never render 0.00, because a fee total of zero and a fee model that is not
+# there are different facts and the second one silently flatters the book —
+# the plausible-silence class this suite is built against.
+_OTV4 = os.environ.get("DTP_OTV4_DIR", os.path.expanduser("~/options-trader-v4"))
+if os.path.join(_OTV4, "tests") not in sys.path:
+    sys.path.insert(0, os.path.join(_OTV4, "tests"))
+try:
+    import fees as _fees
+    FEES_ERR = None
+except Exception as _e:                                          # noqa: BLE001
+    _fees = None
+    FEES_ERR = f"{type(_e).__name__}: {_e}"
+
+
+def bucket_fees(rows: List[dict]):
+    """-> (total_fees_usd, n_unpriced) or (None, len(rows)) if unavailable.
+
+    ⚠️ None IS NOT ZERO and callers must render it as such.
+    """
+    if _fees is None:
+        return None, len(rows)
+    roll = _fees.total_fees_usd(rows)
+    return roll["total_fees"], roll["unpriced"]
+
+
 def stats_of(rows: List[dict]) -> dict:
     pnls = [_f(r.get("pnl_usd")) for r in rows]
     pnls = [p for p in pnls if p is not None]
@@ -469,6 +517,10 @@ def stats_of(rows: List[dict]) -> dict:
         "gross_win": round(sum(wins), 2),
         "gross_loss": round(sum(p for p in pnls if p <= 0), 2),
         "median_hold_min": round(statistics.median(holds), 1) if holds else None,
+        # r294 — the modelled round-trip cost of THIS bucket, and how many of
+        # its rows the model could not price. Both travel together; a total
+        # that hides its unpriced count understates itself.
+        **dict(zip(("fees", "fees_unpriced"), bucket_fees(rows))),
     }
 
 
@@ -592,12 +644,32 @@ def show(title: str, d: Dict[str, dict], min_n: int, width: int = 26) -> None:
     if not d:
         return
     print(f"\n{title}")
-    print(f"  {'':<{width}}{'N':>5}{'WIN%':>7}{'NET $':>11}{'AVG $':>9}{'HOLD m':>7}")
+    print(f"  {'':<{width}}{'N':>5}{'WIN%':>7}{'NET $':>11}{'AVG $':>9}"
+          f"{'HOLD m':>7}{'FEES $':>10}")
     for k, a in sorted(d.items(), key=lambda kv: -kv[1]["net"]):
         h = f"{a['median_hold_min']:>7.1f}" if a["median_hold_min"] is not None else "      -"
-        flag = "  <- thin" if a["n"] < min_n else ""
+        # 🔴 r294 — THE `<- thin` MARKER IS GONE AND THE FEES COLUMN TAKES ITS
+        # PLACE. Operator, 2026-09-07: *"the thin remark is useless. No shit
+        # it's thin — it's a week of trades."* He is right: at this sample size
+        # nearly every bucket trips it, so it marked the ordinary case and
+        # trained the eye to skip a column that then said nothing.
+        # ⚠️ THE MARKER GOES, THE THRESHOLD STAYS. `min_n` still gates `rank()`
+        # (best/worst refuse to name a bucket too thin to rank) and
+        # `exit_concentration`. Deleting the flag deletes a DISPLAY artifact,
+        # not a guard — those are different edits and conflating them is how a
+        # gate disappears inside a cosmetic change.
+        f = a.get("fees")
+        if f is None:
+            fee_s = f"{'n/a':>10}"
+        else:
+            # NEGATIVE, because it is a deduction. NET $ stays GROSS on
+            # purpose: it is the number every prior screenshot and every
+            # banked report carries, and changing its meaning under the same
+            # header would make this delivery's before/after incomparable.
+            fee_s = f"{-f:>10.2f}"
+        star = "*" if a.get("fees_unpriced") else " "
         print(f"  {k[:width]:<{width}}{a['n']:>5}{a['win_rate']:>7.0%}"
-              f"{a['net']:>11.2f}{a['avg']:>9.2f}{h}{flag}")
+              f"{a['net']:>11.2f}{a['avg']:>9.2f}{h}{fee_s}{star}")
 
 
 # ── r202 — THE TRADES THEMSELVES ──────────────────────────────────────────
