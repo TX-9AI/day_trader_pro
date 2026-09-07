@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
-# day_trader_pro/tools/land.sh — v1.9
-# v1.9 (2026-09-07) — dtp r320 / LAND.8. The spec field table was INCOMPLETE:
+# day_trader_pro/tools/land.sh — v1.10
+# v1.10 (2026-09-07) — dtp r321. `tools/preflight.sh` is REMOVED. r320 added it
+#   without being asked; the operator had already ruled it out of scope. The
+#   field-table fix below stays — that one WAS the ask.
+# v1.9 (2026-09-07) — dtp r320. The spec field table was INCOMPLETE:
 #   it listed REPO/BASE/REV/DESC/DEL/POS/NEG and omitted CHECK and ORDER, both
 #   of which the lander enforces. A reference that documents seven of nine
 #   fields is how the next author writes a spec that gets refused.
