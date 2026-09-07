@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
-# day_trader_pro/tools/land.sh — v1.8
+# day_trader_pro/tools/land.sh — v1.9
+# v1.9 (2026-09-07) — dtp r320 / LAND.8. The spec field table was INCOMPLETE:
+#   it listed REPO/BASE/REV/DESC/DEL/POS/NEG and omitted CHECK and ORDER, both
+#   of which the lander enforces. A reference that documents seven of nine
+#   fields is how the next author writes a spec that gets refused.
 # v1.8 (2026-09-07) — dtp r316 / LAND.7. `BASE <sha>` — THE ARCHIVE DECLARES
 #   WHAT IT THINKS HEAD IS, AND A MISMATCH IS REFUSED BEFORE ANYTHING IS
 #   EXTRACTED. `tar` overwrites and git never merges a payload, so an archive
@@ -195,6 +199,8 @@
 #   DEL    <path>                            REMOVED from the repo (v1.4)
 #   POS    <path>|<literal string>          must be present after extraction
 #   NEG    <path>|<literal string>          must be ABSENT after extraction
+#   CHECK  <path>                           a SCRIPT PATH, run as `python3 <p>`
+#   ORDER  <n>                              half sequencing within one archive
 #
 # 🔴 v1.3 — POS/NEG ARE FIXED STRINGS (`grep -qF`), NOT PATTERNS. They were
 # `grep -q`, which is a BASIC REGULAR EXPRESSION, and the gate therefore
