@@ -1,4 +1,12 @@
-# day_trader_pro/consolidate_trades.py — v1.4
+# day_trader_pro/consolidate_trades.py — v1.5
+# v1.5 (2026-09-08) — dtp r322 / CND.1 — 🔴 `for r in rrows:` — A LOOP OVER A
+#   NAME THAT WAS NEVER DEFINED. Its producer (`_read_table(... rejections ...)`)
+#   had been removed and the loop tagging its rows was left behind, doing nothing
+#   but raising. ⚠️ AND IT RAISED PAST THE GUARD: the enclosing `except
+#   sqlite3.DatabaseError` does not catch NameError, so `consolidate()` blew up on
+#   the FIRST box carrying trades — every call, not an edge case. `harvest.py`
+#   catches broadly and printed "consolidate_trades failed (non-fatal)", which is
+#   how a total failure read as a warning. Loop deleted; nothing consumed it.
 # v1.4 (2026-09-05) — dtp r287 / TZ.1 — the naive `today` here asked a UTC box and rolled at 20:00 ET (19:00 in winter), so a report run after that silently asked for TOMORROW and came back empty. It now goes through `ettime`, the one ET/UTC boundary.
 # v1.3   (2026-08-03) — DOC ONLY, no behaviour change. Two stale claims in the
 #        docstring, both of the kind that cost real time on 2026-08-03: the
@@ -218,8 +226,6 @@ def consolidate(date=None, write_csv=True):
                 for c in r:
                     col_union.setdefault(c, None)
                 trades.append(r)
-            for r in rrows:
-                r["box"] = sym
             _bc, brows = _read_table(conn, "circuit_breaker_events", date, "event_time")
             for r in brows:
                 r["box"] = sym

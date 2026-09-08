@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/eod_conductor_v2.py — v2.4
+day_trader_pro/eod_conductor_v2.py — v2.5
+v2.5  2026-09-08 — dtp r322 / CND.1 — 🔴 THIS SERVICE HAS FAILED EVERY SESSION SINCE r287, AND THE FLEET STAYED UP. r287 added `import ettime` BUT PASTED IT INTO THE MIDDLE OF A SENTENCE IN THIS DOCSTRING (inside the v2.1 block below), so Python read it as prose, the name was never bound, and `main()` raised NameError at first use — in the SAME SECOND the service started, 436 lines after the "import". A NameError, not an ImportError, so nothing about it looked like a missing module. Discovered 2026-09-08 at 16:35 when the operator noticed 15/15 boxes still reachable half an hour after the 16:05 conductor. ⚠️ EVERY GATE WAS SELF-CONSISTENT AND EVERY GATE PASSED: the file parses, imports, its header is bumped and its changelog agrees. ⚠️ AND THE LOG LOOKED HEALTHY — `logs/eod_conductor.log` is append-only, so its tail showed a full VERIFY/PURGE block from the last night it worked. WHAT WAS LOST on each failed night: the control-side drain, the verify, and the ordered reports. The box-side self-close at 16:45 still ran, so the boxes came down and `warehouse/self_close.py` still purged — the backstop held, which is why nothing else screamed. Gated by tests/check_no_undefined_names.py.
 v2.4  2026-09-05 — dtp r287 / TZ.1 — the naive `today` here asked a UTC box and rolled at 20:00 ET (19:00 in winter), so a report run after that silently asked for TOMORROW and came back empty. It now goes through `ettime`, the one ET/UTC boundary.
 STOP TRADING → FILL THE BUCKET → VERIFY IT LANDED → TAKE THEM DOWN.
 
@@ -46,7 +47,6 @@ v2.2    2026-09-05  RELEASE THE STORES BEFORE RECLAIMING THEM. The purge has
 
 v2.1    2026-08-27  THE RETENTION PURGE IS A CONDUCTOR PHASE. It was called
 from warehouse/self_close.py, which fires at 16:45 — but this conductor stops
-import ettime                                            # noqa: E402
 the boxes by ~16:08, so on any NORMAL night that timer fired into a stopped
 machine and THE PURGE NEVER RAN. It executed only on nights the conductor had
 already failed. Two months of "dry runs" were therefore also two months of no
@@ -136,6 +136,7 @@ import ec2ops                                                   # noqa: E402
 import fleet                                                    # noqa: E402
 import instance_registry                                        # noqa: E402
 import ssh_util                                                 # noqa: E402
+import ettime                                            # noqa: E402
 try:
     import notify                                               # noqa: E402
 except Exception:                                               # noqa: BLE001

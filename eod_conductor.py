@@ -1,4 +1,9 @@
-# day_trader_pro/eod_conductor.py — v1.16.0
+# day_trader_pro/eod_conductor.py — v1.16.1
+# v1.16.1 (2026-09-08) — dtp r322 / CND.1 — `AUTO_LABEL_PY` WAS NEVER ASSIGNED.
+#   The label phase referenced it four times and would have raised NameError.
+#   ⚠️ THIS FILE IS THE ROLLBACK TARGET: `install_eod_v2.sh` seds the unit back
+#   to `eod_conductor.py` when v2 is backed out, so the fallback for a broken v2
+#   was itself broken. Defined from `__file__` like `EXCURSION_PY` beside it.
 # v1.16.0 (2026-08-22) — the six otv3-dependent phases (the nightly replay,
 #   SWALLOW, VWAP, EVM, READINESS) are DELETED with their CLI flags. Each
 #   shelled into a checkout that is not present, took its not-found branch,
@@ -626,6 +631,8 @@ def phase_label(date, dry, warns):
         _log("LABEL", "✅ session labeled")
 
 
+AUTO_LABEL_PY = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                             "auto_label.py")
 EXCURSION_PY = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                             "excursion_report.py")
 

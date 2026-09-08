@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/fit_readiness.py — v1.6
+day_trader_pro/fit_readiness.py — v1.7
+v1.7  2026-09-08 — dtp r322 / CND.1 — THE SAME r287 MISTAKE, IN THE SAME REVISION. `import ettime` sat inside this module's docstring, so `today_et()` at the bottom of `_dates()` raised NameError. Menu item 47 (FIT READINESS) would have died on use; it is run by hand rather than by timer, which is the only reason it was not noticed first. Moved to the import block and verified by execution.
 v1.6  2026-09-05 — dtp r287 / TZ.1 — the naive `today` here asked a UTC box and rolled at 20:00 ET (19:00 in winter), so a report run after that silently asked for TOMORROW and came back empty. It now goes through `ettime`, the one ET/UTC boundary.
 v1.5  2026-09-05 — dtp r286 / S3.11. 🔴 THE SOURCE BANNER DESCRIBED A COLLAPSE
       THAT NEVER TOUCHED THIS REPORT'S DATA. It printed "N after collapse by
@@ -90,7 +91,6 @@ v1.0  2026-08-25  Replaces `fit_report.py`, which is obsolete — see below.
 🔴 WHY THE OLD FIT REPORT CANNOT ANSWER THIS. It bundled a trade breakdown, an
 excursion read and a (long dead) v3 section into one text file, all sourced
 from `trades`. But `trades` is the population that FIRED. **The question "is
-import ettime                                            # noqa: E402
 this setup ready to fit?" is mostly answered by the population that did NOT** —
 and `strategy_note`, `gate_disposition` and `plan_ledger` did not exist when
 that report was written.
@@ -141,6 +141,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 import warehouse_reader as wr    # noqa: E402  (needs HERE on sys.path first)
+import ettime                                            # noqa: E402
 
 # ⚠️ THE BAR IS DELIBERATELY CRUDE AND STATED OUT LOUD. These are not tuned
 # numbers — they are the point at which a human should LOOK, not a verdict.
