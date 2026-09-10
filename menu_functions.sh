@@ -1,4 +1,15 @@
-# day_trader_pro/menu_functions.sh — v1.62
+# day_trader_pro/menu_functions.sh — v1.63
+# v1.63 (2026-09-09) - dtp r325 / S3.24. `mi_fleet_reconcile` - the fan-out for
+#   `warehouse/s3_push.py --reconcile`, which has existed per box since WH.6
+#   with no way to call it across the fleet.
+#   🔴 IT DRY-RUNS FIRST, ALWAYS, and then demands the word RECONCILE typed
+#   out - the mi_s3_sweep idiom, for the same reason: this rewrites what every
+#   box believes about the bucket, and it resets EVERY prefix, so a genuine gap
+#   elsewhere is silently agreed with and its alarm never fires again. Ordinary
+#   drift needs nothing from it - r180's heal fixes that nightly.
+#   ⚠️ WRAPPED IN tmux, the operator's standing rule for any multi-minute
+#   operation: fifteen boxes at a full prefix walk each, run from Termius on a
+#   phone. A missing tmux runs in-session and SAYS SO rather than failing.
 # v1.62 (2026-09-07) - dtp r315 / S3.22. THE PROMPTS NO LONGER NAME THE EPOCH
 #   DATE. Three menu strings hardcoded 2026-08-25 and would have gone stale the
 #   moment the epoch moved to 09-01 - a prompt that names a constant is a second
@@ -582,6 +593,35 @@ mi_live_p_l_standings_read_only() {
 }
 
 # S3 SWEEP — warehouse hygiene (lists first; --apply required)
+mi_fleet_reconcile() {
+    # r325 - AFTER A DELIBERATE DELETION FROM raw/, NOT AS HYGIENE.
+    # The boxes count PUTs; S3 counts keys. An authorised strip or purge makes
+    # the bucket smaller and tells nobody, so --verify reads got=0 and r180's
+    # heal correctly REFUSES (a prefix S3 knows nothing about is the loss
+    # signature). The fleet is then held every night for bookkeeping.
+    echo
+    echo "  Resets every box's S3 prefix counters to what the bucket HOLDS NOW."
+    echo
+    echo "  USE IT AFTER a deliberate deletion from raw/ - an epoch strip, a purge."
+    echo "  DO NOT use it for ordinary drift: --verify already heals that nightly."
+    echo "  ⚠️  It resets EVERY prefix on the box, so a genuine gap anywhere else"
+    echo "      is agreed with and its alarm never fires again."
+    echo
+    SC=$(ask_scope)
+    $PY tools/fleet_reconcile.py --dry-run $SC
+    echo
+    read -rp "  Reconcile these boxes? Type RECONCILE to confirm: " OK
+    [ "$OK" = "RECONCILE" ] || { echo "  cancelled - nothing was touched."; pause; return 0; }
+    if command -v tmux >/dev/null 2>&1; then
+      echo "  Running in tmux session 'recon' - detach Ctrl-b d, reattach: tmux a -t recon"
+      tmux new -As recon "cd '$PWD' && $PY tools/fleet_reconcile.py $SC; echo; echo DONE rc=\$?; read"
+    else
+      echo "  ⚠️  tmux not present - running in THIS session. Do not disconnect."
+      $PY tools/fleet_reconcile.py $SC
+    fi
+    pause
+}
+
 mi_s3_sweep() {
     # r212 — DELETE LIVES ON CONTROL ONLY. The traders write and never delete,
     # so a compromised or buggy box cannot destroy the warehouse.

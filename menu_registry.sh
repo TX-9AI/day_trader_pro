@@ -1,5 +1,17 @@
 #!/usr/bin/env bash
-# day_trader_pro/menu_registry.sh — v1.16
+# day_trader_pro/menu_registry.sh — v1.17
+# v1.17 (2026-09-09) — dtp r325 / S3.24. NEW ITEM `RECONCILE fleet counters to
+#   S3 (after a deliberate deletion)`, in S3 WAREHOUSE directly under S3 SWEEP.
+#   🔑 PLACED BESIDE THE SWEEP ON PURPOSE: those two items are cause and
+#   consequence. Anything that deletes from `raw/` leaves fifteen ledgers
+#   describing a bucket that no longer exists, and the boxes are then HELD
+#   every night — which is what r314's epoch strip did on 2026-09-07 and
+#   nobody noticed until the 09-09 close held all fifteen.
+#   ⚠️ IT CALLS THE EXISTING FLAG. `warehouse/s3_push.py --reconcile` has done
+#   this per box since WH.6; what never existed was a control-side caller, so
+#   `tools/fleet_reconcile.py` is transport and reporting only.
+#   ⚠️ Count 72 -> 73. S3 WAREHOUSE is the LAST section and LAND sits above it,
+#   so **LAND does not move — still 42.**
 # v1.16 (2026-09-06) — dtp r310 / DEV.10. `Blind-alert DRILL` REMOVED. The
 #   script it called, `tests/blind_alert_selftest.py`, DOES NOT EXIST in otv4 —
 #   every box answered "can't open file" and the item still reported 15/15,
@@ -268,6 +280,7 @@ MENU=(
 
   "SECTION|S3 WAREHOUSE (inventory, hygiene, rebuilds and parity)"
   "ITEM|S3 SWEEP — hygiene (dups / culled symbols; lists first)|mi_s3_sweep"
+  "ITEM|RECONCILE fleet counters to S3 (after a deliberate deletion)|mi_fleet_reconcile"
   "ITEM|Warehouse inventory & cost (asks about noncurrent versions)|mi_warehouse_inventory_cost"
   "ITEM|Rebuild a day's bundle FROM S3 -> reports/warehouse/|mi_warehouse_rebuild_bundle"
   "ITEM|Compare S3 vs local (ENTER = every in-coverage date)|mi_warehouse_compare"
