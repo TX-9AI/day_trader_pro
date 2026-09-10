@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/eod_conductor_v2.py — v2.5
+day_trader_pro/eod_conductor_v2.py — v2.6
+v2.6  2026-09-10 — dtp r346 / CND.2 — 🔴 THE PURGE STARVED THE HALT AND EVERY ALERT DOWNSTREAM OF IT. The conductor verified all 15 boxes and stopped the services on the 8 that passed, then sat inside the retention purge (prints 918,192 · greeks_series 484,442 · surface_series 691,626) until systemd's TimeoutStartSec=1800 killed it at 30 minutes — 1.762s of CPU over 30min of wall clock, blocked on deletes and not spinning. `ec2ops.stop` runs AFTER the purge, so THE FLEET STAYED UP ALL NIGHT; the P&L headline and the HELD-boxes alert are further downstream still, so the operator got fifteen STOPPED alerts and then silence. ⚠️ THIS FILE ALREADY CLAIMED IT COULD NOT HAPPEN — *"it never blocks the halt; a purge failure is logged and stepped over"* — which is true of a FAILURE and false of a SLOW RUN. The claim was about exceptions; nothing bounded TIME. 🔑 `PURGE_BUDGET_S` (default 600s, `DTP_PURGE_BUDGET`) caps the phase: boxes past the budget are SKIPPED, NAMED in the log and ALERTED, and the halt proceeds. The operator's 2026-08-27 ordering is untouched — the purge still runs after the drain is confirmed and BEFORE the box goes down; only its right to consume the entire budget is removed. ⚠️ RESUMABLE BY DESIGN: retention_purge returns 4 on a partial pass (r256), so a skipped box is purged tomorrow — a box left RUNNING is recovered by nothing, which is the trade this file already states. Gated by tests/check_purge_budget.py.
 v2.5  2026-09-08 — dtp r322 / CND.1 — 🔴 THIS SERVICE HAS FAILED EVERY SESSION SINCE r287, AND THE FLEET STAYED UP. r287 added `import ettime` BUT PASTED IT INTO THE MIDDLE OF A SENTENCE IN THIS DOCSTRING (inside the v2.1 block below), so Python read it as prose, the name was never bound, and `main()` raised NameError at first use — in the SAME SECOND the service started, 436 lines after the "import". A NameError, not an ImportError, so nothing about it looked like a missing module. Discovered 2026-09-08 at 16:35 when the operator noticed 15/15 boxes still reachable half an hour after the 16:05 conductor. ⚠️ EVERY GATE WAS SELF-CONSISTENT AND EVERY GATE PASSED: the file parses, imports, its header is bumped and its changelog agrees. ⚠️ AND THE LOG LOOKED HEALTHY — `logs/eod_conductor.log` is append-only, so its tail showed a full VERIFY/PURGE block from the last night it worked. WHAT WAS LOST on each failed night: the control-side drain, the verify, and the ordered reports. The box-side self-close at 16:45 still ran, so the boxes came down and `warehouse/self_close.py` still purged — the backstop held, which is why nothing else screamed. Gated by tests/check_no_undefined_names.py.
 v2.4  2026-09-05 — dtp r287 / TZ.1 — the naive `today` here asked a UTC box and rolled at 20:00 ET (19:00 in winter), so a report run after that silently asked for TOMORROW and came back empty. It now goes through `ettime`, the one ET/UTC boundary.
 STOP TRADING → FILL THE BUCKET → VERIFY IT LANDED → TAKE THEM DOWN.
@@ -147,6 +148,7 @@ INSTALL_DIR = getattr(config, "INSTALL_DIR", "~/options-trader")
 # ⚠️ A DRAIN+VERIFY IS MINUTES OF WORK, NOT SECONDS. Generous on purpose: the
 # cost of waiting is a slower close, the cost of timing out is a box held up
 # for a transport failure that looks exactly like a data failure.
+PURGE_BUDGET_S = int(os.environ.get("DTP_PURGE_BUDGET", "600"))
 VERIFY_TIMEOUT_S = int(os.environ.get("DTP_VERIFY_TIMEOUT", "900"))
 
 # ⚠️ ONE LINE PER BOX, PARSED. Not scraped prose — s3_push prints a stable
@@ -388,7 +390,35 @@ def purge_verified(ok: list, dry: bool) -> dict:
     cmd = (f"cd {INSTALL_DIR} && python3 warehouse/retention_purge.py "
            f"--apply > /tmp/retention_purge.out 2>&1; rc=$?; "
            f"tail -12 /tmp/retention_purge.out; echo rc=$rc")
+    # 🔴 r346 — A BUDGET, BECAUSE THE PURGE CAN STARVE THE HALT. This function
+    # already promises it "never blocks the halt — a purge failure is logged
+    # and stepped over", and that is true of a FAILURE and false of a SLOW RUN.
+    # On 2026-09-10 the purge was still deleting (prints 918,192 ·
+    # greeks_series 484,442 · surface_series 691,626) when systemd's
+    # TimeoutStartSec=1800 killed the process at 30 minutes — so `ec2ops.stop`
+    # NEVER RAN, fifteen boxes stayed up all night, and the P&L and HELD
+    # alerts, which sit downstream of this, were never sent. 1.762s of CPU
+    # over 30 minutes of wall clock: blocked on deletes, not spinning.
+    # 🔑 THE OPERATOR'S 08-27 ORDERING IS UNCHANGED — the purge still runs
+    # after the drain is confirmed and BEFORE the box goes down. Only its
+    # right to consume the ENTIRE budget is removed.
+    # ⚠️ RESUMABLE BY DESIGN: `retention_purge` returns 4 on a partial pass
+    # (r256), so a box skipped tonight is purged tomorrow. A box left RUNNING
+    # is recovered by nothing.
+    _deadline = time.monotonic() + PURGE_BUDGET_S
+    _skipped = []
     for sym, ip, _st in fleet.get_fleet(list(ok)):
+        if time.monotonic() >= _deadline:
+            _skipped.append(sym)
+            continue
+        # ⚠️ THE BUDGET GATES WHETHER A BOX STARTS, NEVER HOW LONG IT GETS.
+        # A first cut shortened the per-box timeout to whatever budget
+        # remained; `check_conductor_purge` C8 refused it, correctly — a
+        # 1.7M-row purge takes minutes, so a box handed 30s fails at the
+        # ssh layer while its work continues on the far side, which is
+        # the exact failure C8 exists to prevent. Overshoot is therefore
+        # bounded by ONE box's VERIFY_TIMEOUT_S past the budget, and that
+        # is the right trade: a box that starts, finishes.
         rc, text, err = ssh_util.ssh_run(ip, cmd, timeout=VERIFY_TIMEOUT_S)
         line = (text or err or "").strip().replace("\n", " | ")
         out[sym] = line
@@ -399,6 +429,16 @@ def purge_verified(ok: list, dry: bool) -> dict:
         if "WOULD remove" in line:
             _log("PURGE", f"  ⚠️ {sym}: PURGE RAN DRY — nothing was deleted. "
                           f"The store will keep growing.")
+    if _skipped:
+        # ⚠️ NAMED AND ALERTED, NEVER SILENT. Skipping a purge is a deliberate
+        # trade — disk against a box left running — and the operator has to
+        # know which boxes carry that debt into tomorrow.
+        _log("PURGE", f"⏱️ BUDGET SPENT ({PURGE_BUDGET_S}s) — NOT purged: "
+                      f"{', '.join(_skipped)}. They come down anyway; "
+                      f"retention resumes tomorrow.")
+        _notify(f"⏱️ EOD purge budget spent — not purged: "
+                f"{', '.join(_skipped)}. Boxes still taken down; "
+                f"retention resumes tomorrow.")
     return out
 
 
