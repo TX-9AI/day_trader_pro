@@ -1,4 +1,23 @@
-# day_trader_pro/standings.py — v1.7
+# day_trader_pro/standings.py — v1.8
+# v1.8 (2026-09-10) — dtp r342 / RPT.25. 🔴 `.strip()` ATE A LIVE POSITION, and
+#   r331 put it there. `center_symbol` was appended as the LAST field and is
+#   empty on everything but a butterfly, so that row's line ENDS IN A TAB.
+#   Rows return `ORDER BY 1`, so 'C' sorts before 'O' and the OPEN row is
+#   ALWAYS LAST — `(out or "").strip().splitlines()` removed its trailing tab,
+#   the row parsed as 12 fields, and `if len(f) != 13: continue` discarded it
+#   without a word. Report 45 then printed NO open section at all while NVDA
+#   held a live credit spread with margin against it, and the box's own
+#   dashboard showed it correctly off the SAME row of the SAME database.
+#   🔑 CLOSED ROWS WERE IMMUNE, WHICH IS WHY IT HID: their trailing tab is
+#   protected by the newline after them. Only the final line is exposed, and
+#   only an OPEN row can be final. Before r331 the last field was
+#   `credit_received`, never empty — the bug could not exist.
+#   FIX: `splitlines()` with no `strip()`, blank lines skipped explicitly, and
+#   an unparseable row is COUNTED and shown as `⁉n` on that box's line.
+#   ⚠️ THE SILENT `continue` IS THE REAL DEFECT. A row the report cannot read
+#   is not a row that does not exist; rendering it as an empty book is the
+#   manufactured absence this codebase keeps finding — the shadow guard, the
+#   versioned reader, and now the P&L panel.
 # v1.7 (2026-09-10) — dtp r331 / RPT.23. A `dir` COLUMN: LONG / SHORT / NEUT on
 #   the UNDERLYING, on both the open and closed tables. Operator's request, and
 #   he named the hazard himself: *"sometimes a vertical spread with calls could
@@ -329,9 +348,30 @@ def _query(ip, off, today_et):
         return None, (named[-1] if named else
                       (lines[-1] if lines else "ssh failed"))[:160]
     opens, closed = [], []
-    for line in (out or "").strip().splitlines():
+    dropped = 0
+    # 🔴 r342 — `.strip()` ATE A LIVE POSITION. r331 appended `center_symbol`
+    # as the LAST field; it is empty on everything except a butterfly, so that
+    # row's line ENDS IN A TAB. Rows come back `ORDER BY 1`, so 'C' sorts
+    # before 'O' and the OPEN row is always LAST — `.strip()` on the joined
+    # output removed its trailing tab, the row parsed as 12 fields, and the
+    # `continue` below discarded it WITHOUT A WORD. The panel then printed no
+    # OPEN POSITIONS section at all, which reads as "flat" while NVDA held a
+    # live credit spread with margin against it.
+    # 🔑 CLOSED ROWS WERE IMMUNE and that is why it hid: their trailing tab is
+    # protected by the newline after them. Only the last line is exposed, and
+    # only an OPEN row can be last.
+    # ⚠️ `splitlines()` WITHOUT `strip()`. Blank lines are skipped explicitly;
+    # nothing may trim a field separator that carries meaning.
+    for line in (out or "").splitlines():
+        if not line:
+            continue
         f = line.split("\t")
         if len(f) != 13:
+            # 🔴 A ROW WE CANNOT READ IS NOT A ROW THAT DOES NOT EXIST. The
+            # silent `continue` here is what let the above hide for a whole
+            # session: an unparseable row rendered as an empty book, which is
+            # the same manufactured absence this codebase keeps finding.
+            dropped += 1
             continue
         (tag, ts, sym, strat, ep, mk, n, pnl, credit,
          side, short, cleg, center) = f
@@ -361,6 +401,7 @@ def _query(ip, off, today_et):
         "rows_open": live,
         "rows_ghost": ghosts,
         "rows_closed": closed,
+        "dropped": dropped,
     }, None
 
 
@@ -398,6 +439,7 @@ def _mock_query(sym, today_et):
         "open_today": len(opens),
         "open_stale": len(ghosts),
         "rows_open": opens, "rows_ghost": ghosts, "rows_closed": closed,
+        "dropped": 0,
     }, None
 
 
@@ -458,6 +500,9 @@ def run(send=False):
             continue
         mark = " ●" if data["open_today"] else ""
         mark += " ⚠" if data["open_stale"] else ""
+        # 🔴 r342 — AN UNREADABLE ROW IS NAMED ON THE BOX'S OWN LINE. The
+        # panel used to drop it in silence and print a flat book.
+        mark += f" ⁉{data['dropped']}" if data.get("dropped") else ""
         lines.append(f"`{sym:<5}` {_money(data['net']):>10}  ({data['closed']}t){mark}")
 
     reporting = sum(1 for _, d, _ in rows if d is not None)
