@@ -1,4 +1,23 @@
-# day_trader_pro/standings.py — v1.6
+# day_trader_pro/standings.py — v1.7
+# v1.7 (2026-09-10) — dtp r331 / RPT.23. A `dir` COLUMN: LONG / SHORT / NEUT on
+#   the UNDERLYING, on both the open and closed tables. Operator's request, and
+#   he named the hazard himself: *"sometimes a vertical spread with calls could
+#   be a short position and a vertical spread with puts could be a long
+#   position, so make sure that you don't get those confused."*
+#   🔴 `option_side` ALONE IS WRONG EXACTLY HALF THE TIME. The direction is an
+#   EXCLUSIVE-OR of "is it a call" and "did we take a credit": calls+debit and
+#   puts+credit are LONG; puts+debit and calls+credit are SHORT. Reading either
+#   column on its own inverts two of the four cases.
+#   ⚠️ NEUT IS AN ANSWER, NOT A FALLBACK. A butterfly or a condor leg has no
+#   directional thesis, and forcing it into LONG/SHORT would sit a made-up
+#   direction beside real ones with nothing to tell them apart.
+#   ⚠️ AND A BLANK `option_side` RENDERS `?`. A row we cannot classify is not a
+#   LONG — that is the same manufactured certainty as calling a missing file an
+#   empty one.
+#   ⚠️ The query now carries four more columns per row (option_side,
+#   is_short_position, is_condor_leg, center_symbol) and the parser's field
+#   count moves 9 -> 13. STILL ONE ROUND TRIP PER BOX: a second query would
+#   double fan-out latency and could straddle a fill.
 # v1.6 (2026-09-05) — dtp r287 / TZ.1 — the naive `today` here asked a UTC box and rolled at 20:00 ET (19:00 in winter), so a report run after that silently asked for TOMORROW and came back empty. It now goes through `ettime`, the one ET/UTC boundary.
 # v1.5 (2026-09-02) — dtp r250. 🔴 `exit_price` IS NOT A COLUMN. The trades
 #   table has 82 columns and the exit mark is `exit_premium`; I invented
@@ -145,17 +164,59 @@ def _sql(off: str) -> str:
         "||char(9)||COALESCE(symbol,'')||char(9)||COALESCE(strategy,'')"
         "||char(9)||COALESCE(entry_premium,0)||char(9)||COALESCE(current_premium,0)"
         "||char(9)||COALESCE(contracts,0)||char(9)||''"
-        "||char(9)||COALESCE(credit_received,0) "
+        "||char(9)||COALESCE(credit_received,0)"
+        "||char(9)||COALESCE(option_side,'')"
+        "||char(9)||COALESCE(is_short_position,0)"
+        "||char(9)||COALESCE(is_condor_leg,0)"
+        "||char(9)||COALESCE(center_symbol,'') "
         "FROM trades WHERE status='open' "
         "UNION ALL "
         "SELECT 'C'||char(9)||COALESCE(datetime(exit_time,'" + off + "'),'')"
         "||char(9)||COALESCE(symbol,'')||char(9)||COALESCE(strategy,'')"
         "||char(9)||COALESCE(entry_premium,0)||char(9)||COALESCE(exit_premium,0)"
         "||char(9)||COALESCE(contracts,0)||char(9)||COALESCE(pnl_usd,0)"
-        "||char(9)||COALESCE(credit_received,0) "
+        "||char(9)||COALESCE(credit_received,0)"
+        "||char(9)||COALESCE(option_side,'')"
+        "||char(9)||COALESCE(is_short_position,0)"
+        "||char(9)||COALESCE(is_condor_leg,0)"
+        "||char(9)||COALESCE(center_symbol,'') "
         f"FROM trades WHERE status='closed' AND {closed_today} "
         "ORDER BY 1"
     )
+
+
+def price_bias(option_side, is_short, is_condor_leg=0, center_symbol=""):
+    """LONG / SHORT / NEUT on the UNDERLYING — not long/short the contract.
+
+    🔴 THE WHOLE POINT: `option_side` ALONE IS THE WRONG ANSWER, and the
+    operator named this hazard when asking for the column. A vertical in CALLS
+    can be a bearish position and a vertical in PUTS can be a bullish one —
+    what decides it is whether we PAID or RECEIVED:
+
+        calls, debit  (long call / call debit spread)   -> LONG
+        puts,  debit  (long put  / put debit spread)    -> SHORT
+        calls, CREDIT (short call spread)               -> SHORT
+        puts,  CREDIT (short put spread / cash-secured) -> LONG
+
+    So it is an exclusive-or of "is it a call" and "did we take a credit", and
+    reading either field on its own is wrong exactly half the time. `pnl_usd`
+    cannot substitute — a winner and a loser share a direction.
+
+    ⚠️ NEUT IS NOT A FALLBACK, IT IS AN ANSWER. A butterfly or a condor leg
+    has no directional thesis on the underlying, and forcing it into LONG or
+    SHORT would put a made-up direction next to a real one with nothing to
+    distinguish them.
+    ⚠️ AN UNKNOWN SIDE RENDERS `?`, NEVER A GUESS. A blank `option_side` is a
+    row we cannot classify; printing LONG for it would be the same
+    manufactured certainty as calling a missing file an empty one.
+    """
+    if str(is_condor_leg) not in ("", "0", "0.0") or str(center_symbol or "").strip():
+        return "NEUT"
+    side = str(option_side or "").strip().lower()
+    if side not in ("call", "put"):
+        return "?"
+    credit = str(is_short).strip() not in ("", "0", "0.0")
+    return "LONG" if (side == "call") != credit else "SHORT"
 
 
 def open_pnl(entry_prem, mark, contracts, credit):
@@ -270,11 +331,13 @@ def _query(ip, off, today_et):
     opens, closed = [], []
     for line in (out or "").strip().splitlines():
         f = line.split("\t")
-        if len(f) != 9:
+        if len(f) != 13:
             continue
-        tag, ts, sym, strat, ep, mk, n, pnl, credit = f
+        (tag, ts, sym, strat, ep, mk, n, pnl, credit,
+         side, short, cleg, center) = f
         rec = {"ts": ts, "sym": sym, "strategy": strat, "entry": ep,
-               "mark": mk, "contracts": n, "credit": credit}
+               "mark": mk, "contracts": n, "credit": credit,
+               "bias": price_bias(side, short, cleg, center)}
         if tag == "O":
             # ⚠️ STALE vs LIVE is decided on the ENTRY DATE, exactly as before:
             # an open row from a prior session is a cross-session ghost, not a
@@ -314,12 +377,14 @@ def _mock_query(sym, today_et):
     h = _stable_hash(sym)
     n_closed = h % 4
     closed = [{"ts": f"{today_et} 1{i}:0{i}:00", "sym": sym,
-               "strategy": "ORBStrategy", "entry": "1.20", "mark": "1.05",
+               "strategy": "ORBStrategy", "bias": "LONG",
+               "entry": "1.20", "mark": "1.05",
                "contracts": "4", "credit": "0",
                "pnl": round(((h + i) % 300) - 150.0, 2)}
               for i in range(n_closed)]
     opens = ([{"ts": f"{today_et} 13:05:00", "sym": sym,
-               "strategy": "GEXPinButterfly", "entry": "0.42", "mark": "0.55",
+               "strategy": "GEXPinButterfly", "bias": "NEUT",
+               "entry": "0.42", "mark": "0.55",
                "contracts": "12", "credit": "0", "stale": False,
                "pnl": open_pnl("0.42", "0.55", "12", "0")}]
              if h % 3 == 0 else [])
@@ -427,11 +492,12 @@ def run(send=False):
     if all_open:
         lines.append("")
         lines.append(f"OPEN POSITIONS ({len(all_open)})")
-        lines.append(f"  {'time':<5} {'sym':<5} {'strat':<4} "
+        lines.append(f"  {'time':<5} {'sym':<5} {'strat':<4} {'dir':<6}"
                      f"{'entry':>5} {'now':>5} {'P&L':>9}")
         for r in sorted(all_open, key=lambda x: str(x["ts"])):
             lines.append(f"  {_hhmm(r['ts']):<5} {r['sym'][:5]:<5} "
                          f"{_abbr(r['strategy']):<4} "
+                         f"{r.get('bias', '?'):<6}"
                          f"{float(r['entry'] or 0):>5.2f}"
                          f"→{float(r['mark'] or 0):>5.2f} {_pnl(r['pnl']):>9}")
         _live = [r["pnl"] for r in all_open if r["pnl"] is not None]
@@ -451,11 +517,12 @@ def run(send=False):
     if all_closed:
         lines.append("")
         lines.append(f"CLOSED TODAY ({len(all_closed)})")
-        lines.append(f"  {'time':<5} {'sym':<5} {'strat':<4} "
+        lines.append(f"  {'time':<5} {'sym':<5} {'strat':<4} {'dir':<6}"
                      f"{'entry':>5} {'exit':>5} {'P&L':>9}")
         for r in sorted(all_closed, key=lambda x: str(x["ts"])):
             lines.append(f"  {_hhmm(r['ts']):<5} {r['sym'][:5]:<5} "
                          f"{_abbr(r['strategy']):<4} "
+                         f"{r.get('bias', '?'):<6}"
                          f"{float(r['entry'] or 0):>5.2f}"
                          f"→{float(r['mark'] or 0):>5.2f} "
                          f"{_money(r['pnl']):>9}")
