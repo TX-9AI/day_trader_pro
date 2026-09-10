@@ -1,6 +1,16 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/brief_sigint.py  v1.0
+day_trader_pro/tools/brief_sigint.py  v1.1
+v1.1  2026-09-10  dtp r339 - SPX GETS A ROW. Operator: *"we cannot have our
+      largest net symbol be silent on that brief."* market_brief's _NON_EQUITY
+      never polls it, so the row is DERIVED from the thirteen constituents that
+      ARE scored, using `composite_call` IMPORTED from otv4's brief_bias_join -
+      the same function the study scores against the tape. A local copy would
+      let the board advertise a signal nobody measured, so a failed import
+      OMITS the row and says so rather than computing one here.
+      ⚠️ PRINTED, NOT ENDORSED: labelled DERIVED and UNVALIDATED on every run
+      (n=44 sessions, ~1.4 SE). SPX also comes out of the TRADED BUT NOT SCORED
+      list, since it now has a row of its own kind.
 v1.0  2026-09-10  dtp r337 / BRF.2 — TURN THE BRIEF INTO SOMETHING WORTH
       READING BEFORE ANYTHING IS WIRED DOWNSTREAM OF IT.
 
@@ -84,6 +94,26 @@ except Exception:                                               # noqa: BLE001
 
 DIR_MAP = {"BULLISH": "LONG", "BEARISH": "SHORT", "NEUTRAL": "NEUT"}
 
+OTV4_DIR = os.environ.get("DTP_OTV4_DIR", os.path.expanduser("~/options-trader-v4"))
+
+
+def load_composite():
+    """The ONE weighting rule, imported from the study that measures it.
+
+    🔴 NO LOCAL COPY, AND NO FALLBACK. `brief_bias_join` scores this composite
+    against the tape; if the board weighted its constituents differently the
+    board would be advertising a signal nobody has measured. If the import
+    fails the SPX row is OMITTED and SAID SO — a silent local reimplementation
+    is how the two drift.
+    """
+    if OTV4_DIR not in sys.path:
+        sys.path.insert(0, os.path.join(OTV4_DIR, "tests"))
+    try:
+        from brief_bias_join import composite_call, SPX_PROXY
+        return composite_call, SPX_PROXY
+    except Exception:                                           # noqa: BLE001
+        return None, ()
+
 
 def load_day(day, db=None):
     """[(ticker, LONG|SHORT|NEUT, score, conviction)] for one report date."""
@@ -162,8 +192,36 @@ def board(day, rows, floor=CONVICTION_FLOOR):
         L.append("⚠️ NO CONVICTION ({}): {} — unmeasured, NOT below the floor"
                  .format(len(unk), ", ".join(t for t, _d, _s, _c in unk)))
 
+    # ── SPX: DERIVED, because the brief never calls it ───────────────────
+    # 🔴 OPERATOR'S REQUIREMENT, 2026-09-10: *"we cannot have our largest net
+    # symbol be silent on that brief."* SPX is in market_brief's _NON_EQUITY
+    # and is never polled, so this row is BUILT from the constituents that are
+    # scored — and it is labelled DERIVED and UNVALIDATED every single day.
+    # ⚠️ IT IS PRINTED, NOT ENDORSED. Measured over 44 SPX sessions (r338):
+    # floor-gated LONG 61.3% vs a 52.5% base at n=31, SHORT 77.8% vs 47.5% at
+    # n=9 — about 1 and 1.4 standard errors. Directionally encouraging and
+    # statistically nothing yet. The label carries that, so a reader cannot
+    # mistake this row for the measured ones above it.
+    cc, members = load_composite()
+    L.append("")
+    if cc is None:
+        L.append("⚠️ SPX: composite unavailable — brief_bias_join did not "
+                 "import from")
+        L.append("   {} (set DTP_OTV4_DIR). NO SPX row rather than a "
+                 "locally-computed one.".format(OTV4_DIR))
+    else:
+        call, avg, k = cc(rows, floor, members)
+        if not k:
+            L.append("SPX  DERIVED: no constituent cleared the floor today "
+                     "(0 of {}).".format(len(members)))
+        else:
+            L.append("SPX  {:<5} conv {:+.2f} from {} constituent(s)  "
+                     "— DERIVED".format(call, avg, k))
+        L.append("   ⚠️ UNVALIDATED: equal-weight, n=44 sessions, ~1.4 SE. "
+                 "Not a measured call.")
+
     seen = {t for t, _d, _s, _c in rows}
-    missing = sorted(PANEL - seen) if PANEL else []
+    missing = sorted((PANEL - seen) - {"SPX"}) if PANEL else []
     if missing:
         L.append("")
         L.append("⚠️ TRADED BUT NOT SCORED ({}): {}".format(
