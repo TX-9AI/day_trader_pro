@@ -1,5 +1,20 @@
 #!/usr/bin/env python3
-# day_trader_pro/tools/shadow_watch.py — v1.0
+# day_trader_pro/tools/shadow_watch.py — v1.1
+# v1.1 (2026-09-10) — dtp r329 / SHD.3. 🔴 THE GUARD PAGED ON ITS OWN BUG.
+#   Its remote line built the filename from `$OT_INSTRUMENT`, a systemd
+#   `Environment=` value that does not exist in the non-login shell `_exec`
+#   opens — so it expanded to EMPTY, the path became `.../<date>/.jsonl`, and
+#   every box answered `rows=0 scored=0`. On 2026-09-10 it paged "the fitting
+#   corpus is empty" while all fifteen boxes held ~141 rows written that
+#   morning and the observer logged no warning at all.
+#   🔑 IT MANUFACTURED THE ABSENCE IT REPORTED — the same plausible-silence
+#   class this guard exists to close, arriving inside the guard.
+#   FIX: glob the day's directory instead of naming the file, and report
+#   `file=none` DISTINCTLY from `rows=0` — no file and an empty file are
+#   different faults and the alert now says which.
+#   ⚠️ TELEGRAM IS AN EMERGENCY CHANNEL (§17), so a false page is not a
+#   cosmetic defect: it is the one thing that teaches an operator to ignore
+#   the channel. Five sessions of it would have been worse than silence.
 # v1.0 (2026-09-05) — dtp r299 / SHD.2. IF SHADOW IS NOT SCORING BY 09:40 ET,
 #   SAY SO ONCE. Operator: *"I'm going to assume it runs. If it's ever not
 #   running by 0930, alert me."*
@@ -55,12 +70,30 @@ except Exception:                                           # noqa: BLE001
 # distinction stage 1 could not make. `rows` is there so a dark box can be told
 # apart from a box that wrote nothing at all: those are different faults.
 REMOTE = (
-    'f=$HOME/options-trader/data/shadow/$(TZ=America/New_York date +%F)'
-    '/$OT_INSTRUMENT.jsonl; '
-    'echo "rows=$(wc -l < "$f" 2>/dev/null || echo 0) '
-    'scored=$(grep -c \'"scores": \\[[^]]\' "$f" 2>/dev/null || echo 0)" || true'
+    # 🔴 r329 — THE PATH IS GLOBBED, NOT BUILT FROM `$OT_INSTRUMENT`.
+    # v1.0 interpolated that variable into the filename. It is a systemd
+    # `Environment=` value: it exists for the UNITS and NOT for the non-login
+    # shell `_exec` opens, so it expanded to EMPTY on every box and the path
+    # became `.../<date>/.jsonl` — a file that cannot exist. `wc -l` found
+    # nothing, `grep -c` found nothing, and all fifteen boxes reported
+    # `rows=0 scored=0`. The guard paged "the fitting corpus is empty" on
+    # 2026-09-10 while every box held ~141 rows written that morning.
+    # 🔑 IT MANUFACTURED THE ABSENCE IT REPORTED. Proven, not inferred:
+    # `echo "OT_INSTRUMENT=[$OT_INSTRUMENT]"` over the same fan-out returned
+    # `[]` on all fifteen, and `wc -l` on the real file returned 141-142.
+    # ⚠️ AND THE FAILURE WAS INDISTINGUISHABLE FROM THE ONE IT WATCHES FOR.
+    # A dark box and a broken watcher both say `rows=0 scored=0`; that is the
+    # same plausible-silence class the guard was written to close, arriving
+    # inside the guard itself.
+    r'd=$HOME/options-trader/data/shadow/$(TZ=America/New_York date +%F); '
+    r'f=$(ls $d/*.jsonl 2>/dev/null | head -1); '
+    r'echo "file=$(basename ${f:-none}) '
+    r'rows=$(wc -l < "$f" 2>/dev/null || echo 0) '
+    r'scored=$(grep -c "\"scores\": \[[^]]" "$f" 2>/dev/null || echo 0)"; true'
 )
-_PAT = re.compile(r"rows=(\d+)\s+scored=(\d+)")
+# `file=none` is NOT `rows=0`: no file at all is a different fault from a file
+# with nothing in it, and the alert says which.
+_PAT = re.compile(r"file=(\S+)\s+rows=(\d+)\s+scored=(\d+)")
 
 
 def main(argv=None) -> int:
@@ -112,7 +145,7 @@ def main(argv=None) -> int:
     # is not running is skipped, not paged. An expected condition must never
     # reach the emergency channel (§17).
     running, skipped = fleet._targets(fleet.get_fleet(None), False)
-    dark, silent_boxes, seen = [], [], 0
+    dark, silent_boxes, missing, seen = [], [], [], 0
     for sym, ip, _st in running:
         rc, out, err = fleet._exec(sym, ip, REMOTE)
         m = _PAT.search(out or "")
@@ -123,18 +156,25 @@ def main(argv=None) -> int:
             silent_boxes.append(sym)
             continue
         seen += 1
-        rows, scored = int(m.group(1)), int(m.group(2))
-        if scored == 0:
+        fname, rows, scored = m.group(1), int(m.group(2)), int(m.group(3))
+        if fname == "none":
+            # ⚠️ NO FILE IS ITS OWN FACT. Reporting it as `0 rows` is exactly
+            # the conflation that hid v1.0's own defect for five days.
+            missing.append(sym)
+        elif scored == 0:
             dark.append(f"{sym} ({rows} row(s), 0 scored)")
 
     print(f"shadow_watch {day}: {seen} box(es) answered, {len(dark)} dark, "
-          f"{len(silent_boxes)} no answer, {len(skipped)} not running (skipped)")
-    if not dark and not silent_boxes:
+          f"{len(silent_boxes)} no answer, {len(missing)} no file, "
+          f"{len(skipped)} not running (skipped)")
+    if not dark and not silent_boxes and not missing:
         return 0
 
     lines = ["🕶️ SHADOW NOT SCORING — the fitting corpus is empty."]
     if dark:
         lines.append("dark: " + ", ".join(dark))
+    if missing:
+        lines.append("NO SHADOW FILE AT ALL: " + ", ".join(missing))
     if silent_boxes:
         lines.append("no answer: " + ", ".join(silent_boxes))
     lines.append("stage 2 writes `scores: []` when a scorer throws — same "
