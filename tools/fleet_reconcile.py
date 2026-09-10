@@ -1,6 +1,16 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/fleet_reconcile.py  v1.0
+day_trader_pro/tools/fleet_reconcile.py  v1.1
+v1.1  2026-09-10  dtp r349 / S3.27 - QUIESCE THE PUSH TIMER, THEN PUT IT BACK.
+      `s3-push.timer` fires every five minutes and the conductor RE-ARMS it at
+      the end of every close, so a reconcile launched afterwards races it box
+      by box. Measured 2026-09-10: box after box came back "NO ANSWER -
+      counters NOT proven reset (no output)" because the loser of that race
+      exited 0 in SILENCE (fixed in otv4 r349, where --reconcile now waits for
+      the lock and speaks when it cannot get it). Stopping the timer removes
+      the race rather than surviving it; the restart is in a `finally`, exactly
+      as eod_conductor_v2 does, because a tool that disarms a timer and dies
+      leaves the box with no pusher.
 v1.0  2026-09-09  dtp r325 / S3.24 — RESET THE FLEET'S PREFIX COUNTERS TO THE
       S3 TRUTH, FROM CONTROL, IN ONE PLACE.
 
@@ -121,6 +131,32 @@ def run(only=None, dry=False, runner=None, out=print):
         out("[dry-run] nothing was run and no counter was touched.")
         return [], []
 
+    # 🔴 r349 — QUIESCE THE PUSH TIMER FIRST, THEN PUT IT BACK. `s3-push.timer`
+    # fires every five minutes and the conductor RE-ARMS it at the end of every
+    # close, so a reconcile launched afterwards races it box by box. Before
+    # r349's lock change the loser exited 0 in silence and this tool could only
+    # report "NO ANSWER"; with the lock change it would merely WAIT, which is
+    # correct but slow across fifteen boxes. Stopping the timer removes the
+    # race instead of surviving it.
+    # ⚠️ IT ALWAYS COMES BACK — in a `finally`, exactly as `eod_conductor_v2`
+    # does it. A tool that disarms a timer and dies leaves the box with no
+    # pusher until somebody notices.
+    # ⚠️ STOPPING THE TIMER DOES NOT STOP A PUSH ALREADY IN FLIGHT; the lock
+    # handles that, which is why r349 needed both halves.
+    for sym, ip in boxes:
+        runner(ip, "sudo systemctl stop s3-push.timer 2>/dev/null; echo quiesced",
+               timeout=60)
+    out("quiesced s3-push.timer on {} box(es)".format(len(boxes)))
+    try:
+        return _reconcile_boxes(boxes, runner, out)
+    finally:
+        for sym, ip in boxes:
+            runner(ip, "sudo systemctl start s3-push.timer 2>/dev/null; "
+                       "echo rearmed", timeout=60)
+        out("re-armed s3-push.timer on {} box(es)".format(len(boxes)))
+
+
+def _reconcile_boxes(boxes, runner, out):
     answered, silent = [], []
     for i, (sym, ip) in enumerate(boxes, 1):
         out("")

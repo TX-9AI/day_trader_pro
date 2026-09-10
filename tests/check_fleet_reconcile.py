@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_fleet_reconcile.py  v1.0
+day_trader_pro/tests/check_fleet_reconcile.py  v1.1
+v1.1  2026-09-10  dtp r349 - R7 and R8 for the timer quiesce. The reconcile
+      raced `s3-push.timer` box by box and every loser exited 0 in silence, so
+      the tool could only say NO ANSWER and the fleet went unreconciled for
+      three nights. R7 pins the order - stop, reconcile, start - and R8 pins
+      that the re-arm survives an exception, because a tool that disarms a
+      timer and dies leaves the box with no pusher at all.
 v1.0  2026-09-09  dtp r325 / S3.24 — the land gate for tools/fleet_reconcile.py.
 
 Six checks, EXECUTED rather than grepped (WA §21): the defect class this tool
@@ -13,6 +19,10 @@ interpreter, and neither is visible in source text.
   R4  --dry-run runs NO ssh at all
   R5  a silent box is reported and makes the exit code non-zero
   R6  the tool holds no reconcile logic of its own (no boto3, no bucket LIST)
+  R7  the push timer is STOPPED before the first reconcile and STARTED again
+      after the last — the race that produced "NO ANSWER" on every box
+  R8  the re-arm runs even when a reconcile raises (a tool that disarms a
+      timer and dies leaves the box with no pusher)
 
 ⚠️ A MISSING MODULE IS A NAMED FAILURE, not a traceback. A checker that dies
 with an ImportError looks like a broken environment, which is the one shape
@@ -103,11 +113,46 @@ def main():
               if w in src]
     check("R6", not banned, "found: {}".format(banned) if banned else "none")
 
+    # R7 — order matters: stop, reconcile, start.
+    seq = []
+
+    def trace(ip, cmd, timeout=None):
+        if "stop s3-push.timer" in cmd:
+            seq.append("stop")
+        elif "start s3-push.timer" in cmd:
+            seq.append("start")
+        else:
+            seq.append("recon")
+        return 0, good, ""
+
+    fr.targets = lambda only=None: [("UNH", "10.0.0.1"), ("QQQ", "10.0.0.2")]
+    fr.run(runner=trace, out=lambda *_a, **_k: None)
+    first_recon = seq.index("recon") if "recon" in seq else -1
+    check("R7", seq.count("stop") == 2 and seq.count("start") == 2
+          and first_recon > 0 and seq[:2] == ["stop", "stop"]
+          and seq[-2:] == ["start", "start"],
+          "sequence {}".format(seq))
+
+    # R8 — the re-arm must survive an exception mid-reconcile.
+    def boom(ip, cmd, timeout=None):
+        if "s3-push.timer" in cmd:
+            seq2.append("start" if "start" in cmd else "stop")
+            return 0, "", ""
+        raise RuntimeError("ssh blew up mid-reconcile")
+
+    seq2 = []
+    try:
+        fr.run(runner=boom, out=lambda *_a, **_k: None)
+    except Exception:                                           # noqa: BLE001
+        pass
+    check("R8", seq2.count("start") == 2,
+          "re-armed {} time(s) after a raise".format(seq2.count("start")))
+
     print("")
     if FAILS:
         print("FAILED: {}".format(", ".join(FAILS)))
         return 1
-    print("ALL PASS (6)")
+    print("ALL PASS (8)")
     return 0
 
 
