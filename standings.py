@@ -1,4 +1,17 @@
-# day_trader_pro/standings.py — v1.8
+# day_trader_pro/standings.py — v1.9
+# v1.9 (2026-09-10) — dtp r345 / RPT.27. THE ACCOUNTING GUARD. r342 fixed the
+#   `.strip()` that ate rows; this makes the class of failure impossible to
+#   hide. r331 dropped exactly ONE ROW PER BOX PER RUN for a whole session —
+#   14 trades across 15 boxes, and report 45 read +$1,067.50 when the book was
+#   -$2,413.50 — and NOTHING in the report could notice, because it had no
+#   invariant relating what a box SENT to what the panel DISPLAYED.
+#   🔑 EVERY LINE LANDS IN EXACTLY ONE BUCKET: closed, open, or dropped.
+#   `received` and `accounted` travel with the data and any gap prints as
+#   `⚠UNACCOUNTED n` on that box's own line.
+#   ⚠️ THIS IS THE GENERAL FORM OF FOUR BUGS FOUND IN ONE DAY — the shadow
+#   guard, the versioned reader, the brief study and this panel all turned
+#   "I could not read this" into "there is nothing here". A count in equals a
+#   count out is the cheapest possible refusal of that.
 # v1.8 (2026-09-10) — dtp r342 / RPT.25. 🔴 `.strip()` ATE A LIVE POSITION, and
 #   r331 put it there. `center_symbol` was appended as the LAST field and is
 #   empty on everything but a butterfly, so that row's line ENDS IN A TAB.
@@ -349,6 +362,7 @@ def _query(ip, off, today_et):
                       (lines[-1] if lines else "ssh failed"))[:160]
     opens, closed = [], []
     dropped = 0
+    received = 0
     # 🔴 r342 — `.strip()` ATE A LIVE POSITION. r331 appended `center_symbol`
     # as the LAST field; it is empty on everything except a butterfly, so that
     # row's line ENDS IN A TAB. Rows come back `ORDER BY 1`, so 'C' sorts
@@ -365,6 +379,7 @@ def _query(ip, off, today_et):
     for line in (out or "").splitlines():
         if not line:
             continue
+        received += 1
         f = line.split("\t")
         if len(f) != 13:
             # 🔴 A ROW WE CANNOT READ IS NOT A ROW THAT DOES NOT EXIST. The
@@ -402,6 +417,17 @@ def _query(ip, off, today_et):
         "rows_ghost": ghosts,
         "rows_closed": closed,
         "dropped": dropped,
+        # 🔴 r345 — THE ACCOUNTING GUARD. r331 dropped exactly ONE ROW PER BOX
+        # PER RUN for a whole session — 14 trades hidden across 15 boxes —
+        # and report 45 had no invariant that could notice. Every line the box
+        # sent must land in exactly one bucket: closed, open, or dropped. The
+        # sum is carried out so `run()` can say so on the box's own line, and
+        # `check_standings_parse` asserts it can never silently disagree.
+        # ⚠️ THIS IS THE GENERAL FORM OF FOUR SEPARATE BUGS TODAY — a reader
+        # that turns "I could not parse this" into "there is nothing here".
+        # A count in equals a count out is the cheapest way to refuse that.
+        "received": received,
+        "accounted": len(closed) + len(opens) + dropped,
     }, None
 
 
@@ -440,6 +466,8 @@ def _mock_query(sym, today_et):
         "open_stale": len(ghosts),
         "rows_open": opens, "rows_ghost": ghosts, "rows_closed": closed,
         "dropped": 0,
+        "received": len(closed) + len(opens) + len(ghosts),
+        "accounted": len(closed) + len(opens) + len(ghosts),
     }, None
 
 
@@ -503,6 +531,12 @@ def run(send=False):
         # 🔴 r342 — AN UNREADABLE ROW IS NAMED ON THE BOX'S OWN LINE. The
         # panel used to drop it in silence and print a flat book.
         mark += f" ⁉{data['dropped']}" if data.get("dropped") else ""
+        # r345 — and if the accounting itself does not balance, say THAT: a
+        # line the box sent that reached no bucket at all is a different and
+        # worse fault than one we knew we could not parse.
+        _in, _out = data.get("received"), data.get("accounted")
+        if _in is not None and _out is not None and _in != _out:
+            mark += f" ⚠UNACCOUNTED {_in - _out}"
         lines.append(f"`{sym:<5}` {_money(data['net']):>10}  ({data['closed']}t){mark}")
 
     reporting = sum(1 for _, d, _ in rows if d is not None)

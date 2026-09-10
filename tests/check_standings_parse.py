@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_standings_parse.py  v1.0
+day_trader_pro/tests/check_standings_parse.py  v1.1
+v1.1  2026-09-10  dtp r345 - S6 and S7, the accounting invariant. r342 fixed
+      the strip(); this pins the CLASS. Every line a box sends must land in
+      exactly one bucket - closed, open or dropped - so a reader can never
+      again turn "I could not parse this" into "there is nothing here". r331
+      hid one row per box per run for a whole session and nothing in the
+      report could notice.
 v1.0  2026-09-10  dtp r342 / RPT.25 — the row the panel could not read.
 
 🔴 THE REGRESSION, EXACTLY AS IT HAPPENED. r331 appended `center_symbol` as
@@ -15,6 +21,11 @@ spread with margin against it.
   S2  it is classified LIVE, so the ● marker and the section render
   S3  closed rows are unaffected
   S4  a genuinely malformed row is COUNTED, not silently discarded
+  S6  ACCOUNTING: every line the box sent lands in exactly one bucket —
+      received == closed + open + dropped. r331 hid one row per box per run
+      for a whole session and no invariant could notice; this is that
+      invariant.
+  S7  a malformed row is accounted for as DROPPED, not simply lost
   S5  no `.strip()` before `splitlines()` — the fix, pinned in source, because
       the next author reaching for it would reintroduce this exactly
 """
@@ -69,6 +80,16 @@ def main():
     # ⚠️ CODE LINES ONLY. The fix's own header explains the bug and therefore
     # contains the offending phrase; a naive grep fails on the documentation
     # that exists to prevent the bug.
+    check("S6", d.get("received") == 2
+          and d["received"] == len(d["rows_closed"]) + len(d["rows_open"])
+          + len(d["rows_ghost"]) + d.get("dropped", 0),
+          "received={} accounted={}".format(d.get("received"),
+                                            d.get("accounted")))
+    check("S7", d2.get("received") == 2 and d2.get("accounted") == 2
+          and d2.get("dropped") == 1,
+          "received={} accounted={} dropped={}".format(
+              d2.get("received"), d2.get("accounted"), d2.get("dropped")))
+
     src = open(os.path.join(REPO, "standings.py"), encoding="utf-8").read()
     bad = [ln for ln in src.splitlines()
            if "strip().splitlines()" in ln and not ln.lstrip().startswith("#")]
@@ -80,7 +101,7 @@ def main():
     if FAILS:
         print("FAILED: {}".format(", ".join(FAILS)))
         return 1
-    print("ALL PASS (5)")
+    print("ALL PASS (7)")
     return 0
 
 
