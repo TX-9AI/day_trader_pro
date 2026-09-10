@@ -1,4 +1,11 @@
-# day_trader_pro/menu_functions.sh — v1.64
+# day_trader_pro/menu_functions.sh — v1.65
+# v1.65 (2026-09-10) - dtp r348 / CND.3. LIVE CLOSE RUNS IN tmux. A close is
+#   fifteen boxes of drain+verify, then the purge, then takedown - minutes,
+#   run from Termius on a phone, and a dropped session used to kill it
+#   MID-FLIGHT with some boxes stopped, some still up and the reports unrun.
+#   The operator's standing rule already required tmux for any multi-minute
+#   operation; this is the longest one in the menu and never had it.
+#   ⚠️ No tmux means run in-session and SAY SO, never silently.
 # v1.64 (2026-09-09) - dtp r327 / RPT.19. `mi_r_excursions` - MFE/MAE in
 #   position dollars, the values the R ledger's capture and giveback are
 #   derived FROM. Goes through the shared `_r_tool`, so it inherits the two
@@ -777,7 +784,25 @@ mi_eod_conductor_full_gated_eod_dry_run_preview() {
          echo "  This STOPS TRADING on every running box, drains to S3,"
          echo "  verifies, and takes down the ones that verified."
          read -rp "  Type CLOSE to confirm: " GO
-         [ "$GO" = "CLOSE" ] && $PY eod_conductor_v2.py || echo "  cancelled." ;;
+         if [ "$GO" = "CLOSE" ]; then
+           # 🔴 r348 — IN tmux, BECAUSE A CLOSE IS MINUTES LONG AND RUN FROM A
+           # PHONE. Fifteen boxes of drain+verify, then purge, then takedown;
+           # a dropped Termius session used to kill the close MID-FLIGHT,
+           # leaving some boxes stopped, some up and the reports unrun. The
+           # operator's standing rule already says any multi-minute operation
+           # ships tmux-wrapped — this is the longest one in the menu.
+           # ⚠️ NO tmux MEANS RUN IN-SESSION AND SAY SO, never silently.
+           if command -v tmux >/dev/null 2>&1; then
+             echo "  Running in tmux session 'eodclose' — detach Ctrl-b d,"
+             echo "  reattach with: tmux a -t eodclose"
+             tmux new -As eodclose "cd '$PWD' && $PY eod_conductor_v2.py; echo; echo DONE rc=\$?; read"
+           else
+             echo "  ⚠️  tmux not present — running in THIS session. Do not disconnect."
+             $PY eod_conductor_v2.py
+           fi
+         else
+           echo "  cancelled."
+         fi ;;
       3) echo "  (plumbing only — every OK below is fabricated)"
          $PY eod_conductor_v2.py --dry-run ;;
       *) echo "  cancelled." ;;
