@@ -1,4 +1,11 @@
-# day_trader_pro/menu_functions.sh — v1.63
+# day_trader_pro/menu_functions.sh — v1.64
+# v1.64 (2026-09-09) - dtp r327 / RPT.19. `mi_r_excursions` - MFE/MAE in
+#   position dollars, the values the R ledger's capture and giveback are
+#   derived FROM. Goes through the shared `_r_tool`, so it inherits the two
+#   date prompts and the epoch default with no new plumbing.
+#   ⚠️ UNMEASURED ROWS ARE NAMED, NEVER FOLDED IN - a row with no excursion
+#   columns is not a trade that never worked, and the prompt says so before
+#   the operator reads a never-favourable count.
 # v1.63 (2026-09-09) - dtp r325 / S3.24. `mi_fleet_reconcile` - the fan-out for
 #   `warehouse/s3_push.py --reconcile`, which has existed per box since WH.6
 #   with no way to call it across the fleet.
@@ -1205,6 +1212,15 @@ _r_tool() {  # $1 = tool filename under otv4 tests/
     elif [ -n "$d" ];                             then ARGS=(--date "$d"); fi
     "$PY" "$TOOL" "${ARGS[@]}"
     pause
+}
+
+# Excursions — the MFE/MAE values themselves (S3)
+mi_r_excursions() {
+    echo; echo "  How much was AVAILABLE, per trade and per bucket - the values"
+    echo "  the R ledger's capture and giveback are computed from."
+    echo "  Rows with no excursion columns are counted SEPARATELY as UNMEASURED,"
+    echo "  never as never-favourable."
+    _r_tool excursions.py
 }
 
 # Stop / TP sweep — R surface over recorded excursions (S3)

@@ -1,5 +1,18 @@
 #!/usr/bin/env bash
-# day_trader_pro/menu_registry.sh — v1.17
+# day_trader_pro/menu_registry.sh — v1.18
+# v1.18 (2026-09-09) — dtp r327 / RPT.19. NEW ITEM `EXCURSIONS  (MFE/MAE in
+#   position dollars, per bucket)` in R SUITE, after the stop sweep.
+#   🔑 THIS REVERSES PART OF r189, WHICH RETIRED BOTH EXCURSION ITEMS with the
+#   operator's concurrence on the argument that the R ledger carried the
+#   measurement that mattered. It still does — capture and giveback are
+#   DERIVED from these columns — but the ledger cannot say how much was
+#   AVAILABLE, and a capture of 0.41 means different things on a $1,200 peak
+#   and a $60 one. Operator's call, 2026-09-09.
+#   ⚠️ IT IS NOT THE OLD REPORT RE-LISTED. `excursion_report.py` is
+#   BUNDLE-sourced and needs reports/warehouse populated; every other R SUITE
+#   item reads S3 through `_r_tool`. The new tool is S3-native and shares
+#   `r_ledger.position_dollars`, so it cannot drift from the ledger.
+#   ⚠️ Count 73 -> 74. R SUITE sits BELOW the LAND item, so LAND stays at 42.
 # v1.17 (2026-09-09) — dtp r325 / S3.24. NEW ITEM `RECONCILE fleet counters to
 #   S3 (after a deliberate deletion)`, in S3 WAREHOUSE directly under S3 SWEEP.
 #   🔑 PLACED BESIDE THE SWEEP ON PURPOSE: those two items are cause and
@@ -253,6 +266,7 @@ MENU=(
   "SECTION|R SUITE (fitting)"
   "ITEM|FIT READINESS — per setup: taken vs skipped, is it fittable yet|mi_fit_readiness"
   "ITEM|Stop / TP sweep       (R surface over excursions)|mi_r_stop_sweep"
+  "ITEM|EXCURSIONS           (MFE/MAE in position dollars, per bucket)|mi_r_excursions"
   "ITEM|Exit replay           (trail fit on real premium paths)|mi_r_exit_replay"
   "ITEM|R LEDGER              (R, expectancy, capture + selection vs extension)|mi_r_ledger"
 
