@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/eod_conductor_v2.py — v2.6
+day_trader_pro/eod_conductor_v2.py — v2.7
+v2.7  2026-09-10 — dtp r347 / S3.26 — THE VERIFY LINE CARRIES `failed`, `pushed` AND `drained`. `DRAIN_RE` has captured all nine fields since v2.0 and the panel printed four, discarding the one number that decides WHY a box is short. r180's auto-heal runs ONLY when `total_failed == 0`, and any single stage raising counts as one failure that blocks healing for the entire box — so SHORT means either drift the heal could not reach (a prefix S3 holds no objects for) or a drain that FAILED and stopped the heal before it began, two different faults with two different fixes, and nothing on any report told them apart. COST, MEASURED: on 2026-09-10 seven boxes came back SHORT the day after a fleet reconcile and "did the heal even run?" could not be answered from any output the fleet produced — three nights of guessing at a question the parser already had the answer to. `drained` is the third case: a box that took no lock did no work at all. Gated by tests/check_verify_line_fields.py.
 v2.6  2026-09-10 — dtp r346 / CND.2 — 🔴 THE PURGE STARVED THE HALT AND EVERY ALERT DOWNSTREAM OF IT. The conductor verified all 15 boxes and stopped the services on the 8 that passed, then sat inside the retention purge (prints 918,192 · greeks_series 484,442 · surface_series 691,626) until systemd's TimeoutStartSec=1800 killed it at 30 minutes — 1.762s of CPU over 30min of wall clock, blocked on deletes and not spinning. `ec2ops.stop` runs AFTER the purge, so THE FLEET STAYED UP ALL NIGHT; the P&L headline and the HELD-boxes alert are further downstream still, so the operator got fifteen STOPPED alerts and then silence. ⚠️ THIS FILE ALREADY CLAIMED IT COULD NOT HAPPEN — *"it never blocks the halt; a purge failure is logged and stepped over"* — which is true of a FAILURE and false of a SLOW RUN. The claim was about exceptions; nothing bounded TIME. 🔑 `PURGE_BUDGET_S` (default 600s, `DTP_PURGE_BUDGET`) caps the phase: boxes past the budget are SKIPPED, NAMED in the log and ALERTED, and the halt proceeds. The operator's 2026-08-27 ordering is untouched — the purge still runs after the drain is confirmed and BEFORE the box goes down; only its right to consume the entire budget is removed. ⚠️ RESUMABLE BY DESIGN: retention_purge returns 4 on a partial pass (r256), so a skipped box is purged tomorrow — a box left RUNNING is recovered by nothing, which is the trade this file already states. Gated by tests/check_purge_budget.py.
 v2.5  2026-09-08 — dtp r322 / CND.1 — 🔴 THIS SERVICE HAS FAILED EVERY SESSION SINCE r287, AND THE FLEET STAYED UP. r287 added `import ettime` BUT PASTED IT INTO THE MIDDLE OF A SENTENCE IN THIS DOCSTRING (inside the v2.1 block below), so Python read it as prose, the name was never bound, and `main()` raised NameError at first use — in the SAME SECOND the service started, 436 lines after the "import". A NameError, not an ImportError, so nothing about it looked like a missing module. Discovered 2026-09-08 at 16:35 when the operator noticed 15/15 boxes still reachable half an hour after the 16:05 conductor. ⚠️ EVERY GATE WAS SELF-CONSISTENT AND EVERY GATE PASSED: the file parses, imports, its header is bumped and its changelog agrees. ⚠️ AND THE LOG LOOKED HEALTHY — `logs/eod_conductor.log` is append-only, so its tail showed a full VERIFY/PURGE block from the last night it worked. WHAT WAS LOST on each failed night: the control-side drain, the verify, and the ordered reports. The box-side self-close at 16:45 still ran, so the boxes came down and `warehouse/self_close.py` still purged — the backstop held, which is why nothing else screamed. Gated by tests/check_no_undefined_names.py.
 v2.4  2026-09-05 — dtp r287 / TZ.1 — the naive `today` here asked a UTC box and rolled at 20:00 ET (19:00 in winter), so a report run after that silently asked for TOMORROW and came back empty. It now goes through `ettime`, the one ET/UTC boundary.
@@ -560,9 +561,26 @@ def _run_close(running, date, dry, a) -> int:
     results = drain_and_verify(running, dry)
     for sym in sorted(results):
         r = results[sym]
+        # 🔴 r347 — `failed`, `pushed` AND `drained` ARE PARSED AND WERE
+        # THROWN AWAY. `DRAIN_RE` has captured nine fields since v2.0 and this
+        # line printed four, discarding the one number that decides WHY a box
+        # is short: r180's auto-heal runs ONLY when `total_failed == 0`, and
+        # ANY single stage raising counts as one failure that blocks healing
+        # for the WHOLE box.
+        # 🔑 SO "SHORT" IS TWO DIFFERENT FAULTS — drift the heal could not
+        # reach (a prefix S3 holds no objects for) or a drain that FAILED and
+        # stopped the heal before it began — and no report distinguished them.
+        # ⚠️ COST, MEASURED: on 2026-09-10 seven boxes came back SHORT the day
+        # after a fleet reconcile, and "did the heal even run?" could not be
+        # answered from any output the fleet produced.
+        # ⚠️ `drained` is the third case: a box that took no lock did no work
+        # at all, which is neither of the above.
         _log("VERIFY", f"{sym:<6} {r.get('verdict','?'):<10} "
                        f"short={r.get('short','?')} "
-                       f"local={r.get('local','?')} s3={r.get('s3','?')}")
+                       f"local={r.get('local','?')} s3={r.get('s3','?')} "
+                       f"drained={r.get('drained','?')} "
+                       f"pushed={r.get('pushed','?')} "
+                       f"failed={r.get('failed','?')}")
 
     # 4 ─ take down what verified
     ok, held = takedown(results, dry, not a.no_takedown)
