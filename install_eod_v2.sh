@@ -1,5 +1,20 @@
 #!/usr/bin/env bash
-# day_trader_pro/install_eod_v2.sh — v1.0
+# day_trader_pro/install_eod_v2.sh — v1.1
+# v1.1 (2026-09-11) — dtp r361 / CND.4 + CND.5. 🔴 THIS INSTALLER DROPPED THE
+#   CLOSE'S TELEGRAM CREDENTIALS. install_eod_conductor.sh (v1) wrote
+#   `EnvironmentFile=${DIR}/.env` into the conductor unit and warned when a
+#   name was missing; v1.0 here rewrote the unit WITHOUT it, and notify.py reads
+#   only os.environ, so no conductor alert has been delivered since 2026-08-25
+#   (23 "[notify] missing" lines in the log before 2026-09-11, three that night).
+#   Both units load $REPO/.env again and the names-only presence check is back:
+#   it greps for the NAME and never prints a value (WORKING_AGREEMENT §18a).
+#   ⚠️ NO `-` PREFIX: an optional EnvironmentFile would make a missing .env
+#   silent again; required, the unit refuses to start and says why — the same
+#   choice dtp-morning and dtp-shadow-watch already make.
+#   🔴 AND TimeoutStartSec 1800 -> 7200. 2026-09-11 verified and halted all 15
+#   boxes and was killed at exactly 30:00 inside the last report phase. Floor
+#   ~6000s = close ~900 (measured) + purge budget 600 + one overshoot 900 + the
+#   analysis unit's declared 3600. Gated by tests/check_eod_units.py.
 # v1.0 (2026-08-25) — SWITCH THE CLOSE OVER TO THE THREE-STEP CONDUCTOR.
 #
 # 🔴 EVERYTHING BUILT THIS WEEKEND WAS LANDED AND NONE OF IT WAS WIRED. The old
@@ -62,9 +77,10 @@ Type=oneshot
 User=ubuntu
 WorkingDirectory=$REPO
 ExecStart=$PY $REPO/eod_conductor_v2.py
+EnvironmentFile=$REPO/.env
 StandardOutput=append:$REPO/logs/eod_conductor.log
 StandardError=append:$REPO/logs/eod_conductor.log
-TimeoutStartSec=1800
+TimeoutStartSec=7200
 UNIT
 
 # ── 2. the reports, 25 minutes later ────────────────────────────────────────
@@ -82,6 +98,7 @@ Type=oneshot
 User=ubuntu
 WorkingDirectory=$REPO
 ExecStart=$PY $REPO/eod_analysis.py
+EnvironmentFile=$REPO/.env
 StandardOutput=append:$REPO/logs/eod_analysis.log
 StandardError=append:$REPO/logs/eod_analysis.log
 TimeoutStartSec=3600
@@ -111,6 +128,19 @@ sudo systemctl disable --now dtp-eod.timer 2>/dev/null || true
 # devtools item 56 and a manual re-run still work, and so --rollback can re-arm
 # it without reinstalling anything.
 sudo systemctl disable --now dtp-eod-analysis.timer 2>/dev/null || true
+
+# ── 4. can the close page? — NAMES ONLY, never a value (§18a) ──────────────
+# v1.1 — restored from install_eod_conductor.sh v1, which this file replaced
+# and which was the last installer to check it.
+echo "  Telegram credentials for the close (both units load $REPO/.env):"
+if [ -f "$REPO/.env" ]; then
+  for V in DTP_TELEGRAM_TOKEN DTP_TELEGRAM_CHAT_ID; do
+    if grep -q "^$V=" "$REPO/.env"; then echo "   ✅ $V present"
+    else echo "   ⚠️  $V MISSING from $REPO/.env — the close still cannot page"; fi
+  done
+else
+  echo "   ⚠️  $REPO/.env does not exist — both units will REFUSE TO START"
+fi
 
 mkdir -p "$REPO/logs"
 sudo systemctl daemon-reload

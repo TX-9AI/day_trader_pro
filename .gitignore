@@ -30,6 +30,10 @@ data/instance_map.json
 data/mock_state.json
 data/report.json
 data/selection_log.jsonl
+# dtp r361 / CND.6 — who the purge budget skipped, rewritten every close. The
+# `*` covers the atomic-write .tmp. Tracked, it would be dirty after every close
+# and exactly what a discard recipe restores away (dtp r360).
+data/purge_debt.json*
 *.patch
 *.csv
 

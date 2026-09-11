@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/eod_conductor_v2.py — v2.8
+day_trader_pro/eod_conductor_v2.py — v2.9
+v2.9  2026-09-11 — dtp r361 / CND.6 — THE BOXES THE BUDGET SKIPS GO FIRST AT THE NEXT CLOSE. `fleet.get_fleet` returns `sorted(mapping)`, so the purge walked AMD..UNH in the same order every night and r346's budget always cut the same tail: on 2026-09-11 it purged AMD..META and skipped MU, NFLX, NVDA, PLTR, QQQ, SPX, TSLA and UNH — MU carrying the fleet's largest store. v2.6's "a skipped box is purged tomorrow" was true of `retention_purge` (resumable, r256) and false of the ORDER: tomorrow the same seven boxes fit first and the same eight are skipped again. Now the skipped boxes are written to `data/purge_debt.json` — gitignored, because a tracked runtime file is one a discard recipe can rewrite (dtp r360) — and purged FIRST at the next close. A debt box that is HELD keeps its debt and is never purged: verified-only still outranks the debt. An unreadable debt file falls back to the sorted order and SAYS SO. Gated by tests/check_purge_budget.py B6-B11.
 v2.8  2026-09-10 — dtp r348 / CND.3 — THE DRAIN NARRATES ITSELF. Operator: *"'Draining + verifying 15 boxes' is virtually useless information to the operator. I want to know which box you're on & how much progress per box."* Each box runs a full `--verify` — a walk of 600+ prefixes against S3 — and the panel printed ONE line then went silent for minutes; fifteen of those is the longest unnarrated wait in the close, and it is INDISTINGUISHABLE FROM A HANG. On 2026-09-10 the run genuinely was hung and looked exactly like a slow one. Now: a `[i/n] SYM verifying...` header BEFORE the call and `answered in Ns` after, because a line printed only on completion says where it FINISHED and never where it is STUCK. Gated by tests/check_drain_progress.py.
 v2.7  2026-09-10 — dtp r347 / S3.26 — THE VERIFY LINE CARRIES `failed`, `pushed` AND `drained`. `DRAIN_RE` has captured all nine fields since v2.0 and the panel printed four, discarding the one number that decides WHY a box is short. r180's auto-heal runs ONLY when `total_failed == 0`, and any single stage raising counts as one failure that blocks healing for the entire box — so SHORT means either drift the heal could not reach (a prefix S3 holds no objects for) or a drain that FAILED and stopped the heal before it began, two different faults with two different fixes, and nothing on any report told them apart. COST, MEASURED: on 2026-09-10 seven boxes came back SHORT the day after a fleet reconcile and "did the heal even run?" could not be answered from any output the fleet produced — three nights of guessing at a question the parser already had the answer to. `drained` is the third case: a box that took no lock did no work at all. Gated by tests/check_verify_line_fields.py.
 v2.6  2026-09-10 — dtp r346 / CND.2 — 🔴 THE PURGE STARVED THE HALT AND EVERY ALERT DOWNSTREAM OF IT. The conductor verified all 15 boxes and stopped the services on the 8 that passed, then sat inside the retention purge (prints 918,192 · greeks_series 484,442 · surface_series 691,626) until systemd's TimeoutStartSec=1800 killed it at 30 minutes — 1.762s of CPU over 30min of wall clock, blocked on deletes and not spinning. `ec2ops.stop` runs AFTER the purge, so THE FLEET STAYED UP ALL NIGHT; the P&L headline and the HELD-boxes alert are further downstream still, so the operator got fifteen STOPPED alerts and then silence. ⚠️ THIS FILE ALREADY CLAIMED IT COULD NOT HAPPEN — *"it never blocks the halt; a purge failure is logged and stepped over"* — which is true of a FAILURE and false of a SLOW RUN. The claim was about exceptions; nothing bounded TIME. 🔑 `PURGE_BUDGET_S` (default 600s, `DTP_PURGE_BUDGET`) caps the phase: boxes past the budget are SKIPPED, NAMED in the log and ALERTED, and the halt proceeds. The operator's 2026-08-27 ordering is untouched — the purge still runs after the drain is confirmed and BEFORE the box goes down; only its right to consume the entire budget is removed. ⚠️ RESUMABLE BY DESIGN: retention_purge returns 4 on a partial pass (r256), so a skipped box is purged tomorrow — a box left RUNNING is recovered by nothing, which is the trade this file already states. Gated by tests/check_purge_budget.py.
@@ -126,6 +127,7 @@ Run:  python3 eod_conductor_v2.py                 # live
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import sys
@@ -152,6 +154,9 @@ INSTALL_DIR = getattr(config, "INSTALL_DIR", "~/options-trader")
 # for a transport failure that looks exactly like a data failure.
 PURGE_BUDGET_S = int(os.environ.get("DTP_PURGE_BUDGET", "600"))
 VERIFY_TIMEOUT_S = int(os.environ.get("DTP_VERIFY_TIMEOUT", "900"))
+# 🔴 r361 / CND.6 — WHO THE BUDGET SKIPPED LAST CLOSE. Local runtime state,
+# gitignored: a tracked file here is one a discard recipe can rewrite.
+PURGE_DEBT_PATH = os.path.join(config.DATA_DIR, "purge_debt.json")
 
 # ⚠️ ONE LINE PER BOX, PARSED. Not scraped prose — s3_push prints a stable
 # key=value line precisely so this can be machine-read.
@@ -356,6 +361,52 @@ def stop_services(ok: list, dry: bool) -> dict:
     return out
 
 
+def _purge_order(ok: list) -> tuple:
+    """(order, held_debt) — last close's skipped boxes FIRST, the rest sorted.
+
+    🔴 r361 / CND.6. `fleet.get_fleet` sorts, so without this the budget cuts
+    the SAME alphabetical tail every night and those boxes are never purged.
+    ⚠️ ONLY VERIFIED BOXES ARE ORDERED. A debt box that is held tonight is not
+    in `ok` and is not purged — it is returned as `held_debt` so it stays owed.
+    ⚠️ UNREADABLE IS NOT EMPTY. A missing file is the first close (no debt);
+    a file that exists and cannot be read is a fault, and it is said out loud
+    rather than silently reverting to the order that caused this.
+    """
+    debt = []
+    try:
+        with open(PURGE_DEBT_PATH, encoding="utf-8") as f:
+            debt = [str(s) for s in (json.load(f).get("skipped") or [])]
+    except FileNotFoundError:
+        debt = []
+    except Exception as exc:                                    # noqa: BLE001
+        _log("PURGE", f"⚠️ purge debt unreadable at {PURGE_DEBT_PATH} ({exc}) — "
+                      f"falling back to alphabetical order; last close's "
+                      f"skipped boxes are NOT known")
+        debt = []
+    first = [s for s in debt if s in ok]
+    order = first + [s for s in sorted(ok) if s not in first]
+    held_debt = [s for s in debt if s not in ok]
+    return order, held_debt
+
+
+def _save_purge_debt(owed: list) -> None:
+    """Write who is still owed a purge. Atomic; a failure is logged, not raised.
+
+    ⚠️ NEVER BLOCKS THE HALT — this runs between the purge and `ec2ops.stop`,
+    so it may only log. A lost write costs one night of alphabetical order.
+    """
+    tmp = PURGE_DEBT_PATH + ".tmp"
+    try:
+        os.makedirs(os.path.dirname(PURGE_DEBT_PATH), exist_ok=True)
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"skipped": owed, "date": ettime.today_et()}, f)
+        os.replace(tmp, PURGE_DEBT_PATH)
+    except Exception as exc:                                    # noqa: BLE001
+        _log("PURGE", f"⚠️ purge debt NOT saved ({exc}) — the next close "
+                      f"falls back to alphabetical order; owed: "
+                      f"{', '.join(owed) or 'none'}")
+
+
 def purge_verified(ok: list, dry: bool) -> dict:
     """Retention purge on the boxes that VERIFIED, before they are stopped.
 
@@ -427,11 +478,17 @@ def purge_verified(ok: list, dry: bool) -> dict:
     # after the drain is confirmed and BEFORE the box goes down. Only its
     # right to consume the ENTIRE budget is removed.
     # ⚠️ RESUMABLE BY DESIGN: `retention_purge` returns 4 on a partial pass
-    # (r256), so a box skipped tonight is purged tomorrow. A box left RUNNING
-    # is recovered by nothing.
+    # (r256). A box left RUNNING is recovered by nothing.
+    # 🔴 r361 — AND "PURGED TOMORROW" NEEDED AN ORDER TO BE TRUE. `get_fleet`
+    # sorts, so the budget cut the same tail every night; the boxes skipped
+    # last close now go FIRST (`_purge_order`), and who is still owed is
+    # written back after the loop (`_save_purge_debt`).
+    _order, _held_debt = _purge_order(list(ok))
+    _ips = {s: ip for s, ip, _st in fleet.get_fleet(list(ok))}
     _deadline = time.monotonic() + PURGE_BUDGET_S
     _skipped = []
-    for sym, ip, _st in fleet.get_fleet(list(ok)):
+    for sym in _order:
+        ip = _ips.get(sym, "")
         if time.monotonic() >= _deadline:
             _skipped.append(sym)
             continue
@@ -458,11 +515,12 @@ def purge_verified(ok: list, dry: bool) -> dict:
         # trade — disk against a box left running — and the operator has to
         # know which boxes carry that debt into tomorrow.
         _log("PURGE", f"⏱️ BUDGET SPENT ({PURGE_BUDGET_S}s) — NOT purged: "
-                      f"{', '.join(_skipped)}. They come down anyway; "
-                      f"retention resumes tomorrow.")
+                      f"{', '.join(_skipped)}. They come down anyway and go "
+                      f"FIRST at the next close.")
         _notify(f"⏱️ EOD purge budget spent — not purged: "
-                f"{', '.join(_skipped)}. Boxes still taken down; "
-                f"retention resumes tomorrow.")
+                f"{', '.join(_skipped)}. Boxes still taken down; they go "
+                f"first at the next close.")
+    _save_purge_debt(_skipped + _held_debt)
     return out
 
 
