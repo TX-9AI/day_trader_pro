@@ -1,5 +1,15 @@
 #!/usr/bin/env bash
-# day_trader_pro/tools/land.sh — v1.10
+# day_trader_pro/tools/land.sh — v1.11
+# v1.11 (2026-09-11) — dtp r360. THE DISCARD RECIPE IS SCOPED TO THE PAYLOAD.
+#   It said `git checkout -- .`, which discards EVERY dirty tracked file in the
+#   repo rather than only the ones this command extracted. MEASURED COST:
+#   `logs/eod_conductor.log` was git-TRACKED and every close appends to it, so
+#   after any close it counted as "from the extract" and the recipe restored it
+#   to its 09-03 committed version — two nights of conductor output gone, and
+#   the file was later read as if it were the record. This command already
+#   walks its own file list to stage by name, so it names those paths here.
+#   `git clean -fd` is no longer printed: it deletes untracked files anywhere,
+#   the operator inbox included, and the extract creates none that need it.
 # v1.10 (2026-09-07) — dtp r321. `tools/preflight.sh` is REMOVED. r320 added it
 #   without being asked; the operator had already ruled it out of scope. The
 #   field-table fix below stays — that one WAS the ask.
@@ -261,14 +271,36 @@ die() {
   if [ -n "${repo:-}" ] && [ -d "${repo:-}/.git" ]; then
     local n; n="$(cd "$repo" && git status --porcelain | wc -l)"
     if [ "$n" != "0" ]; then
-      echo "  ⚠️ $repo has $n uncommitted file(s) from the extract."
+      echo "  ⚠️ $repo has $n uncommitted file(s) — SOME MAY NOT BE FROM THE EXTRACT."
       # 🔴 v1.6 — `git reset HEAD --` FIRST, AND THE OMISSION WAS MEASURED.
       # I decided at r293 that this line was safe because a CONTENT-GATE
       # refusal stages nothing. **A COMMIT failure does** — the payload is
       # staged by then — and that is exactly what the r278 land hit. Without
       # the unstage, `git checkout -- .` copies the INDEX back into the tree
       # and restores what the operator meant to discard.
-      echo "     To discard them:  cd $repo && git reset -q HEAD -- . && git checkout -- . && git clean -fd"
+      # 🔴 r360 — THE RECIPE IS SCOPED TO THE PAYLOAD. It used to say
+      # `git checkout -- .`, which discards EVERY dirty tracked file in the
+      # repo, not only the ones this command extracted.
+      # ⚠️ MEASURED COST: `logs/eod_conductor.log` was git-TRACKED and every
+      # close appends to it, so after any close it counted as "from the
+      # extract" and the recipe restored it to its 09-03 committed version —
+      # two nights of conductor output gone, and the file was later read as if
+      # it were the record.
+      # 🔑 THIS COMMAND ALREADY KNOWS ITS OWN FILE LIST — it walks exactly
+      # these paths to stage by name below. Naming them here costs nothing and
+      # cannot reach anything else.
+      # ⚠️ `git clean -fd` IS NO LONGER PRINTED: it deletes untracked files
+      # anywhere in the tree, the operator inbox included, and the extract
+      # creates none that need removing.
+      local _pay
+      _pay="$(cd "$d" 2>/dev/null && find . -type f ! -name land.spec -printf '%P ' 2>/dev/null)"
+      if [ -n "$_pay" ]; then
+        echo "     To discard the PAYLOAD only:"
+        echo "       cd $repo && git reset -q HEAD -- $_pay && git checkout -- $_pay"
+        echo "     (anything else dirty here is NOT from the extract — check before discarding)"
+      else
+        echo "     Payload list unavailable; inspect with: cd $repo && git status"
+      fi
     fi
   fi
   FAILED=1
@@ -587,8 +619,18 @@ if [ "$FAILED" != "0" ]; then
         # file the operator had mid-edit survives (§35). The defect was in what
         # the operator was TOLD, and in the absence of a command to act on.
         echo "  $r -> $sha (soft: the payload is STAGED, not discarded)"
-        echo "     re-land as-is, or discard with:"
-        echo "     cd $r && git reset -q HEAD -- . && git checkout -- . && git clean -fd"
+        # 🔴 r360 — SCOPED HERE TOO, AND THE INDEX IS WHAT NAMES THE SCOPE.
+        # The rollback is `--soft`, so the payload — and ONLY the payload — is
+        # what remains STAGED. `git diff --cached --name-only` is therefore an
+        # exact list of what this command put there, with nothing else in it.
+        # ⚠️ The old line said `git checkout -- .`, which reaches every dirty
+        # tracked file in the repo. `logs/eod_conductor.log` was tracked and
+        # appended to by every close, so it was restored to a committed
+        # version and two nights of conductor output were lost.
+        # ⚠️ `git clean -fd` is gone: it deletes untracked files anywhere in
+        # the tree, the operator inbox included.
+        echo "     re-land as-is, or discard the PAYLOAD only with:"
+        echo "     cd $r && P=\$(git diff --cached --name-only) && git reset -q HEAD -- \$P && git checkout -- \$P"
       else
         # ⚠️ NAMED, NEVER SWALLOWED. A rollback that fails silently is worse
         # than no rollback, because the operator would believe origin and his

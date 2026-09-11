@@ -46,3 +46,11 @@ MANIFEST.txt
 # crashed process between mkdtemp and its handler could leave one behind, and
 # a multi-GB cache must never be committable.
 var/
+
+# 🔴 r360 — RUNTIME LOGS ARE NOT SOURCE. `logs/eod_conductor.log` was TRACKED
+# and every close appends to it, so any failed land counted it as extract
+# debris and the discard recipe restored it to its committed version — two
+# nights of conductor output lost, and the file later read as if it were the
+# record. A tracked log is not a record: it is a file with a history something
+# else can rewrite. (Untracked by hand at dtp r360; this keeps it out.)
+logs/

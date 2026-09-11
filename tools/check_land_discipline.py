@@ -1,5 +1,14 @@
 #!/usr/bin/env python3
-# day_trader_pro/tools/check_land_discipline.py — v1.1
+# day_trader_pro/tools/check_land_discipline.py — v1.2
+# v1.2 (2026-09-11) — dtp r360 / LAND.8. ONE EXEMPTION TO THE NO-SOURCE RULE:
+#   an index-only untrack of an ignored path. `git rm --cached <f>` diffs as
+#   nothing but deletions, so the rule refused it, and the only way through was
+#   `--no-verify` — which disables EVERY check, including the ones that matter.
+#   A rule whose sole escape hatch is "turn off all the rules" gets used that
+#   way. Measured on `logs/eod_conductor.log` (LAND.2). NARROW BY CONSTRUCTION:
+#   every deleted path must ALSO be ignored now AND still exist on disk, so
+#   removing a real module still fails and a deletion that also removes the
+#   file is not an untrack.
 # v1.1 (2026-08-30) — otv4 r194 / dtp r232. GENESIS ROWS MAY NOT CONTAIN A BARE
 #   HTML TAG. Operator: "something broke & the new additions are nesting now."
 #   🔴 TWO ROWS CONTAINED THE LITERAL STRING <table> — r184's
@@ -287,6 +296,39 @@ def check(repo, rev, ref, problems, notes, hook=False):
     # describing a change that does not exist. Counting the raw diff would let
     # that through, because the ledger row is itself a diff.
     if not any(st != "D" for st, _ in files):
+        # 🔑 r360 — ONE EXEMPTION: AN INDEX-ONLY UNTRACK OF AN IGNORED PATH.
+        # `git rm --cached <f>` produces a diff of nothing but deletions, so
+        # this rule refuses it — correct by its own words (no source changed)
+        # and wrong in effect, because the ONLY way through was `--no-verify`,
+        # which disables EVERY check including the ones that matter. A rule
+        # whose sole escape hatch is "turn off all the rules" gets used that
+        # way.
+        # ⚠️ MEASURED: `logs/eod_conductor.log` was a tracked runtime artifact
+        # (LAND.2), and untracking it had to be forced past this hook.
+        # ⚠️ NARROW ON PURPOSE. Every deleted path must ALSO be ignored now,
+        # so removing a real module still fails — a deleted `.py` that
+        # `.gitignore` does not cover is a source change and needs its
+        # bookkeeping. It must also still EXIST ON DISK: a deletion that
+        # removes the file is not an untrack.
+        # ⚠️ THE RAW DIFF, NOT `files`. `files` is already narrowed to
+        # TEXT_EXT, so a `.log` — the exact case this exists for — is filtered
+        # out before it gets here and the scan would see nothing. Read the
+        # whole change set and require EVERY entry in it to be an untrack.
+        _all = list(changed(repo, ref))
+        _dels = [rel for st, rel in _all if st == "D"]
+        if len(_dels) != len(_all):
+            _dels = []          # something in the commit is not a deletion
+        _ignored = []
+        for _rel in _dels:
+            _chk = sh(["git", "check-ignore", "-q", "--", _rel], repo)
+            if _chk.returncode == 0 and os.path.exists(os.path.join(repo, _rel)):
+                _ignored.append(_rel)
+        if _dels and len(_ignored) == len(_dels):
+            notes.append("BUMP      note  — index-only untrack of %d ignored "
+                         "path(s), still on disk: %s. No source differs, and "
+                         "that is correct for this shape."
+                         % (len(_ignored), ", ".join(_ignored[:4])))
+            return
         problems.append("BUMP: nothing differs from %s except generated or "
                         "append-only files. A land that changes no source is a "
                         "land that did not happen." % ref)
