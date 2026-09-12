@@ -1,5 +1,18 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/check_land_sh.py — v1.8
+# day_trader_pro/tests/check_land_sh.py — v1.9
+# v1.9 (2026-09-12) — dtp r373 / SH.2. SP1/SP1b/SP1c and SP2 pin the shell
+#   sweep the lander gained: a payload carrying an unparseable `.sh` must
+#   REFUSE the land, must NAME the file, and must move no commit — and a
+#   payload whose shell parses must still land, because a sweep that refused
+#   everything would satisfy the red half by itself. Driven through a real
+#   land, never read out of land.sh.
+#   🔴 AND R1d IS RENAMED R1e — r372 SHIPPED A DUPLICATE ID. I added a check
+#   called R1d without reading that one already existed twelve lines below, so
+#   "R1d failed" named two different assertions. DOC.23's finding one file
+#   over: an id is the only handle a check has. ⚠️ D1, D2 and D3 are ALSO
+#   duplicated here, across the DEL series and the two-repo series, and that is
+#   pre-existing — filed as CHK.5 rather than renamed in the same revision that
+#   is changing the lander.
 # v1.8 (2026-09-12) — dtp r372 / LAND.9. THIS HARNESS HAD NOT RUN SINCE
 #   2026-09-07 AND NOBODY KNEW. `land.sh` made `BASE` mandatory at r316; this
 #   file was last edited at r309, the day before, and its fixture never
@@ -253,6 +266,10 @@ def _world(tmp, spec_lines, payload="v2\n", extra=None, docs_only=False):
     dtp = os.path.join(home, "day_trader_pro", "tools")
     os.makedirs(dtp)
     shutil.copy(os.path.join(_root, "tools", "check_land_discipline.py"), dtp)
+    # r373 / SH.2 — the lander also sweeps the target repo's shell now, from a
+    # tool it discovers the same way. The fixture must carry it or every case
+    # in this file dies on NOT FOUND instead of on what it is testing.
+    shutil.copy(os.path.join(_root, "tools", "check_shell_parses.py"), dtp)
     os.makedirs(os.path.join(home, "day_trader_pro", ".git"))
     with open(os.path.join(home, ".gitconfig"), "w") as f:
         f.write("[user]\n\temail = t@t\n\tname = t\n")
@@ -745,7 +762,14 @@ def main():
         # times in comments explaining why it is gone — a source-text canary
         # would trip on the very documentation Rule 5 requires. What must be
         # true is that it never reaches the operator's screen.
-        check("R1d ...and `git clean -fd` is never printed to the operator",
+        # ⚠️ R1e, NOT R1d — r372 SHIPPED A DUPLICATE ID AND THIS IS THE
+        # CORRECTION (§0.1: a correction earns its own revision and says what
+        # went wrong). I added a check called R1d without reading that one
+        # already existed twelve lines below, so "R1d failed" named two
+        # different assertions. That is DOC.23's finding one file over — an id
+        # is the only handle a check has, and a duplicate makes a red report
+        # ambiguous forever, silently.
+        check("R1e ...and `git clean -fd` is never printed to the operator",
               "clean -fd" not in out,
               [l.strip()[:60] for l in out.splitlines() if "clean -fd" in l][:1])
         if line:
@@ -809,6 +833,47 @@ def main():
         # ⚠️ AND THE LAND STILL SUCCEEDS — the bar must be decoration only.
         check("B1c ...and the land itself is unaffected", r.returncode == 0,
               f"rc={r.returncode}")
+
+    # ══ 🔴 SP — THE LANDER SWEEPS THE TARGET REPO'S SHELL (r373 / SH.2) ═══
+    # DRIVEN, NEVER GREPPED. Asserting land.sh CONTAINS the call would pass
+    # against a call that never runs — §21, and the r201 shape §0.6 names.
+    # ⚠️ SP-PREFIXED because A/B/C/D/F/G/L/M/P/R are taken and this file
+    # already carries duplicate D1/D2/D3 across two sections; a new series
+    # should not add a fourth ambiguous id.
+    with tempfile.TemporaryDirectory() as tmp:
+        # r65's exact shape: a changelog line that lost its leading `#`.
+        BROKEN = ("#!/usr/bin/env bash\n"
+                  "v4.1  2026-08-25  r65 EXORCISM: schema (delivery).\n"
+                  "echo hi\n")
+        home, repo, stage = _world(tmp, GOOD,
+                                   extra=dict(PASS_CHK, **{"bad.sh": BROKEN}))
+        before = _head(repo)
+        r = _land(home, stage)
+        out = r.stdout + r.stderr
+        check("SP1 a payload carrying an unparseable .sh REFUSES the land",
+              r.returncode != 0, f"rc={r.returncode}")
+        # ⚠️ SP1b's FIRST CUT PASSED FOR THE WRONG REASON. It asserted only
+        # that "bad.sh" appeared in the output — and it does anyway, from the
+        # land's own handling of the payload, so it was green at HEAD where the
+        # sweep did not exist. A check that cannot fail proves nothing (§0.4).
+        # It now requires the sweep's OWN banner alongside the filename, so it
+        # can only pass when the refusal actually came from the shell check.
+        check("SP1b ...and the refusal comes from the sweep and NAMES the file",
+              "check_shell_parses" in out and "bad.sh" in out,
+              f"sweep={'check_shell_parses' in out} named={'bad.sh' in out}")
+        check("SP1c ...and the refused land moved no commit",
+              _head(repo) == before, f"{before!r} -> {_head(repo)!r}")
+
+    # ⚠️ THE CONTROL CARRIES AS MUCH WEIGHT AS THE RED. A sweep that refused
+    # everything would satisfy SP1 on its own, so a payload whose shell PARSES
+    # must still land — otherwise the gate is breakage wearing a checker's name.
+    with tempfile.TemporaryDirectory() as tmp:
+        OKSH = "#!/usr/bin/env bash\n# v1.0 (2026-09-12) — fine.\necho hi\n"
+        home, repo, stage = _world(tmp, GOOD,
+                                   extra=dict(PASS_CHK, **{"good.sh": OKSH}))
+        r = _land(home, stage)
+        check("SP2 a payload whose shell parses still lands",
+              r.returncode == 0, f"rc={r.returncode}")
 
     print()
     if _fails:

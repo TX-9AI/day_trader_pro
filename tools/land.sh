@@ -1,5 +1,16 @@
 #!/usr/bin/env bash
-# day_trader_pro/tools/land.sh — v1.12
+# day_trader_pro/tools/land.sh — v1.13
+# v1.13 (2026-09-12) — dtp r373 / SH.2. THE LANDER SWEEPS THE TARGET REPO'S
+#   SHELL, on every land, of either repo. SH.1's `bash -n` gate landed in otv4
+#   and walks otv4's own root, so dtp's 15 scripts — including this file and
+#   `deploy.sh`, the entire delivery mechanism — were outside every parse check.
+#   Discovered like `check_land_discipline` and run with `--repo`, so one
+#   implementation covers both trees; wired here rather than left to a `CHECK`
+#   line because SH.1's finding was that NOTHING WAS LOOKING, and a gate an
+#   author must remember to declare is a gate that gets forgotten.
+#   ⚠️ FATAL: an unparseable `.sh` now refuses the land. New failure mode on
+#   the path every delivery takes, and the deliberate trade against the
+#   fourteen days those four scripts silently did nothing.
 # v1.12 (2026-09-12) — dtp r372 / LAND.9. THE DISCARD RECIPE DID NOT WORK ON
 #   ANY DELIVERY THAT ADDED A FILE, at both print sites. `git reset` unstages
 #   the payload, which makes an ADDED file untracked; `git checkout -- $P` is
@@ -579,6 +590,33 @@ land_one() {
   # that title. ⚠️ It proves the BOOKKEEPING, never the edit — the content
   # gate above is what proves that. Citing this one for both would be the
   # laundered green §18 names.
+  # ── SHELL SWEEP (v1.13, r373 / SH.2) ────────────────────────────────────
+  # 🔴 A WHOLE LANGUAGE WAS OUTSIDE EVERY GATE, TWICE. SH.1 found it in otv4:
+  # r65 wrote a changelog entry into four shell headers without the leading
+  # `#`, the parenthesis in "(delivery)" was a syntax error, and because a
+  # syntax error ABORTS THE PARSE those four scripts did nothing at all for
+  # fourteen days on every box. The repair landed in otv4 and walked otv4's own
+  # root — so day_trader_pro's 15 scripts, `land.sh` and `deploy.sh` among
+  # them, stayed unswept. That is §23: fixed where it was found, neighbouring
+  # tree never checked.
+  # 🔑 WIRED HERE RATHER THAN DECLARED AS A `CHECK`, because a CHECK line has
+  # to be remembered by the author of every future spec, and SH.1's finding was
+  # not that a check failed — it was that NOTHING WAS LOOKING. Discovered the
+  # same way as check_land_discipline and run against the repo being landed, so
+  # both trees are covered on every land and no author can forget it.
+  # ⚠️ IT IS FATAL. From r373 an unparseable `.sh` in the target repo REFUSES
+  # the land. That is a new failure mode on the path every delivery takes, and
+  # it is the intended trade against fourteen silent days.
+  local sp=""
+  for cand in "$HOME"/day_trader_pro "$HOME"/*/; do
+    [ -f "${cand%/}/tools/check_shell_parses.py" ] && { sp="${cand%/}"; break; }
+  done
+  if [ -z "$sp" ]; then
+    die "check_shell_parses.py NOT FOUND — cannot confirm the shell parses."; return 1
+  fi
+  python3 "$sp/tools/check_shell_parses.py" --repo "$repo" \
+    || { die "SHELL PARSE FAILED — a .sh in $repo does not parse (see above)."; return 1; }
+
   local ld=""
   for cand in "$HOME"/day_trader_pro "$HOME"/*/; do
     [ -f "${cand%/}/tools/check_land_discipline.py" ] && { ld="${cand%/}"; break; }
