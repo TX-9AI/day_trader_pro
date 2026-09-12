@@ -1,6 +1,15 @@
 #!/usr/bin/env python3
 """
-tools/gen_handoff.py  v1.0
+tools/gen_handoff.py  v1.1
+v1.1  2026-09-12  r370 — THE OPENING STOPS RETRACTING SOMETHING NOBODY SAID.
+      Operator, on reading a generated handoff: the do-not-clone lines *"read
+      like a correction or retraction. Take it out entirely. If the handoff
+      doesn't mention cloning even better, so it doesn't need to be brought
+      up."* The Task block now carries his exact phrase — "THIS is a
+      continuation of that work." — and names the paths instead; every clone
+      reference is gone from the emitted document. Pinned by check_handoff_item
+      H7c (unconditional, no longer disarmable by the document) and H7d (the
+      phrase, verbatim and case-sensitive).
 v1.0  2026-09-12  r368 — THE HANDOFF IS A POINTER, NOT A NARRATIVE.
 
 Emits the operator's standing intro prompt with the VOLATILE facts appended, so
@@ -24,10 +33,21 @@ of that work" — and the RECENT TAIL serves that: the last 12 revisions are 29 
 (~7k tokens) against 148k for the whole ledger. Older rows stay available on
 demand. The agreement is still read IN FULL, because it is the contract.
 
-⚠️ "CLONE MY PUBLIC REPO" IS CHAT-SURFACE WORDING AND IS WRONG ON CONTROL. Both
-repos are already here; cloning yields a stale copy whose edits go nowhere and
-which cannot see anything landed since the last push. On-box, the paths are
-named instead.
+⚠️ THE DOCUMENT NAMES THE PATHS AND SAYS NOTHING ABOUT CLONING, EITHER WAY.
+Both repos are already on this box, so a clone would be a stale copy whose edits
+go nowhere and which cannot see anything landed since the last push. That is
+true, and v1.0 said it IN the handoff. The operator's read of those lines
+(2026-09-12): *"it reads like a correction or retraction. Take it out entirely.
+If the handoff doesn't mention cloning even better, so it doesn't need to be
+brought up."* He is right that an opening which lists what not to do reads as a
+correction being issued to someone who has not done anything yet. So the
+POSITIVE fact stays — the repos are here, at these paths — and the prohibition
+is gone. 🔑 DO NOT RE-ADD EITHER HALF: an instruction to clone would be
+wrong, and a warning against cloning is the thing that was removed. The reason
+lives here, where a maintainer reads it, rather than in the document the
+operator reads — C.31's discipline, kept so the next editor does not restore a
+line whose justification they cannot see. `check_handoff_item` H7c fails on the
+word appearing in the output at all.
 
 🔴 IT REFUSES RATHER THAN GUESSING ABOUT THE FLEET. If the fleet cannot be read
 this exits NON-ZERO and says so, instead of emitting `fleet: unknown`. OPS.6 is
@@ -116,9 +136,8 @@ def main():
 
     print(BRIEF)
     print()
-    print("Task: This is a CONTINUATION. You are running ON the control box — both repos")
-    print("are already here and there is nothing to clone. A clone would be a stale copy")
-    print("whose edits go nowhere.")
+    print("Task: THIS is a continuation of that work. You are running ON the control box —")
+    print("both repos are already here, at the paths below.")
     print()
     print("REPOS")
     print(repo_line(OTV4, "otv4"))

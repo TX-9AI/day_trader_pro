@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """
-tests/check_handoff_item.py  v1.0
+tests/check_handoff_item.py  v1.1
+v1.1  2026-09-12  r370 — H7c TIGHTENED AND H7d ADDED. H7c could be disarmed by
+      the document it checked: it split the output on the literal "nothing to
+      clone" and scanned only the prefix, so a handoff carrying that sentence
+      narrowed the canary to the text above it. The document no longer mentions
+      cloning at all, so the check is now unconditional. H7d pins the
+      operator's exact continuation phrase, which he asked for verbatim.
 v1.0  2026-09-12  r368 — THE HANDOFF ITEM, AND THE THREE THINGS THAT WOULD
       OTHERWISE BITE IT SILENTLY.
 
@@ -98,8 +104,24 @@ def main():
     check("H7b it POINTS at the agreement and backlog rather than restating them",
           "docs/WORKING_AGREEMENT.md" in out and "docs/BACKLOG.md" in out
           and "OPEN ROWS" in out)
-    check("H7c it does NOT tell an on-box thread to clone",
-          "clone" not in out.lower().split("nothing to clone")[0])
+    # H7c — UNCONDITIONAL NOW, AND v1.0's FORM COULD BE DISARMED BY THE
+    # DOCUMENT IT CHECKED. It split the output on the literal "nothing to clone"
+    # and scanned only the text BEFORE that point, so any handoff carrying that
+    # sentence narrowed its own canary to a prefix — §20's shape exactly, where
+    # the prose a rule requires is what defeats the check written against it.
+    # r370 removes every clone reference from the document, so the honest
+    # assertion is that the word is absent outright, with no escape hatch a
+    # later edit can re-open by adding a sentence.
+    check("H7c the document does not mention cloning AT ALL",
+          "clone" not in out.lower())
+
+    # H7d — THE OPERATOR'S EXACT WORDING, 2026-09-12: *"I want you to use the
+    # exact phrase: 'THIS is a continuation of that work.'"* Case included; the
+    # capitalised THIS is his. A phrase that is asked for verbatim and pinned by
+    # nothing is a phrase the next rewrite paraphrases away, and this one is the
+    # first line of orientation every fresh thread reads.
+    check("H7d it opens the task with the operator's exact continuation phrase",
+          "THIS is a continuation of that work." in out)
 
     # H8 — open means the STATUS column. The first draft filtered on the 🔴
     # severity marker and listed long-closed rows as outstanding.
