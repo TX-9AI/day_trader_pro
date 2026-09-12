@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
-# day_trader_pro/menu_registry.sh — v1.18
+# day_trader_pro/menu_registry.sh — v1.19
+# v1.19 (2026-09-12) — r368. NEW ITEM `HAND OFF -> fresh Claude thread` in its
+#   own SESSION section at the foot, because it is the only item that ENDS the
+#   menu rather than returning to it, and burying that among maintenance items
+#   invites it being chosen by accident.
 # v1.18 (2026-09-09) — dtp r327 / RPT.19. NEW ITEM `EXCURSIONS  (MFE/MAE in
 #   position dollars, per bucket)` in R SUITE, after the stop sweep.
 #   🔑 THIS REVERSES PART OF r189, WHICH RETIRED BOTH EXCURSION ITEMS with the
@@ -246,6 +250,9 @@ MENU=(
   "ITEM|Hotfix launcher (repo synch & flush)|mi_hotfix_launcher_repo_synch_flush"
   "ITEM|FULL (wake->bake->restart->STOP)|mi_full_wake_bake_restart_stop"
   "ITEM|EMERGENCY STOP — mid-session, abandons positions (one/all/some)|mi_emergency_stop_no_eod_no_pycache_rth_exempt"
+
+  "SECTION|SESSION (this item ENDS the menu)"
+  "ITEM|HAND OFF -> fresh Claude thread (kills this menu and every tmux)|mi_handoff_fresh_claude"
 
   "SECTION|REPOINT (migrate fleet -> new repo)"
   "ITEM|Snapshot dir -> tarball (the held state before a repoint)|mi_snapshot_dir_repo_ready_tarball"

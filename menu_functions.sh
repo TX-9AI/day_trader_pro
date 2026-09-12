@@ -1,4 +1,21 @@
-# day_trader_pro/menu_functions.sh — v1.65
+# day_trader_pro/menu_functions.sh — v1.66
+# v1.66 (2026-09-12) - r368. HAND OFF TO A FRESH CLAUDE THREAD, from the menu.
+#   Operator: a menu option that "exits (kills) the menu & drops us into the
+#   shell & starts a new tmux with Claude (fresh thread) and provides a
+#   pre-scoped handoff text". `mi_handoff_fresh_claude` does exactly that, and
+#   the handoff is a POINTER document (tools/gen_handoff.py), never a narrative.
+#   THREE THINGS THAT WOULD OTHERWISE BITE, each measured rather than guessed:
+#   (1) `env -u ANTHROPIC_API_KEY` is MANDATORY - ~/.bashrc sources dtp's .env
+#       for selector.py, so the key is in every interactive shell, and a thread
+#       launched with it bills the API instead of the Max subscription. Silent.
+#   (2) the ABSOLUTE path to claude, never bare: under a venv, `deactivate`
+#       restores a PATH predating ~/.local/bin, which is why claude vanished
+#       once already.
+#   (3) ORDER IS create-detached -> switch -> kill. Killing the old session
+#       before switching kills the client you are sitting in.
+#   ⚠️ The generator REFUSES if it cannot read the fleet rather than emitting
+#   "unknown" (OPS.6). A handoff stating a fleet fact it did not verify is
+#   worse than one that stops.
 # v1.65 (2026-09-10) - dtp r348 / CND.3. LIVE CLOSE RUNS IN tmux. A close is
 #   fifteen boxes of drain+verify, then the purge, then takedown - minutes,
 #   run from Termius on a phone, and a dropped session used to kill it
@@ -407,6 +424,46 @@ mi_wake_one_all_some() {
 # Bake only (sync, no restart - RTH-safe)
 mi_bake_only_sync_no_restart_rth_safe() {
     echo; $PY wake_and_bake.py --bake-only; pause
+}
+
+# Hand off to a FRESH Claude thread (kills this menu and every other tmux)
+mi_handoff_fresh_claude() {
+    local HO NEW OLD CLAUDE=/home/ubuntu/.local/bin/claude
+    HO="$(mktemp /tmp/handoff.XXXXXX)"
+    echo
+    if [ ! -x "$CLAUDE" ]; then
+        echo "  claude not found at $CLAUDE — nothing started."; pause; return 1
+    fi
+    echo "  generating the handoff…"
+    if ! python3 /home/ubuntu/day_trader_pro/tools/gen_handoff.py > "$HO"; then
+        echo "  gen_handoff REFUSED (see the reason above). Nothing started."
+        rm -f "$HO"; pause; return 1
+    fi
+    echo "  ── handoff ──────────────────────────────────────────"
+    sed -n '1,14p' "$HO" | sed 's/^/  /'
+    echo "  … $(wc -l < "$HO") lines total"
+    echo "  ─────────────────────────────────────────────────────"
+    read -r -p "  Start a fresh Claude thread and KILL every other tmux session? [y/N] " a
+    [ "$a" = "y" ] || { echo "  cancelled."; rm -f "$HO"; pause; return 0; }
+
+    NEW="claude-$(date +%H%M%S)"
+    if [ -z "${TMUX:-}" ]; then
+        # Not inside tmux: kill any strays first, then attach directly.
+        tmux kill-server 2>/dev/null
+        exec tmux new-session -s "$NEW" -c /home/ubuntu/options-trader-v4 \
+            "env -u ANTHROPIC_API_KEY $CLAUDE \"$(cat "$HO")\"; exec bash -l"
+    fi
+    OLD="$(tmux display-message -p '#S')"
+    tmux new-session -d -s "$NEW" -c /home/ubuntu/options-trader-v4 \
+        "env -u ANTHROPIC_API_KEY $CLAUDE \"$(cat "$HO")\"; exec bash -l"
+    tmux switch-client -t "$NEW" || {
+        echo "  switch-client failed — the new session '$NEW' EXISTS and is detached."
+        echo "  Attach with: tmux attach -t $NEW"; pause; return 1; }
+    # Every other session, not just the one the menu was in. Last, and it takes
+    # this script with it — which is the point.
+    tmux list-sessions -F '#S' 2>/dev/null | grep -vx "$NEW" | while read -r s; do
+        tmux kill-session -t "$s" 2>/dev/null
+    done
 }
 
 # Leave on (skip shutdown)
