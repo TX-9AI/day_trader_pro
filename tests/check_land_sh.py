@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/check_land_sh.py — v1.9
+# day_trader_pro/tests/check_land_sh.py — v1.10
+# v1.10 (2026-09-12) — dtp r374 / LAND.10. F4/F5 pin an assertion whose text
+#   begins with `-`. The content gate called `grep -qF "$p"` with no `--`, so
+#   such a string was parsed as a grep OPTION: a NEG then failed OPEN (grep
+#   exits 2, the gate reads ABSENT, the assertion can never fire) and a POS
+#   failed CLOSED (a correct delivery refused). DEP.2's successor, and its
+#   sentence still applies — a gate that can do both is not a weak gate, it is
+#   unrelated to what it claims to check. Found because a real r374 assertion
+#   began with `-c `.
 # v1.9 (2026-09-12) — dtp r373 / SH.2. SP1/SP1b/SP1c and SP2 pin the shell
 #   sweep the lander gained: a payload carrying an unparseable `.sh` must
 #   REFUSE the land, must NAME the file, and must move no commit — and a
@@ -874,6 +882,51 @@ def main():
         r = _land(home, stage)
         check("SP2 a payload whose shell parses still lands",
               r.returncode == 0, f"rc={r.returncode}")
+
+    # ══ 🔴 F4/F5 — AN ASSERTION THAT STARTS WITH `-` (r374 / LAND.10) ═════
+    # DEP.2's SUCCESSOR, AND THE SAME SENTENCE APPLIES. That row fixed
+    # `grep -q` -> `grep -qF` after the gate failed OPEN on one delivery and
+    # CLOSED on another; this is the next instance of the same shape. The call
+    # was `grep -qF "$p" "$file"` with NO `--`, so any assertion whose text
+    # begins with `-` is parsed as a grep OPTION, not a pattern:
+    #   NEG  -> grep exits 2, `if grep -q` is false, the gate concludes ABSENT
+    #           and the assertion CAN NEVER FIRE. Fails OPEN, silently.
+    #   POS  -> grep exits 2, `! grep -q` is true, the gate reports MISSING and
+    #           REFUSES a correct delivery. Fails CLOSED.
+    # ⚠️ AND `2>/dev/null` HID grep's OWN "invalid option" MESSAGE, so neither
+    # direction said why — §0.5, silence turning a broken check into a
+    # plausible one. Found because a real r374 assertion began with `-c `.
+    with tempfile.TemporaryDirectory() as tmp:
+        DASH = 'tmux new-session -s "$NEW" -c /home/ubuntu/options-trader-v4\n'
+        spec = [l for l in GOOD if not l.startswith("NEG ")] + [
+            "POS dash.sh|-c /home/ubuntu/options-trader-v4",
+            "NEG dash.sh|-c /home/ubuntu/NOT-THERE",
+        ]
+        home, repo, stage = _world(tmp, spec,
+                                   extra=dict(PASS_CHK, **{"dash.sh": DASH}))
+        r = _land(home, stage)
+        out = r.stdout + r.stderr
+        # the POS text IS in the payload, so a correct gate lands it
+        check("F4 a POS whose text begins with `-` is FOUND, not read as a "
+              "grep option", r.returncode == 0 and "MISSING in dash.sh" not in out,
+              f"rc={r.returncode} {out[-90:]!r}")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        DASH = 'tmux new-session -s "$NEW" -c /home/ubuntu/options-trader-v4\n'
+        spec = [l for l in GOOD if not l.startswith("NEG ")] + [
+            # this text IS present, so the NEG must FIRE and refuse the land
+            "NEG dash.sh|-c /home/ubuntu/options-trader-v4",
+        ]
+        home, repo, stage = _world(tmp, spec,
+                                   extra=dict(PASS_CHK, **{"dash.sh": DASH}))
+        before = _head(repo)
+        r = _land(home, stage)
+        out = r.stdout + r.stderr
+        check("F5 a NEG whose text begins with `-` still FIRES — it must not "
+              "silently read as absent", r.returncode != 0, f"rc={r.returncode}")
+        check("F5b ...and it says which file still carries it",
+              "STILL PRESENT in dash.sh" in out, out[-90:])
+        check("F5c ...and nothing was committed", _head(repo) == before)
 
     print()
     if _fails:

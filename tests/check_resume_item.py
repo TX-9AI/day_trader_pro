@@ -1,6 +1,14 @@
 #!/usr/bin/env python3
 """
-tests/check_resume_item.py  v1.0
+tests/check_resume_item.py  v1.1
+v1.1  2026-09-12  r374 / OPS.14 — R10/R10b PIN THE PAIRING ITSELF. The operator
+      asked that items 37 and 38 point at the same place: *"if I start a
+      conversation with 37 that's the one I want to resume with 38."* They did
+      — by coincidence of three literals agreeing, with nothing comparing them.
+      R10 asserts the RELATIONSHIP rather than either value, because pinning
+      each item's path separately goes green on two items pointing at two
+      different directories, each correct alone. R10b requires the name be
+      defined once, so there is no second copy left to drift.
 v1.0  2026-09-12  r371 — THE RESUME ITEM, AND THE TWO WAYS A RESUME LIES ABOUT
       HAVING WORKED.
 
@@ -31,6 +39,7 @@ the word, because the alternative — rewording the echo to keep a grep green �
 degrades the thing the operator reads in order to protect the test.
 """
 import os
+import re
 import sys
 
 _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -94,10 +103,41 @@ def main():
     launches = [ln for ln in b.splitlines() if "$CLAUDE --continue" in ln]
     check("R6 every launch passes --continue", len(launches) >= 1,
           f"{len(launches)} launch line(s)")
-    check("R6b and every launch runs in the otv4 directory — --continue is "
-          "scoped to a directory, so the wrong cwd opens a FRESH thread",
-          b.count('-c "$DIR"') >= 2 and "DIR=/home/ubuntu/options-trader-v4" in b,
-          f'-c "$DIR" x{b.count(chr(45) + "c " + chr(34) + "$DIR" + chr(34))}')
+    check("R6b and every launch runs in the shared session directory — "
+          "--continue is scoped to a directory, so the wrong cwd opens a "
+          "FRESH thread",
+          b.count('-c "$CLAUDE_SESSION_DIR"') >= 2,
+          f'launches: {b.count(chr(45) + chr(99) + " " + chr(34) + "$CLAUDE_SESSION_DIR" + chr(34))}')
+
+    # ══ 🔴 R10 — 37 AND 38 MUST POINT AT THE SAME PLACE ═══════════════════
+    # OPERATOR'S REQUIREMENT, 2026-09-12: *"the new session and the resume
+    # session need to point to the same place. Because if I start a
+    # conversation with 37 that's the one I want to resume with 38."*
+    # 🔑 THAT PAIRING IS THE WHOLE FEATURE, AND UNTIL r374 NOTHING HELD IT.
+    # The two items agreed only because three separate literals happened to
+    # match — 37 hardcoded the path twice inline, 38 kept its own `local DIR`.
+    # Change one and `--continue` finds no conversation for the new directory
+    # and opens a FRESH thread, which is indistinguishable from a successful
+    # resume until the model turns out to know nothing.
+    # ⚠️ ASSERTED AS A RELATIONSHIP, NOT AS A VALUE. Pinning each item's path
+    # separately would go green on two items pointing at two different places,
+    # each "correct" on its own — so this compares the `-c` arguments of BOTH
+    # function bodies and requires them to be the same non-empty set.
+    hand = fn.split("mi_handoff_fresh_claude() {", 1)
+    hb = hand[1].split("\n}\n", 1)[0] if len(hand) == 2 else ""
+    cs_resume = set(re.findall(r'-c (\S+)', b))
+    cs_hand = set(re.findall(r'-c (\S+)', hb))
+    check("R10 the handoff item and the resume item launch in the SAME "
+          "directory — 37 starts the thread 38 must find",
+          bool(cs_hand) and cs_hand == cs_resume,
+          f"37={sorted(cs_hand)} 38={sorted(cs_resume)}")
+    # R10b — and the shared name is defined ONCE, above both, so there is no
+    # second copy for a future edit to drift.
+    check("R10b ...from a single definition, not two literals that agree",
+          fn.count("CLAUDE_SESSION_DIR=") == 1
+          and "/home/ubuntu/options-trader-v4" not in b,
+          f"definitions={fn.count('CLAUDE_SESSION_DIR=')} "
+          f"literals_in_38={b.count('/home/ubuntu/options-trader-v4')}")
 
     # R7 — this item must NOT generate or pass a handoff. A resume that also
     # hands over a document is two mechanisms disagreeing about what the new

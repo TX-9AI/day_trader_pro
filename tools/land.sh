@@ -1,5 +1,22 @@
 #!/usr/bin/env bash
-# day_trader_pro/tools/land.sh — v1.13
+# day_trader_pro/tools/land.sh — v1.14
+# v1.14 (2026-09-12) — dtp r374 / LAND.10. `grep -qF --`, AND THE MISSING `--`
+#   BROKE THE CONTENT GATE IN BOTH DIRECTIONS. Any POS or NEG whose text begins
+#   with `-` was parsed as a grep OPTION rather than a pattern:
+#     NEG -> grep exits 2, `if grep -q` is false, the gate concludes the string
+#            is ABSENT, and the assertion CAN NEVER FIRE. Fails OPEN.
+#     POS -> grep exits 2, `! grep -q` is true, the gate reports MISSING and
+#            REFUSES a correct delivery. Fails CLOSED.
+#   🔴 DEP.2'S SUCCESSOR, AND ITS SENTENCE STILL APPLIES: that row fixed
+#   `grep -q` -> `grep -qF` after the gate failed open on one delivery and
+#   closed on another, and recorded that *a gate that can do both is not a weak
+#   gate, it is unrelated to what it claims to check*. Same defect, one token
+#   further along.
+#   ⚠️ `2>/dev/null` HID grep's OWN "invalid option" MESSAGE, so neither
+#   direction said why — §0.5, silence turning a broken check into a plausible
+#   one. The redirect stays (it also hides "no such file"), but `--` removes
+#   the class rather than the symptom.
+#   ⚠️ FOUND BECAUSE A REAL r374 ASSERTION BEGAN WITH `-c `, not by audit.
 # v1.13 (2026-09-12) — dtp r373 / SH.2. THE LANDER SWEEPS THE TARGET REPO'S
 #   SHELL, on every land, of either repo. SH.1's `bash -n` gate landed in otv4
 #   and walks otv4's own root, so dtp's 15 scripts — including this file and
@@ -471,13 +488,13 @@ land_one() {
   local g=0 f p
   while IFS= read -r line; do
     f="${line#POS }"; p="${f#*|}"; f="${f%%|*}"
-    if ! grep -qF "$p" "$repo/$f" 2>/dev/null; then
+    if ! grep -qF -- "$p" "$repo/$f" 2>/dev/null; then
       echo "  MISSING in $f: $p"; g=1
     fi
   done < <(grep '^POS ' "$spec")
   while IFS= read -r line; do
     f="${line#NEG }"; p="${f#*|}"; f="${f%%|*}"
-    if grep -qF "$p" "$repo/$f" 2>/dev/null; then
+    if grep -qF -- "$p" "$repo/$f" 2>/dev/null; then
       echo "  STILL PRESENT in $f: $p"; g=1
     fi
   done < <(grep '^NEG ' "$spec")

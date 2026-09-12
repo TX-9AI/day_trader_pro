@@ -1,4 +1,21 @@
-# day_trader_pro/menu_functions.sh — v1.68
+# day_trader_pro/menu_functions.sh — v1.69
+# v1.69 (2026-09-12) - dtp r374 / OPS.14. THE TWO SESSION ITEMS READ ONE
+#   DIRECTORY. Operator: "the new session and the resume session need to point
+#   to the same place, because if I start a conversation with 37 that's the one
+#   I want to resume with 38." They already DID resolve to the same path - and
+#   only by coincidence of three separate literals agreeing: item 37 hardcoded
+#   `/home/ubuntu/options-trader-v4` twice inline, item 38 held its own
+#   `local DIR=`, and NOTHING compared them.
+#   🔴 WHY THAT IS A DEFECT AND NOT A TIDINESS COMPLAINT. `claude --continue`
+#   resumes the most recent conversation FOR A DIRECTORY. Change 37's path and
+#   38 keeps resuming the old one - or finds nothing and silently opens a FRESH
+#   thread, which reads exactly like a successful resume until the model turns
+#   out to know nothing. The pairing IS the feature, and it was held together
+#   by three copies of one fact: C.11, where a fact in three places rots in the
+#   one nobody sweeps.
+#   FIX: `CLAUDE_SESSION_DIR`, defined once here and read by both items, so
+#   they cannot disagree. Pinned by check_resume_item R10, which compares the
+#   `-c` argument of BOTH functions rather than asserting either one's value.
 # v1.68 (2026-09-12) - dtp r371 / OPS.13. NEW ITEM `RESUME -> continue the last
 #   Claude thread`, beside the handoff item and ending the menu the same way.
 #   Operator: an exit-the-menu item that runs `claude --continue` in a tmux
@@ -328,6 +345,16 @@
 # Reset mock state
 
 # Dry-run spool-up (real reads)
+# 🔑 THE ONE DIRECTORY BOTH SESSION ITEMS LAUNCH IN (r374 / OPS.14).
+# Item 37 starts a thread here; item 38 resumes the most recent thread here.
+# `claude --continue` is scoped to a DIRECTORY, so if these two ever disagree
+# the resume silently opens a fresh thread instead of continuing the one the
+# handoff started — a wrong answer that looks like a right one.
+# ⚠️ Overridable, and never unset: `set -u` in devtools.sh would make a bare
+# reference fatal at call time, and a launch with an empty `-c` would land the
+# thread in whatever directory the menu happened to be in.
+CLAUDE_SESSION_DIR="${CLAUDE_SESSION_DIR:-$HOME/options-trader-v4}"
+
 mi_dry_run_spool_up_real_reads() {
     echo; $PY orchestrator.py --dry-run --no-gate; pause
 }
@@ -498,11 +525,11 @@ mi_handoff_fresh_claude() {
     if [ -z "${TMUX:-}" ]; then
         # Not inside tmux: kill any strays first, then attach directly.
         tmux kill-server 2>/dev/null
-        exec tmux new-session -s "$NEW" -c /home/ubuntu/options-trader-v4 \
+        exec tmux new-session -s "$NEW" -c "$CLAUDE_SESSION_DIR" \
             "env -u ANTHROPIC_API_KEY $CLAUDE 'Read $HO and follow it.'; exec bash -l"
     fi
     OLD="$(tmux display-message -p '#S')"
-    tmux new-session -d -s "$NEW" -c /home/ubuntu/options-trader-v4 \
+    tmux new-session -d -s "$NEW" -c "$CLAUDE_SESSION_DIR" \
         "env -u ANTHROPIC_API_KEY $CLAUDE 'Read $HO and follow it.'; exec bash -l"
     tmux switch-client -t "$NEW" || {
         echo "  switch-client failed — the new session '$NEW' EXISTS and is detached."
@@ -517,7 +544,6 @@ mi_handoff_fresh_claude() {
 # RESUME -> continue the last Claude thread
 mi_resume_claude_tmux() {
     local NEW OLD CLAUDE=/home/ubuntu/.local/bin/claude
-    local DIR=/home/ubuntu/options-trader-v4
     echo
     if [ ! -x "$CLAUDE" ]; then
         echo "  claude not found at $CLAUDE — nothing started."; pause; return 1
@@ -527,7 +553,7 @@ mi_resume_claude_tmux() {
     # prior conversation and opens a FRESH thread with no context and no
     # handoff — which looks like a successful resume and is not. Same directory
     # the handoff item uses, for the same reason.
-    echo "  RESUME: claude --continue in $DIR"
+    echo "  RESUME: claude --continue in $CLAUDE_SESSION_DIR"
     echo "  ── tmux sessions right now ───────────────────────────"
     tmux list-sessions -F '    #S  (#{session_windows} window(s), attached=#{session_attached})' \
         2>/dev/null | sed 's/^/  /' || echo "      (none)"
@@ -547,17 +573,17 @@ mi_resume_claude_tmux() {
     # ⚠️ AND THE FALLBACK REPORTS BEFORE IT CATCHES, which is r369's own lesson
     # written into its sibling: `exec bash -l` is what turned a dead launch
     # into a bare prompt nobody could explain. A resume legitimately fails when
-    # there is no prior conversation for $DIR, so that case must SAY SO rather
+    # there is no prior conversation for $CLAUDE_SESSION_DIR, so that case must SAY SO rather
     # than drop silently to a shell.
     NEW="claude-$(date +%H%M%S)"
     if [ -z "${TMUX:-}" ]; then
         tmux kill-server 2>/dev/null
-        exec tmux new-session -s "$NEW" -c "$DIR" \
-            "env -u ANTHROPIC_API_KEY $CLAUDE --continue || echo '  RESUME FAILED — no prior conversation for $DIR, or claude exited non-zero. Nothing was resumed.'; exec bash -l"
+        exec tmux new-session -s "$NEW" -c "$CLAUDE_SESSION_DIR" \
+            "env -u ANTHROPIC_API_KEY $CLAUDE --continue || echo '  RESUME FAILED — no prior conversation for $CLAUDE_SESSION_DIR, or claude exited non-zero. Nothing was resumed.'; exec bash -l"
     fi
     OLD="$(tmux display-message -p '#S')"
-    tmux new-session -d -s "$NEW" -c "$DIR" \
-        "env -u ANTHROPIC_API_KEY $CLAUDE --continue || echo '  RESUME FAILED — no prior conversation for $DIR, or claude exited non-zero. Nothing was resumed.'; exec bash -l"
+    tmux new-session -d -s "$NEW" -c "$CLAUDE_SESSION_DIR" \
+        "env -u ANTHROPIC_API_KEY $CLAUDE --continue || echo '  RESUME FAILED — no prior conversation for $CLAUDE_SESSION_DIR, or claude exited non-zero. Nothing was resumed.'; exec bash -l"
     tmux switch-client -t "$NEW" || {
         echo "  switch-client failed — the new session '$NEW' EXISTS and is detached."
         echo "  Attach with: tmux attach -t $NEW"; pause; return 1; }
