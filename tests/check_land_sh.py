@@ -1,5 +1,28 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/check_land_sh.py — v1.7
+# day_trader_pro/tests/check_land_sh.py — v1.8
+# v1.8 (2026-09-12) — dtp r372 / LAND.9. THIS HARNESS HAD NOT RUN SINCE
+#   2026-09-07 AND NOBODY KNEW. `land.sh` made `BASE` mandatory at r316; this
+#   file was last edited at r309, the day before, and its fixture never
+#   declared one — so every land it drove was refused for a missing directive
+#   and the file reported 20 PASS / 26 FAIL plus a traceback, none of it about
+#   what the checks were testing. Even "a clean delivery lands" failed.
+#   ⚠️ IT WENT UNSEEN BECAUSE NOTHING INVOKES IT — no `land.spec` names it, so
+#   it is a standalone nobody runs, which is [[SHD.5]]'s lesson applied to the
+#   one gate protecting the script every delivery passes through.
+#   FIXED: `_write_spec` derives BASE from the fixture repo's real HEAD at both
+#   spec sites, and `_restamp_base` refreshes it for G1, which commits a hook
+#   AFTER the spec is written and therefore had a genuinely stale BASE — the
+#   lander was right to refuse it, so the fixture is corrected, not the check.
+#   🔴 AND THE REPAIR IMMEDIATELY EARNED ITSELF TWICE. R1c was asserting a
+#   `git clean -fd` recovery line that r360 DELETED, so it could never pass
+#   again; and the R1d behind it — guarded by `if line:` — had therefore never
+#   executed at all. Run for the first time, it found a REAL defect in the
+#   recovery command the operator is handed after a failed land (see land.sh
+#   v1.9). A dead gate does not merely stop protecting: it hides the next
+#   check that rots inside it, and the defect that check would have caught.
+#   🔑 M1/M1b are the anti-rot: the mandatory directive set is READ OUT OF
+#   land.sh and compared with what the fixture writes, so the next required
+#   directive reds this by name instead of quietly refusing every land.
 # v1.7 (2026-09-06) — dtp r309 / LAND.5. B1 pins the progress bar's ONE
 #   dangerous property: under a pipe it must emit NOTHING. Every land in this
 #   project is read through `deploy.sh`'s output, and a bar that wrote escape
@@ -100,6 +123,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -137,6 +161,41 @@ def _clean_env(**over):
 def _run(cmd, cwd=None, env=None):
     return subprocess.run(cmd, cwd=cwd, env=env, shell=isinstance(cmd, str),
                           capture_output=True, text=True)
+
+
+def _head_sha(repo):
+    """The fixture repo's current short HEAD — what BASE must equal."""
+    return _run("git rev-parse --short HEAD", cwd=repo).stdout.strip()
+
+
+def _write_spec(path, spec_lines, repo):
+    """Write a land.spec, supplying BASE from `repo` unless one is declared.
+
+    ⚠️ A CASE THAT DELIBERATELY TESTS A BAD OR ABSENT BASE PASSES ITS OWN
+    `BASE ...` LINE and this leaves it alone — the helper must not make the
+    negative cases impossible to write.
+    """
+    lines = list(spec_lines)
+    if not any(l.startswith("BASE ") for l in lines):
+        lines.insert(1, f"BASE {_head_sha(repo)}")
+    with open(path, "w") as f:
+        f.write("\n".join(lines) + "\n")
+
+
+def _restamp_base(path, repo):
+    """Point an already-written spec at `repo`'s CURRENT head.
+
+    🔴 FOR FIXTURES THAT COMMIT AFTER BUILDING THE SPEC. G1 installs a
+    pre-commit hook and commits it, which moves HEAD — so the BASE captured
+    when the spec was written is genuinely stale by the time the land runs, and
+    the lander is RIGHT to refuse it. That is BASE working, not BASE in the
+    way, so the fixture is corrected rather than the check loosened.
+    """
+    out = []
+    for ln in open(path, encoding="utf-8").read().splitlines():
+        out.append(f"BASE {_head_sha(repo)}" if ln.startswith("BASE ") else ln)
+    with open(path, "w") as f:
+        f.write("\n".join(out) + "\n")
 
 
 def _world(tmp, spec_lines, payload="v2\n", extra=None, docs_only=False):
@@ -181,8 +240,14 @@ def _world(tmp, spec_lines, payload="v2\n", extra=None, docs_only=False):
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         with open(dst, "w") as f:
             f.write(body)
-    with open(os.path.join(stage, "half", "land.spec"), "w") as f:
-        f.write("\n".join(spec_lines) + "\n")
+    # 🔴 BASE COMES FROM THE FIXTURE REPO, NOT FROM A CONSTANT (r372 / LAND.9).
+    # `land.sh` has REFUSED a half with no BASE since r316, and this harness
+    # was last touched the day before — so from 2026-09-07 every land it drove
+    # was refused for a missing directive and 26 of its checks reported failure
+    # about something else entirely. Deriving it here is also §0.4: the fixture
+    # is built from the source of truth (the repo's own HEAD), never from a
+    # literal that drifts the moment the fixture does.
+    _write_spec(os.path.join(stage, "half", "land.spec"), spec_lines, repo)
     shutil.copy(LAND, os.path.join(stage, "land.sh"))
     # the bookkeeping tool the lander insists on finding
     dtp = os.path.join(home, "day_trader_pro", "tools")
@@ -217,6 +282,45 @@ def _head(repo):
 
 
 def main():
+    # 🔴 M1 RUNS FIRST, AND ITS FIRST PLACEMENT WAS WRONG. It sat at the
+    # END of this file, where the G2 traceback aborted the run before it
+    # could speak — so in the exact state it exists to diagnose, it never
+    # executed. A precondition that only reports when everything else
+    # already worked is not a precondition. Proven by mutation: with the
+    # fixture re-broken the way r316 broke it, this now names the missing
+    # directive before a single land is driven.
+    # ══ 🔴 M1 — THE FIXTURE IS DERIVED FROM THE LANDER, NOT FROZEN ═══════
+    # THIS IS THE CHECK THAT WOULD HAVE CAUGHT r316 THE DAY IT LANDED. `BASE`
+    # became mandatory on 2026-09-07; this harness was last edited the day
+    # before and its spec never declared one, so from that morning every land
+    # it drove was refused for a MISSING DIRECTIVE — and reported the failure
+    # as 26 unrelated checks plus a traceback. Five days and 24 dtp commits
+    # passed with the lander's own gate dead, and the rot was invisible
+    # because a refused land looks like a failing assertion.
+    # 🔑 SO THE MANDATORY SET IS READ OUT OF land.sh ITSELF and compared with
+    # what the fixture actually writes. The next directive the lander makes
+    # required turns THIS red, by name, instead of silently refusing every
+    # land in the file. §0.4: the fixture comes from the source of truth.
+    # ⚠️ SCOPED TO AN ACTUAL REFUSAL, NOT TO THE WORDS. The first cut matched
+    # `(carries|declares) no ([A-Z]+)` anywhere and picked up MANIFEST out of a
+    # COMMENT quoting §27 ("the archive carries no MANIFEST or scaffolding") —
+    # §20 for the third time in this delivery, and the same lesson each time:
+    # anchor on the shape of the thing, here a `die "..."` string, never on the
+    # prose around it. A mandatory directive is one the lander REFUSES without.
+    mandatory = set(re.findall(r'die "[^"]*(?:carries|declares) no ([A-Z]+)',
+                               open(LAND).read()))
+    check("M1 the lander declares at least one mandatory directive",
+          bool(mandatory), ", ".join(sorted(mandatory)))
+    with tempfile.TemporaryDirectory() as tmp:
+        home, repo, stage = _world(tmp, GOOD, extra=PASS_CHK)
+        written = open(os.path.join(stage, "half", "land.spec")).read()
+        missing = sorted(d for d in mandatory
+                         if not re.search(rf"^{d}\b", written, re.M))
+        check("M1b the fixture supplies EVERY directive the lander requires",
+              not missing,
+              f"missing: {', '.join(missing)}" if missing
+              else f"all of {', '.join(sorted(mandatory))}")
+
     # ── P1 — the happy path lands, pushes and cleans up ──────────────────
     with tempfile.TemporaryDirectory() as tmp:
         home, repo, stage = _world(tmp, GOOD, extra=PASS_CHK)
@@ -401,6 +505,7 @@ def main():
         with open(os.path.join(h2, "land.spec"), "w") as f:
             f.write("\n".join([
                 "REPO MARKER2", "REV r1000", "DESC the second half",
+                f"BASE {_head_sha(r2)}",
                 "ORDER 2",
                 "POS other.py|NEW2 = 2", "NEG other.py|OLD2 = 1",
                 # ⚠️ THE ORDERING GATE: this file only exists once half one has
@@ -617,11 +722,32 @@ def main():
         staged = _run("git diff --cached --name-only", cwd=repo).stdout.strip()
         check("R1b ...because it demonstrably is", bool(staged),
               staged.replace("\n", " ")[:60])
+        # 🔴 R1c WAS ASSERTING A COMMAND r360 DELETED, AND COULD NEVER PASS
+        # AGAIN (r372 / LAND.9). It looked for a recovery line containing
+        # `git clean -fd`; LAND.2 removed that from every printed recipe
+        # because it deletes untracked files anywhere in the tree — the
+        # `handoffs/` inbox included — and the extract creates none needing
+        # removal. So this check went stale at r360 and nobody saw it, because
+        # the harness had ALREADY been dead since r316. A dead gate does not
+        # merely stop protecting; it HIDES the next check that rots inside it.
+        # It now asserts what LAND.3 actually requires: a scoped recovery that
+        # UNSTAGES first, because `git checkout -- .` alone copies the index
+        # back over the working tree and restores what it meant to discard.
         line = ""
         for ln in out.splitlines():
-            if ln.strip().startswith("cd ") and "clean -fd" in ln:
-                line = ln.strip()
-        check("R1c ...and a command is offered for it", bool(line), line[:64])
+            t = ln.strip()
+            if t.startswith("cd ") and "git reset" in t and "git checkout --" in t:
+                line = t
+        check("R1c ...and a SCOPED recovery command is offered — one that "
+              "unstages before it checks out", bool(line), line[:72])
+        # ⚠️ R1d IS THE OTHER HALF, AND IT IS CHECKED ON THE OUTPUT RATHER THAN
+        # THE SOURCE ON PURPOSE (§20). `land.sh` NAMES `git clean -fd` three
+        # times in comments explaining why it is gone — a source-text canary
+        # would trip on the very documentation Rule 5 requires. What must be
+        # true is that it never reaches the operator's screen.
+        check("R1d ...and `git clean -fd` is never printed to the operator",
+              "clean -fd" not in out,
+              [l.strip()[:60] for l in out.splitlines() if "clean -fd" in l][:1])
         if line:
             _run(line)
             # 🔑 ASSERTED ON THE REPO, NOT THE WORDING. Grepping the message for
@@ -659,6 +785,8 @@ def main():
                     "open('generated_map.txt','w').write("
                     "'\\n'.join(sorted(os.listdir('.'))))\n")
         _run("git add -A && git commit -q -m hook", cwd=repo)
+        # the hook commit moved HEAD, so the spec's BASE is now genuinely stale
+        _restamp_base(os.path.join(stage, "half", "land.spec"), repo)
         r = _land(home, stage)
         check("G1 a delivery that DELETES a file still commits — the map is "
               "generated after the removal",

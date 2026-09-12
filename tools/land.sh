@@ -1,5 +1,25 @@
 #!/usr/bin/env bash
-# day_trader_pro/tools/land.sh — v1.11
+# day_trader_pro/tools/land.sh — v1.12
+# v1.12 (2026-09-12) — dtp r372 / LAND.9. THE DISCARD RECIPE DID NOT WORK ON
+#   ANY DELIVERY THAT ADDED A FILE, at both print sites. `git reset` unstages
+#   the payload, which makes an ADDED file untracked; `git checkout -- $P` is
+#   then handed a pathspec git no longer knows, exits non-zero — and the `&&`
+#   chain STOPS THERE, so it restored nothing and even the modified files
+#   stayed modified. REPRODUCED OUTSIDE THE HARNESS on one edit plus one new
+#   file: `error: pathspec 'tests/ok.py' did not match any file(s) known to
+#   git`, leaving `M thing.py` and `?? tests/` exactly as they were.
+#   🔴 SO THE OPERATOR WAS HANDED A CLEANUP COMMAND THAT CLEANED NOTHING, at
+#   the worst moment there is — immediately after a failed land.
+#   FIX: per path. In HEAD -> `git checkout` it; not in HEAD -> the payload
+#   added it, `rm -f` it. Still scoped to the payload's own file list, so
+#   `handoffs/` and every other untracked file in the tree are untouched,
+#   which is r360's whole point and why `git clean -fd` stays gone.
+#   ⚠️ FOUND ONLY BECAUSE THE HARNESS WAS REPAIRED IN THE SAME REVISION.
+#   `check_land_sh` R1d executes this recipe and asserts the tree ends clean —
+#   it was guarded behind an R1c that had rotted at r360, inside a harness dead
+#   since r316, so it had NEVER RUN. A dead gate does not merely stop
+#   protecting: it hides the next check that rots inside it, and the live
+#   defect that check would have caught.
 # v1.11 (2026-09-11) — dtp r360. THE DISCARD RECIPE IS SCOPED TO THE PAYLOAD.
 #   It said `git checkout -- .`, which discards EVERY dirty tracked file in the
 #   repo rather than only the ones this command extracted. MEASURED COST:
@@ -295,8 +315,17 @@ die() {
       local _pay
       _pay="$(cd "$d" 2>/dev/null && find . -type f ! -name land.spec -printf '%P ' 2>/dev/null)"
       if [ -n "$_pay" ]; then
+        # 🔴 r372 / LAND.9 — PER PATH, BECAUSE `git checkout` DIES ON A FILE
+        # THE PAYLOAD ADDED. After the reset an ADDED file is untracked, git
+        # does not know the pathspec, `checkout` exits non-zero — and the `&&`
+        # chain stops there, so it restores NOTHING and even the modified
+        # files stay modified. Reproduced outside the harness: a payload of one
+        # edit plus one new file left `M thing.py` and `?? tests/` behind.
+        # In HEAD -> restore it; not in HEAD -> the payload added it, remove
+        # it. Scoped to the payload's own list, so `handoffs/` and every other
+        # untracked file in the tree are untouched — LAND.2's whole point.
         echo "     To discard the PAYLOAD only:"
-        echo "       cd $repo && git reset -q HEAD -- $_pay && git checkout -- $_pay"
+        echo "       cd $repo && git reset -q HEAD -- $_pay && for f in $_pay; do if git cat-file -e HEAD:\"\$f\" 2>/dev/null; then git checkout -- \"\$f\"; else rm -f \"\$f\"; fi; done"
         echo "     (anything else dirty here is NOT from the extract — check before discarding)"
       else
         echo "     Payload list unavailable; inspect with: cd $repo && git status"
@@ -629,8 +658,14 @@ if [ "$FAILED" != "0" ]; then
         # version and two nights of conductor output were lost.
         # ⚠️ `git clean -fd` is gone: it deletes untracked files anywhere in
         # the tree, the operator inbox included.
+        # 🔴 r372 / LAND.9 — SAME PER-PATH REPAIR AS THE die() RECIPE ABOVE.
+        # `git checkout -- $P` fails on any path the payload ADDED, and takes
+        # the whole chain down with it, so the operator ran a command that
+        # cleaned nothing and said so only in git's pathspec error. This never
+        # showed because the check that runs it was gated behind a sibling that
+        # had rotted at r360, inside a harness dead since r316.
         echo "     re-land as-is, or discard the PAYLOAD only with:"
-        echo "     cd $r && P=\$(git diff --cached --name-only) && git reset -q HEAD -- \$P && git checkout -- \$P"
+        echo "     cd $r && P=\$(git diff --cached --name-only) && git reset -q HEAD -- \$P && for f in \$P; do if git cat-file -e HEAD:\"\$f\" 2>/dev/null; then git checkout -- \"\$f\"; else rm -f \"\$f\"; fi; done"
       else
         # ⚠️ NAMED, NEVER SWALLOWED. A rollback that fails silently is worse
         # than no rollback, because the operator would believe origin and his
