@@ -1,4 +1,16 @@
-# day_trader_pro/menu_functions.sh — v1.66
+# day_trader_pro/menu_functions.sh — v1.67
+# v1.67 (2026-09-12) - dtp r369 / OPS.9. THE HANDOFF PROMPT IS A PATH, NOT THE
+#   DOCUMENT. r368 embedded the whole handoff into the command string tmux
+#   hands to `sh` via "$(cat "$HO")" - expanded by the OUTER shell, so a
+#   multi-line document full of quotes, backticks, $ and parentheses was pasted
+#   into a command line and the inner shell died on the first unbalanced quote.
+#   `exec bash -l` caught the fall, so the operator landed in a BARE BASH
+#   PROMPT in a session named claude-170: handoff lost, previous session
+#   already killed, no error anywhere saying why. A PATH HAS NO
+#   METACHARACTERS - the document goes to handoffs/ (r358's convention, where
+#   it also survives to be re-read) and the new thread is told to read it.
+#   The file is removed on CANCEL only; deleting it on success would hand the
+#   fresh session a dangling reference.
 # v1.66 (2026-09-12) - r368. HAND OFF TO A FRESH CLAUDE THREAD, from the menu.
 #   Operator: a menu option that "exits (kills) the menu & drops us into the
 #   shell & starts a new tmux with Claude (fresh thread) and provides a
@@ -427,9 +439,24 @@ mi_bake_only_sync_no_restart_rth_safe() {
 }
 
 # Hand off to a FRESH Claude thread (kills this menu and every other tmux)
+# 🔴 r369 — THE PROMPT IS A PATH, NOT THE DOCUMENT. The first cut embedded the
+# whole handoff into the command string tmux hands to `sh`:
+#     "env -u ANTHROPIC_API_KEY $CLAUDE \"$(cat "$HO")\"; exec bash -l"
+# `$(cat ...)` expands in the OUTER shell, so a multi-line document full of
+# quotes, backticks, `$` and parentheses was pasted into a command line and the
+# inner shell died on the first unbalanced quote. `exec bash -l` then caught
+# the fall, so the operator landed in a BARE BASH PROMPT in a session named
+# `claude-170` — the handoff lost, the old session already killed, and no error
+# anywhere saying why.
+# 🔑 A PATH HAS NO METACHARACTERS. The document is written to `handoffs/`, the
+# new thread is told to read it, and nothing has to survive shell quoting.
 mi_handoff_fresh_claude() {
     local HO NEW OLD CLAUDE=/home/ubuntu/.local/bin/claude
-    HO="$(mktemp /tmp/handoff.XXXXXX)"
+    # 🔑 r369 — THE HANDOFF LIVES IN `handoffs/`, NOT /tmp. It is the operator's
+    # inbox by convention (r358), it survives the session that wrote it, and a
+    # handoff nobody can re-read after the fact is not a handoff.
+    mkdir -p /home/ubuntu/options-trader-v4/handoffs 2>/dev/null
+    HO="$(mktemp /home/ubuntu/options-trader-v4/handoffs/handoff.XXXXXX)"
     echo
     if [ ! -x "$CLAUDE" ]; then
         echo "  claude not found at $CLAUDE — nothing started."; pause; return 1
@@ -444,6 +471,9 @@ mi_handoff_fresh_claude() {
     echo "  … $(wc -l < "$HO") lines total"
     echo "  ─────────────────────────────────────────────────────"
     read -r -p "  Start a fresh Claude thread and KILL every other tmux session? [y/N] " a
+    # ⚠️ THE FILE IS ONLY REMOVED ON CANCEL. The new thread reads it by PATH,
+    # so deleting it on success would hand the fresh session a dangling
+    # reference — which is how the first cut failed in a different way.
     [ "$a" = "y" ] || { echo "  cancelled."; rm -f "$HO"; pause; return 0; }
 
     NEW="claude-$(date +%H%M%S)"
@@ -451,11 +481,11 @@ mi_handoff_fresh_claude() {
         # Not inside tmux: kill any strays first, then attach directly.
         tmux kill-server 2>/dev/null
         exec tmux new-session -s "$NEW" -c /home/ubuntu/options-trader-v4 \
-            "env -u ANTHROPIC_API_KEY $CLAUDE \"$(cat "$HO")\"; exec bash -l"
+            "env -u ANTHROPIC_API_KEY $CLAUDE 'Read $HO and follow it.'; exec bash -l"
     fi
     OLD="$(tmux display-message -p '#S')"
     tmux new-session -d -s "$NEW" -c /home/ubuntu/options-trader-v4 \
-        "env -u ANTHROPIC_API_KEY $CLAUDE \"$(cat "$HO")\"; exec bash -l"
+        "env -u ANTHROPIC_API_KEY $CLAUDE 'Read $HO and follow it.'; exec bash -l"
     tmux switch-client -t "$NEW" || {
         echo "  switch-client failed — the new session '$NEW' EXISTS and is detached."
         echo "  Attach with: tmux attach -t $NEW"; pause; return 1; }
