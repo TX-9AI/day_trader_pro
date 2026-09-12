@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_handoff_prompt.py  v1.0
+day_trader_pro/tests/check_handoff_prompt.py  v1.1
+v1.1  2026-09-12  r375 / OPS.15 — H3 ANCHORED ON THE SHAPE, NOT THE SPELLING.
+      It matched the literal otv4 path, so hoisting the handoffs directory onto
+      `$CLAUDE_SESSION_DIR` — one definition replacing four — turned it red for
+      a reason unrelated to the property it guards. The property, in its own
+      words, is *written under handoffs/, not /tmp*; that is what it asserts
+      now, and the /tmp refusal is made explicit rather than implied.
 v1.0  2026-09-12  dtp r369 / OPS.9 — the handoff prompt must be a PATH.
 
 🔴 WHAT HAPPENED. r368 built the tmux command as
@@ -53,8 +59,18 @@ def main():
     byref = len([l for l in code.splitlines() if "Read $HO" in l])
     check("H2", byref == 2, "{} of 2 launch paths pass the file by path".format(byref))
 
-    check("H3", "options-trader-v4/handoffs/handoff.XXXXXX" in code,
-          "written under handoffs/")
+    # 🔴 H3 WAS PINNED TO THE VALUE, NOT THE SHAPE (r375). It matched the
+    # literal `options-trader-v4/handoffs/handoff.XXXXXX`, so hoisting the
+    # directory into `$CLAUDE_SESSION_DIR` — a strictly better state, with one
+    # definition instead of four — turned it red for a reason unrelated to
+    # what it checks. Its own header says the property is *written under
+    # handoffs/, not /tmp, so it survives to be re-read*, and that is still
+    # true. C.24's lesson in a new costume: a canary tied to a spelling rots on
+    # the next legitimate change, and the tempting fix is to un-do the change.
+    # Anchored on the shape now, plus the /tmp refusal it actually cares about.
+    check("H3", "handoffs/handoff.XXXXXX" in code
+          and "mktemp /tmp" not in code and 'mktemp "/tmp' not in code,
+          "written under handoffs/, not /tmp")
 
     # ⚠️ POSITION, NOT WORDING. The refuse-path `rm` sits on its own line and
     # the reason is on the `echo` above it, so matching words tests the prose.

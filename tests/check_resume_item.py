@@ -1,6 +1,15 @@
 #!/usr/bin/env python3
 """
-tests/check_resume_item.py  v1.1
+tests/check_resume_item.py  v1.2
+v1.2  2026-09-12  r375 / OPS.15 — THE ITEMS ARE DISCOVERED FROM THE REGISTRY,
+      NOT LISTED HERE. A third SESSION item landed (`RESUME [other]`), and a
+      checker that names its subjects has to be edited every time one is added
+      — the item that gets forgotten being exactly the one nobody checks. It
+      now reads the SESSION section and applies r368's three traps, the
+      report-before-catch rule and the shared-directory rule to EACH item, so
+      a fourth is covered the moment it is registered. R10 compares all of
+      them at once, because the pairing is a relationship and pinning each
+      value separately goes green on items pointing at different places.
 v1.1  2026-09-12  r374 / OPS.14 — R10/R10b PIN THE PAIRING ITSELF. The operator
       asked that items 37 and 38 point at the same place: *"if I start a
       conversation with 37 that's the one I want to resume with 38."* They did
@@ -61,111 +70,114 @@ def read(*parts):
         return ""
 
 
+def session_items(rg):
+    """The SESSION section's function names, in registry order.
+
+    🔑 DISCOVERED, NOT LISTED. Naming the items here would mean this file has
+    to be edited every time one is added — and the item that gets forgotten is
+    the one nobody checks. The registry already declares which items END the
+    menu; that is the source of truth, so a fourth is covered the moment it is
+    registered rather than the day somebody remembers the test.
+    """
+    out, inside = [], False
+    for ln in rg.splitlines():
+        if '"SECTION|' in ln:
+            inside = "SESSION (" in ln
+            continue
+        if inside and '"ITEM|' in ln:
+            out.append(ln.rsplit("|", 1)[1].strip().strip('"'))
+    return out
+
+
+def body_of(fn, name):
+    part = fn.split(f"{name}() {{", 1)
+    return part[1].split("\n}\n", 1)[0] if len(part) == 2 else ""
+
+
 def main():
-    print("check_resume_item — RESUME -> continue the last Claude thread")
+    print("check_resume_item — the SESSION items (handoff, resume, resume-pick)")
     fn = read("menu_functions.sh")
     rg = read("menu_registry.sh")
 
-    body = fn.split("mi_resume_claude_tmux() {", 1)
-    check("R1 the function exists", len(body) == 2)
-    b = body[1].split("\n}\n", 1)[0] if len(body) == 2 else ""
+    items = session_items(rg)
+    check("R0 the SESSION section declares its items", len(items) >= 3,
+          ", ".join(items) or "none found")
 
-    check("R2 the API key is unset before claude is launched — it bills the "
-          "subscription, not the API",
-          b.count("env -u ANTHROPIC_API_KEY") >= 1 and "claude" in b.lower())
+    # ── the invariants EVERY session item shares, checked on EACH ──────────
+    # r368's three traps, each silent in its own way: an API key that bills the
+    # wrong account while working perfectly, a bare `claude` a venv's PATH can
+    # hide, and a kill order that takes out the client before it has moved.
+    for name in items:
+        b = body_of(fn, name)
+        tag = name.replace("mi_", "")
+        check(f"R1[{tag}] the function exists", bool(b))
+        check(f"R2[{tag}] the API key is unset — it bills the subscription",
+              b.count("env -u ANTHROPIC_API_KEY") >= 1)
+        launch = [l for l in b.splitlines() if "env -u ANTHROPIC_API_KEY" in l]
+        check(f"R3[{tag}] claude is invoked by ABSOLUTE path on every launch",
+              bool(launch) and all("$CLAUDE" in l for l in launch),
+              f"{len(launch)} launch line(s)")
+        i_sw, i_k = b.find("switch-client"), b.find("kill-session")
+        check(f"R4[{tag}] the client switches BEFORE anything is killed",
+              i_sw != -1 and i_k != -1 and i_sw < i_k, f"switch@{i_sw} kill@{i_k}")
+        # the r368-note's lesson: a fallback that catches without reporting
+        # converts a crash into a mystery. Every launch that ends in a shell
+        # must explain itself first.
+        bad = [l for l in launch
+               if "exec bash -l" in l and l.find("echo") > l.find("exec bash -l")]
+        noecho = [l for l in launch if "exec bash -l" in l and "echo" not in l]
+        check(f"R8[{tag}] a failed launch REPORTS before `exec bash -l` catches it",
+              not bad and not noecho, f"{len(bad) + len(noecho)} silent launch(es)")
 
-    # 🔴 R3 IS ANCHORED ON THE LAUNCH SHAPE, NOT ON THE WORD "claude", AND ITS
-    # FIRST CUT WAS §20 VERBATIM. It searched every line for `claude --` and
-    # went red on `echo "  RESUME: claude --continue in $DIR"` — a DISPLAY
-    # string, telling the operator what the item is about to do. The tempting
-    # fix is to reword the echo so the grep stays quiet; §20's corollary says
-    # the opposite, that a canary tripping on prose is a broken canary, and the
-    # loosened version is the one that misses the real regression. So a LAUNCH
-    # is identified by the thing that makes it one — the mandatory
-    # `env -u ANTHROPIC_API_KEY` prefix (R2) — and every launch must carry
-    # $CLAUDE. An echo can never match, because an echo has no env prefix.
-    launch_env = [ln for ln in b.splitlines() if "env -u ANTHROPIC_API_KEY" in ln]
-    bare = [ln.strip() for ln in launch_env if "$CLAUDE" not in ln]
-    check("R3 claude is invoked by ABSOLUTE path on every launch, never bare",
-          bool(launch_env) and not bare,
-          "; ".join(x[:60] for x in bare[:2]) or f"{len(launch_env)} launch line(s)")
-
-    i_sw, i_kill = b.find("switch-client"), b.find("kill-session")
-    check("R4 the client switches BEFORE anything is killed",
-          i_sw != -1 and i_kill != -1 and i_sw < i_kill,
-          f"switch@{i_sw} kill@{i_kill}")
-
-    check("R5 the item is registered in the menu",
-          "mi_resume_claude_tmux" in rg)
-
-    # R6 — the flag and the directory, together. Either alone is not a resume:
-    # the flag without the right cwd silently starts a fresh thread.
-    launches = [ln for ln in b.splitlines() if "$CLAUDE --continue" in ln]
-    check("R6 every launch passes --continue", len(launches) >= 1,
-          f"{len(launches)} launch line(s)")
-    check("R6b and every launch runs in the shared session directory — "
-          "--continue is scoped to a directory, so the wrong cwd opens a "
-          "FRESH thread",
-          b.count('-c "$CLAUDE_SESSION_DIR"') >= 2,
-          f'launches: {b.count(chr(45) + chr(99) + " " + chr(34) + "$CLAUDE_SESSION_DIR" + chr(34))}')
-
-    # ══ 🔴 R10 — 37 AND 38 MUST POINT AT THE SAME PLACE ═══════════════════
-    # OPERATOR'S REQUIREMENT, 2026-09-12: *"the new session and the resume
-    # session need to point to the same place. Because if I start a
-    # conversation with 37 that's the one I want to resume with 38."*
-    # 🔑 THAT PAIRING IS THE WHOLE FEATURE, AND UNTIL r374 NOTHING HELD IT.
-    # The two items agreed only because three separate literals happened to
-    # match — 37 hardcoded the path twice inline, 38 kept its own `local DIR`.
-    # Change one and `--continue` finds no conversation for the new directory
-    # and opens a FRESH thread, which is indistinguishable from a successful
-    # resume until the model turns out to know nothing.
-    # ⚠️ ASSERTED AS A RELATIONSHIP, NOT AS A VALUE. Pinning each item's path
-    # separately would go green on two items pointing at two different places,
-    # each "correct" on its own — so this compares the `-c` arguments of BOTH
-    # function bodies and requires them to be the same non-empty set.
-    hand = fn.split("mi_handoff_fresh_claude() {", 1)
-    hb = hand[1].split("\n}\n", 1)[0] if len(hand) == 2 else ""
-    cs_resume = set(re.findall(r'-c (\S+)', b))
-    cs_hand = set(re.findall(r'-c (\S+)', hb))
-    check("R10 the handoff item and the resume item launch in the SAME "
-          "directory — 37 starts the thread 38 must find",
-          bool(cs_hand) and cs_hand == cs_resume,
-          f"37={sorted(cs_hand)} 38={sorted(cs_resume)}")
-    # R10b — and the shared name is defined ONCE, above both, so there is no
-    # second copy for a future edit to drift.
-    check("R10b ...from a single definition, not two literals that agree",
+    # ══ 🔴 R10 — EVERY SESSION ITEM POINTS AT THE SAME PLACE ══════════════
+    # OPERATOR, 2026-09-12: *"the new session and the resume session need to
+    # point to the same place. Because if I start a conversation with 37 that's
+    # the one I want to resume with 38."*
+    # ⚠️ ASSERTED AS A RELATIONSHIP ACROSS ALL OF THEM, NOT AS A VALUE EACH.
+    # Pinning each item's path separately goes green on items pointing at
+    # different directories, each "correct" alone — and `--continue` and
+    # `--resume` are BOTH scoped to a directory, so a disagreement means the
+    # picker offers a different set of threads than the handoff creates into.
+    dirs = {}
+    for name in items:
+        got = set(re.findall(r'-c (\S+)', body_of(fn, name)))
+        dirs[name] = got
+    allsame = len({frozenset(v) for v in dirs.values()}) == 1 and all(dirs.values())
+    check("R10 EVERY session item launches in the SAME directory",
+          allsame,
+          "; ".join(f"{k.replace('mi_','')}={sorted(v)}" for k, v in dirs.items()))
+    check("R10b ...from a single definition, with no literal left to drift",
           fn.count("CLAUDE_SESSION_DIR=") == 1
-          and "/home/ubuntu/options-trader-v4" not in b,
-          f"definitions={fn.count('CLAUDE_SESSION_DIR=')} "
-          f"literals_in_38={b.count('/home/ubuntu/options-trader-v4')}")
+          and not any("/home/ubuntu/options-trader-v4" in body_of(fn, n)
+                      for n in items),
+          f"definitions={fn.count('CLAUDE_SESSION_DIR=')}")
 
-    # R7 — this item must NOT generate or pass a handoff. A resume that also
-    # hands over a document is two mechanisms disagreeing about what the new
-    # thread should read, and it reintroduces the interpolation OPS.9 removed.
-    check("R7 it neither generates nor interpolates a handoff — no $(...) in "
-          "the command string, so OPS.9's defect cannot recur",
-          "gen_handoff" not in b and "$(cat" not in b)
+    # ── per-item specifics: the flag is what distinguishes them ────────────
+    cont = body_of(fn, "mi_resume_claude_tmux")
+    pick = body_of(fn, "mi_resume_pick_claude_tmux")
+    check("R6 the RESUME item passes --continue (the most recent thread)",
+          "$CLAUDE --continue" in cont)
+    check("R11 the RESUME [other] item passes --resume (the picker)",
+          "$CLAUDE --resume" in pick)
+    # ⚠️ AND THEY MUST NOT BE THE SAME ITEM WEARING TWO LABELS. Two menu
+    # entries that do the identical thing is the failure DEV.4 found when
+    # RETIRE ran the byte-identical command to EMERGENCY STOP.
+    check("R11b ...and the two resume items are genuinely different",
+          ("--continue" in cont) != ("--continue" in pick)
+          and ("--resume" in pick) != ("--resume" in cont))
 
-    # R8 — the r368-note's lesson, enforced on its sibling. The report must sit
-    # between the launch and the exec, or a failed resume is a bare prompt.
-    ok8 = True
-    detail8 = ""
-    for ln in launches:
-        i_launch = ln.find("$CLAUDE --continue")
-        i_rep = ln.find("RESUME FAILED")
-        i_exec = ln.find("exec bash -l")
-        if not (i_launch < i_rep < i_exec) or i_rep == -1:
-            ok8 = False
-            detail8 = f"launch@{i_launch} report@{i_rep} exec@{i_exec}"
-            break
-    check("R8 a failed resume REPORTS before `exec bash -l` catches it — a "
-          "fallback that catches without reporting turns a crash into a mystery",
-          ok8 and bool(launches), detail8)
+    # R7 — no item may interpolate a document into its command string.
+    for name in items:
+        b = body_of(fn, name)
+        if name == "mi_handoff_fresh_claude":
+            continue          # it passes a PATH, checked by check_handoff_item
+        check(f"R7[{name.replace('mi_','')}] no $(...) in the command string — "
+              "OPS.9 cannot recur", "$(cat" not in b)
 
-    # R9 — the section heading. It read "this item ENDS the menu" when there
-    # was one; two items under a singular heading is the drift §5 catches.
-    check("R9 the SESSION heading is plural now that two items end the menu",
+    check("R9 the SESSION heading is plural", 
           "SECTION|SESSION (these items END the menu)" in rg)
+    for name in items:
+        check(f"R5[{name.replace('mi_','')}] registered in the menu", name in rg)
 
     print()
     if _fails:

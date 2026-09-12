@@ -1,4 +1,38 @@
-# day_trader_pro/menu_functions.sh — v1.69
+# day_trader_pro/menu_functions.sh — v1.71
+# v1.71 (2026-09-12) - dtp r375 / OPS.15. TWO FIXES TO ITEM 37, BOTH FOUND BY
+#   THE NEW REGISTRY-DRIVEN CHECK RATHER THAN BY LOOKING.
+#   🔴 (1) ITS LAUNCH NEVER LEARNED ITS OWN LESSON. r368 dropped the operator
+#   at a bare prompt with no error because `exec bash -l` caught a dead launch
+#   silently; r369 fixed the CAUSE (the prompt is a path now) and never added
+#   the REPORT. So any other startup failure still produced the same
+#   unexplained bare shell. The r368-note states the rule outright — a fallback
+#   that catches a failure without reporting it converts a crash into a
+#   mystery — and items 38 and 39 were written with it while 37, the item the
+#   incident happened to, was not. It now names the failure, says the handoff
+#   survives at its path, and points at `claude --resume`, the recovery the
+#   r368-note records as having existed and gone unmentioned.
+#   🔴 (2) IT HELD A FOURTH COPY OF THE PATH. r374 hoisted the LAUNCH onto
+#   CLAUDE_SESSION_DIR and left `mkdir`/`mktemp` hardcoding the otv4 path for
+#   the handoffs directory. The document must be written inside the directory
+#   the thread starts in: split them and the handoff lands in one place while
+#   the session opens in another, and the new thread reads a path that is not
+#   where it is looking. C.30 — when a rule changes, sweep its readers.
+# v1.70 (2026-09-12) - dtp r375 / OPS.15. NEW ITEM `RESUME [other] -> pick a
+#   Claude thread`, the third and last SESSION item. 38 takes the MOST RECENT
+#   conversation in the directory and can never reach back past a newer one;
+#   this opens `claude --resume`'s PICKER so any thread in that directory can
+#   be chosen. Recorded as a limit in OPS.14 the same day and asked for
+#   immediately after.
+#   🔑 SAME `CLAUDE_SESSION_DIR` AS 37 AND 38, and now the pairing check reads
+#   the SESSION section of the registry instead of naming functions, so a
+#   fourth item is covered the moment it is registered rather than the day
+#   somebody remembers to extend the test.
+#   ⚠️ IT IS INTERACTIVE, which none of its siblings are: the thread is chosen
+#   from a list INSIDE the new session, so cancelling the picker leaves a shell
+#   and this menu is already gone. The item says so before asking.
+#   ⚠️ AND ITS FALLBACK SAYS "EXITED WITHOUT RESUMING", NOT "FAILED" —
+#   cancelling is a legitimate choice and is indistinguishable from an error by
+#   exit code, so the wording must explain the bare prompt without accusing.
 # v1.69 (2026-09-12) - dtp r374 / OPS.14. THE TWO SESSION ITEMS READ ONE
 #   DIRECTORY. Operator: "the new session and the resume session need to point
 #   to the same place, because if I start a conversation with 37 that's the one
@@ -500,8 +534,14 @@ mi_handoff_fresh_claude() {
     # 🔑 r369 — THE HANDOFF LIVES IN `handoffs/`, NOT /tmp. It is the operator's
     # inbox by convention (r358), it survives the session that wrote it, and a
     # handoff nobody can re-read after the fact is not a handoff.
-    mkdir -p /home/ubuntu/options-trader-v4/handoffs 2>/dev/null
-    HO="$(mktemp /home/ubuntu/options-trader-v4/handoffs/handoff.XXXXXX)"
+    # 🔴 r375 — DERIVED, NOT A FOURTH COPY OF THE PATH (OPS.14/OPS.15). This
+    # hardcoded the otv4 path twice more, beside the launch that r374 had
+    # already hoisted. The handoff MUST be written inside the directory the
+    # thread is started in: split them and the document lands in one place
+    # while the session opens in another, and the new thread is told to read a
+    # file that is not where it is looking.
+    mkdir -p "$CLAUDE_SESSION_DIR/handoffs" 2>/dev/null
+    HO="$(mktemp "$CLAUDE_SESSION_DIR/handoffs/handoff.XXXXXX")"
     echo
     if [ ! -x "$CLAUDE" ]; then
         echo "  claude not found at $CLAUDE — nothing started."; pause; return 1
@@ -526,11 +566,11 @@ mi_handoff_fresh_claude() {
         # Not inside tmux: kill any strays first, then attach directly.
         tmux kill-server 2>/dev/null
         exec tmux new-session -s "$NEW" -c "$CLAUDE_SESSION_DIR" \
-            "env -u ANTHROPIC_API_KEY $CLAUDE 'Read $HO and follow it.'; exec bash -l"
+            "env -u ANTHROPIC_API_KEY $CLAUDE 'Read $HO and follow it.' || echo '  CLAUDE DID NOT START — the handoff is still at the path above; recover with: claude --resume'; exec bash -l"
     fi
     OLD="$(tmux display-message -p '#S')"
     tmux new-session -d -s "$NEW" -c "$CLAUDE_SESSION_DIR" \
-        "env -u ANTHROPIC_API_KEY $CLAUDE 'Read $HO and follow it.'; exec bash -l"
+        "env -u ANTHROPIC_API_KEY $CLAUDE 'Read $HO and follow it.' || echo '  CLAUDE DID NOT START — the handoff is still at the path above; recover with: claude --resume'; exec bash -l"
     tmux switch-client -t "$NEW" || {
         echo "  switch-client failed — the new session '$NEW' EXISTS and is detached."
         echo "  Attach with: tmux attach -t $NEW"; pause; return 1; }
@@ -589,6 +629,56 @@ mi_resume_claude_tmux() {
         echo "  Attach with: tmux attach -t $NEW"; pause; return 1; }
     # Switch FIRST, kill LAST — killing the old session first takes out the
     # client this script is running in.
+    tmux list-sessions -F '#S' 2>/dev/null | grep -vx "$NEW" | while read -r s; do
+        tmux kill-session -t "$s" 2>/dev/null
+    done
+}
+
+# RESUME [other] -> pick a Claude thread
+mi_resume_pick_claude_tmux() {
+    local NEW OLD CLAUDE=/home/ubuntu/.local/bin/claude
+    echo
+    if [ ! -x "$CLAUDE" ]; then
+        echo "  claude not found at $CLAUDE — nothing started."; pause; return 1
+    fi
+    # 🔑 SAME DIRECTORY AS ITEMS 37 AND 38, AND FOR THE SAME REASON (OPS.14).
+    # The picker lists the conversations belonging to a DIRECTORY, so pointing
+    # this one somewhere else would offer a different set of threads than the
+    # one the handoff item creates into — the pairing is the feature.
+    echo "  RESUME [other]: claude --resume in $CLAUDE_SESSION_DIR"
+    echo "  ── tmux sessions right now ───────────────────────────"
+    tmux list-sessions -F '    #S  (#{session_windows} window(s), attached=#{session_attached})' \
+        2>/dev/null | sed 's/^/  /' || echo "      (none)"
+    echo "  ─────────────────────────────────────────────────────"
+    # ⚠️ THIS ONE IS INTERACTIVE. `--resume` with no id opens a PICKER, so the
+    # thread is chosen inside the new tmux session, not here. It needs a TTY,
+    # which is why it is launched into tmux like its siblings rather than run
+    # from the menu process.
+    echo "  ⚠️  You pick the thread from a list INSIDE the new session."
+    echo "      Cancelling the picker leaves you at a shell, not back here —"
+    echo "      this menu is gone by then."
+    echo "      A session still RUNNING claude wants: tmux attach -t <name>"
+    read -r -p "  Pick a Claude thread to resume and KILL every other tmux session? [y/N] " a
+    [ "$a" = "y" ] || { echo "  cancelled."; pause; return 0; }
+
+    # ⚠️ THE MESSAGE SAYS "EXITED WITHOUT RESUMING", NOT "FAILED" — cancelling
+    # the picker is a legitimate choice and is indistinguishable from an error
+    # by exit code alone, so the wording must not accuse. What matters is that
+    # the bare prompt is EXPLAINED rather than mysterious, which is the whole
+    # of the r368-note's lesson: a fallback that catches without reporting
+    # turns a crash into a mystery.
+    NEW="claude-$(date +%H%M%S)"
+    if [ -z "${TMUX:-}" ]; then
+        tmux kill-server 2>/dev/null
+        exec tmux new-session -s "$NEW" -c "$CLAUDE_SESSION_DIR" \
+            "env -u ANTHROPIC_API_KEY $CLAUDE --resume || echo '  EXITED WITHOUT RESUMING — picker cancelled, or no conversation for $CLAUDE_SESSION_DIR.'; exec bash -l"
+    fi
+    OLD="$(tmux display-message -p '#S')"
+    tmux new-session -d -s "$NEW" -c "$CLAUDE_SESSION_DIR" \
+        "env -u ANTHROPIC_API_KEY $CLAUDE --resume || echo '  EXITED WITHOUT RESUMING — picker cancelled, or no conversation for $CLAUDE_SESSION_DIR.'; exec bash -l"
+    tmux switch-client -t "$NEW" || {
+        echo "  switch-client failed — the new session '$NEW' EXISTS and is detached."
+        echo "  Attach with: tmux attach -t $NEW"; pause; return 1; }
     tmux list-sessions -F '#S' 2>/dev/null | grep -vx "$NEW" | while read -r s; do
         tmux kill-session -t "$s" 2>/dev/null
     done

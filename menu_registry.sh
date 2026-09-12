@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
-# day_trader_pro/menu_registry.sh — v1.20
+# day_trader_pro/menu_registry.sh — v1.21
+# v1.21 (2026-09-12) — dtp r375 / OPS.15. NEW ITEM `RESUME [other] -> pick a
+#   Claude thread`, third in the SESSION section. 38 resumes the MOST RECENT
+#   conversation in the directory; this opens the picker so an older one can be
+#   chosen. Ordered after 38 because the common case should be the shorter
+#   path — most of the time the thread wanted IS the last one.
+#   ⚠️ Cited BY LABEL (C.15): this shifts every item number below it.
 # v1.20 (2026-09-12) — dtp r371 / OPS.13. NEW ITEM `RESUME -> continue the last
 #   Claude thread`, in the SESSION section beside the handoff item because it
 #   is the second item that ENDS the menu rather than returning to it. The
@@ -262,6 +268,7 @@ MENU=(
   "SECTION|SESSION (these items END the menu)"
   "ITEM|HAND OFF -> fresh Claude thread (kills this menu and every tmux)|mi_handoff_fresh_claude"
   "ITEM|RESUME -> continue the last Claude thread (kills this menu and every tmux)|mi_resume_claude_tmux"
+  "ITEM|RESUME [other] -> pick a Claude thread (kills this menu and every tmux)|mi_resume_pick_claude_tmux"
 
   "SECTION|REPOINT (migrate fleet -> new repo)"
   "ITEM|Snapshot dir -> tarball (the held state before a repoint)|mi_snapshot_dir_repo_ready_tarball"
