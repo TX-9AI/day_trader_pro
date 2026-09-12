@@ -1,5 +1,13 @@
 #!/usr/bin/env bash
-# day_trader_pro/menu_registry.sh — v1.19
+# day_trader_pro/menu_registry.sh — v1.20
+# v1.20 (2026-09-12) — dtp r371 / OPS.13. NEW ITEM `RESUME -> continue the last
+#   Claude thread`, in the SESSION section beside the handoff item because it
+#   is the second item that ENDS the menu rather than returning to it. The
+#   section heading moves from "this item ENDS the menu" to "these items END
+#   the menu" — it was written when there was exactly one, and a heading that
+#   says "this item" above two of them is the kind of drift §5 exists to catch.
+#   ⚠️ Both items are cited BY LABEL everywhere (C.15): numbers come from a
+#   render-time loop counter, and adding this one shifts every item below it.
 # v1.19 (2026-09-12) — r368. NEW ITEM `HAND OFF -> fresh Claude thread` in its
 #   own SESSION section at the foot, because it is the only item that ENDS the
 #   menu rather than returning to it, and burying that among maintenance items
@@ -251,8 +259,9 @@ MENU=(
   "ITEM|FULL (wake->bake->restart->STOP)|mi_full_wake_bake_restart_stop"
   "ITEM|EMERGENCY STOP — mid-session, abandons positions (one/all/some)|mi_emergency_stop_no_eod_no_pycache_rth_exempt"
 
-  "SECTION|SESSION (this item ENDS the menu)"
+  "SECTION|SESSION (these items END the menu)"
   "ITEM|HAND OFF -> fresh Claude thread (kills this menu and every tmux)|mi_handoff_fresh_claude"
+  "ITEM|RESUME -> continue the last Claude thread (kills this menu and every tmux)|mi_resume_claude_tmux"
 
   "SECTION|REPOINT (migrate fleet -> new repo)"
   "ITEM|Snapshot dir -> tarball (the held state before a repoint)|mi_snapshot_dir_repo_ready_tarball"

@@ -1,6 +1,21 @@
 #!/usr/bin/env python3
 """
-tools/gen_handoff.py  v1.1
+tools/gen_handoff.py  v1.2
+v1.2  2026-09-12  r371 — THE HANDOFF DECLARES THE PERMISSIONS RATHER THAN
+      LEAVING A FRESH THREAD TO INFER THEM. Operator: *"You are a part of this
+      project, so I also want the handoff script to explicitly declare what
+      your permissions are and not to assume anything not already covered."*
+      🔑 THE GAP IT CLOSES WAS MEASURED, NOT IMAGINED: on 2026-09-12 a thread
+      read §38, built an archive, took his yes, and only THEN discovered the
+      land was refused — the harness rules OPS.2 records were not on the box.
+      A permission a document describes and the machine does not hold is worse
+      than an absent one, because it is discovered at the last step. So the
+      block names what is granted, names that the operator always keeps
+      approval of WHAT gets committed, names that the lander and its checkers
+      are never bypassed, and states plainly that a grant is not a harness rule
+      — if a listed command is refused, the RULE is missing and only he can add
+      it. WORKING_AGREEMENT §38.9 is the authority; this is a pointer to it
+      (§35), and it must never carry a rule §38.9 does not.
 v1.1  2026-09-12  r370 — THE OPENING STOPS RETRACTING SOMETHING NOBODY SAID.
       Operator, on reading a generated handoff: the do-not-clone lines *"read
       like a correction or retraction. Take it out entirely. If the handoff
@@ -159,6 +174,36 @@ def main():
     print()
     print("⚠️ Anything not written in those files did not survive the last thread. If a")
     print("decision seems to be missing, it is missing — ask rather than reconstruct it.")
+    print()
+    # 🔴 THE PERMISSIONS ARE DECLARED, NOT INFERRED (operator, 2026-09-12).
+    # WORKING_AGREEMENT §38.9 is the authority and this is a POINTER to it, in
+    # his own terms — the §35 rule applies to permissions exactly as it does to
+    # anything else, so this block must never grow a rule §38.9 does not carry.
+    print("YOUR PERMISSIONS — DECLARED. Assume NOTHING beyond this list.")
+    print("WORKING_AGREEMENT §38.9 is the authority; this is the short form.")
+    print("  YOURS, no asking:")
+    print("    · The FLEET. Bring boxes up and down, run commands, bake, start,")
+    print("      stop and restart services — via fleet.py and its flags (--only,")
+    print("      etc.), ec2ops.py and wake_and_bake.py.")
+    print("    · S3 from control: studies, reports, comparisons, any read.")
+    print("    · The COMMIT and the BAKE, once he has approved the contents —")
+    print("      timed whenever it makes the most sense to synch everything.")
+    print("    · Adding CHECKERS to the land sequence when a need is unmet.")
+    print("  HIS, always:")
+    print("    · WHAT GETS COMMITTED. You describe the file changes; that")
+    print("      description is what he approves, BEFORE the land. Quote:")
+    print("      \"I always retain approval over the land — you're responsible")
+    print("      for the rest.\"")
+    print("  NEVER:")
+    print("    · Bypassing the landing script or the checkers. They exist for")
+    print("      our protection. Add to them; do not go around them.")
+    print("  ⚠️ A GRANT IS NOT A HARNESS RULE. These are the operator's terms;")
+    print("     Claude Code enforces its own permission rules separately, from")
+    print("     ~/.claude/settings.json. If a command ON this list is refused,")
+    print("     the RULE is missing — say so and let him add it. Never grant")
+    print("     yourself one: that is refused as self-modification, correctly.")
+    print("  ⚠️ MORE WILL BE ADDED as new situations need them. Absent from this")
+    print("     list means NOT GRANTED YET, not forbidden forever — ask.")
     print()
     # 🔴 OPEN IS THE STATUS COLUMN, NOT THE SEVERITY MARKER, and the first draft
     # of this got it wrong: it filtered on 🔴 and listed a dozen LONG-CLOSED rows

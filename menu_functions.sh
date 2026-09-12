@@ -1,4 +1,22 @@
-# day_trader_pro/menu_functions.sh — v1.67
+# day_trader_pro/menu_functions.sh — v1.68
+# v1.68 (2026-09-12) - dtp r371 / OPS.13. NEW ITEM `RESUME -> continue the last
+#   Claude thread`, beside the handoff item and ending the menu the same way.
+#   Operator: an exit-the-menu item that runs `claude --continue` in a tmux
+#   "in case we want to resume a session rather than start up a new one" - the
+#   recovery the r368-note records as having existed and gone unmentioned when
+#   the handoff item dropped him into a bare shell.
+#   🔑 IT INHERITS ALL THREE OF r368's TRAPS - `env -u ANTHROPIC_API_KEY` so the
+#   thread bills the subscription, the ABSOLUTE claude path so a venv's PATH
+#   cannot hide it, and create-detached -> switch -> kill so the client moves
+#   before anything is killed - and adds two of its own. THE CWD IS
+#   LOAD-BEARING: `--continue` resumes the most recent conversation FOR A
+#   DIRECTORY, so launched elsewhere it silently opens a FRESH thread with no
+#   context, which reads as a successful resume. AND THE FALLBACK REPORTS
+#   BEFORE IT CATCHES: `exec bash -l` is exactly what turned r368's dead launch
+#   into an unexplained bare prompt, and a resume legitimately fails when there
+#   is no prior conversation, so that case prints why instead of going quiet.
+#   ⚠️ Nothing is interpolated into the command string - no prompt, no
+#   document, no $(...) - so OPS.9's defect cannot recur here by construction.
 # v1.67 (2026-09-12) - dtp r369 / OPS.9. THE HANDOFF PROMPT IS A PATH, NOT THE
 #   DOCUMENT. r368 embedded the whole handoff into the command string tmux
 #   hands to `sh` via "$(cat "$HO")" - expanded by the OUTER shell, so a
@@ -491,6 +509,60 @@ mi_handoff_fresh_claude() {
         echo "  Attach with: tmux attach -t $NEW"; pause; return 1; }
     # Every other session, not just the one the menu was in. Last, and it takes
     # this script with it — which is the point.
+    tmux list-sessions -F '#S' 2>/dev/null | grep -vx "$NEW" | while read -r s; do
+        tmux kill-session -t "$s" 2>/dev/null
+    done
+}
+
+# RESUME -> continue the last Claude thread
+mi_resume_claude_tmux() {
+    local NEW OLD CLAUDE=/home/ubuntu/.local/bin/claude
+    local DIR=/home/ubuntu/options-trader-v4
+    echo
+    if [ ! -x "$CLAUDE" ]; then
+        echo "  claude not found at $CLAUDE — nothing started."; pause; return 1
+    fi
+    # 🔑 THE CWD IS LOAD-BEARING, NOT COSMETIC. `--continue` resumes the most
+    # recent conversation FOR A DIRECTORY. Launched anywhere else it finds no
+    # prior conversation and opens a FRESH thread with no context and no
+    # handoff — which looks like a successful resume and is not. Same directory
+    # the handoff item uses, for the same reason.
+    echo "  RESUME: claude --continue in $DIR"
+    echo "  ── tmux sessions right now ───────────────────────────"
+    tmux list-sessions -F '    #S  (#{session_windows} window(s), attached=#{session_attached})' \
+        2>/dev/null | sed 's/^/  /' || echo "      (none)"
+    echo "  ─────────────────────────────────────────────────────"
+    # ⚠️ RESUMING IS NOT ATTACHING, AND THE TWO ARE EASY TO CONFUSE HERE.
+    # `--continue` starts a NEW process against the most recent transcript. If
+    # a session listed above is still RUNNING claude, the thing wanted is
+    # `tmux attach -t <name>`, not a second process on the same conversation.
+    echo "  ⚠️  --continue starts a NEW process on the most recent transcript."
+    echo "      If a session above is still RUNNING claude, attach to it"
+    echo "      instead: tmux attach -t <name>"
+    read -r -p "  Resume the last Claude thread and KILL every other tmux session? [y/N] " a
+    [ "$a" = "y" ] || { echo "  cancelled."; pause; return 0; }
+
+    # 🔑 NOTHING IS INTERPOLATED INTO THE COMMAND STRING — no prompt, no
+    # document, no $(...). OPS.9's failure cannot recur here by construction.
+    # ⚠️ AND THE FALLBACK REPORTS BEFORE IT CATCHES, which is r369's own lesson
+    # written into its sibling: `exec bash -l` is what turned a dead launch
+    # into a bare prompt nobody could explain. A resume legitimately fails when
+    # there is no prior conversation for $DIR, so that case must SAY SO rather
+    # than drop silently to a shell.
+    NEW="claude-$(date +%H%M%S)"
+    if [ -z "${TMUX:-}" ]; then
+        tmux kill-server 2>/dev/null
+        exec tmux new-session -s "$NEW" -c "$DIR" \
+            "env -u ANTHROPIC_API_KEY $CLAUDE --continue || echo '  RESUME FAILED — no prior conversation for $DIR, or claude exited non-zero. Nothing was resumed.'; exec bash -l"
+    fi
+    OLD="$(tmux display-message -p '#S')"
+    tmux new-session -d -s "$NEW" -c "$DIR" \
+        "env -u ANTHROPIC_API_KEY $CLAUDE --continue || echo '  RESUME FAILED — no prior conversation for $DIR, or claude exited non-zero. Nothing was resumed.'; exec bash -l"
+    tmux switch-client -t "$NEW" || {
+        echo "  switch-client failed — the new session '$NEW' EXISTS and is detached."
+        echo "  Attach with: tmux attach -t $NEW"; pause; return 1; }
+    # Switch FIRST, kill LAST — killing the old session first takes out the
+    # client this script is running in.
     tmux list-sessions -F '#S' 2>/dev/null | grep -vx "$NEW" | while read -r s; do
         tmux kill-session -t "$s" 2>/dev/null
     done
