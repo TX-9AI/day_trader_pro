@@ -1,6 +1,29 @@
 #!/usr/bin/env python3
 """
-tests/check_resume_item.py  v1.2
+tests/check_resume_item.py  v1.3
+v1.3  2026-09-13  r381 / OPS.17 — THE SECTION IS `CLAUDE CODE`, IT HOLDS AN
+      ITEM THAT LAUNCHES NOTHING, AND THE LAUNCH RULES STILL CANNOT BE DODGED.
+      Operator, 2026-09-13: rename the section, shorten 38 so it stops wrapping
+      on the phone, and add an item after 37 that *"exit[s] the menu and
+      reattach[es] to the tmux session hosting our current conversation, which
+      is not quite the same as resume conversation."*
+      🔑 CLASSIFIED BY WHAT THE BODY DOES, NOT BY A LIST OF NAMES. An item whose
+      body contains `new-session` is a LAUNCHER and gets every r368 launch rule
+      (R1-R4, R8, R10); one that does not is an ATTACHER and gets RA1-RA5 — it
+      must kill NOTHING, start NOTHING, and say so when there is nothing to
+      attach to. So a future launcher that forgot its `env -u` cannot slip
+      through by being mistaken for an attacher: it would have to stop
+      launching to stop being checked as a launcher.
+      🔴 RA3 IS DRIVEN, NOT READ (§21). tmux reports a Claude pane's command as
+      `bash`, because the launch is `bash -c "env ... claude ..."` — measured on
+      control on 2026-09-13, pane `claude-133147:0.0 cmd=bash` with `claude` its
+      child. So `pane_current_command` cannot find the conversation. The finder
+      walks each `claude` process up its parents to a pane, and RA3 runs THAT
+      FUNCTION against a private tmux server holding a fake `claude` under
+      `bash -c` and a decoy session that is not claude.
+      ⚠️ RW pins the width: every label in the section is at most 71 chars, the
+      longest the operator's screenshot showed fitting (39's) — 38 was 74 and
+      wrapped.
 v1.2  2026-09-12  r375 / OPS.15 — THE ITEMS ARE DISCOVERED FROM THE REGISTRY,
       NOT LISTED HERE. A third SESSION item landed (`RESUME [other]`), and a
       checker that names its subjects has to be edited every time one is added
@@ -70,8 +93,23 @@ def read(*parts):
         return ""
 
 
+SECTION_HEAD = "CLAUDE CODE ("
+WIDTH_MAX = 71      # 39's label, the longest seen fitting on the phone
+
+
+def session_labels(rg):
+    out, inside = [], False
+    for ln in rg.splitlines():
+        if '"SECTION|' in ln:
+            inside = SECTION_HEAD in ln
+            continue
+        if inside and '"ITEM|' in ln:
+            out.append(ln.split('"ITEM|', 1)[1].rsplit("|", 1)[0])
+    return out
+
+
 def session_items(rg):
-    """The SESSION section's function names, in registry order.
+    """The CLAUDE CODE section's function names, in registry order.
 
     🔑 DISCOVERED, NOT LISTED. Naming the items here would mean this file has
     to be edited every time one is added — and the item that gets forgotten is
@@ -82,7 +120,7 @@ def session_items(rg):
     out, inside = [], False
     for ln in rg.splitlines():
         if '"SECTION|' in ln:
-            inside = "SESSION (" in ln
+            inside = SECTION_HEAD in ln
             continue
         if inside and '"ITEM|' in ln:
             out.append(ln.rsplit("|", 1)[1].strip().strip('"'))
@@ -94,14 +132,80 @@ def body_of(fn, name):
     return part[1].split("\n}\n", 1)[0] if len(part) == 2 else ""
 
 
+def ra3(fn):
+    """RA3 — drive `_claude_tmux_sessions` against a PRIVATE tmux server.
+
+    ⚠️ A fake `claude` (a shebang script NAMED claude, so its comm IS `claude`)
+    runs under
+    `bash -c` — the real launch shape, which is exactly what makes tmux report
+    the pane as `bash`. A decoy session runs plain `sleep`. The function must
+    name the first and not the second. TMUX_TMPDIR isolates the server, so the
+    real conversation on the default socket is invisible to it.
+    """
+    import shutil
+    import subprocess
+    import tempfile
+    import time
+    head = "_claude_tmux_sessions() {"
+    if head not in fn:
+        check("RA3 the finder locates claude by PROCESS, not pane command", False,
+              "_claude_tmux_sessions is not defined")
+        return
+    src = head + fn.split(head, 1)[1].split("\n}\n", 1)[0] + "\n}\n"
+    if not shutil.which("tmux"):
+        check("RA3 the finder locates claude by PROCESS, not pane command", False,
+              "tmux is not installed here — the check cannot run")
+        return
+    # ⚠️ TWO WAYS THIS FIXTURE FAILED ON ITS FIRST RUN, BOTH SILENTLY GREEN-ABLE:
+    # a COPY of `sleep` does not run on this box (uutils coreutils is one
+    # multi-call binary and refuses an unknown name), so the fake never started
+    # and only RA3b's "finds nothing" could have passed; and a tmux socket under
+    # a long scratch TMPDIR exceeds the socket-path limit. Hence a script, and a
+    # short directory under /tmp, and RA3's detail prints the panes it saw.
+    with tempfile.TemporaryDirectory(prefix="ra3", dir="/tmp") as td:
+        fake = os.path.join(td, "claude")
+        with open(fake, "w") as fh:
+            fh.write("#!/bin/bash\nwhile :; do sleep 1; done\n")
+        os.chmod(fake, 0o755)
+        env = dict(os.environ, TMUX_TMPDIR=td)
+        env.pop("TMUX", None)
+        run = lambda *a: subprocess.run(["tmux"] + list(a), env=env,
+                                        capture_output=True, text=True)
+        try:
+            run("new-session", "-d", "-s", "fake claude", f"bash -c '{fake}; true'")
+            run("new-session", "-d", "-s", "decoy", "sleep 60")
+            time.sleep(0.6)
+            got = subprocess.run(["bash", "-c", src + "_claude_tmux_sessions"],
+                                 env=env, capture_output=True, text=True)
+            panes = run("list-panes", "-a", "-F", "#S cmd=#{pane_current_command}").stdout
+            names = [l for l in got.stdout.splitlines() if l.strip()]
+            check("RA3 the finder locates claude by PROCESS, not pane command",
+                  names == ["fake claude"] and got.returncode == 0,
+                  f"found={names} rc={got.returncode} panes={panes.split(chr(10))[:2]}")
+            run("kill-session", "-t", "=fake claude")
+            got2 = subprocess.run(["bash", "-c", src + "_claude_tmux_sessions"],
+                                  env=env, capture_output=True, text=True)
+            check("RA3b ...and finds NOTHING when no pane is running claude",
+                  got2.stdout.strip() == "" and got2.returncode == 0,
+                  f"found={got2.stdout.split()} rc={got2.returncode}")
+        finally:
+            run("kill-server")
+
+
 def main():
-    print("check_resume_item — the SESSION items (handoff, resume, resume-pick)")
+    print("check_resume_item — the CLAUDE CODE items (handoff, reattach, resume, resume-pick)")
     fn = read("menu_functions.sh")
     rg = read("menu_registry.sh")
 
-    items = session_items(rg)
-    check("R0 the SESSION section declares its items", len(items) >= 3,
-          ", ".join(items) or "none found")
+    every = session_items(rg)
+    check("R0 the CLAUDE CODE section declares its items", len(every) >= 4,
+          ", ".join(every) or "none found")
+    # 🔑 LAUNCHERS vs ATTACHERS, decided by the body. See the v1.3 header.
+    items = [n for n in every if "new-session" in body_of(fn, n)]
+    attachers = [n for n in every if n not in items]
+    check("R0b ...three launch a thread and one reattaches",
+          len(items) >= 3 and "mi_reattach_claude_tmux" in attachers,
+          f"launchers={len(items)} attachers={attachers}")
 
     # ── the invariants EVERY session item shares, checked on EACH ──────────
     # r368's three traps, each silent in its own way: an API key that bills the
@@ -174,10 +278,36 @@ def main():
         check(f"R7[{name.replace('mi_','')}] no $(...) in the command string — "
               "OPS.9 cannot recur", "$(cat" not in b)
 
-    check("R9 the SESSION heading is plural", 
-          "SECTION|SESSION (these items END the menu)" in rg)
-    for name in items:
+    check("R9 the section is named CLAUDE CODE, and the old name is gone",
+          "SECTION|CLAUDE CODE (these items END the menu)" in rg
+          and '"SECTION|SESSION (' not in rg)
+    for name in every:
         check(f"R5[{name.replace('mi_','')}] registered in the menu", name in rg)
+
+    # ── RW — nothing in the section wraps on the phone ─────────────────────
+    labels = session_labels(rg)
+    wide = [f"{len(l)}: {l}" for l in labels if len(l) > WIDTH_MAX]
+    check(f"RW every CLAUDE CODE label is <= {WIDTH_MAX} chars",
+          bool(labels) and not wide, "; ".join(wide) or f"{len(labels)} label(s)")
+    check("RW2 REATTACH sits directly after HAND OFF",
+          every[:2] == ["mi_handoff_fresh_claude", "mi_reattach_claude_tmux"],
+          ", ".join(every[:2]))
+
+    # ══ RA — THE ATTACHER ═════════════════════════════════════════════════
+    ra = body_of(fn, "mi_reattach_claude_tmux")
+    check("RA0 the reattach function exists", bool(ra))
+    check("RA1 it kills NOTHING — no kill-session, no kill-server",
+          bool(ra) and "kill-session" not in ra and "kill-server" not in ra)
+    check("RA2 it starts NOTHING — no new-session, no claude launch",
+          bool(ra) and "new-session" not in ra and "$CLAUDE" not in ra
+          and "--continue" not in ra and "--resume" not in ra)
+    i_none = ra.find("_claude_tmux_sessions")
+    check("RA4 an empty result is REPORTED before returning to the menu",
+          "No tmux session is running claude" in ra)
+    check("RA5 outside tmux it ATTACHES; inside, it switches and EXITS the menu",
+          "exec tmux attach-session" in ra and "switch-client" in ra
+          and "exit 0" in ra, f"finder@{i_none}")
+    ra3(fn)
 
     print()
     if _fails:

@@ -1,5 +1,18 @@
 #!/usr/bin/env bash
-# day_trader_pro/menu_registry.sh — v1.21
+# day_trader_pro/menu_registry.sh — v1.22
+# v1.22 (2026-09-13) — dtp r381 / OPS.17. THE SECTION IS `CLAUDE CODE`, 38 STOPS
+#   WRAPPING, AND A REATTACH ITEM SITS AFTER THE HANDOFF. Operator, 2026-09-13,
+#   from a phone screenshot: 38's label was 74 chars and ran onto a second line
+#   (39's 71 fits); *"instead of that section being called 'Session' I would
+#   prefer it be named 'CLAUDE CODE'"*; and an item *"to exit the menu and
+#   reattach to the tmux session hosting our current conversation, which is not
+#   quite the same as resume conversation."*
+#   🔑 REATTACH IS NOT RESUME. RESUME starts a NEW claude process on the most
+#   recent transcript and kills every tmux session; REATTACH starts nothing and
+#   kills nothing — it puts the terminal back on the process that is already
+#   running, mid-turn if it is mid-turn. Placed right after HAND OFF, which is
+#   where the operator asked for it.
+#   ⚠️ Cited BY LABEL (C.15): this shifts every item number below 37 by one.
 # v1.21 (2026-09-12) — dtp r375 / OPS.15. NEW ITEM `RESUME [other] -> pick a
 #   Claude thread`, third in the SESSION section. 38 resumes the MOST RECENT
 #   conversation in the directory; this opens the picker so an older one can be
@@ -265,9 +278,10 @@ MENU=(
   "ITEM|FULL (wake->bake->restart->STOP)|mi_full_wake_bake_restart_stop"
   "ITEM|EMERGENCY STOP — mid-session, abandons positions (one/all/some)|mi_emergency_stop_no_eod_no_pycache_rth_exempt"
 
-  "SECTION|SESSION (these items END the menu)"
+  "SECTION|CLAUDE CODE (these items END the menu)"
   "ITEM|HAND OFF -> fresh Claude thread (kills this menu and every tmux)|mi_handoff_fresh_claude"
-  "ITEM|RESUME -> continue the last Claude thread (kills this menu and every tmux)|mi_resume_claude_tmux"
+  "ITEM|REATTACH -> the running Claude session (exits menu, kills nothing)|mi_reattach_claude_tmux"
+  "ITEM|RESUME -> the last Claude thread (kills this menu and every tmux)|mi_resume_claude_tmux"
   "ITEM|RESUME [other] -> pick a Claude thread (kills this menu and every tmux)|mi_resume_pick_claude_tmux"
 
   "SECTION|REPOINT (migrate fleet -> new repo)"

@@ -1,4 +1,18 @@
-# day_trader_pro/menu_functions.sh — v1.71
+# day_trader_pro/menu_functions.sh — v1.72
+# v1.72 (2026-09-13) - dtp r381 / OPS.17. NEW ITEM `REATTACH -> the running
+#   Claude session`: exit the menu and put the terminal back on the tmux session
+#   whose pane is running claude. Operator: *"not quite the same as resume
+#   conversation"* — and it is not: RESUME starts a second process on a
+#   transcript and kills every session, REATTACH starts nothing, kills nothing,
+#   and lands on the live process as it is.
+#   🔴 THE OBVIOUS FINDER DOES NOT WORK, MEASURED BEFORE WRITING IT. tmux's
+#   `pane_current_command` for this conversation's pane on 2026-09-13 read
+#   `bash`, because every session item launches `bash -c "env ... claude ..."`
+#   and claude is that shell's CHILD. So `_claude_tmux_sessions` walks each
+#   `claude` process up its parent chain to a pane pid instead, and
+#   check_resume_item RA3 drives it against a private tmux server.
+#   ⚠️ NOTHING FOUND IS SAID OUT LOUD and the menu stays up (§0.5); a session
+#   that ends between the list and the attach is re-checked and named.
 # v1.71 (2026-09-12) - dtp r375 / OPS.15. TWO FIXES TO ITEM 37, BOTH FOUND BY
 #   THE NEW REGISTRY-DRIVEN CHECK RATHER THAN BY LOOKING.
 #   🔴 (1) ITS LAUNCH NEVER LEARNED ITS OWN LESSON. r368 dropped the operator
@@ -581,7 +595,89 @@ mi_handoff_fresh_claude() {
     done
 }
 
-# RESUME -> continue the last Claude thread
+# The tmux session(s) whose panes are running claude, one name per line.
+# ⚠️ NOT `pane_current_command` — that reads `bash` for every session item,
+# because the launch is `bash -c "env ... $CLAUDE ..."` and claude is a CHILD
+# of the pane's shell. So: every claude process owned by this user, walked up
+# its parents until one is a pane pid. Session names may contain spaces, hence
+# the `|` separator. Prints nothing (rc 0) when there is no server or no match.
+_claude_tmux_sessions() {
+    local cp p s panes me
+    me="$(id -un)"
+    panes="$(tmux list-panes -a -F '#{pane_pid}|#S' 2>/dev/null)" || return 0
+    [ -n "$panes" ] || return 0
+    for cp in $(pgrep -u "$me" -x claude 2>/dev/null); do
+        p="$cp"
+        while [ -n "$p" ] && [ "$p" -gt 1 ] 2>/dev/null; do
+            s="$(printf '%s\n' "$panes" | awk -F'|' -v p="$p" '$1==p {sub(/^[^|]*\|/, ""); print; exit}')"
+            if [ -n "$s" ]; then echo "$s"; break; fi
+            p="$(ps -o ppid= -p "$p" 2>/dev/null | tr -d ' ')"
+        done
+    done | sort -u
+    return 0
+}
+
+# REATTACH -> the running Claude session (exits menu, kills nothing)
+# 🔑 ATTACHING IS NOT RESUMING. `claude --continue` (RESUME) starts a SECOND
+# process on the most recent transcript; this starts no process at all and puts
+# the terminal back on the one already running — the conversation as it is,
+# mid-turn if it is mid-turn. It kills nothing, so it is safe to press while a
+# thread is working.
+mi_reattach_claude_tmux() {
+    local S here pick n=0
+    local -a found=()
+    echo
+    if ! command -v tmux >/dev/null 2>&1; then
+        echo "  tmux is not installed — there is no session to reattach to."; pause; return 1
+    fi
+    mapfile -t found < <(_claude_tmux_sessions)
+    here=""
+    [ -n "${TMUX:-}" ] && here="$(tmux display-message -p '#S' 2>/dev/null)"
+    if [ "${#found[@]}" -eq 0 ]; then
+        # ⚠️ SAID, NOT SILENT (§0.5): an empty list must not look like a hang or
+        # a menu that ignored the keypress.
+        echo "  No tmux session is running claude right now — nothing to reattach to."
+        echo "  To bring a conversation back, use RESUME (it starts a new process on the transcript)."
+        pause; return 0
+    fi
+    echo "  REATTACH: tmux session(s) running claude —"
+    for S in "${found[@]}"; do
+        n=$((n+1))
+        if [ "$S" = "$here" ]; then echo "    $n) $S   (this menu is inside it)"; else echo "    $n) $S"; fi
+    done
+    echo "  Nothing is started and nothing is killed. The menu exits."
+    if [ "$n" -eq 1 ]; then
+        read -r -p "  Reattach to '${found[0]}' and exit the menu? [y/N] " pick
+        _yes "$pick" || { echo "  cancelled."; pause; return 0; }
+        S="${found[0]}"
+    else
+        read -r -p "  Which one [1-$n, Enter cancels]: " pick
+        case "$pick" in ''|*[!0-9]*) echo "  cancelled."; pause; return 0 ;; esac
+        if [ "$pick" -lt 1 ] || [ "$pick" -gt "$n" ]; then
+            echo "  no such session: $pick — nothing attached."; pause; return 1
+        fi
+        S="${found[$((pick-1))]}"
+    fi
+    # Re-checked at the last moment: the thread may have ended while the
+    # operator was reading the list, and `exec` would then drop them to a shell
+    # with only tmux's one-line error to explain it.
+    if ! tmux has-session -t "=$S" 2>/dev/null; then
+        echo "  '$S' has ended since the list was read — nothing attached."; pause; return 1
+    fi
+    if [ -z "${TMUX:-}" ]; then
+        exec tmux attach-session -t "=$S"
+    fi
+    if [ "$S" = "$here" ]; then
+        echo "  This menu is already inside '$S' — exiting the menu leaves you there."
+        exit 0
+    fi
+    tmux switch-client -t "=$S" || {
+        echo "  switch-client failed — '$S' still exists; attach with: tmux attach -t '$S'"
+        pause; return 1; }
+    exit 0
+}
+
+# RESUME -> the last Claude thread
 mi_resume_claude_tmux() {
     local NEW OLD CLAUDE=/home/ubuntu/.local/bin/claude
     echo
