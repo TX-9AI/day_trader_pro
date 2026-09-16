@@ -1,6 +1,32 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/excursion_report.py — v3.6 — MFE/MAE distributions from the
+day_trader_pro/excursion_report.py — v3.7 — MFE/MAE distributions from the
+v3.7  2026-09-16 — r383 / EXIT.4 — THE FLOOR VERDICT NOW SEPARATES THE FLOOR A
+       ROW DECLARED FROM THE FLOOR IT GOT. It reported one averaged number, so a
+       stop that announced -20% and filled at -23% read as a clean -20% stop.
+       📊 146 OF 171 DEBIT FLOOR EXITS (85%) ACROSS 13 BANKED SESSIONS realized
+       worse than their own declared floor — median realized -23.3% against a
+       median declared -20.0%, median overshoot 2.5 points, worst 17.5. MU
+       2026-09-14's -32.7% on a 25% stop is the tail of that distribution, not
+       an outlier.
+       🔑 DERIVED, NOT A NEW COLUMN (WORKING_AGREEMENT §22 — "PREFER DERIVING: a
+       new column fixes tomorrow and not today"). Every input — `stop_premium`,
+       `entry_premium`, `pnl_pct` — is already a column, so this answers for
+       every banked trade retroactively and ships to no trading box.
+       ⚠️ THE CAUSE IS SAMPLING, NOT SLIPPAGE: the floor is a PRICE LEVEL checked
+       against a 15-second poll, so the fill is the first mark at or below it and
+       the level itself is usually never observed. MU's marks went 4.17 -> 3.80
+       -> 2.805 against a 3.13125 floor.
+       ⚠️ AND IT IS PRINTED AS A **PAPER LOWER BOUND**, out loud, because in
+       paper `exit_premium == exit_mark_at_trigger` with zero latency and one
+       ladder step — the fill IS the trigger mark. Live adds the spread, so the
+       real overshoot is at least this. A number this shape without that caveat
+       invites someone to read it as the live figure.
+       ⚠️ AN EMPTY WINDOW SAYS "NOT COMPUTABLE" rather than rendering a zeroed
+       split — an absent measurement must never look like a measured one (§0.5).
+       GATE: tests/check_floor_overshoot.py F1-F5, born red at dtp 0eb272d on
+       F3/F4; F1/F2 recompute the corpus figure INDEPENDENTLY of the report's own
+       output and pin it to what was measured by hand.
 v3.6  2026-09-05 — dtp r287 / TZ.1 — the naive `today` here asked a UTC box and rolled at 20:00 ET (19:00 in winter), so a report run after that silently asked for TOMORROW and came back empty. It now goes through `ettime`, the one ET/UTC boundary.
 fleet's trade records, per-box DBs or a bundle.
 
@@ -623,6 +649,69 @@ def build_report(rows, day, src, skipped, mode, hints=None,
         w(f"  floor stops taken ........................ {len(stops)}"
           f"  avg realized {pct(mean(excursions(r)[2] for r in stops))}"
           f"  avg MFE before dying {pct(mean(excursions(r)[0] for r in stops))}")
+
+    # ── r383 / EXIT.4 — THE FLOOR IT DECLARED vs THE FLOOR IT GOT ───────────
+    # 🔴 This block used to collapse the two into one number, so a stop that
+    # announced -20% and filled at -23% read as a clean -20% stop.
+    # 📊 MEASURED ACROSS 13 BANKED SESSIONS: 146 of 171 debit floor exits (85%)
+    # realized WORSE than the floor the record itself declared. Median realized
+    # -23.3% against a median declared -20.0%; median overshoot 2.5 points,
+    # worst 17.5. MU 2026-09-14's -32.7% on a 25% stop is the tail of this
+    # distribution, not an outlier.
+    # 🔑 DERIVED, NOT A NEW COLUMN (WORKING_AGREEMENT 22 — "PREFER DERIVING: a
+    # new column fixes tomorrow and not today"). Every input is already a
+    # column, so this answers for every banked trade retroactively and ships to
+    # no trading box.
+    # ⚠️ THE CAUSE IS SAMPLING, NOT SLIPPAGE. The floor is a PRICE LEVEL checked
+    # against a 15-second poll, so the fill is the first mark at or below it and
+    # the level itself is usually never observed. MU's marks went 4.17 -> 3.80
+    # -> 2.805 against a 3.13125 floor.
+    # ⚠️ AND IT IS A PAPER LOWER BOUND, WHICH IS THE POINT OF PRINTING IT. In
+    # paper `exit_premium == exit_mark_at_trigger`, latency 0, one ladder step —
+    # the fill IS the trigger mark. Live adds the spread on top, so the real
+    # overshoot is at least this. Better to know the number before live capital
+    # meets it than after.
+    over = []
+    for r in stops:
+        sp = fnum(r, "stop_premium")
+        ep = fnum(r, "entry_premium")
+        pp = fnum(r, "pnl_pct")
+        if not sp or not ep or ep <= 0 or pp is None:
+            continue
+        declared = (1.0 - (sp / ep)) * 100.0     # the floor the row announced
+        realized = -pp * 100.0                   # the loss actually taken
+        over.append((declared, realized, realized - declared, ep))
+    if over:
+        worse = [o for o in over if o[2] > 0.5]
+        w("")
+        w("  DECLARED FLOOR vs REALIZED — a 15s poll cannot hit a price level:")
+        w(f"    n with both legs recorded .............. {len(over)}"
+          f"   (of {len(stops)} floor stops)")
+        w(f"    realized WORSE than its own declared floor {len(worse)}"
+          f"  ({len(worse) / len(over):.0%})")
+        w(f"    median declared -{median(o[0] for o in over):.1f}%"
+          f"   median realized -{median(o[1] for o in over):.1f}%"
+          f"   median overshoot {median(o[2] for o in over):.1f} pts")
+        w(f"    worst overshoot {max(o[2] for o in over):.1f} pts")
+        # Cheapness contributes but does not explain it — the dominant term is
+        # roughly uniform, which is what a 15-second sample costs on a 0DTE
+        # option. Bucketed so that stays visible instead of being asserted.
+        for lo, hi, lab in ((0.0, 0.25, "entry < $0.25"),
+                            (0.25, 0.75, "$0.25-0.75"),
+                            (0.75, 2.00, "$0.75-2.00"),
+                            (2.00, 1e9, ">= $2.00")):
+            b = [o[2] for o in over if lo <= o[3] < hi]
+            if b:
+                w(f"      {lab:<14} n={len(b):<4} median overshoot "
+                  f"{median(b):.1f} pts")
+        w("    ⚠️ PAPER LOWER BOUND: paper fills AT the trigger mark "
+          "(exit_premium == exit_mark_at_trigger, latency 0). Live adds the "
+          "spread, so the live overshoot is at least this.")
+    elif stops:
+        w("")
+        w("  DECLARED FLOOR vs REALIZED — NOT COMPUTABLE on this window: no "
+          "floor stop carries both stop_premium and entry_premium. That is a "
+          "MISSING measurement, not a clean one.")
 
     w("")
     w("LEASH VERDICT (giveback = MFE - realized, per trail flavor):")
