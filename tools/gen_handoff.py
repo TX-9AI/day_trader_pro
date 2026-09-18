@@ -1,6 +1,27 @@
 #!/usr/bin/env python3
 """
-tools/gen_handoff.py  v1.2
+tools/gen_handoff.py  v1.3
+v1.3  2026-09-18  r388 — ITEM 5: THE LAST CONVERSATION, AND THE OLDER ONES AS
+      A SEARCHABLE CORPUS. Operator: *"Read our last conversation in full as
+      this thread is likely a continuation of that work"*, and *"looking into
+      other past threads if available is always an option for a word search or
+      other reference."* WORKING_AGREEMENT §25 carries the same entry as the
+      AUTHORITY; this is the pointer (§35) and must never say more than §25.
+      🔑 FIFTH, AFTER THE DURABLE RECORD, ON PURPOSE. A transcript holds things
+      SAID AND THEN REVERSED — r386's row retracts a finding reported
+      confidently an hour earlier, after the operator had already approved it —
+      so the backlog is read first and wins where the two disagree.
+      ⚠️ THE ENTRY CARRIES ITS MECHANICS BECAUSE §25 HAS BEEN BITTEN BY EXACTLY
+      THE OPPOSITE: it routed to a `docs/README.md` never ported to v4, for
+      months. Both traps were MEASURED 2026-09-18 before the entry was written —
+      the raw JSONL is 1.6-12.7 MB of mostly tool output against 1-121k tokens
+      of real text, and the NEWEST session by mtime held ONE TURN and 2 KB, so a
+      literal reading gets a stub and concludes there is no history.
+      🔴 AND THE GENESIS COUNT IS NOW COUNTED. This file said "not all 418"
+      while the ledger held 375 — a stale literal in the one document every
+      fresh thread reads first, which is DOC.6 landing where it does most harm.
+      `_genesis_rows()` reads the ledger and returns "?" rather than raising.
+      GATE: check_handoff_item H9/H9b/H9c/H9d/H9e/H9f, born red at 28258dd.
 v1.2  2026-09-12  r371 — THE HANDOFF DECLARES THE PERMISSIONS RATHER THAN
       LEAVING A FRESH THREAD TO INFER THEM. Operator: *"You are a part of this
       project, so I also want the handoff script to explicitly declare what
@@ -135,6 +156,32 @@ def fleet_block(skip):
     return f"  {line}\n  (per-box revision is NOT in this listing — see the note below)"
 
 
+# ── r388 — the transcript location, named once. ─────────────────────────────
+# A fresh thread cannot be told to "read the last conversation" without being
+# told WHERE, which is §25's own failure mode: that section pointed at a
+# `docs/README.md` that was never ported, for months, and the one rule whose job
+# is to stop documents going unread was itself routing to a missing document.
+TRANSCRIPTS = "~/.claude/projects/-home-ubuntu-options-trader-v4/*.jsonl"
+
+
+def _genesis_rows(path: str = "/home/ubuntu/options-trader-v4/docs/GENESIS.md") -> str:
+    """The ledger's real row count, COUNTED rather than remembered.
+
+    🔴 THIS LINE USED TO BE THE LITERAL 418 AND THE LEDGER HELD 375. Nobody
+    noticed because the handoff is read by a fresh thread that has no way to
+    know better — which is precisely what DOC.6 is about, landing in the one
+    document every new thread reads first. A hardcoded count is a claim with a
+    shelf life; `wc` has none.
+    Returns "?" rather than raising: the handoff must still emit if the ledger
+    cannot be read, and an honest "?" beats a confident wrong number.
+    """
+    try:
+        with open(path, encoding="utf-8") as f:
+            return str(sum(1 for ln in f if ln.startswith("| **")))
+    except Exception:                                           # noqa: BLE001
+        return "?"
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--no-fleet", action="store_true")
@@ -164,13 +211,39 @@ def main():
     print("READ THESE, IN THIS ORDER — Rule #1: ALWAYS adhere to the WORKING AGREEMENT.")
     print("  1. docs/WORKING_AGREEMENT.md — IN FULL. It is the contract, and §0 and §38")
     print("     govern everything you are permitted to do on this box. ~21k tokens.")
-    print(f"  2. docs/GENESIS.md — the LAST {a.genesis} rows (`tail -{a.genesis}`), not all 418.")
+    print(f"  2. docs/GENESIS.md — the LAST {a.genesis} rows (`tail -{a.genesis}`), not all {_genesis_rows()}.")
     print("     The ledger is ~148k tokens whole and ~7k at that depth, and the reason to")
     print("     read it is continuity, which the recent tail gives you. Older rows are")
     print("     there when a specific revision matters.")
     print("  3. docs/BACKLOG.md — the open work. PART 0-3 plus the open tail. It is large")
     print("     (~142k tokens) and it is the single record of what remains unresolved.")
     print("  4. docs/PLAN_SPEC.md — only when the task touches plans or levels.")
+    # ── r388 — THE LAST CONVERSATION. Operator, 2026-09-18: *"Read our last
+    # conversation in full as this thread is likely a continuation of that
+    # work."* WORKING_AGREEMENT §25 carries the same entry as the AUTHORITY;
+    # this is the pointer (§35), and it must never say more than §25 does.
+    # 🔑 IT SITS AT 5, AFTER THE DURABLE RECORD, AND THAT ORDER IS LOAD-BEARING.
+    # §25's own line is that anything not written in those files did not survive
+    # the last thread. A transcript contains things that were SAID AND THEN
+    # REVERSED — r386's own row is a retraction of a finding reported
+    # confidently an hour earlier — so the backlog must be read first and wins
+    # where the two disagree. Reading the chat first inverts that.
+    print("  5. OUR LAST CONVERSATION — read it in full; this thread is likely a")
+    print("     continuation of that work. Transcripts are on this box at")
+    print(f"     {TRANSCRIPTS}")
+    print("     ⚠️ READ THE TEXT, NOT THE FILE. The raw JSONL runs to megabytes and is")
+    print("     mostly tool output; the human/assistant text inside it is a small")
+    print("     fraction of that. Extract the message text and read that.")
+    print("     ⚠️ NEWEST IS NOT ALWAYS THE RIGHT ONE. A session can be a stub — one")
+    print("     has held a single turn — so taking the newest by mtime can read a")
+    print("     couple of KB, find nothing, and wrongly conclude there is no history.")
+    print("     Take the newest SUBSTANTIVE transcript.")
+    print("     🔑 THE OLDER THREADS ARE SEARCHABLE — a different mode. Only the last")
+    print("     one is READ; the rest are there to be SEARCHED when a question needs")
+    print("     an origin (when a constant was chosen, what he actually said):")
+    print(f"         grep -l \"<term>\" {TRANSCRIPTS}")
+    print("     ⚠️ A transcript is evidence of what was SAID, never of what is true")
+    print("     now. A quote found this way is a lead to verify against the repo.")
     print()
     print("⚠️ Anything not written in those files did not survive the last thread. If a")
     print("decision seems to be missing, it is missing — ask rather than reconstruct it.")

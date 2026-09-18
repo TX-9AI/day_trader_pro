@@ -1,7 +1,26 @@
 #!/usr/bin/env python3
 """
-tests/check_floor_overshoot.py  v1.0
+tests/check_floor_overshoot.py  v1.1
 
+v1.1  2026-09-18  r388 — 🔴 F1 WAS PINNED TO A COUNT AND THE COUNT GROWS. MINE.
+      I wrote `EXPECT_N = 171` / `EXPECT_WORSE = 146` against a 13-session
+      corpus that gains a session every trading day, so **it went red on the
+      very next one** and stayed red for three sessions unnoticed. §24 says this
+      in as many words: *"a canary pinned to a VERSION STRING rots on the next
+      legitimate bump — training the reader to skim past failures while a real
+      one looks identical. Canaries check BEHAVIOUR, never a version number."*
+      📊 AND THE FINDING NEVER MOVED, WHICH IS THE POINT: at 13 sessions it was
+      146/171 = 85%; at 16 it is 166/195 = 85%, with the medians identical at
+      -20.0% declared against -23.3% realized. The relationship is stable and
+      only my frozen number rotted. F1 now asserts the RELATIONSHIP and PRINTS
+      the live figures so drift is visible without being fatal; the r383
+      numbers stay below as the measurement of record, where they belong.
+      🔴 AND IT WENT RED IN ANY CLONE, FOR ENVIRONMENT. `reports/warehouse` is
+      not tracked, so a fresh checkout reported FAIL for having no bundles —
+      CV.1's shape, a gate red for a property of the target rather than a defect
+      in it, which is the thing that teaches an operator to ignore reds. An
+      absent corpus is now GREEN VACUOUS and says so: nothing was checked can
+      never read as everything passed (r373's S0 rule).
 v1.0  2026-09-16  r383 / EXIT.4 — THE FLOOR A ROW DECLARED vs THE FLOOR IT GOT.
 
 🔴 THE DEFECT IN THE REPORT, not in the bot. `excursion_report`'s FLOOR VERDICT
@@ -43,8 +62,9 @@ born-red evidence and calling the rest controls would dress up the record.
                              trivially. It is only meaningful on the build.
                              Stated rather than counted as a control.
 
-  F1  the corpus figure reproduces: 171 debit floor exits, 146 of them worse
-      than declared. Recomputed here, not read from the report.
+  F1  the RELATIONSHIP holds — most debit floor exits realize worse than the
+      floor they declared. Recomputed from the bundles, not read from the
+      report. Prints the live figures beside r383's so drift is visible.
   F2  the median declared (-20.0%) and median realized (-23.3%) are both
       reported and are NOT the same number
   F3  the report actually PRINTS the split — driven by running it, not grepped
@@ -66,9 +86,17 @@ sys.path.insert(0, _root)
 
 _fails: list = []
 
-# The hand-computed corpus figures this file exists to pin.
-EXPECT_N = 171
-EXPECT_WORSE = 146
+# 📊 THE MEASUREMENT OF RECORD, r383, 13 banked sessions: 146 of 171 debit floor
+# exits (85%) realized worse than their own declared floor; median declared
+# -20.0%, median realized -23.3%, median overshoot 2.5 pts, worst 17.5.
+# ⚠️ THESE ARE NOT ASSERTED — see v1.1. They are here so a later reader can see
+# what the figure was when the report was built, and compare.
+R383_N, R383_WORSE = 171, 146
+# What IS asserted: the relationship, which is what the report claims and what a
+# regression would break. The floor is deliberately well below the observed 85%
+# so an honest shift in the tape does not go red — only the finding vanishing.
+MIN_CORPUS = 40
+MIN_WORSE_SHARE = 0.70
 BUNDLES = os.path.join(_root, "reports", "warehouse")
 
 
@@ -104,18 +132,26 @@ def main() -> int:
     print("check_floor_overshoot — the floor a row declared vs the floor it got")
     print()
 
+    # ⚠️ GREEN VACUOUS, NOT RED. `reports/` is untracked, so a fresh clone has no
+    # corpus — and a gate that goes red for a property of the TARGET rather than
+    # a defect in it is CV.1's shape: it teaches the reader to skip reds. It says
+    # plainly that nothing was checked, so "nothing to check" can never be read
+    # as "everything passed" (r373's S0).
     if not os.path.isdir(BUNDLES):
-        check("F1", False, f"no bundle directory at {BUNDLES}")
-        for n in ("F2", "F3", "F4", "F5"):
-            check(n, False, "unreachable: no bundles")
-        return 1
+        print(f"  GREEN VACUOUS — no bundle corpus at {BUNDLES}")
+        print("  Nothing was checked. This is a clone without reports/warehouse,")
+        print("  not a passing run. Re-run where the bundles live.")
+        return 0
 
     rows = _corpus()
     worse = [r for r in rows if r[2] > 0.5]
-    check(f"F1 the corpus figure reproduces: {EXPECT_N} floor exits, "
-          f"{EXPECT_WORSE} worse than declared",
-          len(rows) == EXPECT_N and len(worse) == EXPECT_WORSE,
-          f"got n={len(rows)} worse={len(worse)}")
+    share = (len(worse) / len(rows)) if rows else 0.0
+    check("F1 the finding holds: most debit floor exits realize WORSE than the "
+          "floor they declared",
+          len(rows) >= MIN_CORPUS and share >= MIN_WORSE_SHARE,
+          f"n={len(rows)} worse={len(worse)} ({share:.0%})  "
+          f"[r383 recorded {R383_WORSE}/{R383_N} = "
+          f"{R383_WORSE / R383_N:.0%} over 13 sessions]")
 
     if rows:
         md, mr = median(r[0] for r in rows), median(r[1] for r in rows)

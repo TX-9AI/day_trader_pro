@@ -1,6 +1,17 @@
 #!/usr/bin/env python3
 """
-tests/check_handoff_item.py  v1.1
+tests/check_handoff_item.py  v1.2
+v1.2  2026-09-18  r388 — H9/H9b/H9c/H9d: THE LAST CONVERSATION IS ITEM 5.
+      Operator: *"Read our last conversation in full as this thread is likely a
+      continuation of that work."* H9 requires the PATH as well as the sentence,
+      because an instruction that does not say HOW is §25's own failure — that
+      section routed to a `docs/README.md` never ported to v4, for months.
+      H9b and H9c pin the two traps MEASURED before the entry was written: the
+      raw JSONL is megabytes of mostly tool output against 1-121k tokens of
+      actual text, and the NEWEST session by mtime held ONE TURN and 2 KB, so a
+      thread taking "last" literally reads a stub and concludes there is no
+      history. H9d pins that the GENESIS row count is COUNTED — the line said
+      418 while the ledger held 375.
 v1.1  2026-09-12  r370 — H7c TIGHTENED AND H7d ADDED. H7c could be disarmed by
       the document it checked: it split the output on the literal "nothing to
       clone" and scanned only the prefix, so a handoff carrying that sentence
@@ -122,6 +133,61 @@ def main():
     # first line of orientation every fresh thread reads.
     check("H7d it opens the task with the operator's exact continuation phrase",
           "THIS is a continuation of that work." in out)
+
+    # ── H9 — r388. THE LAST CONVERSATION IS ITEM 5, AND IT IS ACTIONABLE.
+    # Operator, 2026-09-18: *"Read our last conversation in full as this thread
+    # is likely a continuation of that work."*
+    # 🔴 AN INSTRUCTION THAT DOES NOT SAY HOW IS THE §25 FAILURE ITSELF. That
+    # section pointed at a `docs/README.md` that was never ported to v4 — for
+    # months, the one rule whose job is to stop documents going unread was
+    # routing to a missing document, inside a section written because two days
+    # of work were lost to unread docs. So H9 does not merely assert the
+    # sentence is present: it requires the PATH, and both traps that make the
+    # literal instruction fail.
+    # 📊 BOTH TRAPS WERE MEASURED ON 2026-09-18 BEFORE THE ENTRY WAS WRITTEN:
+    # the raw transcripts run 1.6-12.7 MB and are mostly tool output while the
+    # conversation text inside them is 1-121k tokens; and the NEWEST session by
+    # mtime held a single turn and 2 KB, so a thread taking "last" literally
+    # would have read a stub, found nothing, and concluded there was no history
+    # while the real context sat in the session before it.
+    check("H9 item 5 names the last conversation AND where it lives",
+          "OUR LAST CONVERSATION" in out
+          and ".claude/projects" in out and ".jsonl" in out,
+          "path present" if ".jsonl" in out else "no transcript path emitted")
+    check("H9b it warns that the raw file is not the thing to read",
+          "READ THE TEXT, NOT THE FILE" in out)
+    check("H9c it warns that the newest session can be a stub",
+          "NEWEST IS NOT ALWAYS" in out and "SUBSTANTIVE" in out)
+    # ── H9e — READ vs SEARCH ARE DIFFERENT MODES AND THE DOCUMENT SAYS SO.
+    # Operator, 2026-09-18: *"looking into other past threads if available is
+    # always an option for a word search or other reference."* Only the LAST
+    # conversation is read in full; the rest are a searchable corpus for when a
+    # question needs an origin. Pinned with the runnable form, because an
+    # affordance a thread is told it has but not how to use is the §25 failure
+    # this whole entry exists to avoid.
+    check("H9e it offers the older threads as a SEARCHABLE corpus, with the "
+          "command", "SEARCHABLE" in out and "grep -l" in out)
+    # ⚠️ AND IT SAYS WHAT A TRANSCRIPT IS WORTH. §0.1: a quote found by search
+    # is a LEAD TO VERIFY, not a fact to assert — the same standard §38.3 sets
+    # for a panel that explains itself. Without this line the search affordance
+    # invites exactly the citation-as-evidence habit §0 exists to stop.
+    check("H9f it says a transcript is evidence of what was SAID, not of what "
+          "is true now", "evidence of what was SAID" in out)
+
+    # ── H9d — THE COUNT IS COUNTED, NOT REMEMBERED. The GENESIS line carried
+    # the literal 418 while the ledger held 375; nobody noticed because the
+    # handoff is read by a thread with no way to know better. Anchored on the
+    # ABSENCE of the stale literal AND on the emitted number agreeing with the
+    # ledger, so a future hardcode cannot satisfy it.
+    _g_md = "/home/ubuntu/options-trader-v4/docs/GENESIS.md"
+    _real = None
+    if os.path.exists(_g_md):
+        with open(_g_md, encoding="utf-8") as f:
+            _real = sum(1 for ln in f if ln.startswith("| **"))
+    check("H9d the GENESIS row count is computed, not a stale literal",
+          "not all 418" not in out
+          and (_real is None or f"not all {_real}." in out),
+          f"ledger has {_real} rows")
 
     # H8 — open means the STATUS column. The first draft filtered on the 🔴
     # severity marker and listed long-closed rows as outstanding.
