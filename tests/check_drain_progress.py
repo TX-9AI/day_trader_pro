@@ -1,6 +1,24 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_drain_progress.py  v1.0
+day_trader_pro/tests/check_drain_progress.py  v1.1
+v1.1  2026-09-19  dtp r390 / FAN.1 — THE DRAIN IS NOW CONCURRENT AND D1-D5 PASS
+      UNMODIFIED, WHICH IS THE POINT. The phase went from fifteen serial ssh
+      calls to one `ssh_map` dispatch, and not one of CND.3's five checks had
+      to move: the property they pin — the drain says where it IS, not only
+      where it finished — is PRESERVED by the new shape rather than
+      re-pointed at it. A checker that needed editing to stay green would have
+      meant the rewrite had dropped the property (§36).
+      🔴 AND A BLOCKING GATHER WOULD HAVE REINTRODUCED CND.3'S DEFECT IN A
+      WORSE FORM. Waiting on all fifteen and printing at the end would emit
+      NOTHING for a hung box's entire timeout — strictly less than the serial
+      version, which at least showed fourteen answering and stalling on the
+      fifteenth. So `ssh_map` gained an `on_result` callback and each box
+      reports AS IT LANDS.
+      D6  each box's completion line is emitted as it lands, not batched at
+          the end of the phase
+      D7  every progress line NAMES THE BOXES STILL OUTSTANDING — strictly
+          more than the serial drain could say, since it never knew which
+          boxes it had not yet reached
 v1.0  2026-09-10  dtp r348 / CND.3 — the drain must say where it IS, not only
       where it finished.
 
@@ -26,9 +44,11 @@ from contextlib import redirect_stdout
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 FAILS = []
+RAN = []
 
 
 def check(name, ok, detail=""):
+    RAN.append(name)   # count what RAN; a hardcoded total rots (CHK.6)
     print("  {:<4} {}  {}".format(name, "PASS" if ok else "FAIL", detail))
     if not ok:
         FAILS.append(name)
@@ -65,6 +85,11 @@ def main():
         C.drain_and_verify(syms, False)
     out = buf.getvalue()
 
+    _src = open(os.path.join(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))), "eod_conductor_v2.py")).read()
+    _SRC_DRAIN = _src[_src.index("def drain_and_verify"):]
+    _SRC_DRAIN = _SRC_DRAIN[:_SRC_DRAIN.index("def stop_services")]
+
     before_first = order[0][1] if order else ""
     check("D1", "AMD" in before_first and "verifying" in before_first,
           "header printed before the first ssh call")
@@ -79,6 +104,19 @@ def main():
     body = body.split("\n}", 1)[0]
     has_tmux = "tmux new -As eodclose" in body
     has_fallback = "tmux not present" in body
+    # 🔴 D6/D7 — THE NEW PROPERTIES v2.11 HAS TO EARN, because parallelising a
+    # narrated phase is exactly where narration silently dies. D1-D5 above
+    # still pass UNMODIFIED, which is the point: the concurrent drain preserves
+    # CND.3's property rather than re-pointing its checks.
+    check("D6", "ssh_map(" in _SRC_DRAIN and "ssh_util.ssh_run(" not in _SRC_DRAIN,
+          "the drain dispatches concurrently and no longer calls ssh_run in a loop")
+    # D7 — A STALL MUST NAME WHAT IS OUTSTANDING. This is the half that makes
+    # concurrency SAFER than the serial version rather than merely faster: with
+    # a blocking gather a hung box shows nothing at all for its whole timeout,
+    # which is the CND.3 defect in a worse form. Here every landing line names
+    # the boxes still owed, so a stall is visible AND attributable.
+    check("D7", "outstanding" in out.lower(),
+          "each landing names the boxes still owed")
     check("D5", has_tmux and has_fallback,
           "tmux={} fallback announced={}".format(has_tmux, has_fallback))
 
@@ -86,7 +124,7 @@ def main():
     if FAILS:
         print("FAILED: {}".format(", ".join(FAILS)))
         return 1
-    print("ALL PASS (5)")
+    print(f"ALL PASS ({len(RAN)})")
     return 0
 
 

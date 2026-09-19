@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/eod_conductor_v2.py — v2.9
+day_trader_pro/eod_conductor_v2.py — v2.11
+v2.11 2026-09-19 — FU.2 SECOND HALF, OPERATOR'S CALL — THE DRAIN FANS OUT TOO. v2.10 deliberately left this serial, one change at a time on the file that takes the fleet down; the operator ruled to fold it in rather than wait a week. 🔴 THE DRAIN IS THE LARGER PRIZE: each box runs a full --verify, a walk of 600+ prefixes against S3 at up to VERIFY_TIMEOUT_S, and fifteen of those in SERIES is the longest wait in the close — CND.3's own words, and on 2026-09-10 the run was genuinely hung and looked identical to a slow one. Concurrent, the phase costs MAX(per-box) rather than SUM. 🔑 CND.3's PROPERTY IS PRESERVED AND SHARPENED, AND THAT IS THE ONLY REASON THIS IS SAFE TO DO. A BLOCKING gather would have reintroduced the exact defect CND.3 was written against, in a WORSE form: nothing printed at all until the slowest box returns, so a single hung box shows silence for its whole timeout, where the serial version at least showed fourteen answering and then stalling on the fifteenth. So ssh_map gained an on_result callback and reports each box AS IT LANDS; the header names every box up front; and each line says how many have answered AND WHICH ARE STILL OUTSTANDING. That is strictly more than the serial version could say. ⚠️ C8/D4 UNTOUCHED - every box still gets its FULL timeout, never a shrinking slice. ⚠️ AND RESULTS ARE RETURNED IN THE CALLER'S ORDER, not completion order, so a human diffing two nightly logs does not read scheduler noise as change. Gated by check_drain_progress D1-D5 updated WITH the ruling and check_fanout_parallel.
+v2.10 2026-09-19 — FU.2 — THE PURGE PHASE FANS OUT CONCURRENTLY: THE SAME BUDGET, SPENT ALL AT ONCE. 🔴 `PURGE_BUDGET_S` (600s, v2.6/CND.2) caps the whole phase and was spent SERIALLY on work that executes entirely ON the box — control only held an ssh session and waited. 📊 MEASURED over the seven closes to 2026-09-18 from this file's own log: the phase reached 7 → 7 → 3 → 2 → 2 → 3 → 4 boxes of FIFTEEN, and the trend is DOWNWARD because each box's store grows while the budget does not. A full rotation therefore takes 4–5 nights, which makes the 5-day `1m` retention policy ARITHMETICALLY UNREACHABLE: on 2026-09-19 PLTR and QQQ were both +14 days beyond policy on every interval, and PLTR sat at 93% disk with 661M free — past the DEV.7 guard, which fired for real 24s after a wake. 🔑 v2.9's DEBT ROTATION WAS NOT THE PROBLEM AND IS UNTOUCHED: it works, and the log shows the deferred set going first. THE BUDGET WAS THE PROBLEM. The work is per-box, independent and remote, so `ssh_util.ssh_map` (v0.5.0) dispatches all of them at once and THE PHASE NOW COSTS MAX(per-box) INSTEAD OF SUM(per-box). ⚠️ CND.2's PROTECTION IS TIGHTER, NOT LOOSER — that budget exists because the purge starved the halt and left the fleet up all night, and MAX is a smaller bound than SUM. ⚠️ AND C8 IS UNTOUCHED: every box still gets its FULL `VERIFY_TIMEOUT_S`, never a shrinking slice, which is the exact cut `check_conductor_purge` C8 refused once already — a 1.7M-row purge handed 30s fails at the ssh layer while its work continues on the far side. ⚠️ NOT MORE HEADROOM AND NOT A TRADE, which was the operator's explicit constraint: *"a smart way to solve this once and for all that does not involve adding more headroom and is not a painful trade-off of some sort."* ⚠️ THE DRAIN AND THE STATUS FAN-OUT ARE DELIBERATELY LEFT SERIAL in this revision — same defect, same fix, but one change at a time on the file that takes the fleet down. The drain is the larger prize (CND.3 calls it the longest unnarrated wait in the close) and it is filed, not folded in. Gated by tests/check_fanout_parallel.py P1-P6b, born red at 6e3c84a.
 v2.9  2026-09-11 — dtp r361 / CND.6 — THE BOXES THE BUDGET SKIPS GO FIRST AT THE NEXT CLOSE. `fleet.get_fleet` returns `sorted(mapping)`, so the purge walked AMD..UNH in the same order every night and r346's budget always cut the same tail: on 2026-09-11 it purged AMD..META and skipped MU, NFLX, NVDA, PLTR, QQQ, SPX, TSLA and UNH — MU carrying the fleet's largest store. v2.6's "a skipped box is purged tomorrow" was true of `retention_purge` (resumable, r256) and false of the ORDER: tomorrow the same seven boxes fit first and the same eight are skipped again. Now the skipped boxes are written to `data/purge_debt.json` — gitignored, because a tracked runtime file is one a discard recipe can rewrite (dtp r360) — and purged FIRST at the next close. A debt box that is HELD keeps its debt and is never purged: verified-only still outranks the debt. An unreadable debt file falls back to the sorted order and SAYS SO. Gated by tests/check_purge_budget.py B6-B11.
 v2.8  2026-09-10 — dtp r348 / CND.3 — THE DRAIN NARRATES ITSELF. Operator: *"'Draining + verifying 15 boxes' is virtually useless information to the operator. I want to know which box you're on & how much progress per box."* Each box runs a full `--verify` — a walk of 600+ prefixes against S3 — and the panel printed ONE line then went silent for minutes; fifteen of those is the longest unnarrated wait in the close, and it is INDISTINGUISHABLE FROM A HANG. On 2026-09-10 the run genuinely was hung and looked exactly like a slow one. Now: a `[i/n] SYM verifying...` header BEFORE the call and `answered in Ns` after, because a line printed only on completion says where it FINISHED and never where it is STUCK. Gated by tests/check_drain_progress.py.
 v2.7  2026-09-10 — dtp r347 / S3.26 — THE VERIFY LINE CARRIES `failed`, `pushed` AND `drained`. `DRAIN_RE` has captured all nine fields since v2.0 and the panel printed four, discarding the one number that decides WHY a box is short. r180's auto-heal runs ONLY when `total_failed == 0`, and any single stage raising counts as one failure that blocks healing for the entire box — so SHORT means either drift the heal could not reach (a prefix S3 holds no objects for) or a drain that FAILED and stopped the heal before it began, two different faults with two different fixes, and nothing on any report told them apart. COST, MEASURED: on 2026-09-10 seven boxes came back SHORT the day after a fleet reconcile and "did the heal even run?" could not be answered from any output the fleet produced — three nights of guessing at a question the parser already had the answer to. `drained` is the third case: a box that took no lock did no work at all. Gated by tests/check_verify_line_fields.py.
@@ -302,16 +304,42 @@ def drain_and_verify(symbols, dry: bool) -> dict:
     # ⚠️ `_log` flushes on every call — that is what makes a header useful
     # under devtools' pipe, where a buffered line would arrive together with
     # the result it was meant to precede.
-    _n = len(list(symbols))
-    for _i, (sym, ip, _st) in enumerate(fleet.get_fleet(list(symbols)), 1):
-        # `_log` already flushes on every call, which is what makes the
-        # header useful under devtools' pipe.
-        _log("DRAIN", f"  [{_i}/{_n}] {sym:<6} verifying... "
-                      f"(up to {VERIFY_TIMEOUT_S}s)")
-        _t0 = time.monotonic()
-        rc, text, err = ssh_util.ssh_run(ip, cmd, timeout=VERIFY_TIMEOUT_S)
-        _el = time.monotonic() - _t0
-        _log("DRAIN", f"  [{_i}/{_n}] {sym:<6} answered in {_el:.0f}s")
+    # 🔴 CONCURRENT SINCE v2.11. Fifteen boxes each walking 600+ prefixes was
+    # the longest wait in the close by a wide margin — and it was SERIAL on
+    # work that runs entirely on the box. Same change as the purge phase one
+    # step down, on the phase that costs the most.
+    # 🔑 CND.3's PROPERTY IS PRESERVED AND SHARPENED, WHICH IS THE ONLY REASON
+    # THIS IS SAFE. That rule exists because the panel printed one line and
+    # went silent, indistinguishable from a hang. A blocking gather would have
+    # REINTRODUCED it in a worse form: one hung box would show nothing at all
+    # for its entire timeout. So `ssh_map` reports each box AS IT LANDS, and
+    # the header below names every box up front — so at any moment the log
+    # says how many have answered and, on a stall, WHICH ARE OUTSTANDING.
+    # That is strictly more than the serial version could say.
+    # ⚠️ EVERY BOX STILL GETS ITS FULL VERIFY_TIMEOUT_S (C8 / D4).
+    _fleet = list(fleet.get_fleet(list(symbols)))
+    _n = len(_fleet)
+    _order = [sym for sym, _ip, _st in _fleet]
+    _log("DRAIN", f"  verifying {_n} box(es) concurrently, up to "
+                  f"{VERIFY_TIMEOUT_S}s each: {' '.join(_order)}")
+    _t0 = time.monotonic()
+    _seen = []
+
+    def _landed(sym, _res, done, total):
+        _seen.append(sym)
+        _out = [s for s in _order if s not in _seen]
+        _log("DRAIN", f"  [{done}/{total}] {sym:<6} answered in "
+                      f"{time.monotonic() - _t0:.0f}s"
+                      + (f" · outstanding: {' '.join(_out)}" if _out else ""))
+
+    _res = ssh_util.ssh_map([(s, ip) for s, ip, _st in _fleet], cmd,
+                            timeout=VERIFY_TIMEOUT_S, on_result=_landed)
+    _w = getattr(ssh_util.ssh_map, "last_waves", 1)
+    _log("DRAIN", f"  all {len(_res)}/{_n} answered in "
+                  f"{time.monotonic() - _t0:.0f}s · {_w} wave(s)"
+                  + ("  ⚠️ POOL NARROWER THAN THE FLEET" if _w > 1 else ""))
+    for sym, ip, _st in _fleet:
+        rc, text, err = _res.get(sym, (255, "", "no result"))
         m = DRAIN_RE.search(text or "")
         if not m:
             # ⚠️ NO LINE IS NOT "OK". A box that did not answer has not been
@@ -485,11 +513,60 @@ def purge_verified(ok: list, dry: bool) -> dict:
     # written back after the loop (`_save_purge_debt`).
     _order, _held_debt = _purge_order(list(ok))
     _ips = {s: ip for s, ip, _st in fleet.get_fleet(list(ok))}
-    _deadline = time.monotonic() + PURGE_BUDGET_S
+    _t_phase = time.monotonic()
     _skipped = []
+    # 🔴 FU.2 — CONCURRENT. THE SAME BUDGET, SPENT ALL AT ONCE.
+    # The budget gated whether a box STARTED and was spent SERIALLY on work
+    # that runs entirely ON the box — control only held an ssh session and
+    # waited. Measured over the seven closes to 2026-09-18 it reached
+    # 7 → 7 → 3 → 2 → 2 → 3 → 4 boxes of fifteen: a full rotation every 4–5
+    # nights, which makes the 5-day `1m` retention policy arithmetically
+    # unreachable. PLTR and QQQ were both +14 days beyond policy and PLTR sat
+    # at 93% disk with 661M free, past the DEV.7 guard, which fired for real.
+    # 🔑 THE PHASE NOW COSTS MAX(per-box) INSTEAD OF SUM(per-box).
+    # ⚠️ CND.2's PROTECTION IS TIGHTER, NOT LOOSER. It exists because the purge
+    # starved the halt and left the fleet up all night; MAX is a smaller bound
+    # than SUM. And C8 is untouched — every box still gets its FULL
+    # VERIFY_TIMEOUT_S and never a shrinking slice, which is the exact mistake
+    # check_conductor_purge C8 refused once already.
+    # ⚠️ THE DEADLINE AND THE DEBT ROTATION (CND.6) BOTH SURVIVE: a box the pool
+    # could not dispatch inside the budget is still named and still carried.
+    _pending = [(sym, _ips.get(sym, "")) for sym in _order]
+    _log("PURGE", f"  dispatching {len(_pending)} box(es) concurrently "
+                  f"(budget {PURGE_BUDGET_S}s, per-box {VERIFY_TIMEOUT_S}s)")
+    _results = ssh_util.ssh_map(_pending, cmd, timeout=VERIFY_TIMEOUT_S)
+    # ⚠️ QUOTE THE REAL BOUND, NEVER "ONE BOX'S TIMEOUT". A pool narrower than
+    # the fleet runs in WAVES and the worst case is ceil(N/workers) x the
+    # per-box timeout. At fifteen boxes and a default of sixteen workers this
+    # is one wave — but it stops being one the moment the fleet grows past the
+    # pool or DTP_FANOUT_WORKERS is lowered, and a stale "900s" in a report is
+    # how that goes unnoticed.
+    _w = getattr(ssh_util.ssh_map, "last_waves", 1)
+    _el = time.monotonic() - _t_phase
+    _log("PURGE", f"  {len(_results)} answered in {_el:.0f}s · {_w} wave(s) · "
+                  f"worst case {_w * VERIFY_TIMEOUT_S}s"
+                  + ("  ⚠️ POOL NARROWER THAN THE FLEET" if _w > 1 else ""))
+    # 🔑 `PURGE_BUDGET_S` IS NOW A TRIPWIRE, NOT A GATE — AND IT IS GIVEN THAT
+    # JOB RATHER THAN LEFT LIVE-LOOKING AND DEAD.
+    # It used to gate whether a box STARTED. Concurrent dispatch removed that
+    # role, and the `_deadline` it computed became a variable assigned and
+    # never read. A constant that no longer binds anything, left in place, is
+    # the thing the next reader tunes and then reports no effect from — so it
+    # keeps a real job: the duration this phase is EXPECTED not to exceed.
+    # ⚠️ IT NO LONGER SKIPS ANY BOX. Every box runs to completion; exceeding
+    # the budget now means "this took longer than we think it should" and is
+    # worth knowing, not worth truncating — truncating is what would orphan a
+    # running purge into the next run's lock (S3.19 / S3.17).
+    if _el > PURGE_BUDGET_S:
+        _log("PURGE", f"  ⚠️ phase took {_el:.0f}s against a {PURGE_BUDGET_S}s "
+                      f"budget — nothing was skipped, but this is slower than "
+                      f"expected and the halt sits behind it")
+        _notify(f"⚠️ EOD purge took {_el:.0f}s against a {PURGE_BUDGET_S}s "
+                f"budget. All {len(_results)} box(es) completed; nothing was "
+                f"skipped. The halt runs after this phase.")
     for sym in _order:
         ip = _ips.get(sym, "")
-        if time.monotonic() >= _deadline:
+        if sym not in _results:
             _skipped.append(sym)
             continue
         # ⚠️ THE BUDGET GATES WHETHER A BOX STARTS, NEVER HOW LONG IT GETS.
@@ -500,7 +577,7 @@ def purge_verified(ok: list, dry: bool) -> dict:
         # the exact failure C8 exists to prevent. Overshoot is therefore
         # bounded by ONE box's VERIFY_TIMEOUT_S past the budget, and that
         # is the right trade: a box that starts, finishes.
-        rc, text, err = ssh_util.ssh_run(ip, cmd, timeout=VERIFY_TIMEOUT_S)
+        rc, text, err = _results[sym]
         line = (text or err or "").strip().replace("\n", " | ")
         out[sym] = line
         # ⚠️ SAY WHAT WAS REMOVED, PER BOX. The two-month failure was a log line

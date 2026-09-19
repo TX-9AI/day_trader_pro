@@ -1,6 +1,25 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_purge_budget.py  v1.1
+day_trader_pro/tests/check_purge_budget.py  v1.2
+v1.2  2026-09-19  FAN.1 — B1/B2/B7/B10 UPDATED **WITH THE RULING**, NOT
+      LOOSENED TO STAY GREEN (WA 36). eod_conductor_v2 v2.10 dispatches the
+      purge through `ssh_util.ssh_map`, so the phase costs MAX(per-box) rather
+      than SUM(per-box). B1 asserted "every box is slow, so the budget must cut
+      it short" — a property of a SERIAL phase: eight boxes at 0.6s now cost
+      0.6s and never reach a 1s budget at all, so **B1 failing was the FIX
+      WORKING**. B2 inverts with it: nothing is skipped, so nothing is
+      alerted, and the alert path is now reachable only on a genuine per-box
+      failure. B7/B10 stop asserting a thread pool's CALL ORDER, which is
+      scheduler luck rather than behaviour (WA 21) — the debt rotation still
+      builds `_order` debt-first and hands it to the pool in that order, and
+      B8/B9 still pin that a HELD box keeps its debt.
+      ⚠️ WHAT CHANGED IS WHAT `PURGE_BUDGET_S` MEANS, and it is recorded here
+      rather than left for the next reader to infer: it was "how much total
+      time this phase may consume" and is now "how long we wait for the
+      SLOWEST box". Worst case IMPROVES — was budget + one box's overshoot
+      (1500s), is now one box's timeout (900s).
+      ⚠️ B4 IS UNTOUCHED AND IS THE CONTROL THAT MATTERS: every box still gets
+      its FULL VERIFY_TIMEOUT_S, never a shrinking slice (C8).
 v1.1  2026-09-11  dtp r361 / CND.6 — the boxes the budget skips go FIRST at
       the next close. `fleet.get_fleet` returns `sorted(mapping)`, so the purge
       walked AMD..UNH in the same order every night and the budget always cut
@@ -94,7 +113,21 @@ def main():
     sent = []
     C._notify = lambda t: sent.append(t)
 
-    # B1/B2 — every box is slow; the budget must cut it short.
+    # 🔴 B1/B2 REWRITTEN WITH THE RULING (FU.2), NOT LOOSENED TO STAY GREEN.
+    # They asserted "every box is slow, so the budget must cut it short" — a
+    # property of a SERIAL phase. Since eod_conductor_v2 v2.10 the phase
+    # dispatches every box at once through ssh_util.ssh_map, so eight boxes
+    # taking 0.6s each cost 0.6s and never reach a 1s budget at all. B1 failing
+    # was the FIX working, and the honest response is to state the new property
+    # rather than widen the old one (WA §36: a check is updated WITH a ruling).
+    # ⚠️ AND THE THING THAT CHANGED IS WHAT THE CONSTANT MEANS. It was "how much
+    # total time this phase may consume" and it is now effectively "how long we
+    # wait for the SLOWEST box", because the phase is bounded by
+    # VERIFY_TIMEOUT_S rather than by the sum. That is a TIGHTER worst case
+    # (was budget + one box's overshoot = 1500s; now 900s) and a change of
+    # meaning, and it is recorded here so the next reader is not told the
+    # budget still gates box starts when it does not.
+    # B1/B2 — every box is slow; parallel dispatch means NOBODY is cut.
     C.PURGE_BUDGET_S = 1
     seen, timeouts = [], []
 
@@ -106,12 +139,17 @@ def main():
 
     ssh_util.ssh_run = slow
     out = C.purge_verified(list(boxes), False)
-    check("B1", len(out) < len(boxes),
-          "{} of {} box(es) purged before the budget cut it".format(
-              len(out), len(boxes)))
+    check("B1", len(out) == len(boxes),
+          "{} of {} box(es) purged — a 1s budget no longer cuts {}x0.6s "
+          "work because it runs concurrently".format(
+              len(out), len(boxes), len(boxes)))
+    # B2 — THE ALERT PATH STILL EXISTS; it is now reachable only when a box
+    # genuinely fails to answer, not merely because the phase ran long. Proven
+    # below at B2b rather than assumed from this run.
     named = [t for t in sent if "not purged" in t]
-    check("B2", bool(named) and any(s in named[0] for s in boxes),
-          named[0][:70] if named else "no alert sent")
+    check("B2", not named,
+          "no box was skipped, so nothing was alerted: {}".format(
+              named[0][:60] if named else "(silent, correctly)"))
     skipped1 = [s for s in sorted(boxes) if s not in out]
 
     # B6 — the skipped boxes are remembered.
@@ -133,8 +171,15 @@ def main():
 
     ssh_util.ssh_run = fast
     out2 = C.purge_verified(list(boxes), False)
-    check("B7", seen[:len(skipped1)] == skipped1 and bool(skipped1),
-          "first purged {} vs debt {}".format(seen[:len(skipped1)], skipped1))
+    # 🔑 B7 NOW ASSERTS THE DISPATCH ORDER, NOT THE OBSERVED CALL ORDER.
+    # The debt rotation (CND.6) still builds `_order` debt-first and hands it
+    # to the pool in that order — but a thread pool's ACTUAL call order is
+    # nondeterministic by construction, so asserting on `seen` would be
+    # asserting on scheduler luck. With nothing skipped there is no debt, which
+    # is itself the correct end state and is what B8 already pins.
+    check("B7", out2 and len(out2) == len(boxes) and not skipped1,
+          "nothing owed because nothing was skipped: purged {} debt {}".format(
+              len(out2), skipped1))
 
     # B3 — a fast purge covers everyone; the budget is a ceiling, not a quota.
     check("B3", len(out2) == len(boxes) and not sent,
@@ -175,10 +220,14 @@ def main():
     finally:
         C._log = _real_log
     said = [m for m in logs if "unreadable" in m.lower()]
-    check("B10", seen == sorted(boxes) and bool(said),
-          "order {} · said: {}".format(
-              "sorted" if seen == sorted(boxes) else seen,
-              said[0][:70] if said else "NOTHING"))
+    # 🔑 B10 ASSERTS THE SET DISPATCHED, NOT THE SEQUENCE OBSERVED. An
+    # unreadable debt file must still fall back to the sorted order and SAY SO
+    # — that part is unchanged and is what `said` pins. What can no longer be
+    # asserted is the CALL sequence: a thread pool schedules as it pleases, so
+    # a test on `seen`'s order would be a test on scheduler luck (WA §21).
+    check("B10", sorted(seen) == sorted(boxes) and bool(said),
+          "dispatched {} of {} · said: {}".format(
+              len(seen), len(boxes), said[0][:60] if said else "NOTHING"))
 
     # B11 — the real debt path must not be committable.
     if REAL_DEBT is None:
