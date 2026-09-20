@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/fit_readiness.py — v1.7
+day_trader_pro/fit_readiness.py — v1.8
+v1.8  2026-09-20 — r397 / D3 — THE VOLUME FLOOR AND THE JUDGEMENT WERE APPLIED TO DIFFERENT POPULATIONS. `verdict()` tested `MIN_DECLINED` against `declined` — for ORBStrategy over 2026-09-14..09-18 that is **3,362, of which 3,265 are `manage`** — and then ran the dominance test over an ENTRY sample of **3**, emitting "100% of declines are 'entry_underwater'" while the report printed `declined 3362` two lines above. A factor of 1,120 between the number in the sentence and the number in the verdict, on the strategy carrying the operator's open question. It cost the 2026-09-20 brief a full reconciliation pass and came within one step of overturning a correct finding from the week before. 🔑 THE FLOOR NOW GUARDS THE POPULATION IT IS ABOUT (`total`, the entry-rung count the histogram has always printed correctly) and the message NAMES ITS DENOMINATOR. ⚠️ THE dtp-r267 SPLIT ITSELF IS UNTOUCHED AND CORRECT — the defect was the sentence and the floor, not the design. ⚠️ `management_rungs()` is extracted so `verdict()` and `render()` share one definition, and it DERIVES rather than subtracting: `rungs` is fed from strategy_note, gate_disposition AND plan_ledger, so `declined - entry_total` is not the management count.
 v1.7  2026-09-08 — dtp r322 / CND.1 — THE SAME r287 MISTAKE, IN THE SAME REVISION. `import ettime` sat inside this module's docstring, so `today_et()` at the bottom of `_dates()` raised NameError. Menu item 47 (FIT READINESS) would have died on use; it is run by hand rather than by timer, which is the only reason it was not noticed first. Moved to the import block and verified by execution.
 v1.6  2026-09-05 — dtp r287 / TZ.1 — the naive `today` here asked a UTC box and rolled at 20:00 ET (19:00 in winter), so a report run after that silently asked for TOMORROW and came back empty. It now goes through `ettime`, the one ET/UTC boundary.
 v1.5  2026-09-05 — dtp r286 / S3.11. 🔴 THE SOURCE BANNER DESCRIBED A COLLAPSE
@@ -418,27 +419,67 @@ def entry_rungs(rungs):
     return {g: n for g, n in rungs.items() if g not in MANAGEMENT_RUNGS}
 
 
+def management_rungs(rungs):
+    """The rungs that describe a MANAGEMENT decision. Counterpart of the above.
+
+    🔑 r397 — EXTRACTED SO THERE IS ONE DEFINITION. `render()` derived this
+    inline while `verdict()` did not derive it at all, which is how the two
+    came to disagree about which population they were describing.
+    ⚠️ AND IT IS DERIVED, NEVER SUBTRACTED. `rec["declined"]` counts
+    `strategy_note` rows only, while `rec["rungs"]` is fed from THREE sources
+    — strategy_note outcomes, `gate_disposition` gates and `plan_ledger` — so
+    `declined - entry_total` is not the management count and would silently
+    drift the moment any of those three moves.
+    """
+    return {g: n for g, n in rungs.items() if g in MANAGEMENT_RUNGS}
+
+
 def verdict(rec: dict) -> tuple:
     """(READY|NOT READY, reason). Coverage, not volume."""
     nf, nd = rec["fired"], rec["declined"]
     if nf < MIN_FIRED:
         return "NOT READY", f"only {nf} fired (need ~{MIN_FIRED} for outcomes)"
-    if nd < MIN_DECLINED:
-        return "NOT READY", f"only {nd} declined (need ~{MIN_DECLINED})"
     # ⚠️ dtp-r267 — computed over ENTRY rungs only. Including `manage` made
     # every strategy look un-fittable for a reason that has nothing to do with
     # its entry gates.
     _entry = entry_rungs(rec["rungs"])
     total = sum(_entry.values())
+    _mgmt = sum(management_rungs(rec["rungs"]).values())
+    # 🔴 r397 — THE VOLUME FLOOR AND THE JUDGEMENT WERE APPLIED TO DIFFERENT
+    # POPULATIONS, AND THAT IS THE WHOLE DEFECT.
+    # This read `if nd < MIN_DECLINED`, testing the floor against `declined`
+    # — which for ORBStrategy over 2026-09-14..09-18 was **3,362, of which
+    # 3,265 were `manage`** — and then ran the dominance test over an ENTRY
+    # sample of **3**. So a setup cleared "enough declines to judge" on
+    # MANAGEMENT traffic and was then declared un-fittable on three rows, and
+    # the report printed `declined 3362` two lines above a verdict whose real
+    # denominator was 1,120x smaller.
+    # 🔑 THE FLOOR NOW GUARDS THE POPULATION IT IS ABOUT. `total` is the
+    # entry-rung count — the same number the histogram below the verdict has
+    # always printed correctly — so a dominance verdict can no longer rest on
+    # a sample the floor never looked at.
+    if total < MIN_DECLINED:
+        _why = f"only {total} ENTRY refusal(s) on record (need ~{MIN_DECLINED})"
+        if _mgmt:
+            # ⚠️ NAMED, NOT DROPPED. "few entry refusals" and "plenty of
+            # traffic, none of it about entry" are different states and must
+            # not read the same (WA §0.5).
+            _why += (f"; {_mgmt} of the {nd} decline(s) are MANAGEMENT, "
+                     f"not entry")
+        return "NOT READY", _why
     if total:
         top, n = max(_entry.items(), key=lambda kv: kv[1])
         share = n / total
         if share > MAX_RUNG_SHARE:
             # 🔴 THE FINDING THAT MATTERS MOST, AND THE ONE A ROW COUNT HIDES.
+            # ⚠️ r397 — THE DENOMINATOR IS NAMED IN THE SENTENCE. It used to
+            # read "N% of declines", borrowing a word this same report uses
+            # for a different and much larger number one line above.
             return ("NOT READY",
-                    f"{share:.0%} of declines are '{top}' — one rung dominates, "
-                    f"so there is no surface to fit; the data shows where the "
-                    f"line IS, not where it should be")
+                    f"{share:.0%} of the {total} recorded ENTRY refusals are "
+                    f"'{top}' — one rung dominates, so there is no surface to "
+                    f"fit; the data shows where the line IS, not where it "
+                    f"should be")
     if len(_entry) < 2:
         return "NOT READY", "declines land on fewer than two distinct rungs"
     return "READY", f"{nf} fired / {nd} declined across {len(rec['rungs'])} rungs"
@@ -476,7 +517,7 @@ def render(data: dict, dates: list, only=None) -> str:
         L.append(f"    declined {rec['declined']:>6}")
 
         _entry = entry_rungs(rec["rungs"])
-        _mgmt = sum(n for g, n in rec["rungs"].items() if g in MANAGEMENT_RUNGS)
+        _mgmt = sum(management_rungs(rec["rungs"]).values())
         if _entry:
             total = sum(_entry.values())
             L.append("")
