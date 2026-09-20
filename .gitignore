@@ -34,6 +34,11 @@ data/selection_log.jsonl
 # `*` covers the atomic-write .tmp. Tracked, it would be dirty after every close
 # and exactly what a discard recipe restores away (dtp r360).
 data/purge_debt.json*
+# r401 / OPS.26 — the boot raiser's status stamp. Runtime state, per-box,
+# never shipped. Listed by NAME because this file ignores data/ per file
+# rather than wholesale, and [[LVL.19]] is what forgetting the line costs:
+# r379 shipped a reader and left its directory untracked AND unignored.
+data/AGENT_STATUS
 *.patch
 *.csv
 

@@ -1,0 +1,62 @@
+# day_trader_pro/tools/claude-boot.service  v1.0
+# r401 / OPS.26 — RESURRECT the operator's Claude session in tmux at boot.
+#
+# Operator, 2026-09-20: "I want it to be the exact session exactly where we
+# left off and with the exact permissions. I literally want that agent
+# resurrected on a reboot." So: `--resume <recorded id>`, never
+# `--fork-session`, and NO permission guard — a resurrected agent that cannot
+# land is not the same agent.
+#
+# 🔴 NOT INSTALLED BY THIS DELIVERY. WORKING_AGREEMENT §38.1 puts "any systemd
+# unit or timer" in the operator's column, and this one raises an agent on the
+# box that holds a live funded broker token, GitHub write on both repos and the
+# Telegram token. It ships as a FILE and a proposal; installing it is:
+#     sudo cp tools/claude-boot.service /etc/systemd/system/
+#     sudo systemctl daemon-reload && sudo systemctl enable claude-boot
+#
+# 🔑 Type=oneshot + RemainAfterExit=yes, AND NO KillMode= AT ALL. Keeping the
+# unit ACTIVE is what stops systemd tearing down its cgroup when the raiser
+# exits, which is what lets the tmux server survive. Default
+# KillMode=control-group is left alone deliberately.
+# ⚠️ THE FORK MEASURED THIS ON A REAL REBOOT (their boot 15:44:21, unit
+# finished 15:44:27, tmux session created 15:44:27 — the second it exited) and
+# they were explicit that they did NOT try a shape that failed first: it was
+# designed, DECLARED UNPROVEN in their own header, and then verified. So
+# `Type=forking`, `KillMode=none` and `systemd-run --scope` are UNMEASURED on
+# both trees and nothing here claims otherwise.
+# ⚠️ AND THE FOOT-GUN THEY NAMED: `systemctl stop claude-boot` WILL kill the
+# session, because that is when the cgroup is finally torn down. Untested, but
+# it follows from the mechanism.
+#
+# ⚠️ NO `Environment=` CREDENTIALS, EVER (§18a — every unit that carries them
+# is a credential store). The raiser writes a stamped status file and stops.
+# Control runs no `optionsbot`, so unlike the fork there is no boot alert to
+# append to; the menu reads the file instead.
+[Unit]
+Description=Raise a Claude agent session in tmux at boot (dtp r401, OPS.26)
+After=network-online.target
+
+[Service]
+# 🔑 THE CREDENTIALS ARRIVE THE WAY EVERY OTHER CONTROL UNIT GETS THEM — the
+# pattern install_eod_v2.sh established for the conductor. `-` so a missing
+# file does not fail the boot; the alert simply will not send and the status
+# file still records.
+# ⚠️ THIS FILE ALSO CARRIES ANTHROPIC_API_KEY, which is exactly why the tmux
+# command runs `env -u ANTHROPIC_API_KEY` — otherwise the resumed session
+# bills the API instead of the subscription.
+EnvironmentFile=-/home/ubuntu/day_trader_pro/.env
+Type=oneshot
+RemainAfterExit=yes
+User=ubuntu
+Environment=HOME=/home/ubuntu
+WorkingDirectory=/home/ubuntu/day_trader_pro
+# 🔴 THE VENV, NOT /usr/bin/python3 — matching every other dtp unit, and
+# MEASURED: the system interpreter here has no pytz, so the IP lookup dies
+# (CHK.9). ExecStart and the lookup use the same interpreter deliberately.
+ExecStart=/home/ubuntu/day_trader_pro/venv/bin/python /home/ubuntu/day_trader_pro/tools/claude_boot.py
+TimeoutStartSec=45
+StandardOutput=append:/home/ubuntu/day_trader_pro/logs/claude_boot.log
+StandardError=append:/home/ubuntu/day_trader_pro/logs/claude_boot.log
+
+[Install]
+WantedBy=multi-user.target

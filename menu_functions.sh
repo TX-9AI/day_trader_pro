@@ -1,4 +1,21 @@
-# day_trader_pro/menu_functions.sh — v1.72
+# day_trader_pro/menu_functions.sh — v1.73
+# v1.73 (2026-09-20) - dtp r401 / OPS.27. HAND OFF now runs
+#   `tools/scratch_purge.py --wait 20` as the FIRST step of the new pane's
+#   command, before `claude`. Claude Code writes every Bash result under
+#   /tmp/claude-<uid>/, /tmp is tmpfs with `usrquota`, and 1.5GB of stale
+#   scratch exhausted the user's block quota on 2026-09-20 — every Bash call
+#   returned exit 1 with NO output, including `true`, and two threads were
+#   lost to it while `df` reported 384MB free.
+#   🔑 IT RUNS IN THE PANE, NOT BEFORE THE LAUNCH, AND THAT IS MEASURED: this
+#   function starts the new session BEFORE it kills the old ones, so a purge
+#   run ahead of the launch still sees the outgoing agent as live and skips
+#   its directory — which on 2026-09-20 was 1.3GB of a 1.9GB quota. `--wait`
+#   settles for the kill instead.
+#   ⚠️ `;` AND NEVER `&&` (§19): a purge failure must not stop the agent from
+#   starting. scratch_purge exits 0 on every path by construction.
+#   ⚠️ RESUME AND RESUME [other] ARE DELIBERATELY UNTOUCHED — the operator's
+#   spec: a resume exists to preserve continuity, so it is the worst moment to
+#   remove working artifacts. Only the deliberate clean break purges.
 # v1.72 (2026-09-13) - dtp r381 / OPS.17. NEW ITEM `REATTACH -> the running
 #   Claude session`: exit the menu and put the terminal back on the tmux session
 #   whose pane is running claude. Operator: *"not quite the same as resume
@@ -580,11 +597,11 @@ mi_handoff_fresh_claude() {
         # Not inside tmux: kill any strays first, then attach directly.
         tmux kill-server 2>/dev/null
         exec tmux new-session -s "$NEW" -c "$CLAUDE_SESSION_DIR" \
-            "env -u ANTHROPIC_API_KEY $CLAUDE 'Read $HO and follow it.' || echo '  CLAUDE DID NOT START — the handoff is still at the path above; recover with: claude --resume'; exec bash -l"
+            "python3 /home/ubuntu/day_trader_pro/tools/scratch_purge.py --wait 20; env -u ANTHROPIC_API_KEY $CLAUDE 'Read $HO and follow it.' || echo '  CLAUDE DID NOT START — the handoff is still at the path above; recover with: claude --resume'; exec bash -l"
     fi
     OLD="$(tmux display-message -p '#S')"
     tmux new-session -d -s "$NEW" -c "$CLAUDE_SESSION_DIR" \
-        "env -u ANTHROPIC_API_KEY $CLAUDE 'Read $HO and follow it.' || echo '  CLAUDE DID NOT START — the handoff is still at the path above; recover with: claude --resume'; exec bash -l"
+        "python3 /home/ubuntu/day_trader_pro/tools/scratch_purge.py --wait 20; env -u ANTHROPIC_API_KEY $CLAUDE 'Read $HO and follow it.' || echo '  CLAUDE DID NOT START — the handoff is still at the path above; recover with: claude --resume'; exec bash -l"
     tmux switch-client -t "$NEW" || {
         echo "  switch-client failed — the new session '$NEW' EXISTS and is detached."
         echo "  Attach with: tmux attach -t $NEW"; pause; return 1; }
