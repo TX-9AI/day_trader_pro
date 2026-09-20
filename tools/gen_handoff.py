@@ -1,6 +1,24 @@
 #!/usr/bin/env python3
 """
-tools/gen_handoff.py  v1.3
+tools/gen_handoff.py  v1.4
+v1.4  2026-09-20  r398 — THE PERMISSIONS BLOCK CARRIES THE VETO.
+Operator, 2026-09-20: "You are allowed to stage, land, edit and present
+proposed changes unprompted, but I must be given the opportunity to veto
+anything before the change is committed to the codebase. Once expressly
+approved, you may upload it GitHub and fan it out to the fleet." The block said
+his approval came BEFORE THE LAND; landing is now unprompted and THE COMMIT is
+what needs his yes.
+  A VETO NEEDS AN OPPORTUNITY, WHICH MEANS A WAIT, and the block says so: a
+summary sent and immediately acted on has not given him the chance.
+  IT ALSO CARRIES ALL FIVE ANSWERS - yes, no, yes but, no and, hold off -
+because the middle two get flattened, and flattening them drops the half of his
+answer that is an instruction.
+  THIS IS A POINTER AND NOT A SECOND AUTHORITY, which is r371's own rule for
+this block: sections 38.9 and 38.10 are the authority and this must never grow
+a rule they do not carry.
+  AND IT PRESERVES THE LEDGER'S SENSE OF BAKED deliberately: his `bake` means
+fan it out to the fleet, which IS section 18's meaning, so a revision on origin
+that no box runs stays PUSHED and never gets the tick.
 v1.3  2026-09-18  r388 — ITEM 5: THE LAST CONVERSATION, AND THE OLDER ONES AS
       A SEARCHABLE CORPUS. Operator: *"Read our last conversation in full as
       this thread is likely a continuation of that work"*, and *"looking into
@@ -259,14 +277,42 @@ def main():
     print("      stop and restart services — via fleet.py and its flags (--only,")
     print("      etc.), ec2ops.py and wake_and_bake.py.")
     print("    · S3 from control: studies, reports, comparisons, any read.")
-    print("    · The COMMIT and the BAKE, once he has approved the contents —")
-    print("      timed whenever it makes the most sense to synch everything.")
+    print("    · BUILDING AND LANDING a package — moving it OUT of the")
+    print("      scratchpad and onto the file system. No asking (2026-09-20).")
     print("    · Adding CHECKERS to the land sequence when a need is unmet.")
     print("  HIS, always:")
-    print("    · WHAT GETS COMMITTED. You describe the file changes; that")
-    print("      description is what he approves, BEFORE the land. Quote:")
-    print("      \"I always retain approval over the land — you're responsible")
-    print("      for the rest.\"")
+    print("    · THE VETO, and he states it in one line: ALL CHANGES MUST BE")
+    print("      APPROVED BEFORE COMMITMENT TO THE REPO AND/OR THE FLEET.")
+    print("      He must be given the OPPORTUNITY to refuse any")
+    print("      change before it is committed to the codebase. Quote,")
+    print("      2026-09-20: \"You are allowed to stage, land, edit and")
+    print("      present proposed changes unprompted, but I must be given the")
+    print("      opportunity to veto anything before the change is committed")
+    print("      to the codebase. Once expressly approved, you may upload it")
+    print("      GitHub and fan it out to the fleet.\"")
+    print("  ⚠️ A VETO NEEDS AN OPPORTUNITY, WHICH MEANS A WAIT. A summary sent")
+    print("     and immediately acted on has NOT given him the chance.")
+    print("  ⚠️ HIS ANSWER IS NOT BINARY: yes / no / yes but / no and / hold")
+    print("     off. \"yes but\" and \"no and\" each carry an instruction in the")
+    print("     half that is not the verdict — do not flatten them. \"Hold")
+    print("     off\" is not a no, and the silence after it is not consent.")
+    print("  ⚠️ AND THE APPROVAL EXPIRES. It attaches to the contents he was")
+    print("     SHOWN; if they move, it is void and a fresh one is owed FIRST.")
+    print("  ⚠️ VOCABULARY: LAND/STAGE/EDIT/PRESENT = yours, unprompted. The")
+    print("     COMMIT needs his yes, and that one yes releases BOTH GitHub")
+    print("     and the fleet. The fleet LIFECYCLE (up/down/commands/restart)")
+    print("     is unconditional; releasing a package to it is not. §38.10.")
+    print("  🔑 AND HE WORKS FROM INTENT (§39): \"I prefer to work from intent.")
+    print("     Operator's intent.\" Ask him any time what he is trying to")
+    print("     achieve, and ask yourself before proposing anything: is this")
+    print("     in the SPIRIT of his intent? He states that intent in nearly")
+    print("     every message — read for it rather than parsing the wording.")
+    print("     ⚠️ It does NOT license overriding a clear instruction (§0).")
+    print("  ⚠️ `✅ BAKED` in the BACKLOG status column keeps §18's meaning —")
+    print("     LIVE ON THE BOXES. A revision on origin no box runs is")
+    print("     ◐ PUSHED, never ✅.")
+    print("  ⚠️ land.sh COMMITS AND PUSHES IN ONE ATOMIC RUN, so in practice the")
+    print("     summary precedes deploy.sh. There is no --no-push mode.")
     print("  NEVER:")
     print("    · Bypassing the landing script or the checkers. They exist for")
     print("      our protection. Add to them; do not go around them.")

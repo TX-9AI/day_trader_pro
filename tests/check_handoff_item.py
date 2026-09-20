@@ -1,6 +1,23 @@
 #!/usr/bin/env python3
 """
-tests/check_handoff_item.py  v1.2
+tests/check_handoff_item.py  v1.3
+v1.3  2026-09-20  r398 — H10, H10b, H10c and H10d: the permission block. The
+operator moved the line on 2026-09-20 — landing and editing on the file system
+are Claude's, and the PUSH and the BAKE are gated on HIM BEING INFORMED rather
+than on an approval — and nothing checked that the handoff carried it.
+  🔴 H10 PINS THE VERB. "Approval" and "informed" produce different threads:
+one stops and waits for a click, the other summarises and proceeds. A block
+that drifted back to approval-language would quietly reintroduce a bottleneck
+he removed.
+  🔴 H10b PINS THE EXPIRY, which is the half most likely to be dropped: if the
+delivery stops matching what he was told, he is unappraised again and owed an
+update FIRST. [[ORB.16]] is what skipping it cost once already.
+  🔴 H10c PINS THAT `BAKED` STILL MEANS LIVE ON THE BOXES. He uses `bake`
+conversationally for "make it official"; section 18 and BACKLOG PART 0 use
+✅ BAKED for the fleet, and hundreds of rows already carry that sense. A
+handoff teaching the other one would re-grade all of them at once. Anchored on
+the CONSEQUENCE — on origin is PUSHED, never ✅ — so a reworded block still has
+to mean it.
 v1.2  2026-09-18  r388 — H9/H9b/H9c/H9d: THE LAST CONVERSATION IS ITEM 5.
       Operator: *"Read our last conversation in full as this thread is likely a
       continuation of that work."* H9 requires the PATH as well as the sentence,
@@ -188,6 +205,42 @@ def main():
           "not all 418" not in out
           and (_real is None or f"not all {_real}." in out),
           f"ledger has {_real} rows")
+
+    # ── H10 — THE PERMISSION LINE, AND THE ONE WORD THAT WOULD RE-GRADE THE
+    # LEDGER IF IT ROTTED (r398, operator's ruling 2026-09-20).
+    # 🔑 WHY THIS IS PINNED ON THE RENDERED TEXT AND NOT ON SOURCE (§21):
+    # for a DOCUMENT GENERATOR the emitted prose IS the behaviour — it is the
+    # only thing a fresh thread ever sees — which is the idiom H7b, H7c and
+    # H9b already use.
+    # 🔴 H10 — A VETO NEEDS AN OPPORTUNITY, AND AN OPPORTUNITY IS A WAIT.
+    # An earlier draft of this check asserted the opposite — that the gate was
+    # "the informing, not a click" — which was wrong in Claude's favour. The
+    # document has to say BOTH that he may veto and that the release waits.
+    check("H10 the permissions block carries the VETO and says it is a WAIT",
+          "opportunity to veto" in out
+          and "NEEDS AN OPPORTUNITY, WHICH MEANS A WAIT" in out,
+          "the veto and the wait are both stated")
+    # 🔴 H10d — ALL FIVE ANSWERS. "yes but" and "no and" are the ones a thread
+    # flattens into a plain yes/no, which drops the half of his reply that is
+    # an instruction; and "hold off" is not a refusal, nor is the silence
+    # after it consent.
+    check("H10d it carries all five answers, not a yes/no binary",
+          "yes but" in out and "no and" in out and "hold" in out)
+    # 🔴 H10b — AND THE APPRAISAL EXPIRES. This is the half most likely to be
+    # dropped in a future edit, and dropping it is the [[ORB.16]] failure: a
+    # finding he had already said yes to, retracted an hour later, because the
+    # delivery no longer matched what he had been told.
+    check("H10b it says the approval EXPIRES when the delivery changes",
+          "EXPIRES" in out and "fresh one is owed" in out)
+    # 🔴 H10c — `BAKED` MUST KEEP §18's MEANING IN THE STATUS COLUMN.
+    # The operator uses `bake` conversationally for "make it official"; §18 and
+    # BACKLOG PART 0 use ✅ BAKED for LIVE ON THE BOXES, and hundreds of rows
+    # already carry it that way. A handoff that taught the other sense would
+    # silently re-grade every one of them — falsifying the record, which §0.1
+    # forbids in its own words. Anchored on the CONSEQUENCE (pushed ≠ baked)
+    # rather than on a definition, so a reworded block still has to mean it.
+    check("H10c it preserves §18's BAKED — on origin is PUSHED, not ✅",
+          "LIVE ON THE BOXES" in out and "PUSHED, never" in out)
 
     # H8 — open means the STATUS column. The first draft filtered on the 🔴
     # severity marker and listed long-closed rows as outstanding.
