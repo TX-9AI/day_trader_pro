@@ -1,6 +1,23 @@
 #!/usr/bin/env python3
 """
-tests/check_scratch_purge.py  v1.0
+tests/check_scratch_purge.py  v1.1
+v1.1  2026-09-20  r404 / OPS.27 — P14..P18, AND THIS GATE STOPS MUTATING THE
+      TREE IT CHECKS.
+      🔴 v1.0 SWEPT THE LIVE `handoffs/` FOLDER EVERY TIME IT RAN. Only P2/P3
+      isolated `HANDOFF_DIRS`, by rewriting the source into a temp copy; P4,
+      P5, P6, P7 and P8 invoked the REAL tool with only the scratch paths
+      redirected, so each of them archived the live directory's surplus stubs
+      into a `TemporaryDirectory` that was deleted on exit. Eight generated
+      stubs became three that way, and this file is named by r401's
+      `land.spec` — so **every future land ran it.** A gate that mutates its
+      subject is worse than no gate.
+      🔑 THE FIX IS NOT "REMEMBER TO SET THE VARIABLE". P14 establishes that
+      the tool HONOURS `CLAUDE_HANDOFF_DIR` before anything invokes it, and
+      if it does not, every tool-invoking case is REFUSED BY NAME rather than
+      run against the live tree. The gate declines to exercise a tool it
+      cannot isolate — the same principle as `check_claude_boot`'s blanked
+      Telegram token, where the unsafe act is made impossible rather than
+      merely avoided.
 v1.0  2026-09-20  r401 / OPS.27 — GATE FOR tools/scratch_purge.py AND ITS ONE
       CALL SITE.
 
@@ -32,10 +49,30 @@ def ck(name, ok, why=""):
     _res.append((name, bool(ok), why))
     print(f"  {'PASS' if ok else 'FAIL'}  {name}  {'' if ok else why}")
 
+#: A throwaway handoffs directory and log, applied to EVERY invocation, so no
+#: case can reach the live folder by forgetting. v1.0 left this to each case
+#: and five of them forgot.
+_ISO = tempfile.mkdtemp(prefix="sp_iso_")
+
+
 def run(env_extra, *args, cwd=None):
-    env = dict(os.environ); env.update(env_extra)
+    env = dict(os.environ)
+    env.setdefault("CLAUDE_HANDOFF_DIR", os.path.join(_ISO, "handoffs"))
+    env.setdefault("CLAUDE_SCRATCH_LOG", os.path.join(_ISO, "purge.log"))
+    env.update(env_extra)
     return subprocess.run([sys.executable, TOOL, *args], capture_output=True,
                           text=True, env=env, timeout=120, cwd=cwd)
+
+
+REAL_HANDOFFS = os.path.join(os.path.expanduser("~"), "options-trader-v4",
+                             "handoffs")
+
+
+def _handoff_snapshot():
+    try:
+        return sorted(os.listdir(REAL_HANDOFFS))
+    except OSError:
+        return None
 
 def mkscratch(base, project, sess, size_kb=64, age_sec=4000):
     d = os.path.join(base, project, sess)
@@ -45,6 +82,34 @@ def mkscratch(base, project, sess, size_kb=64, age_sec=4000):
     old = time.time() - age_sec
     os.utime(d, (old, old))
     return d
+
+# ── P14 · 🔴 THE TOOL HONOURS `CLAUDE_HANDOFF_DIR` — CHECKED BEFORE ANYTHING
+# INVOKES IT, AND WITH NO SIDE EFFECTS OF ITS OWN.
+# 🔑 THE MODULE IS **LOADED**, NOT RUN. `scratch_purge` does its work under
+# `if __name__ == "__main__"`, so importing it resolves the constants and
+# sweeps nothing — which is what makes this probe safe against a version that
+# would otherwise reach the live folder. Asserting on the resolved CONSTANT is
+# asserting on the definition (§20), not on a mention of the variable's name.
+_HO_PROBE = tempfile.mkdtemp(prefix="sp_ho_")
+_probe_env = dict(os.environ, CLAUDE_HANDOFF_DIR=_HO_PROBE)
+_probe_code = ("import importlib.util,sys;"
+               "spec=importlib.util.spec_from_file_location('sp',%r);"
+               "m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m);"
+               "print(m.HANDOFF_DIRS[0])" % TOOL)
+try:
+    _pr = subprocess.run([sys.executable, "-c", _probe_code], capture_output=True,
+                         text=True, env=_probe_env, timeout=60)
+    _resolved = (_pr.stdout or "").strip().splitlines()[-1] if _pr.stdout.strip() else ""
+except Exception as _e:                                          # noqa: BLE001
+    _resolved = "probe raised: %r" % (_e,)
+_ISOLATABLE = _resolved == _HO_PROBE
+ck("P14", _ISOLATABLE,
+   f"the tool must resolve its handoffs directory from CLAUDE_HANDOFF_DIR so a "
+   f"test can point it somewhere harmless — got {_resolved!r}, wanted "
+   f"{_HO_PROBE!r}. Until it does, every invocation in this file sweeps the "
+   f"LIVE handoffs/ folder, and this file runs inside the land gate.")
+
+_HO_BEFORE = _handoff_snapshot()
 
 # ── P1 · the tool runs at all and reports ────────────────────────────────────
 if not os.path.exists(TOOL):
@@ -63,7 +128,8 @@ else:
 # "born red" could not be claimed for any of them. [[r400]] records the same
 # mistake earlier the same day in check_map_accuracy's R1c. A gate that
 # cannot report on the broken version is not a gate.
-_TOOLCHECKS = ["P2", "P3", "P3b", "P4", "P5", "P6", "P7", "P8"]
+_TOOLCHECKS = ["P2", "P3", "P3b", "P4", "P5", "P6", "P7", "P8",
+               "P16", "P17", "P18"]
 
 def _unrun(reason):
     done = {n for n, _, _ in _res}
@@ -73,6 +139,12 @@ def _unrun(reason):
 
 if not os.path.exists(TOOL):
     _unrun(f"{TOOL} does not exist")
+elif not _ISOLATABLE:
+    # 🔴 REFUSED, NOT RUN. This is the half that makes P14 more than a
+    # complaint: a tool that ignores the override would have these cases sweep
+    # the operator's live handoffs/ folder, and one of them runs on every land.
+    _unrun("the tool ignores CLAUDE_HANDOFF_DIR — REFUSING to invoke it, "
+           "because doing so would sweep the LIVE handoffs/ directory")
 else:
   try:
     # ── P2 · AN AUTHORED .md IS NEVER TOUCHED ───────────────────────────────────
@@ -89,14 +161,20 @@ else:
             open(g, "w").write("stub"); gens.append(g)
             t = time.time() - (10 - i) * 86400
             os.utime(g, (t, t))
-        src = open(TOOL).read().replace(
-            'HANDOFF_DIRS = [os.path.join(HOME, "options-trader-v4", "handoffs")]',
-            f'HANDOFF_DIRS = [{hd!r}]')
-        alt = os.path.join(tmp, "alt_purge.py"); open(alt, "w").write(src)
-        env = dict(os.environ); env.update({"CLAUDE_SCRATCH_ROOT": sr,
-                                            "CLAUDE_SCRATCH_ARCHIVE": ar})
-        r = subprocess.run([sys.executable, alt], capture_output=True, text=True,
-                           env=env, timeout=120)
+        # 🔴 v1.1 — THROUGH THE SUPPORTED OVERRIDE, NOT A SOURCE REWRITE, AND
+        # THE OLD MECHANISM'S FAILURE IS WHY.
+        # v1.0 copied the tool to `alt_purge.py` with the `HANDOFF_DIRS = [...]`
+        # literal string-replaced. That `.replace()` **asserted nothing about
+        # its anchor** (§24: *"any scripted edit must assert its anchor
+        # matched"*), so the moment r404 changed that line the substitution
+        # silently matched zero times, the copy kept the production default,
+        # and these two cases ran against the operator's LIVE handoffs/ folder
+        # while reporting on a fixture they had never touched. It was caught
+        # only because P3 then failed — the no-op was invisible on its own.
+        # ⚠️ AND THESE CASES BUILT THEIR OWN `env` DICT, BYPASSING `run()`'s
+        # isolation, which is precisely the hole P14 and P15 exist to close.
+        r = run({"CLAUDE_SCRATCH_ROOT": sr, "CLAUDE_SCRATCH_ARCHIVE": ar,
+                 "CLAUDE_HANDOFF_DIR": hd})
         ck("P2", os.path.exists(keep) and open(keep).read() == "the brief",
            "an authored .md was moved or altered — the Saturday briefs are "
            "single-copy and gitignored")
@@ -179,6 +257,69 @@ else:
         finally:
             os.chmod(blocked, 0o700)
 
+
+    # ── P16 · 🔴 A ZERO-LENGTH FILE IS AN ARTEFACT, AND MUST BE ARCHIVED ─────
+    # v1.0 decided emptiness from the BYTE TOTAL and `rmtree`d anything summing
+    # to zero. A tree of zero-length files sums to zero and is not empty — this
+    # fleet's own `data/DRILL_DISK`, `data/NO_MIDNIGHT_HALT` and
+    # `data/FEED_MAINTENANCE` sentinels are exactly that shape, and r401's near
+    # miss is the standing reason this tool preserves rather than deletes.
+    with tempfile.TemporaryDirectory() as tmp:
+        sr, ar = os.path.join(tmp, "scratch"), os.path.join(tmp, "arc")
+        z = os.path.join(sr, "proj", "99999999-1111-2222-3333-444444444444")
+        os.makedirs(z)
+        open(os.path.join(z, "SENTINEL"), "w").close()       # zero LENGTH
+        _o = time.time() - 4000; os.utime(z, (_o, _o))
+        run({"CLAUDE_SCRATCH_ROOT": sr, "CLAUDE_SCRATCH_ARCHIVE": ar})
+        kept = os.path.join(ar, "proj", "99999999-1111-2222-3333-444444444444",
+                            "SENTINEL")
+        ck("P16", os.path.exists(kept),
+           "a scratch dir holding only ZERO-LENGTH files was destroyed — "
+           "emptiness must be decided by whether any FILE exists, not by the "
+           "byte total, or a sentinel is deleted for weighing nothing")
+
+    # ── P17 · A GENUINELY EMPTY DIR IS REMOVED **AND SAID SO** ──────────────
+    # 🔑 THE REMOVAL IS FINE; THE SILENCE WAS THE DEFECT. v1.0 printed nothing
+    # and counted nothing, so a run that removed three directories and a run
+    # that did nothing produced identical output (§0.5). That is how the first
+    # live purge's effect had to be reconstructed from surviving artefacts
+    # instead of read off its own report.
+    with tempfile.TemporaryDirectory() as tmp:
+        sr, ar = os.path.join(tmp, "scratch"), os.path.join(tmp, "arc")
+        e = os.path.join(sr, "proj", "88888888-1111-2222-3333-444444444444")
+        os.makedirs(os.path.join(e, "sub"))
+        _o = time.time() - 4000
+        os.utime(os.path.join(e, "sub"), (_o, _o)); os.utime(e, (_o, _o))
+        r17 = run({"CLAUDE_SCRATCH_ROOT": sr, "CLAUDE_SCRATCH_ARCHIVE": ar})
+        out17 = r17.stdout + r17.stderr
+        ck("P17", (not os.path.isdir(e)) and "88888888" in out17
+           and "removed 1 empty scratch dir" in out17,
+           f"an empty scratch dir must be removed AND REPORTED, per item and "
+           f"on the summary line — gone={not os.path.isdir(e)} "
+           f"named={'88888888' in out17} tallied="
+           f"{'removed 1 empty scratch dir' in out17}")
+
+    # ── P18 · 🔴 §38.5 — THE RUN LEAVES A RECORD A HUMAN CAN READ LATER ─────
+    # *"Anything Claude runs unattended writes what it did, what it found and
+    # what it changed — to a log the operator can read after the fact, not only
+    # to the session that is gone when the window closes."* v1.0 wrote to the
+    # hand-off pane's stdout and nowhere else.
+    # ⚠️ AND THE STAMP IS ASSERTED TO BE ET, because writing the record in the
+    # zone the sibling tool just got wrong would be repeating the defect one
+    # file over.
+    with tempfile.TemporaryDirectory() as tmp:
+        sr, ar = os.path.join(tmp, "scratch"), os.path.join(tmp, "arc")
+        mkscratch(sr, "proj", "77777777-1111-2222-3333-444444444444")
+        lg = os.path.join(tmp, "purge.log")
+        run({"CLAUDE_SCRATCH_ROOT": sr, "CLAUDE_SCRATCH_ARCHIVE": ar,
+             "CLAUDE_SCRATCH_LOG": lg})
+        body18 = open(lg, encoding="utf-8").read() if os.path.exists(lg) else ""
+        ck("P18", "ARCHIVE proj/77777777" in body18
+           and re.search(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} ET ", body18,
+                         re.M) is not None,
+           f"the purge must append an ET-stamped record of what it moved to "
+           f"{lg} — §38.5, a run nobody can reconstruct is indistinguishable "
+           f"from a run that never happened. got {body18[:120]!r}")
 
   except Exception as _exc:
     _unrun(f"check block raised: {_exc!r}")
@@ -284,6 +425,20 @@ ck("P13", not _root_is_repo and not _depth1_repo,
    f"first match without reporting ambiguity")
 print(f"  [P13] archive={_arc} direct_child_of_home={_direct_child} "
       f"root_is_repo={_root_is_repo} depth1_repos={len(_depth1_repo)}")
+
+# ── P15 · THE LIVE handoffs/ FOLDER IS UNCHANGED BY THIS ENTIRE RUN ────────
+# ⚠️ STATED HONESTLY: THIS IS A CONTROL, AND TODAY IT CAN PASS VACUOUSLY.
+# The live folder currently holds three generated stubs, which is exactly
+# `HANDOFF_KEEP`, so even the unisolated v1.0 tool would move nothing from it
+# right now. It is here because it is the property that actually matters and
+# because it catches the NEXT case that forgets isolation — at which point the
+# folder will not be at the keep threshold and this will bite. P14 is the
+# born-red evidence; this is the invariant.
+_HO_AFTER = _handoff_snapshot()
+ck("P15", _HO_BEFORE == _HO_AFTER,
+   f"this gate changed the live handoffs/ directory. before={_HO_BEFORE} "
+   f"after={_HO_AFTER} — a checker that mutates its subject is worse than no "
+   f"checker, and this file is named by a land.spec so it runs on every land")
 
 bad = [n for n, ok, _ in _res if not ok]
 print(f"\n  {len(_res) - len(bad)}/{len(_res)} passed")

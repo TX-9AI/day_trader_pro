@@ -1,6 +1,26 @@
 #!/usr/bin/env python3
 """
-tools/scratch_purge.py  v1.0
+tools/scratch_purge.py  v1.1
+v1.1  2026-09-20  r404 / OPS.27 — THREE DEFECTS, ALL FOUND BY VERIFYING THE
+      FIRST LIVE RUN RATHER THAN BY ACCEPTING THAT IT HAD WORKED.
+      🔴 (1) IT DELETED, SILENTLY, IN THE TOOL WHOSE STATED PRINCIPLE IS THAT
+      IT NEVER DOES. `dir_bytes()` summed FILE SIZES, and a directory summing
+      to zero was `rmtree`d with **no log line and no tally** — so "nothing to
+      do" and "I removed three directories" rendered identically. And the test
+      was the wrong one: a tree of ZERO-LENGTH files has no bytes and is not
+      empty (this fleet's own `data/DRILL_DISK` idiom is a zero-byte
+      sentinel). The question is now "does it contain any FILE at all", a
+      directory with files is ARCHIVED whatever they weigh, and a genuinely
+      empty one is removed **with a line and a count**.
+      🔴 (2) `HANDOFF_DIRS` WAS A CONSTANT WITH NO OVERRIDE, so every check in
+      `check_scratch_purge` that invoked this tool for real swept the LIVE
+      `handoffs/` directory — a gate mutating production, and it runs inside
+      the land gate on every delivery. `CLAUDE_HANDOFF_DIR` now overrides it
+      and P14/P15 pin both halves.
+      🔴 (3) THE RUN LEFT NO DURABLE RECORD (§38.5). Output went to the
+      hand-off pane's stdout and scrolled away, so what the first live purge
+      did had to be reconstructed from surviving artefacts. It now appends to
+      `logs/scratch_purge.log`, ET-stamped.
 v1.0  2026-09-20  r401 / OPS.27 — ARCHIVE STALE CLAUDE SCRATCH AT THE HAND-OFF
       BOUNDARY, BECAUSE A FULL /tmp QUOTA SILENTLY KILLS THE Bash TOOL.
 
@@ -74,6 +94,16 @@ import time
 
 HOME = os.path.expanduser("~")
 UID = os.getuid()
+_DTP = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# 🔴 THE ONE ET DEFINITION, IMPORTED (dtp r287/TZ.1), AND GUARDED BECAUSE THIS
+# TOOL MAY NOT FAIL. The house shim `tools/shadow_watch.py` uses, with a
+# try/except because a raise here would stop the agent starting — which is the
+# one thing this file promises it cannot do.
+sys.path.insert(0, _DTP)
+try:
+    import ettime as _ettime                                    # noqa: E402
+except Exception:                                               # noqa: BLE001
+    _ettime = None
 SCRATCH_ROOT = os.environ.get("CLAUDE_SCRATCH_ROOT", f"/tmp/claude-{UID}")
 ARCHIVE = os.environ.get("CLAUDE_SCRATCH_ARCHIVE",
                          os.path.join(HOME, "claude_scratch_archive"))
@@ -83,10 +113,21 @@ RETENTION_DAYS = int(os.environ.get("CLAUDE_SCRATCH_RETENTION_DAYS", "14"))
 # thread a dangling reference — the failure mi_handoff_fresh_claude's own
 # comment records from its first cut.
 HANDOFF_KEEP = int(os.environ.get("CLAUDE_HANDOFF_KEEP", "3"))
-HANDOFF_DIRS = [os.path.join(HOME, "options-trader-v4", "handoffs")]
+HANDOFF_DIRS = [os.environ.get(
+    "CLAUDE_HANDOFF_DIR", os.path.join(HOME, "options-trader-v4", "handoffs"))]
 # A directory younger than this is left alone even when nothing holds it open —
 # a session can exist for a moment before it opens its first file.
 GRACE_SEC = int(os.environ.get("CLAUDE_SCRATCH_GRACE_SEC", "600"))
+# 🔴 v1.1 — OVERRIDABLE, AND IT WAS NOT. Until now this was a bare constant,
+# so every `check_scratch_purge` case that ran the real tool swept the LIVE
+# `handoffs/` folder: a gate mutating the thing it checks, on a path the land
+# gate takes for every delivery. Eight generated stubs became three that way,
+# and only the `GENERATED` pattern kept the authored documents out of it.
+# ⚠️ THE DEFAULT IS UNCHANGED, so production behaviour is identical; what
+# changes is that a test can point it somewhere harmless — which is what
+# `check_scratch_purge` P14/P15 now require of every invocation.
+LOG_PATH = os.environ.get("CLAUDE_SCRATCH_LOG",
+                          os.path.join(_DTP, "logs", "scratch_purge.log"))
 
 # A generated stub is `handoff.` plus exactly the six characters mktemp's
 # XXXXXX template produces. Anything else in that folder is a human's document.
@@ -94,8 +135,60 @@ import re
 GENERATED = re.compile(r"^handoff\.[A-Za-z0-9]{6}$")
 
 
+def _et_stamp() -> str:
+    """`YYYY-MM-DD HH:MM:SS ET`, or an HONESTLY LABELLED UTC stamp.
+
+    Same rule as `claude_boot._et_now` and for the same reason: a time
+    labelled with a zone it is not in is worse than an unlabelled one. This
+    box's `/etc/localtime` is `Etc/UTC`, and the sibling tool shipped a four-
+    hour error to the operator's phone by taking local time and calling it ET.
+    """
+    if _ettime is not None:
+        try:
+            return _ettime.now_et().strftime("%Y-%m-%d %H:%M:%S ET")
+        except Exception:                                       # noqa: BLE001
+            pass
+    return time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime())
+
+
 def _log(msg: str) -> None:
-    print(f"  [scratch_purge] {msg}", flush=True)
+    """Print, AND append to a durable log.
+
+    🔴 §38.5: *"anything Claude runs unattended writes what it did, what it
+    found and what it changed — to a log the operator can read after the fact,
+    not only to the session that is gone when the window closes."* v1.0 printed
+    to the hand-off pane's stdout and nothing else, so when the first live
+    purge ran on 2026-09-20 the only way to establish what it had done was to
+    infer it from what survived. **A run nobody can reconstruct is
+    indistinguishable from a run that never happened**, which is the failure
+    that section names.
+    ⚠️ THE FILE WRITE CANNOT FAIL THE TOOL. A log is a record, not a
+    prerequisite; if it cannot be written the purge still runs and the pane
+    still shows the line.
+    """
+    line = f"  [scratch_purge] {msg}"
+    print(line, flush=True)
+    try:
+        os.makedirs(os.path.dirname(LOG_PATH), exist_ok=True)
+        with open(LOG_PATH, "a", encoding="utf-8") as fh:
+            fh.write(f"{_et_stamp()} {msg}\n")
+    except Exception:                                           # noqa: BLE001
+        pass
+
+
+def _sz(n: int) -> str:
+    """Bytes a human can act on.
+
+    ⚠️ v1.0 REPORTED WHOLE MEGABYTES VIA `n // (1 << 20)`, so every directory
+    under a megabyte read as `0 MB` — including the one the summary said it
+    had archived. A report that renders a real quantity as zero is the
+    plausible-silence class in miniature.
+    """
+    n = int(n)
+    for unit, div in (("GB", 1 << 30), ("MB", 1 << 20), ("KB", 1 << 10)):
+        if n >= div:
+            return f"{n / div:.1f} {unit}"
+    return f"{n} B"
 
 
 def quota_state() -> str:
@@ -182,15 +275,27 @@ def wait_quiet(seconds: int) -> bool:
     return not other_claude_pids()
 
 
-def dir_bytes(path: str) -> int:
-    total = 0
+def dir_stats(path: str) -> tuple:
+    """(file count, byte total).
+
+    🔴 THE COUNT IS WHAT DECIDES WHETHER A DIRECTORY IS EMPTY, AND v1.0 USED
+    THE BYTES. A tree of zero-length files sums to zero and is NOT empty — a
+    sentinel file is an artefact, and this fleet's own `data/DRILL_DISK`,
+    `data/NO_MIDNIGHT_HALT` and `data/FEED_MAINTENANCE` idiom is exactly that
+    shape. Deciding "there is nothing here" from a byte total deletes real
+    things that happen to weigh nothing.
+    ⚠️ AND THE BYTES ARE STILL RETURNED, because they are what the quota
+    measures and what the report is about.
+    """
+    files_n = total = 0
     for root, _dirs, files in os.walk(path, onerror=lambda e: None):
         for f in files:
+            files_n += 1
             try:
                 total += os.lstat(os.path.join(root, f)).st_size
             except OSError:
                 pass
-    return total
+    return files_n, total
 
 
 def _contained(path: str, root: str) -> bool:
@@ -204,10 +309,10 @@ def _contained(path: str, root: str) -> bool:
 def archive_scratch(dry: bool) -> tuple:
     if not os.path.isdir(SCRATCH_ROOT):
         _log(f"no scratch root at {SCRATCH_ROOT} — nothing to do")
-        return 0, 0
+        return 0, 0, 0
     live = live_paths()
     now = time.time()
-    moved = freed = 0
+    moved = freed = emptied = 0
     for project in sorted(os.listdir(SCRATCH_ROOT)):
         pdir = os.path.join(SCRATCH_ROOT, project)
         if not os.path.isdir(pdir):
@@ -226,17 +331,28 @@ def archive_scratch(dry: bool) -> tuple:
             if age < GRACE_SEC:
                 _log(f"SKIP {project}/{sess[:8]} — modified {int(age)}s ago, inside the grace window")
                 continue
-            size = dir_bytes(sdir)
-            if size == 0:
+            nfiles, size = dir_stats(sdir)
+            # 🔴 NOT SILENT, AND NOT KEYED ON BYTES. v1.0 asked whether the
+            # files summed to zero and `rmtree`d on yes, printing NOTHING and
+            # counting nothing — in the one tool whose header says it archives
+            # and does not delete. Two changes: the question is now whether it
+            # holds any FILE at all (a zero-length file is an artefact), and
+            # whatever is removed SAYS SO and is tallied. *Nothing to do* and
+            # *I removed three directories* must not render identically (§0.5).
+            if nfiles == 0:
+                _log(f"{'WOULD REMOVE' if dry else 'REMOVE'} {project}/{sess[:8]} "
+                     f"— no files at any depth, nothing to preserve")
                 if not dry:
                     try:
                         shutil.rmtree(sdir)
-                    except OSError:
-                        pass
+                    except OSError as exc:
+                        _log(f"  remove FAILED for {sess[:8]}: {exc}")
+                        continue
+                emptied += 1
                 continue
             dest = os.path.join(ARCHIVE, project, sess)
             _log(f"{'WOULD ARCHIVE' if dry else 'ARCHIVE'} {project}/{sess[:8]} "
-                 f"({size // (1 << 20)} MB) -> {dest}")
+                 f"({_sz(size)} in {nfiles} file(s)) -> {dest}")
             if not dry:
                 try:
                     os.makedirs(os.path.dirname(dest), exist_ok=True)
@@ -248,7 +364,7 @@ def archive_scratch(dry: bool) -> tuple:
                     continue
             moved += 1
             freed += size
-    return moved, freed
+    return moved, freed, emptied
 
 
 def archive_handoffs(dry: bool) -> tuple:
@@ -271,7 +387,8 @@ def archive_handoffs(dry: bool) -> tuple:
             except OSError:
                 continue
             dest = os.path.join(ARCHIVE, "handoffs", n)
-            _log(f"{'WOULD ARCHIVE' if dry else 'ARCHIVE'} handoff {n} ({size} B)")
+            _log(f"{'WOULD ARCHIVE' if dry else 'ARCHIVE'} handoff {n} ({_sz(size)}) "
+             f"from {hdir}")
             if not dry:
                 try:
                     os.makedirs(os.path.dirname(dest), exist_ok=True)
@@ -332,13 +449,19 @@ def main(argv=None) -> int:
             _log(f"still {len(other_claude_pids())} claude process(es) after {a.wait}s "
                  f"— their scratch is SKIPPED, not forced")
 
-    sm, sf = archive_scratch(a.dry_run)
+    sm, sf, se = archive_scratch(a.dry_run)
     hm, hf = archive_handoffs(a.dry_run)
     dropped = sweep_retention(a.dry_run)
 
+    # ⚠️ THE REMOVED COUNT IS ON THE SUMMARY LINE, NOT ONLY IN THE PER-ITEM
+    # LOG. v1.0's summary counted archives alone, so a run that removed
+    # directories reported the same line as a run that did nothing.
     _log(f"{'would archive' if a.dry_run else 'archived'}: "
-         f"{sm} scratch dir(s) {sf // (1 << 20)} MB, {hm} generated handoff(s) {hf} B; "
+         f"{sm} scratch dir(s) {_sz(sf)}, {hm} generated handoff(s) {_sz(hf)}; "
+         f"removed {se} empty scratch dir(s); "
          f"{dropped} archive entr{'y' if dropped == 1 else 'ies'} past {RETENTION_DAYS}d")
+    _log(f"handoff dir: {HANDOFF_DIRS[0]} (keep newest {HANDOFF_KEEP})")
+    _log(f"log: {LOG_PATH}")
     _log(f"after:  {quota_state()}")
     return 0
 

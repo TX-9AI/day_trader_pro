@@ -1,6 +1,28 @@
 #!/usr/bin/env python3
 """
-tools/claude_boot.py  v1.0
+tools/claude_boot.py  v1.1
+v1.1  2026-09-20  r404 / OPS.31 — THE BOOT ALERT STAMPED UTC AND LABELLED IT
+      `ET`, AND THIS HEADER DESCRIBED THREE THINGS THE CODE DOES NOT DO.
+      🔴 THE CODE DEFECT, FOUND BY THE OPERATOR ON HIS PHONE: the first real
+      boot alert read `09/20 21:43 ET` when Eastern was 17:43. `announce()`
+      used `time.strftime(..., time.localtime())` and appended the letters
+      `ET`; `/etc/localtime` on this box is `Etc/UTC`, so the stamp was four
+      hours out while reading as a plausible fact about a different time. It
+      now comes from `ettime.now_et()`, the ONE ET definition this repo has
+      (dtp r287/TZ.1) — and when that import is unavailable the fallback says
+      **UTC**, because a time labelled with a zone it is not in is worse than
+      an honest one.
+      🔴 AND THREE DOCUMENTATION DEFECTS IN THIS BLOCK, WHICH IS THE ONE §32
+      REQUIRES BE READ BEFORE THE FILE IS EDITED: it said the raiser exports
+      `VERTIGO_UNATTENDED=1` BY DEFAULT (it does not — the default is
+      UNGUARDED); it advertised an `--attended` flag that **has never existed
+      in this file**; and it said this tool *"writes the stamped status file
+      and stops"* and that a failed raise is *"SILENT until somebody looks"*
+      while `announce()` forty lines down sends its own Telegram on every
+      path. ⚠️ [[OPS.26]] corrected the LEDGER for the guard claim at r403
+      and the FILE went on saying it, so the revision written to fix the
+      description left the description wrong. Pinned now by
+      `check_claude_boot` B14/B15/B15b/B16.
 v1.0  2026-09-20  r401 / OPS.26 — RAISE A CLAUDE SESSION IN tmux AT BOOT, SO A
       REBOOT DOES NOT COST THE OPERATOR HIS AGENT.
 
@@ -20,13 +42,24 @@ The fork's raiser writes a status file which their BOT reads and appends to its
 boot Telegram — the bot holds the token, so the raiser needs no credentials
 (our §18a reasoning: credentials reach a box through systemd's `Environment=`).
 **Control runs no `optionsbot`**, verified: no `optionsbot`, `candle-feed` or
-`shadow-observer` unit exists here. So there is no boot alert to append to, and
-this file does NOT invent a second credential store to make one. It writes the
-stamped status file and stops; the menu reads it.
-⚠️ CONSEQUENCE, STATED SO IT IS NOT DISCOVERED LATER: on control a failure to
-raise is SILENT until somebody looks. That is the honest trade against putting
-a Telegram token in one more unit, and it is why `--status-only` exists and why
-the status file carries a TIMESTAMP — a stale stamp is readable as stale.
+`shadow-observer` unit exists here. So there is no boot alert to APPEND to —
+and this file therefore sends **its own**, in the same channel and the same
+shape, through `notify.send` with the credentials the unit's `EnvironmentFile`
+already supplies. No second credential store is invented; the one this repo
+already uses is reused.
+🔴 v1.1 CORRECTION — THIS PARAGRAPH PREVIOUSLY SAID THE OPPOSITE, AND IT WAS
+WRONG IN THE DIRECTION THAT MATTERS. It read *"It writes the stamped status
+file and stops"* and *"on control a failure to raise is SILENT until somebody
+looks."* **Neither is true.** `announce()` sends on EVERY path, success and
+failure alike, which is exactly what `main()` does and what `check_claude_boot`
+B16 now pins. The operator's first real reboot refuted it from his phone within
+minutes of the claim landing in the ledger. ⚠️ A header describing behaviour
+the code does not have is §5's own failure, and §32 makes this the block an
+editor reads BEFORE touching the file — so it is the most expensive place in
+the file for a false sentence to sit.
+⚠️ THE STATUS FILE IS STILL WRITTEN ON EVERY PATH and still leads with the
+epoch, so a stale stamp is readable as stale; it is the record a human reads
+after the fact (§38.5) rather than the only signal there is.
 
 🔴 IT REFUSES TO RAISE A SECOND SESSION, AND THAT IS THE SAFETY PROPERTY.
 `--continue` does not fork a conversation: it APPENDS to a transcript (measured
@@ -37,7 +70,20 @@ this unit can also be started BY HAND while a session is alive, and then the
 same flag would have systemd writing into a conversation the operator is
 attached to. So: **if a Claude session already exists, this raises nothing.**
 
-⚠️ AND IT EXPORTS `VERTIGO_UNATTENDED=1` INTO THE SESSION BY DEFAULT.
+🔴 IT DOES **NOT** GUARD THE SESSION BY DEFAULT, AND THAT IS THE OPERATOR'S
+OWN RULING: *"I want it to be the exact session exactly where we left off and
+with the exact permissions. I literally want that agent resurrected on a
+reboot."* A resurrected agent that cannot land is not the same agent. So
+`launch_cmd(..., guarded=False)` is the default, `--guarded` is an OPT-IN, and
+the unit's `ExecStart` passes no flags at all.
+⚠️ v1.1 CORRECTION: THIS PARAGRAPH USED TO SAY THE EXPORT HAPPENED BY DEFAULT,
+AND NAMED AN `--attended` FLAG TO CLEAR IT. There has never been such a flag in
+this file. [[OPS.26]] corrected the ledger at r403 and did not correct this
+block, so the prose and the code disagreed for a second revision while
+`check_claude_boot` B3 and B4 had the truth green the whole time. **The gate
+was right and only the prose was read.** B15/B15b now refuse a Run block that
+names a flag the parser does not define, or omits one it does.
+🔴 WHAT THE UNGUARDED DEFAULT COSTS, NAMED RATHER THAN SOFTENED.
 r396/SAT.3 measured that `--allowedTools "Bash"` does NOT scope shell commands,
 so enforcement lives in the protected thing: `tools/land.sh` and
 `tools/deploy.sh` both refuse that variable with exit 9. A systemd-raised
@@ -51,13 +97,14 @@ ours is the box that deploys to fifteen live traders.
 ⚠️ WHAT I DO **NOT** KNOW, AND WILL NOT ASSERT: whether an IDLE interactive
 session acts on a cross-session peer message without a human giving it a turn.
 If it does, an unguarded boot session is a remote-triggerable lander. Unmeasured
-here, and the guard makes the question moot rather than answering it.
-`--attended` clears the guard for a session the operator is deliberately
-raising himself.
+here, and `--guarded` makes the question moot rather than answering it for
+any session the operator chooses to raise that way.
 
-Run:  python3 tools/claude_boot.py                 # raise if absent (boot path)
+Run:  python3 tools/claude_boot.py                 # kill, then raise (boot path)
       python3 tools/claude_boot.py --status-only   # report, change nothing
-      python3 tools/claude_boot.py --attended      # raise WITHOUT the guard
+      python3 tools/claude_boot.py --guarded       # raise WITH the lander guard
+      python3 tools/claude_boot.py --quiet         # raise, send no Telegram
+      python3 tools/claude_boot.py --isolated      # a fresh session, not --continue
 """
 from __future__ import annotations
 
@@ -69,6 +116,54 @@ import sys
 import time
 
 HOME = os.path.expanduser("~")
+
+# 🔴 THE ONE ET DEFINITION, IMPORTED — NOT A SECOND COMPUTATION OF IT.
+# `ettime` (dtp r287/TZ.1) owns this question for the whole control repo and
+# resolves `America/New_York`, the name that still exists after tzdata 2026c
+# moved the legacy `US/Eastern` link into an uninstalled package ([[OPS.22]]).
+# The path shim is the house idiom `tools/shadow_watch.py` and
+# `tools/brief_sigint.py` already use.
+# ⚠️ GUARDED, UNLIKE THEIRS, BECAUSE THIS ONE RUNS FROM systemd AT BOOT. A
+# bare top-level import that raised would fail the unit, and this file's whole
+# discipline is that nothing it does can stop the box coming up.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+try:
+    import ettime as _ettime                                    # noqa: E402
+except Exception:                                               # noqa: BLE001
+    _ettime = None
+
+
+def _et_now() -> str:
+    """`MM/DD HH:MM ET` for the alert — or an HONESTLY LABELLED UTC stamp.
+
+    🔴 THE DEFECT THIS REPLACES, AND THE OPERATOR FOUND IT ON HIS PHONE. v1.0
+    used `time.strftime("%m/%d %H:%M", time.localtime())` and appended the
+    letters `ET`. `/etc/localtime` on control is `Etc/UTC`, so the first real
+    boot alert read `09/20 21:43 ET` against an actual Eastern time of 17:43 —
+    **four hours out, and rendering as a plausible fact about a different
+    time** rather than as an error. `ettime`'s own header describes the same
+    class in the operator's words: a UTC box silently answering a question he
+    asked in ET.
+    🔑 THE FALLBACK SAYS `UTC`, AND THAT IS THE WHOLE POINT. If `ettime` cannot
+    be imported this returns a UTC stamp LABELLED UTC. A missing dependency
+    must degrade to a true statement, never to the same wrong one — the zone
+    label is a claim, and a claim you cannot support is not made (§0.1).
+    """
+    if _ettime is not None:
+        try:
+            return _ettime.now_et().strftime("%m/%d %H:%M") + " ET"
+        except Exception:                                       # noqa: BLE001
+            pass
+    return time.strftime("%m/%d %H:%M", time.gmtime()) + " UTC"
+
+
+# ⚠️ THE SESSION NAME IS LOCAL TIME (UTC HERE) AND IS DELIBERATELY LEFT THAT
+# WAY. It carries no zone LABEL, so it makes no claim that can be false — the
+# defect v1.1 fixes is a stamp that says `ET` and is not. And menu items 37,
+# 38 and 39 all name their sessions `claude-$(date +%H%M%S)` from the shell,
+# which is UTC on this box too: changing one side alone would make a boot
+# session and a menu session disagree, which is worse than both being plain.
+# Recorded in [[OPS.31]] as observed and not changed.
 SESSION = os.environ.get("CLAUDE_BOOT_SESSION",
                          "claude-" + time.strftime("%H%M%S"))
 STATUS = os.environ.get("CLAUDE_BOOT_STATUS",
@@ -291,7 +386,7 @@ def announce(state: str, how: str) -> bool:
         import notify
         ip, why = public_ip()
         ipf = "IP %s" % ip if ip else "IP unavailable (%s)" % why
-        when = time.strftime("%m/%d %H:%M", time.localtime())
+        when = _et_now()                       # v1.1 — ET, or honestly UTC
         # 🔑 THE HOUSE STYLE, NOT A NEW ONE. `wake_and_bake` posts to this same
         # bot as `🛠️ wake_and_bake [phase] done — ✅ clean — …`, so this reads
         # as a sibling of the alerts already in that channel rather than as a
@@ -303,7 +398,7 @@ def announce(state: str, how: str) -> bool:
         # reads as a sibling of `wake_and_bake`'s alerts in the same channel.
         mark = "\u2705" if state == "up" else "\u26A0\uFE0F"
         return bool(notify.send(
-            "\U0001F6E0\uFE0F %s [boot]: %s Claude %s (%s) — %s — %s ET"
+            "\U0001F6E0\uFE0F %s [boot]: %s Claude %s (%s) — %s — %s"
             % (BOX, mark, state, how, ipf, when)))
     except Exception:                                           # noqa: BLE001
         return False

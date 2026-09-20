@@ -1,6 +1,13 @@
 #!/usr/bin/env python3
 """
-tests/check_claude_boot.py  v1.0
+tests/check_claude_boot.py  v1.1
+v1.1  2026-09-20  r404 / OPS.31 — B14/B15/B15b/B16. THE ALERT'S TIMESTAMP IS
+      ET RATHER THAN UTC WEARING AN ET LABEL; THE MODULE DOCSTRING MAY NOT
+      NAME A FLAG THAT DOES NOT EXIST, NOR OMIT ONE THAT DOES; AND NO FAILURE
+      PATH MAY BE SILENT. The operator caught the timestamp on his phone —
+      `09/20 21:43 ET` against a real 17:43 — and the docstring half is the
+      SECOND time this file's prose has been wrong about its own guard while
+      the CODE was right (see [[OPS.26]]'s correction at r403).
 v1.0  2026-09-20  r401 / OPS.26 — the gate on the boot-time agent raiser.
 
 🔴 WHAT IT PROTECTS. `tools/claude_boot.py` runs from a systemd unit at boot,
@@ -20,6 +27,11 @@ no `optionsbot` and there is therefore no boot alert for a status to ride on.
   B5  a status line is written on EVERY path, including failures
   B6  the session finder walks the PROCESS TREE, driven against a real tmux
   B7  it never exits non-zero — a failed raise must not fail the unit
+  B14 🔴 the alert's stamp is ET, DRIVEN under TZ=Etc/UTC (v1.1)
+  B14b and with ettime gone it degrades to an HONEST `UTC`, never a wrong ET
+  B15 🔴 every flag the Run block advertises EXISTS in the parser (v1.1)
+  B15b and every flag that exists is advertised — the other direction
+  B16 no failure path is silent: status and alert are paired in main()
 
 ⚠️ B6 IS DRIVEN AGAINST A PRIVATE tmux SERVER, not asserted from source, which
 is the shape `check_resume_item` RA3 already uses for the same question.
@@ -246,6 +258,145 @@ def main() -> int:
        "every pre-existing tmux session is KILLED before the new one is "
        "raised (item 39's behaviour): before={} after={}".format(
            before if tmux else "?", after if tmux else "?"))
+
+    # ── B14 — 🔴 THE STAMP IS ET, NOT UTC WEARING AN ET LABEL.
+    # THE OPERATOR FOUND THIS ONE, on his phone, from the alert itself:
+    # `09/20 21:43 ET` when the real ET time was 17:43. `time.localtime()` on
+    # this box IS UTC — `/etc/localtime` is `Etc/UTC` — and the format string
+    # hardcoded the letters `ET`, so the alert was four hours out while
+    # reading as a plausible fact about a different time.
+    # 🔑 IT IS DRIVEN UNDER `TZ=Etc/UTC`, WHICH IS WHAT MAKES IT A REAL TEST.
+    # Forcing the child's zone to UTC guarantees local time and ET DISAGREE,
+    # so a stamp taken from the local clock cannot accidentally match. It also
+    # keeps the check meaningful if this box is ever moved to ET — the
+    # divergence is manufactured rather than relied upon.
+    # ⚠️ AND IT COMPARES AGAINST `ettime`, THE ONE ET DEFINITION THIS REPO HAS
+    # (dtp r287/TZ.1), never against a second computation of the same thing.
+    import json as _j2, re as _re2
+    probe2 = os.path.join(tempfile.mkdtemp(prefix="cb_tz_"), "out.json")
+    code2 = ("import sys,json,importlib.util;"
+             "spec=importlib.util.spec_from_file_location('cb',%r);"
+             "cb=importlib.util.module_from_spec(spec);spec.loader.exec_module(cb);"
+             "cb.announce('up','continue');"
+             "sys.path.insert(0,%r);import notify;"
+             "open(%r,'w').write(json.dumps(notify.captured()))"
+             % (BOOT, os.path.join(os.path.expanduser("~"), "day_trader_pro"),
+                probe2))
+    subprocess.run([sys.executable, "-c", code2], capture_output=True,
+                   text=True, timeout=60, env=child_env({"TZ": "Etc/UTC"}))
+    try:
+        caught2 = _j2.load(open(probe2))
+    except Exception:                                           # noqa: BLE001
+        caught2 = []
+    msg2 = caught2[0] if caught2 else ""
+    m14 = _re2.search(r"(\d{2}/\d{2}) (\d{2}):(\d{2})\s*([A-Za-z]+)\s*$", msg2.strip())
+    ok14, why14 = False, "no timestamp found in %r" % (msg2[-40:] if msg2 else None)
+    if m14:
+        label = m14.group(4)
+        sys.path.insert(0, os.path.join(os.path.expanduser("~"), "day_trader_pro"))
+        import ettime as _et
+        now_et = _et.now_et()
+        got_min = int(m14.group(2)) * 60 + int(m14.group(3))
+        want_min = now_et.hour * 60 + now_et.minute
+        # a two-minute window, because the alert was composed a moment ago and
+        # the hour can roll between the two reads
+        drift = min(abs(got_min - want_min), 1440 - abs(got_min - want_min))
+        ok14 = (label == "ET") and drift <= 2
+        why14 = ("stamp %s %s:%s %s against ettime %s — drift %d min"
+                 % (m14.group(1), m14.group(2), m14.group(3), label,
+                    now_et.strftime("%m/%d %H:%M"), drift))
+    ck("B14", ok14,
+       "the alert's timestamp must BE Eastern, not local time wearing an ET "
+       "label (driven under TZ=Etc/UTC): " + why14)
+
+    # ── B14b — THE FALLBACK DEGRADES TO A TRUE STATEMENT, NOT THE SAME LIE.
+    # 🔑 THIS IS THE HALF THAT GENERALISES PAST THIS FILE. The defect was never
+    # "the clock was wrong" — it was that a LABEL asserted a zone the value was
+    # not in. So when `ettime` cannot be imported the stamp must say `UTC` and
+    # not fall back to the old wrong `ET`, because a dependency going missing
+    # must not silently restore the defect it was brought in to fix.
+    # ⚠️ `getattr`-GUARDED, AND THE FIRST CUT WAS NOT — IT RAISED AT THE
+    # BORN-RED COMMIT (`_ettime` does not exist there) AND TOOK B15, B15b AND
+    # B16 DOWN WITH IT, so nothing after it reported at all. That is the same
+    # crash-versus-failure defect [[r400]] records in `check_map_accuracy`'s
+    # R1c and [[r401]] records in `check_scratch_purge`'s first cut — third
+    # instance, and it was caught by RUNNING the born-red pass rather than
+    # trusting it (§0.6). A gate that cannot report on the broken version is
+    # not a gate.
+    _fb = None
+    if hasattr(cb, "_et_now") and hasattr(cb, "_ettime"):
+        _saved = cb._ettime
+        try:
+            cb._ettime = None                  # simulate: ettime unavailable
+            _fb = cb._et_now()
+        except Exception as _e14:                               # noqa: BLE001
+            _fb = "raised: %r" % (_e14,)
+        finally:
+            cb._ettime = _saved
+    ck("B14b", bool(_fb) and _fb.endswith(" UTC") and " ET" not in _fb,
+       "with ettime unavailable the stamp must be LABELLED UTC rather than "
+       "silently reverting to a wrong ET: {!r}".format(_fb))
+
+    # ── B15 / B15b — 🔴 THE DOCSTRING MAY NOT ADVERTISE A FLAG THAT DOES NOT
+    # EXIST, NOR HIDE ONE THAT DOES.
+    # At r403 this file's header claimed the raiser exports
+    # `VERTIGO_UNATTENDED=1` BY DEFAULT and that `--attended` clears it. The
+    # default is UNGUARDED, the flag is `--guarded`, and **`--attended` does
+    # not exist anywhere in the file.** [[OPS.26]] corrected the LEDGER for
+    # that and the FILE went on saying it — so the one block §32 requires be
+    # read before editing was still wrong after the revision written to fix it.
+    # 🔑 ANCHORED ON DEFINITIONS, BOTH SIDES (§20). The real flags come from
+    # the `add_argument` CALLS by AST — a flag's definition — and the claimed
+    # flags from the `Run:` block only, where every line invokes THIS tool.
+    # Scoping to that block is what stops it firing on `--continue`,
+    # `--fork-session` or `--allowedTools`, which the prose legitimately names
+    # as CLAUDE's flags. A canary that fires on correct prose is one that gets
+    # loosened, and the loosened version is what misses the real thing.
+    import ast as _ast
+    _src = open(BOOT, encoding="utf-8").read()
+    _tree = _ast.parse(_src)
+    real_flags = sorted({a.value for n in _ast.walk(_tree)
+                         if isinstance(n, _ast.Call)
+                         and getattr(n.func, "attr", "") == "add_argument"
+                         for a in n.args
+                         if isinstance(a, _ast.Constant)
+                         and isinstance(a.value, str) and a.value.startswith("--")})
+    _doc = _ast.get_docstring(_tree) or ""
+    run_flags = sorted(set(_re2.findall(
+        r"claude_boot\.py\s+(--[A-Za-z0-9][A-Za-z0-9-]*)", _doc)))
+    phantom = [f for f in run_flags if f not in real_flags]
+    ck("B15", not phantom,
+       "the Run block advertises flag(s) the parser does not define: %s "
+       "(real: %s)" % (phantom, real_flags))
+    undocumented = [f for f in real_flags if f not in run_flags]
+    ck("B15b", not undocumented,
+       "flag(s) exist and the Run block never mentions them: %s — an opt-in "
+       "nobody can find is an opt-in nobody takes" % (undocumented,))
+
+    # ── B16 — NO FAILURE PATH IS SILENT. Control, GREEN AT HEAD BY DESIGN.
+    # ⚠️ STATED PLAINLY RATHER THAN COUNTED AS BORN RED: the CODE has always
+    # been right here. What was wrong is the header, which claimed this file
+    # *"writes the stamped status file and stops"* and that on control *"a
+    # failure to raise is SILENT until somebody looks"* — while `announce()`
+    # sends its own Telegram on every one of those paths. The operator's own
+    # screenshot refuted the claim within minutes of it landing.
+    # 🔑 SO THE GATE PINS THE PROPERTY, NOT THE PROSE: every path in `main()`
+    # that stamps a status also raises an alert. A future edit that drops the
+    # alert from a failure branch turns this red; a reworded paragraph does
+    # not, which is the distinction §20 and §24 both exist for.
+    w16 = a16 = 0
+    for _fn in _ast.walk(_tree):
+        if isinstance(_fn, _ast.FunctionDef) and _fn.name == "main":
+            for _n in _ast.walk(_fn):
+                if isinstance(_n, _ast.Call) and isinstance(_n.func, _ast.Name):
+                    if _n.func.id == "write_status":
+                        w16 += 1
+                    elif _n.func.id == "announce":
+                        a16 += 1
+    ck("B16", w16 == a16 and w16 >= 4,
+       "every main() path that writes a status must also announce — "
+       "write_status=%d announce=%d (a failure that stamps and says nothing "
+       "is the silence the header wrongly claimed)" % (w16, a16))
 
     print("")
     if FAILS:
