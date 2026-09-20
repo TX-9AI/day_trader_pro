@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/check_land_sh.py — v1.10
+# day_trader_pro/tests/check_land_sh.py — v1.11
+# v1.11 (2026-09-20) — dtp r402 / LAND.6. D6/D6b DRIVE the repo-copy fallback
+#   with an archive that carries no land.sh — the path deploy.sh has documented
+#   since r278 and which could never work, observed failing at otv4 r293_r2
+#   (2026-09-07) and again at r401 (2026-09-20). D6c/D6d pin the one case that
+#   must still REFUSE: a payload shipping tools/land.sh without carrying it at
+#   the archive root would be landed by the OLD lander, which is precisely what
+#   WA §15 exists to prevent.
 # v1.10 (2026-09-12) — dtp r374 / LAND.10. F4/F5 pin an assertion whose text
 #   begins with `-`. The content gate called `grep -qF "$p"` with no `--`, so
 #   such a string was parsed as a grep OPTION: a NEG then failed OPEN (grep
@@ -569,6 +576,62 @@ def main():
         # the same moment, from inside its own verification.
         check("D3b ...and its own staging directory is gone",
               not os.path.isdir(mine), mine)
+
+    # ══ D6 — THE REPO-COPY FALLBACK ACTUALLY LANDS (LAND.6) ══════════════
+    # 🔴 DRIVEN, NOT GREPPED. `deploy.sh` has documented a fallback to the
+    # checkout's own land.sh since r278, and it COULD NOT WORK: land.sh set
+    # STAGE from `dirname $BASH_SOURCE`, so under the fallback it resolved
+    # halves against `day_trader_pro/tools/` and died with "no such half in the
+    # archive". Observed at otv4 r293_r2 on 2026-09-07 and AGAIN at r401 on
+    # 2026-09-20 — twice, two weeks apart, because a documented path that
+    # nothing exercises is a path nobody knows is broken (§17's own argument).
+    # A grep for `LAND_STAGE` would have passed against the broken version;
+    # only landing an archive with no lander in it can tell.
+    with tempfile.TemporaryDirectory() as tmp:
+        home, repo, r2, arc, bare1, bare2 = _two_half_world(tmp)
+        st = os.path.join(tmp, "nolander"); os.makedirs(st)
+        _run(f'tar xf "{arc}" -C "{st}"')
+        os.remove(os.path.join(st, "land.sh"))          # the whole point
+        os.remove(arc)
+        _run(f'tar czf "{arc}" -C "{st}" .')
+        mine = os.path.join(tmp, "stage5")
+        r = _run(f'bash "{DEPLOY}"', env=_clean_env(HOME=home, LAND_STAGE=mine))
+        out = r.stdout + r.stderr
+        check("D6 an archive carrying NO land.sh still lands, via the checkout copy",
+              r.returncode == 0 and _head(repo).startswith("r999")
+              and _head(r2).startswith("r1000"),
+              f"rc={r.returncode} {_head(repo)!r} / {_head(r2)!r} :: "
+              + " | ".join(out.strip().splitlines()[-3:]))
+        check("D6b ...and it SAYS the lander came from the checkout, not the archive",
+              "this checkout" in out,
+              [l for l in out.splitlines() if "lander:" in l])
+
+    # ══ D6c — EXCEPT WHEN THE PAYLOAD IS THE LANDER ITSELF ═══════════════
+    # 🔑 WA §15: "a delivery that improves the lander must be landed BY the
+    # improved copy or the improvement is never exercised on the one delivery
+    # that could prove it." Making the fallback work would silently defeat that
+    # rule for exactly the delivery it matters for, so that one case REFUSES.
+    with tempfile.TemporaryDirectory() as tmp:
+        home, repo, r2, arc, bare1, bare2 = _two_half_world(tmp)
+        st = os.path.join(tmp, "shipslander"); os.makedirs(st)
+        _run(f'tar xf "{arc}" -C "{st}"')
+        os.remove(os.path.join(st, "land.sh"))
+        os.makedirs(os.path.join(st, "half", "tools"), exist_ok=True)
+        with open(os.path.join(st, "half", "tools", "land.sh"), "w") as f:
+            f.write("# a payload that ships the lander\n")
+        os.remove(arc)
+        _run(f'tar czf "{arc}" -C "{st}" .')
+        before1, before2 = _head(repo), _head(r2)
+        mine = os.path.join(tmp, "stage5c")
+        r = _run(f'bash "{DEPLOY}"', env=_clean_env(HOME=home, LAND_STAGE=mine))
+        out = r.stdout + r.stderr
+        check("D6c a payload that SHIPS tools/land.sh without carrying it at the "
+              "archive root is REFUSED",
+              r.returncode != 0 and "REFUSED" in out,
+              f"rc={r.returncode} :: " + " | ".join(out.strip().splitlines()[-3:]))
+        check("D6d ...and the refusal moved no commit in either repo",
+              _head(repo) == before1 and _head(r2) == before2,
+              f"{before1!r}->{_head(repo)!r} / {before2!r}->{_head(r2)!r}")
 
     # ══ D2c — AND BACKWARDS IS REFUSED, WHICH IS WHAT MAKES `ORDER` REAL ══
     # An ordering that is never tested against the wrong order is an ordering

@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
-# day_trader_pro/tools/land.sh — v1.16
+# day_trader_pro/tools/land.sh — v1.17
+# v1.17 (2026-09-20) — dtp r402 / LAND.6. `STAGE` honours `LAND_STAGE`, which
+#   `deploy.sh` now exports. Before this the documented repo-copy fallback
+#   resolved halves against `day_trader_pro/tools/` and could never land —
+#   observed at otv4 r293_r2 (2026-09-07) and again at r401 (2026-09-20). The
+#   default is unchanged, so a lander travelling in the tarball is unaffected.
 # v1.16 (2026-09-20) — dtp r396 / SAT.3. THE UNATTENDED GUARD. `--allowedTools "Bash,..."` grants the
 #   Bash TOOL and a tool-name grant DOES NOT SCOPE SHELL COMMANDS — measured
 #   2026-09-20, a session holding only `Bash` was asked to `touch
@@ -387,7 +392,18 @@ if [ -n "${VERTIGO_UNATTENDED:-}" ]; then
   exit 9
 fi
 
-STAGE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# 🔴 LAND.6 — `LAND_STAGE` WINS, AND THE DEFAULT IS UNCHANGED.
+# This line read only the second half. `deploy.sh` documents a fallback to the
+# CHECKOUT's copy of this script for an archive that carries none — but under
+# that fallback `dirname $BASH_SOURCE` is `day_trader_pro/tools`, so every half
+# resolved against the wrong directory and the land died with "no such half in
+# the archive". THE FALLBACK COULD NOT WORK, and it was not theoretical: otv4
+# r293_r2 failed exactly this way on 2026-09-07 and r401 repeated it on 09-20,
+# both times because the archive omitted the lander that WA §15 requires.
+# ⚠️ THE DEFAULT IS STILL THIS SCRIPT'S OWN DIRECTORY, so a lander that DID
+# travel in the tarball behaves exactly as before and §15's property — a
+# delivery improving the lander is exercised by the improved copy — is intact.
+STAGE="${LAND_STAGE:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 # v1.1 — NAMED, NOT GUESSED. deploy.sh exports the file it actually extracted.
 # Falling back to a glob is kept for a hand-run, but an ambiguous glob resolves
 # to NOTHING rather than to whichever name sorts first, because the only thing

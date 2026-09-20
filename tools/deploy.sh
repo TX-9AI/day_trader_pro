@@ -1,5 +1,12 @@
 #!/usr/bin/env bash
-# day_trader_pro/tools/deploy.sh — v1.1
+# day_trader_pro/tools/deploy.sh — v1.2
+# v1.2 (2026-09-20) — dtp r402 / LAND.6. EXPORTS `LAND_STAGE` so the repo-copy
+#   fallback can actually land — it never could, and that was observed twice
+#   (otv4 r293_r2 2026-09-07, r401 2026-09-20). ⚠️ AND THE FALLBACK IS NOW
+#   REFUSED when the payload itself ships `tools/land.sh`, because §15's whole
+#   reason for the lander travelling in the tarball is that a delivery
+#   improving it must be exercised BY the improved copy. Survivable everywhere
+#   else; never in the one case that would defeat the rule silently.
 # v1.1 (2026-09-20) — dtp r396 / SAT.3. THE UNATTENDED GUARD. `--allowedTools "Bash,..."` grants the
 #   Bash TOOL and a tool-name grant DOES NOT SCOPE SHELL COMMANDS — measured
 #   2026-09-20, a session holding only `Bash` was asked to `touch
@@ -86,6 +93,10 @@ HOME_DIR="${HOME:-/home/ubuntu}"
 # a self-replacing script, which r235 already had to solve once.
 # LAND_STAGE overrides it so a caller can point somewhere it controls.
 STAGE="${LAND_STAGE:-$(mktemp -d /tmp/land.XXXXXX)}"
+# 🔴 LAND.6 — EXPORTED, so the lander resolves halves against the directory we
+# actually extracted into rather than against its own location. Without this
+# the repo-copy fallback below is unreachable by construction.
+export LAND_STAGE="$STAGE"
 DRY=0
 [ "${1:-}" = "--dry" ] && DRY=1
 
@@ -172,8 +183,24 @@ done
 LANDER="$STAGE/land.sh"
 SRC="the archive"
 if [ ! -f "$LANDER" ]; then
+  # 🔴 REFUSED WHEN THE PAYLOAD ITSELF CHANGES THE LANDER (WA §15, LAND.6).
+  # §15's reason for the lander travelling in the tarball is that "a delivery
+  # that improves the lander must be landed BY the improved copy or the
+  # improvement is never exercised on the one delivery that could prove it."
+  # A missing lander is now survivable, so it must NOT be survivable in the one
+  # case where it would silently defeat that property.
+  for _h in "${ORDERED[@]}"; do
+    if [ -f "$STAGE/$_h/tools/land.sh" ]; then
+      echo
+      say "REFUSED: this archive SHIPS tools/land.sh but does not carry land.sh"
+      say "         at its root, so it would be landed by the OLD lander and the"
+      say "         change would never be exercised (WA §15)."
+      say "         Re-cut with the new land.sh at the archive root."
+      exit 1
+    fi
+  done
   LANDER="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/land.sh"
-  SRC="this checkout (the archive carries none)"
+  SRC="this checkout (the archive carries none — WA §15 wants it in the tarball)"
 fi
 say "lander: $SRC"
 
