@@ -1,5 +1,43 @@
 #!/usr/bin/env bash
-# day_trader_pro/tools/land.sh — v1.14
+# day_trader_pro/tools/land.sh — v1.15
+# v1.15 (2026-09-20) — dtp r392 / LAND.10. THE PARSER STRIPPED EXACTLY ONE
+#   SPACE WHILE THE FORMAT BLOCK IN THIS FILE DOCUMENTS COLUMN-ALIGNED
+#   EXAMPLES — so a spec written from the documentation yielded a path of
+#   "   path", and the two directives failed in OPPOSITE DIRECTIONS AGAIN:
+#     POS greps with `!`, so an unresolvable path FLAGS. Fails CLOSED, loudly.
+#     NEG greps WITHOUT `!` and swallows the error with 2>/dev/null, so
+#         file-not-found read as "the string is absent" and THE ASSERTION
+#         PASSED. Fails OPEN, silently, on every delivery.
+#   🔴 A NEG IS THE ONLY THING PROVING SUPERSEDED CODE IS GONE. A vacuous one
+#   certifies the removal WITHOUT LOOKING.
+#   ⚠️ THIS IS THE THIRD TIME THIS FILE HAS HAD THIS EXACT ASYMMETRY. v1.3
+#   fixed `grep -q` -> `grep -qF` after the gate failed open on one delivery
+#   and closed on another; v1.14 fixed the missing `--` with the SAME two
+#   outcomes; v1.15 is the same shape a third time, now in PATH RESOLUTION
+#   rather than in the pattern. Their shared sentence stands: *a gate that can
+#   fail in both directions is not a weak gate, it is unrelated to the thing
+#   it claims to check.*
+#   FIX — BOTH HALVES, because either alone leaves a hole: `_spec_rest` /
+#   `_spec_path` normalise EVERY directive and the REV/DESC/REPO header fields
+#   (`cut -d" " -f2-` had the same fault, and REV becomes the GENESIS row AND
+#   the commit subject); AND an unresolvable POS *or* NEG path is now a
+#   REFUSAL rather than a silent pass, because normalising alone would still
+#   let a TYPO'd path pass a NEG in silence.
+#   ⚠️ THE LITERAL IS NEVER TRIMMED, ONLY THE PATH. r390 deliberately asserted
+#   on an EIGHT-SPACE-INDENTED code line so a comment quoting the old code
+#   could not satisfy the NEG; a normaliser that trimmed the literal would
+#   have silently re-broken that gate. Pinned by L5/L5b.
+#   FOUND ON THE OTV4TEST FORK AND CONFIRMED HERE BY MEASUREMENT rather than
+#   assumed from shared lineage. ⚠️ ONE DIVERGENCE WORTH RECORDING: that fork
+#   carries land.sh in BOTH repos; this tree has a SINGLE copy, in dtp.
+#   GATE — tests/check_land_spec_parse.py L0-L5b, BORN RED 4 of 9 at the v1.14
+#   lander. It drives the REAL lander end to end with HOME REDIRECTED into a
+#   scratch tree under a marker that exists in no real checkout, and L0 ABORTS
+#   THE FILE if a run ever names a repo outside it — this is the script that
+#   commits and pushes, and a gate that can reach the live checkout is worse
+#   than no gate. ⚠️ L3 PASSES AGAINST THE OLD CODE, because a vacuous NEG
+#   looks exactly like a correct one; L3b is its control and is what actually
+#   discriminates.
 # v1.14 (2026-09-12) — dtp r374 / LAND.10. `grep -qF --`, AND THE MISSING `--`
 #   BROKE THE CONTENT GATE IN BOTH DIRECTIONS. Any POS or NEG whose text begins
 #   with `-` was parsed as a grep OPTION rather than a pattern:
@@ -280,6 +318,38 @@
 # ordinary characters in the text being asserted, so a regex engine here only
 # ever misreads them. Nothing was gained by it and two deliveries were graded
 # wrongly.
+# ── v1.15 — ONE NORMALISER FOR EVERY DIRECTIVE (r392 / LAND.10) ──────────
+# 🔴 THE PARSER STRIPPED EXACTLY ONE SPACE WHILE THE FORMAT BLOCK IN THIS FILE
+# DOCUMENTS COLUMN-ALIGNED EXAMPLES. A spec written from the documentation
+# ("NEG    path|literal") yielded a path of "   path", which resolves to
+# nothing — and the two directives then failed in OPPOSITE DIRECTIONS:
+#   · POS greps with `!`, so an unresolvable path FLAGS. Fails closed, loudly.
+#   · NEG greps WITHOUT `!` and swallows the error with 2>/dev/null, so
+#     file-not-found read as "the string is absent" and THE ASSERTION PASSED.
+# ⚠️ A NEG IS THE ONLY THING PROVING SUPERSEDED CODE IS GONE. A vacuous one
+# certifies that without looking. This is v1.3's own finding — "one failed
+# open and one failed closed ... a gate that can do either is unrelated to the
+# thing it claims to check" — recurring in the PARSER rather than in the
+# pattern it was written about.
+# 📊 MEASURED on this file before the fix: a NEG naming a non-existent path
+# passed, and so did the column-aligned form. Found on the OTV4TEST fork and
+# confirmed here rather than assumed (§40: on a shared lineage "ours differs"
+# is a claim requiring measurement).
+_spec_rest() {
+  # Strip the directive keyword and ANY following whitespace.
+  local r="${1#$2}"
+  printf '%s' "${r#"${r%%[![:space:]]*}"}"
+}
+_spec_path() {
+  # Trim whitespace around a PATH field only.
+  local v="${1#"${1%%[![:space:]]*}"}"
+  printf '%s' "${v%"${v##*[![:space:]]}"}"
+}
+# ⚠️ AND THE LITERAL IS NEVER TRIMMED. r390 deliberately asserted on an
+# EIGHT-SPACE-INDENTED code line ("        rec_stop = 0.25") precisely so the
+# assertion could not be satisfied by a comment quoting the old code. Trimming
+# the literal would have silently re-broken that gate.
+
 set -u
 
 STAGE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -406,9 +476,11 @@ land_one() {
   [ -f "$spec" ]  || { die "$half carries NO land.spec — refusing. A delivery with no content gate is the one you most want stopped."; return 1; }
 
   local rev desc markers repo=""
-  rev="$(grep    '^REV '   "$spec" | head -1 | cut -d' ' -f2-)"
-  desc="$(grep   '^DESC '  "$spec" | head -1 | cut -d' ' -f2-)"
-  markers="$(grep '^REPO ' "$spec" | head -1 | cut -d' ' -f2-)"
+  # ⚠️ `cut -d' ' -f2-` HAS THE SAME FAULT: on "REV    r392" it returns
+  # "   r392", and that value becomes the GENESIS row AND the commit subject.
+  rev="$(_spec_rest "$(grep '^REV' "$spec" | head -1)" "REV")"
+  desc="$(_spec_rest "$(grep '^DESC' "$spec" | head -1)" "DESC")"
+  markers="$(_spec_rest "$(grep '^REPO' "$spec" | head -1)" "REPO")"
   [ -n "$rev" ]     || { die "spec carries no REV"; return 1; }
   [ -n "$desc" ]    || { die "spec carries no DESC"; return 1; }
   [ -n "$markers" ] || { die "spec carries no REPO markers"; return 1; }
@@ -485,19 +557,30 @@ land_one() {
   # ── THE CONTENT GATE: this delivery's own assertions (§15) ──────────────
   # Keyed on CONTENT, not version strings: a header bump with no real edit
   # must fail. On any flag: fail loudly, stage nothing, keep the archive.
-  local g=0 f p
+  local g=0 f p r
   while IFS= read -r line; do
-    f="${line#POS }"; p="${f#*|}"; f="${f%%|*}"
-    if ! grep -qF -- "$p" "$repo/$f" 2>/dev/null; then
+    r="$(_spec_rest "$line" "POS")"; p="${r#*|}"; f="$(_spec_path "${r%%|*}")"
+    if [ ! -f "$repo/$f" ]; then
+      echo "  UNRESOLVABLE POS path: '$f'"; g=1
+    elif ! grep -qF -- "$p" "$repo/$f" 2>/dev/null; then
       echo "  MISSING in $f: $p"; g=1
     fi
-  done < <(grep '^POS ' "$spec")
+  done < <(grep '^POS' "$spec")
   while IFS= read -r line; do
-    f="${line#NEG }"; p="${f#*|}"; f="${f%%|*}"
-    if grep -qF -- "$p" "$repo/$f" 2>/dev/null; then
+    r="$(_spec_rest "$line" "NEG")"; p="${r#*|}"; f="$(_spec_path "${r%%|*}")"
+    # 🔴 THE REFUSAL IS THE FIX. Normalising alone would still let a TYPO'd
+    # path pass a NEG in silence, because a path that does not exist and a
+    # string that is absent produce the identical grep result. An
+    # unresolvable path is now a REFUSAL for both directives, so a NEG can
+    # never again certify a removal it did not look for.
+    if [ ! -f "$repo/$f" ]; then
+      echo "  UNRESOLVABLE NEG path: '$f' — a NEG that cannot find its file"
+      echo "     proves NOTHING about whether the superseded code is gone."
+      g=1
+    elif grep -qF -- "$p" "$repo/$f" 2>/dev/null; then
       echo "  STILL PRESENT in $f: $p"; g=1
     fi
-  done < <(grep '^NEG ' "$spec")
+  done < <(grep '^NEG' "$spec")
   if [ "$g" != "0" ]; then
     die "CONTENT GATE FAILED"; return 1
   fi
@@ -509,7 +592,7 @@ land_one() {
   # so `|| echo 0` appended a SECOND zero and the arithmetic died — taking the
   # docs-only path with it. The same grep-counts-are-not-exit-codes trap the
   # fleet commands have, in a new costume.
-  _nc=$(grep -c '^CHECK ' "$spec" 2>/dev/null || true); _nc=${_nc:-0}
+  _nc=$(grep -c '^CHECK' "$spec" 2>/dev/null || true); _nc=${_nc:-0}
   pb_init $(( _nc + 4 ))
 
   # ── THE CHECKS: EXECUTED, NOT GREPPED (v1.1) ────────────────────────────
@@ -519,7 +602,7 @@ land_one() {
   # is how every checker in these trees expects to be invoked.
   local nchk=0 chk
   while IFS= read -r line; do
-    chk="${line#CHECK }"
+    chk="$(_spec_rest "$line" "CHECK")"
     nchk=$((nchk+1))
     # 🔴 A CHECK MUST NOT INHERIT THIS DELIVERY'S OWN CONTROL VARIABLES, and
     # this was found by the CHECK stage biting its own delivery: r279's
@@ -540,7 +623,7 @@ land_one() {
       echo "     re-run it yourself:  cd $repo && python3 $chk"
       die "A DECLARED CHECK DID NOT PASS"; return 1
     fi
-  done < <(grep '^CHECK ' "$spec")
+  done < <(grep '^CHECK' "$spec")
 
   # ⚠️ A CODE HALF WITH NO CHECK IS REFUSED. Detected from the payload rather
   # than trusted to the author: if this half ships a .py outside docs/ and
@@ -570,7 +653,7 @@ land_one() {
   # would record a deletion that never happened.
   local deleted=0
   while IFS= read -r line; do
-    local target="${line#DEL }"
+    local target="$(_spec_path "$(_spec_rest "$line" "DEL")")"
     [ -z "$target" ] && continue
     if [ ! -e "$repo/$target" ]; then
       die "DEL $target — not present in $repo. The spec describes a repo this is not."
