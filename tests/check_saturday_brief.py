@@ -1,6 +1,15 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_saturday_brief.py  v1.0
+day_trader_pro/tests/check_saturday_brief.py  v1.1
+v1.1  2026-09-20  dtp r396 / SAT.3 — S2b REPLACED. It asserted
+      '"deploy.sh" not in TOOLS', i.e. that a string was absent from a list
+      that DOES NOT SCOPE SHELL COMMANDS — a check providing no protection
+      while reading as if it did. S2b/S2c/S2d/S2e now drive the real
+      refusal: the wrapper exports the marker, deploy.sh AND land.sh both
+      exit 9 on it, and an ATTENDED run is NOT refused so the guard cannot
+      have simply disabled landing. Every wrapper invocation also writes to
+      a TEMP out-path, because running against the live brief made three
+      checks fail once a genuine brief existed — a red for the wrong reason.
 v1.0  2026-09-20  dtp r394 / SAT.2 — THE UNATTENDED SESSION MUST NOT BE ABLE
       TO LAND, AND THE TIMER MUST NOT BE SILENTLY DEAD.
 
@@ -25,6 +34,13 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 SH = os.path.join(ROOT, "tools", "saturday_brief.sh")
 PROMPT = os.path.join(ROOT, "tools", "saturday_brief.prompt")
+
+# ⚠️ EVERY WRAPPER INVOCATION BELOW WRITES TO A TEMP PATH. Running against the
+# live brief path meant that once a real brief existed the wrapper stood down
+# — correctly — and three checks failed for a reason unrelated to what they
+# assert. A red for the wrong reason is worse than no red.
+import tempfile
+_TMPOUT = os.path.join(tempfile.gettempdir(), "check_saturday_brief_out.md")
 
 FAILS, RAN = [], []
 
@@ -78,10 +94,35 @@ tools = (m.group(1) if m else "")
 ck("S2", m is not None and tools,
    f"the wrapper declares an explicit tool grant: {tools or '(none)'}")
 
-banned = ("deploy.sh", "land.sh", "wake_and_bake", "ec2ops", "fleet.py")
-hit = [b for b in banned if b in tools]
-ck("S2b", not hit,
-   f"the tool grant names NO lander or fleet mutator: {hit or 'clean'}")
+# 🔴 S2b REPLACED — THE OLD CHECK PROVIDED NO PROTECTION AND READ AS IF IT
+# DID. It asserted `"deploy.sh" not in TOOLS`, i.e. that a string was absent
+# from a list that DOES NOT SCOPE SHELL COMMANDS. Measured 2026-09-20: a
+# session granted only `Bash` was asked to touch a file and the file
+# appeared. Omitting the lander from --allowedTools never made it
+# unreachable, because it is reached THROUGH Bash.
+# ✅ The real enforcement is a refusal inside the thing being protected.
+ck("S2b", "VERTIGO_UNATTENDED=1" in src and "export VERTIGO_UNATTENDED" in src,
+   "the wrapper EXPORTS VERTIGO_UNATTENDED for every path through it")
+
+_lander = os.path.join(ROOT, "tools", "deploy.sh")
+r = subprocess.run(["bash", _lander, "--dry"], capture_output=True, text=True,
+                   timeout=120, env=dict(os.environ, VERTIGO_UNATTENDED="1"))
+ck("S2c", r.returncode == 9 and "REFUSED" in r.stdout,
+   f"deploy.sh REFUSES an unattended caller (rc={r.returncode}, expect 9)")
+
+r = subprocess.run(["bash", os.path.join(ROOT, "tools", "land.sh"), "otv4"],
+                   capture_output=True, text=True, timeout=120,
+                   env=dict(os.environ, VERTIGO_UNATTENDED="1"))
+ck("S2d", r.returncode == 9 and "REFUSED" in r.stdout,
+   f"land.sh REFUSES it too — guarding only the wrapper would leave the "
+   f"lander reachable directly (rc={r.returncode})")
+
+r = subprocess.run(["bash", _lander, "--dry"], capture_output=True, text=True,
+                   timeout=120, env={k: v for k, v in os.environ.items()
+                                     if k != "VERTIGO_UNATTENDED"})
+ck("S2e", r.returncode != 9,
+   f"an ATTENDED run is NOT refused — the guard did not simply disable the "
+   f"lander (rc={r.returncode})")
 
 # ------------------------------------------------------------------------ S3
 # 🔑 THE PROMPT MUST SAY IT TOO. The tool list is the enforcement; the prompt
@@ -127,7 +168,8 @@ try:
     # gate that dies tells the reader less than one that fails.
     r = subprocess.run(["bash", SH], capture_output=True, text=True,
                        timeout=120,
-                       env=dict(os.environ, SATURDAY_BRIEF_CLAUDE="/bin/false"))
+                       env=dict(os.environ, SATURDAY_BRIEF_CLAUDE="/bin/false",
+                                SATURDAY_BRIEF_OUT=_TMPOUT))
     ck("S5", r.returncode != 0 and "REFUSED" in (r.stdout + r.stderr),
        f"a MISSING prompt REFUSES (rc={r.returncode}) rather than invoking "
        f"claude with an empty brief")
@@ -190,12 +232,14 @@ _pre = os.path.exists(MARK)
 try:
     subprocess.run(["touch", "-d", "5 hours ago", MARK], check=True)
     r = subprocess.run(["bash", SH], capture_output=True, text=True, timeout=120,
-                       env=dict(os.environ, SATURDAY_BRIEF_CLAUDE="/bin/false"))
+                       env=dict(os.environ, SATURDAY_BRIEF_CLAUDE="/bin/false",
+                                SATURDAY_BRIEF_OUT=_TMPOUT))
     ck("S7", "ABANDONED" in r.stdout,
        "a 5-hour-old in-flight marker is treated as ABANDONED, not obeyed")
     subprocess.run(["touch", MARK], check=True)
     r = subprocess.run(["bash", SH], capture_output=True, text=True, timeout=120,
-                       env=dict(os.environ, SATURDAY_BRIEF_CLAUDE="/bin/false"))
+                       env=dict(os.environ, SATURDAY_BRIEF_CLAUDE="/bin/false",
+                                SATURDAY_BRIEF_OUT=_TMPOUT))
     ck("S7b", "IN FLIGHT" in r.stdout,
        "a FRESH marker IS obeyed — the expiry did not simply disable the guard")
 finally:

@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
-# day_trader_pro/tools/saturday_brief.sh — v1.0
+# day_trader_pro/tools/saturday_brief.sh — v1.1
+# v1.1 (2026-09-20) — dtp r396 / SAT.3. THE SAFETY CLAIM IN v1.0 WAS FALSE
+#   and is corrected in the body; this file now EXPORTS VERTIGO_UNATTENDED=1
+#   on every path and the lander refuses it. SATURDAY_BRIEF_OUT is
+#   overridable so the gate need not run against the live brief path.
+
 # v1.0 (2026-09-20) — dtp r394 / SAT.2. THE SATURDAY BRIEF, ON A TIMER.
 #
 #   Operator, 2026-09-20: "Everything that you've done for me today has not
@@ -37,11 +42,27 @@
 #     4 CANARY     WED 07:17 UTC (--canary). Proves the chain midweek, so a
 #                  break is found then rather than at 08:00 Saturday.
 #
-# ⚠️ IT LANDS NOTHING, AND THAT IS ENFORCED RATHER THAN REQUESTED.
-#   `--allowedTools` omits the lander and every fleet mutator. An unsupervised
-#   session on a box holding a live funded broker token, a GitHub token with
-#   write on both repos and the Telegram token gets READ and MEASURE only; the
-#   operator approves every land (§38.9, and his own standing rule).
+# 🔴 v1.1 — THE ORIGINAL SAFETY CLAIM HERE WAS FALSE AND IS CORRECTED.
+#   v1.0 said: "IT LANDS NOTHING, AND THAT IS ENFORCED RATHER THAN REQUESTED.
+#   `--allowedTools` omits the lander and every fleet mutator."
+#   ⚠️ OMITTING THE LANDER FROM A TOOL LIST DOES NOTHING. `--allowedTools`
+#   grants the Bash TOOL, and a tool-name grant DOES NOT SCOPE SHELL COMMANDS
+#   — the lander is reached THROUGH Bash. MEASURED 2026-09-20: a session
+#   granted only `Bash` was asked to `touch /tmp/allowtest_marker` and the
+#   file appeared. Worse, this file's own gate asserted `"deploy.sh" not in
+#   TOOLS`, which verified a string was absent from a list that never scoped
+#   anything — a check that provided no protection while reading as if it did.
+#   🔑 FOUND BY A BRIEF THIS WRAPPER ITSELF PRODUCED. An unattended session
+#   spawned during testing wrote 874 lines and led with this defect.
+#   🔑 SCOPING IS NOT THE FIX EITHER. `Bash(git log:*)` genuinely blocks an
+#   unlisted command — verified — but matching is prefix-based on the command
+#   string, so the brief would stall at 03:17 on the first shape nobody
+#   anticipated, with nobody awake to approve it.
+#   ✅ SO THE ENFORCEMENT MOVED INTO THE THING BEING PROTECTED: this wrapper
+#   exports VERTIGO_UNATTENDED=1 and tools/land.sh and tools/deploy.sh BOTH
+#   REFUSE it, exit 9. That holds however the session behaves, it is
+#   mutation-testable, and it does not rest on CLI semantics misread once.
+#   The operator approves every land (§38.9, and his own standing rule).
 #
 # ⚠️ IT SENDS NOTHING. No Telegram (§17 — the alert path is for emergencies
 #   and a weekly report is not one), no push, no commit. One file, then stop.
@@ -50,9 +71,17 @@
 set -uo pipefail
 
 export PATH="/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin"
+# 🔴 THE ENFORCEMENT. Exported for EVERY path through this file — brief,
+# smoke, canary and watchdog alike — because a session that can land is a
+# session that can land whichever flag started it.
+export VERTIGO_UNATTENDED=1
 OTV4="/home/ubuntu/options-trader-v4"
 STAMP="$(date +%Y-%m-%d)"
-OUT="$OTV4/handoffs/saturday_${STAMP}.md"
+# ⚠️ OVERRIDABLE SO THE GATE NEED NOT DEPEND ON TODAY'S REAL BRIEF. Its
+# first cut ran against the live path, so once a genuine brief existed the
+# wrapper correctly stood down and three checks failed for a reason that had
+# nothing to do with what they assert.
+OUT="${SATURDAY_BRIEF_OUT:-$OTV4/handoffs/saturday_${STAMP}.md}"
 LOG="/home/ubuntu/saturday_brief.log"
 # 🔑 A ONE-LINE-PER-RUN LEDGER, SEPARATE FROM THE CHATTY LOG. The failure this
 # arrangement most needs to survive is SILENCE — a timer that stops firing is

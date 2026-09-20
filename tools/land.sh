@@ -1,5 +1,17 @@
 #!/usr/bin/env bash
-# day_trader_pro/tools/land.sh — v1.15
+# day_trader_pro/tools/land.sh — v1.16
+# v1.16 (2026-09-20) — dtp r396 / SAT.3. THE UNATTENDED GUARD. `--allowedTools "Bash,..."` grants the
+#   Bash TOOL and a tool-name grant DOES NOT SCOPE SHELL COMMANDS — measured
+#   2026-09-20, a session holding only `Bash` was asked to `touch
+#   /tmp/allowtest_marker` and the file appeared. So saturday_brief.sh's claim
+#   that omitting the lander from --allowedTools made it unreachable WAS
+#   FALSE: the lander is reached THROUGH Bash. Scoping (`Bash(git log:*)`)
+#   does block — verified — but matches on a command-string prefix, so an
+#   unattended brief would stall at 03:17 on the first shape nobody
+#   anticipated. So the refusal lives in the thing being protected: an
+#   exported VERTIGO_UNATTENDED=1 makes this script exit 9.
+#   🔑 FOUND BY A BRIEF THIS TIMER ITSELF PRODUCED, which led with the defect.
+
 # v1.15 (2026-09-20) — dtp r392 / LAND.10. THE PARSER STRIPPED EXACTLY ONE
 #   SPACE WHILE THE FORMAT BLOCK IN THIS FILE DOCUMENTS COLUMN-ALIGNED
 #   EXAMPLES — so a spec written from the documentation yielded a path of
@@ -351,6 +363,29 @@ _spec_path() {
 # the literal would have silently re-broken that gate.
 
 set -u
+
+# ── 🔴 UNATTENDED SESSIONS MAY NOT LAND (r396 / SAT.3) ────────────────────
+# MEASURED 2026-09-20: `claude -p --allowedTools "Bash,..."` grants the Bash
+# TOOL, and a tool-name grant DOES NOT SCOPE SHELL COMMANDS. A probe asked a
+# session holding only `Bash` to `touch /tmp/allowtest_marker` and the file
+# appeared. So `tools/saturday_brief.sh`s claim that omitting the lander from
+# --allowedTools made it "unreachable" WAS FALSE: the lander is reached
+# THROUGH Bash, and its own gate asserted `"deploy.sh" not in TOOLS`, which
+# verified a string was absent from a list that never scoped anything.
+# 🔑 SCOPING IS NOT THE ANSWER EITHER. `Bash(git log:*)` does block the
+# unlisted command — verified — but matching is prefix-based on the command
+# string, so the brief would stall at 03:17 on the first shape nobody
+# anticipated, with no one awake to approve it.
+# 🔑 SO THE ENFORCEMENT LIVES IN THE THING BEING PROTECTED. The unattended
+# wrapper exports VERTIGO_UNATTENDED=1 and the lander REFUSES it. That holds
+# however clever the caller is, it is testable, and it does not depend on
+# CLI tool-scoping semantics that were misread once already.
+# ⚠️ IT IS A REFUSAL, NOT A PROMPT. An unattended session cannot approve.
+if [ -n "${VERTIGO_UNATTENDED:-}" ]; then
+  echo "  🔴 REFUSED: VERTIGO_UNATTENDED is set — an unattended session may"
+  echo "     not land. The operator approves every land (WA §38.9)."
+  exit 9
+fi
 
 STAGE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # v1.1 — NAMED, NOT GUESSED. deploy.sh exports the file it actually extracted.
