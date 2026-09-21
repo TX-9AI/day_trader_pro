@@ -1,4 +1,10 @@
-# day_trader_pro/config.py — v0.1.5
+# day_trader_pro/config.py — v0.1.6
+# v0.1.6 (2026-09-21) — r406 / OPS.32. ADD SSH_COMMAND_TIMEOUT. How long a
+#   remote command may RUN is a different question from how long to wait for a
+#   TCP handshake, and until now one constant answered both: ssh_util derived
+#   its subprocess budget from SSH_CONNECT_TIMEOUT, so every fleet command that
+#   passed no timeout of its own was bounded at 22 seconds. See ssh_util
+#   v0.6.0 for the measurement.
 """
 Central configuration for the day_trader_pro control server (orchestrator).
 
@@ -163,6 +169,24 @@ SSH_KEY_PATH = os.environ.get("DTP_SSH_KEY", os.path.expanduser("~/.ssh/tx-9.pem
 SSH_USER = os.environ.get("DTP_SSH_USER", "ubuntu")
 SSH_USE_PUBLIC_IP = _flag("DTP_SSH_USE_PUBLIC", "0")
 SSH_CONNECT_TIMEOUT = int(os.environ.get("DTP_SSH_TIMEOUT", "12"))
+# 🔴 HOW LONG A REMOTE COMMAND MAY RUN — A DIFFERENT QUESTION FROM HOW LONG WE
+# WAIT FOR A TCP HANDSHAKE, AND UNTIL r406 THEY WERE THE SAME NUMBER.
+# `ssh_util.ssh_run` derived its subprocess budget from SSH_CONNECT_TIMEOUT
+# (+10), so every fleet command that did not pass its own timeout was bounded
+# at 22 seconds — a CONNECT timeout answering a RUNTIME question ([[S3.19]],
+# [[OPS.32]]). Measured on control against loopback: `sleep 5` returned in
+# 5.2s with rc=0, `sleep 30` was killed at 22.0s with `rc=255 ssh timeout`
+# while the remote `sleep` kept running.
+# 🔑 45 IS NOT A NUMBER I INVENTED. It is the smallest budget a human had
+# already chosen for a real remote command in this tree — `rotate_tokens.py`
+# has passed `timeout=45` since it was written — and it covers the 38-second
+# manifold board that exposed this (C.44: a constant read by fallback is a
+# constant nobody chose).
+# ⚠️ AN UNREACHABLE BOX IS NOT SLOWED BY THIS, MEASURED RATHER THAN ASSUMED:
+# `-o ConnectTimeout` bounds that case inside ssh itself, and a black-hole IP
+# was refused in 12.0s with ssh's own "Connection timed out" both before and
+# after. This budget only binds once a box has ACCEPTED the connection.
+SSH_COMMAND_TIMEOUT = int(os.environ.get("DTP_SSH_CMD_TIMEOUT", "45"))
 # Path to the P&L file on each BOT box, relative to that box's home dir.
 EOD_REMOTE_PNL_PATH = os.environ.get("DTP_EOD_REMOTE_PATH", "eod/pnl_today.json")
 

@@ -1,4 +1,12 @@
-# day_trader_pro/wake_and_bake.py — v1.6
+# day_trader_pro/wake_and_bake.py — v1.7
+# v1.7 (2026-09-21) — r406 / DEV.14. DISPLAY ONLY — NO BEHAVIOUR CHANGE.
+#   The argparse help for `--bake-only` said "PING + git sync + restart". IT
+#   DOES NOT RESTART, and that is why the mode is exempt from the RTH guard.
+#   Three readers answer this question: the DOCSTRING (:76, corrected by r301
+#   when it wrongly said this mode STOPS the fleet), the MENU LABEL ("Bake only
+#   (sync, no restart - RTH-safe)"), and this string — which is what an
+#   operator reads at the moment of choosing a mode, and the one r301 did not
+#   sweep. C.30: when a rule changes, sweep its readers.
 # v1.6 (2026-09-06) — dtp r302. DISPLAY ONLY — NO BEHAVIOUR CHANGE. Operator on
 #   the wake item: "all I want is an IAM-based wake and then an SSH ping
 #   confirming they're all up" — which is exactly what it does; the prose was
@@ -688,7 +696,17 @@ def main(argv):
     modes.add_argument("--wake-only", action="store_true",
                        help="WAKE + PING only; leave fleet running")
     modes.add_argument("--bake-only", action="store_true",
-                       help="fleet already awake: PING + git sync + restart; no wake/stop")
+                       # 🔴 r406 — THIS SAID "restart" AND IT DOES NOT.
+                       # dtp r301/[[DEV.1]] corrected the DOCSTRING when it
+                       # wrongly claimed --bake-only stops the fleet, and did
+                       # not sweep this string. Three readers answer "does
+                       # bake-only restart": the docstring (:76, right since
+                       # r301), the menu label "Bake only (sync, no restart -
+                       # RTH-safe)" (right), and THIS ONE — which is what an
+                       # operator reads at the moment of choosing a mode.
+                       # C.30: when a rule changes, sweep its readers.
+                       help="fleet already awake: PING + git sync + VERIFY; "
+                            "syncs files and does NOT restart (RTH-safe)")
     modes.add_argument("--shutdown-only", action="store_true",
                        help="pycache clear, then a clean fleet stop (NO EOD/P&L harvest)")
     args = p.parse_args(argv[1:])

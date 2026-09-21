@@ -1,4 +1,14 @@
-# day_trader_pro/fleet.py — v0.7.0
+# day_trader_pro/fleet.py — v0.8.0
+# v0.8.0 (2026-09-21) — r406 / OPS.32. `run --timeout N` — A PER-BOX COMMAND
+#   BUDGET, AND THE BANNER NOW STATES IT.
+#   `_exec` passed no timeout, so every menu fan-out inherited ssh_util's
+#   default — which was itself derived from the CONNECT timeout, bounding every
+#   command at 22s. The manifold board took 38s and reported `rc=255 ssh
+#   timeout`, which reads as a dead box rather than as a budget.
+#   ⚠️ `cmd_run` IS STILL SERIAL, so the worst case is N x the budget.
+#   `ssh_util.ssh_map` exists and this caller was deliberately NOT moved onto
+#   it — FAN.1's own precedent, one change at a time on the path that drives
+#   the fleet.
 # v0.7.0 (2026-08-18) — REPOINT WILL NOT SILENTLY UN-FORK THE FLEET.
 #   The fleet now holds two repos: the QQQ box runs options_trader_smc, the
 #   other 28 run options_trader_v3. `repoint <url>` with no --only rewrites
@@ -152,12 +162,12 @@ def cmd_list(only=None):
     print(f"\n{running}/{len(fleet)} running")
 
 
-def _exec(symbol, ip, command):
+def _exec(symbol, ip, command, timeout=None):
     if config.MOCK_AWS:
         return 0, f"[mock output for {symbol}: {command}]", ""
     if not ip:
         return 255, "", "no private IP"
-    return ssh_util.ssh_run(ip, command)
+    return ssh_util.ssh_run(ip, command, timeout=timeout)
 
 
 def cmd_ping(only=None, include_all=False):
@@ -179,13 +189,25 @@ def cmd_ping(only=None, include_all=False):
     return 0 if ok == len(running) else 1
 
 
-def cmd_run(command, only=None, include_all=False):
+def cmd_run(command, only=None, include_all=False, timeout=None):
+    """🔑 `timeout` IS THE PER-BOX COMMAND BUDGET (r406).
+
+    A fan-out that needs longer than `config.SSH_COMMAND_TIMEOUT` asks for it
+    here rather than moving the global — the manifold board took 38s against a
+    22s bound and reported `rc=255 ssh timeout`, which reads as a dead box.
+    ⚠️ THIS LOOP IS STILL SERIAL, so the worst case is N x the budget. That is
+    [[FAN.1]]'s territory: `ssh_util.ssh_map` exists and this caller has not
+    been moved onto it, deliberately — one change at a time on the path that
+    drives the fleet.
+    """
     fleet = get_fleet(only)
     running, skipped = _targets(fleet, include_all)
-    print(f"Running on {len(running)} box(es): `{command}`\n")
+    budget = timeout or config.SSH_COMMAND_TIMEOUT
+    print(f"Running on {len(running)} box(es): `{command}`"
+          f"   [per-box budget {budget}s]\n")
     fails = 0
     for s, ip, _ in running:
-        rc, out, err = _exec(s, ip, command)
+        rc, out, err = _exec(s, ip, command, timeout=timeout)
         head = f"── {s} ({ip}) "
         print(head + "─" * max(0, 50 - len(head)))
         if rc == 0:
@@ -620,6 +642,10 @@ def main(argv):
                    help="comma-separated symbols to target (e.g. SPX,QQQ)")
     p.add_argument("--all", action="store_true",
                    help="include stopped boxes (shown as skipped)")
+    p.add_argument("--timeout", type=int, default=None,
+                   help="per-box COMMAND budget in seconds for 'run' "
+                        "(default config.SSH_COMMAND_TIMEOUT); the connect "
+                        "timeout is separate and unaffected")
     p.add_argument("--day", default=None,
                    help="date YYYY-MM-DD: ohlc = which day's candles to fetch; "
                         "db = target harvest folder (defaults to today)")
@@ -650,7 +676,7 @@ def main(argv):
         if not args.command:
             print("run needs a command, e.g.:  python fleet.py run \"uptime\"")
             return 2
-        return cmd_run(args.command, only, args.all)
+        return cmd_run(args.command, only, args.all, timeout=args.timeout)
     if args.action == "update":
         return cmd_update(only, restart=not args.no_restart, wake=args.wake)
     if args.action == "repoint":

@@ -1,4 +1,4 @@
-# day_trader_pro/ssh_util.py — v0.5.0
+# day_trader_pro/ssh_util.py — v0.6.0
 """
 Shared SSH helper. One place for the exact ssh invocation so eod_report and
 fleet behave identically (same key, user, timeouts, host-key policy).
@@ -7,6 +7,41 @@ Keyed, non-interactive (BatchMode), auto-trusts new hosts on first contact.
 Returns (returncode, stdout, stderr); never raises.
 
 Changelog:
+  v0.6.0 (2026-09-20) — r406 / [[OPS.32]], [[S3.19]]. A COMMAND BUDGET THAT
+    WAS A CONNECT TIMEOUT WEARING A DIFFERENT HAT.
+    🔴 AND IT WAS THREE FUNCTIONS, NOT ONE. `ssh_run`, `scp_push` and
+    `scp_pull` all resolved their budget the same wrong way. **The first cut of
+    this fix touched only `ssh_run`, and the delivery's own NEG assertion
+    caught the other two still carrying it** — §23 verbatim, *fix the hop
+    upstream, not just the one that broke*, and the half-sweep this repo has
+    recorded in [[SH.2]], [[DEP.11]] and [[CFG.2]] (*"both were repaired on
+    the START side and nobody swept the END"*). `check_ssh_budget` S8 now pins
+    the SHAPE by AST — every function taking a `timeout` resolves it from the
+    COMMAND constant — so the next one added is covered the day it is written
+    rather than the day somebody remembers.
+    🔴 `ssh_run` did `timeout = timeout or config.SSH_CONNECT_TIMEOUT` and then
+    gave the subprocess `timeout + 10`, so EVERY caller that passed nothing —
+    `fleet.py run` (every menu fan-out), `wake_and_bake`'s remote step,
+    `harvest`, `standings`, `eod_report` — was bounded at **22 seconds**, and
+    the bound came from a number whose job is *how long to wait for a TCP
+    handshake*. Two different questions, one constant.
+    📊 REPRODUCED END TO END ON CONTROL, NO FLEET INVOLVED, against loopback:
+    `sleep 5` -> 5.2s rc=0 with its output; `sleep 30` -> **22.0s, rc=255,
+    "ssh timeout"** — and the remote `sleep` carried on running.
+    🔑 `SSH_CONNECT_TIMEOUT` KEEPS ITS REAL JOB (the `-o ConnectTimeout=`
+    option) and `SSH_COMMAND_TIMEOUT` is the new one. The subprocess budget is
+    now their SUM, which is the honest wall clock: you must connect, and then
+    you must wait.
+    ⚠️ AN EXPLICIT `timeout=` STILL WINS, so the eight callers that already
+    pass one (`rotate_tokens` 45/90, `eod_report` 300, the conductor's
+    `VERIFY_TIMEOUT_S`, `orchestrator` 15, `eod_backfill`'s DRAIN_TIMEOUT)
+    keep their own budgets — they gain only the connect allowance on top.
+    🔴 AND THE TIMEOUT MESSAGE STOPS UNDER-REPORTING. It said `ssh timeout`
+    and nothing else: not how long it waited, and not [[S3.19]]'s finding that
+    **the client dies and the remote process does not.** That silence cost
+    three nights once — two abandoned fan-outs held `feed_store` open and the
+    conductor's checkpoint met a busy database ([[S3.17]]).
+
   v0.5.0 (2026-09-19) — FU.2. ADD ssh_map(): THE SAME WORK, CONCURRENTLY.
     🔴 THE FLEET FAN-OUT HAS ALWAYS BEEN SERIAL. Nothing in this module or in
     fleet.py has ever used a thread pool, so every fleet command walks fifteen
@@ -79,8 +114,22 @@ import config
 MAX_FANOUT_WORKERS = int(__import__('os').environ.get("DTP_FANOUT_WORKERS", "16"))
 
 
+# 🔑 A TRANSFER IS NOT A COMMAND, AND THIS IS THE ANONYMOUS `+ 60` THAT WAS
+# ALREADY HERE, NAMED. `scp_pull` moves whole `trades.db` files, so the extra
+# room was always the right instinct — it was simply unnamed, and added to a
+# base that was itself the wrong number.
+SCP_TRANSFER_GRACE_S = 60
+
+
 def ssh_run(ip, command, timeout=None):
-    timeout = timeout or config.SSH_CONNECT_TIMEOUT
+    """-> (rc, stdout, stderr). NEVER raises.
+
+    🔴 `timeout` IS THE COMMAND'S BUDGET, NOT THE CONNECT TIMEOUT. Until r406
+    it defaulted to `config.SSH_CONNECT_TIMEOUT`, which is the answer to a
+    different question — see this module's v0.6.0 note. The subprocess gets
+    CONNECT + COMMAND because the wall clock has to cover both.
+    """
+    budget = timeout or config.SSH_COMMAND_TIMEOUT
     cmd = [
         "ssh", "-i", config.SSH_KEY_PATH,
         "-o", "BatchMode=yes",
@@ -102,10 +151,26 @@ def ssh_run(ip, command, timeout=None):
         # problem; a swallowed report is not.
         p = subprocess.run(cmd, capture_output=True, text=True,
                            encoding="utf-8", errors="replace",
-                           timeout=timeout + 10)
+                           timeout=config.SSH_CONNECT_TIMEOUT + budget)
         return p.returncode, p.stdout, p.stderr
     except subprocess.TimeoutExpired:
-        return 255, "", "ssh timeout"
+        # 🔴 SAY WHAT WE WAITED FOR, AND SAY WHAT IS STILL RUNNING.
+        # [[S3.19]]: *"an ssh timeout kills the CLIENT, not the remote
+        # process"* — the command carries on with nobody reading its output.
+        # That is not a footnote: two abandoned fan-outs once held
+        # `feed_store.db` open and the conductor's checkpoint arrived to a busy
+        # database, which took three nights to diagnose ([[S3.17]]).
+        # ⚠️ AND IT IS DISTINGUISHABLE FROM AN UNREACHABLE BOX. That case never
+        # reaches here — `-o ConnectTimeout` fails it inside ssh with ssh's own
+        # wording — so this message is only ever about a box that ANSWERED and
+        # then took too long.
+        return 255, "", (
+            "ssh command timeout after %ds (connect %ds + command %ds) — "
+            "the box ANSWERED; the remote command is PROBABLY STILL RUNNING "
+            "(S3.19). Raise it with fleet.py run --timeout N or "
+            "DTP_SSH_CMD_TIMEOUT."
+            % (config.SSH_CONNECT_TIMEOUT + budget,
+               config.SSH_CONNECT_TIMEOUT, budget))
     except Exception as exc:  # noqa: BLE001
         return 255, "", f"ssh error: {exc}"
 
@@ -201,7 +266,7 @@ def scp_push(ip, local_path, remote_path, timeout=None):
     a terse "No such file or directory" — the caller mkdirs first.
     Returns (rc, stdout, stderr); never raises.
     """
-    timeout = timeout or config.SSH_CONNECT_TIMEOUT
+    budget = timeout or config.SSH_COMMAND_TIMEOUT
     cmd = [
         "scp", "-i", config.SSH_KEY_PATH,
         "-o", "BatchMode=yes",
@@ -212,10 +277,16 @@ def scp_push(ip, local_path, remote_path, timeout=None):
     try:
         p = subprocess.run(cmd, capture_output=True, text=True,
                            encoding="utf-8", errors="replace",
-                           timeout=timeout + 60)
+                           timeout=(config.SSH_CONNECT_TIMEOUT + budget
+                                    + SCP_TRANSFER_GRACE_S))
         return p.returncode, p.stdout, p.stderr
     except subprocess.TimeoutExpired:
-        return 255, "", "scp timeout"
+        return 255, "", (
+            "scp timeout after %ds (connect %ds + command %ds + transfer "
+            "grace %ds) — the box ANSWERED; the transfer may be PARTIAL "
+            "(S3.19)."
+            % (config.SSH_CONNECT_TIMEOUT + budget + SCP_TRANSFER_GRACE_S,
+               config.SSH_CONNECT_TIMEOUT, budget, SCP_TRANSFER_GRACE_S))
     except Exception as exc:  # noqa: BLE001
         return 255, "", f"scp error: {exc}"
 
@@ -227,7 +298,7 @@ def scp_pull(ip, remote_path, local_path, timeout=None):
     SFTP-mode scp. Returns (rc, stdout, stderr); never raises. Files transfer
     can take longer than a command, so the timeout budget is more generous.
     """
-    timeout = timeout or config.SSH_CONNECT_TIMEOUT
+    budget = timeout or config.SSH_COMMAND_TIMEOUT
     cmd = [
         "scp", "-i", config.SSH_KEY_PATH,
         "-o", "BatchMode=yes",
@@ -240,9 +311,15 @@ def scp_pull(ip, remote_path, local_path, timeout=None):
         # non-ASCII too, and a strict decoder would lose the whole result.
         p = subprocess.run(cmd, capture_output=True, text=True,
                            encoding="utf-8", errors="replace",
-                           timeout=timeout + 60)
+                           timeout=(config.SSH_CONNECT_TIMEOUT + budget
+                                    + SCP_TRANSFER_GRACE_S))
         return p.returncode, p.stdout, p.stderr
     except subprocess.TimeoutExpired:
-        return 255, "", "scp timeout"
+        return 255, "", (
+            "scp timeout after %ds (connect %ds + command %ds + transfer "
+            "grace %ds) — the box ANSWERED; the transfer may be PARTIAL "
+            "(S3.19)."
+            % (config.SSH_CONNECT_TIMEOUT + budget + SCP_TRANSFER_GRACE_S,
+               config.SSH_CONNECT_TIMEOUT, budget, SCP_TRANSFER_GRACE_S))
     except Exception as exc:  # noqa: BLE001
         return 255, "", f"scp error: {exc}"
