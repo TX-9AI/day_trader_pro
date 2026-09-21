@@ -1,4 +1,16 @@
-# day_trader_pro/orchestrator.py — v0.6.0
+# day_trader_pro/orchestrator.py — v0.6.1
+# v0.6.1 (2026-09-20) — r409 / DOC.27. THE MANDATORY-READING BLOCK SAID THIS
+#   FILE WAKES TWO BOXES. IT WAKES FIFTEEN, AND THE FILE CONTRADICTED ITSELF.
+#   The prose carried v0.2.0's "DISCRETIONARY SELECTION RETIRED ... wakes ONLY
+#   SPX + QQQ" while its OWN CHANGELOG four lines below recorded v0.3.0
+#   RESTORING selection. Measured: ALWAYS_ON ['SPX','QQQ'] + MAX_DISCRETIONARY
+#   13 = 15, the whole fleet. NO BEHAVIOUR CHANGE — the code was always right
+#   and only the description was wrong, which is why it survived two months.
+#   🔑 THE PROSE NOW NAMES THE CONSTANTS RATHER THAN A SYMBOL LIST, so it
+#   cannot rot again when either moves. Gated by tests/check_orchestrator_doc.py
+#   O1/O2 (born red), O1 driven BY AST off whether main() actually calls
+#   _load_selection() — so the gate reds the day CODE and DESCRIPTION diverge,
+#   whichever of the two moved, rather than pinning today's wording (§21).
 # v0.6.0 (2026-09-07) — dtp r319 / DEP.12. The morning brief carries a HALF DAY
 #   banner ABOVE the wake/strength list. 🔴 IT WARNS AND CHANGES NOTHING: every
 #   exit time is still keyed to a 16:00 bell — VERTICAL_HOLD_TO_ET 15:45, the
@@ -56,18 +68,37 @@ and warming its feed before the 09:30 open.
 Flow:
   0. Master switch (control_state) — no-op if control is DISABLED.
   1. Trading-day gate (skip weekends/holidays) unless --no-gate.
-  2. Resolve the baseline symbols (config.ALWAYS_ON = SPX + QQQ) to instance IDs.
+  2. Resolve the WAKE LIST to instance IDs — config.ALWAYS_ON plus exactly
+     config.MAX_DISCRETIONARY names (see WHAT WAKES, below).
   3. Start them (unless --dry-run/--mock).
   4. Confirm they reach 'running'; page on any that don't.
   5. Telegram the morning wake summary (always sends; a silent failed morning
      is the worst outcome).
 
-DISCRETIONARY SELECTION RETIRED (v0.2.0): the model-driven "pick the top 5-6
-high-conviction names" step was removed. A week of running all 29 showed the
-strongest-R trades were NOT the names the model would have selected, so the
-pick added complexity and a report/LLM dependency for no proven edge. The
-orchestrator now wakes ONLY SPX + QQQ; start any additional names by hand.
-No report.json is read and no model is called.
+WHAT WAKES: config.ALWAYS_ON plus EXACTLY config.MAX_DISCRETIONARY names,
+chosen by selector.select() from market_brief's move_ranked, with a
+deterministic backfill that guarantees the count. READ THE CONSTANTS - never a
+list written here. At r409 they are ["SPX","QQQ"] + 13, which is the WHOLE
+FLEET, and either may move. Selection failure falls back to ALWAYS_ON-only and
+SAYS SO on Telegram; it never blocks the wake.
+
+    market-brief.timer   ~09:00 ET   produces the ranking this reads
+    dtp-morning.timer    ~09:15 ET   this file
+
+x SUPERSEDED - "DISCRETIONARY SELECTION RETIRED (v0.2.0)". This block stated
+that the model-driven pick was removed, that the orchestrator "wakes ONLY
+SPX + QQQ; start any additional names by hand", and that no report.json is read
+and no model is called. v0.3.0 RESTORED selection FOUR DAYS LATER and the file
+is now v0.6.1, so the paragraph was false for two months IN THE BLOCK
+WORKING_AGREEMENT 32 MAKES MANDATORY READING BEFORE THIS FILE IS EDITED.
+Struck rather than deleted (r240's precedent): the v0.2.0 measurement - a week
+of running all 29 showed the strongest-R trades were NOT the names the model
+would have selected - is still why the count is FIXED and the backfill is
+deterministic, so the pick cannot quietly shrink the fleet.
+x A READER WHO BELIEVED IT WOULD HAVE CONCLUDED THIRTEEN BOXES WERE DOWN ON
+PURPOSE - or, worse, not noticed thirteen that FAILED to wake, because the
+document says that is normal. OPS.31's class: not a wrong number, a wrong
+CLAIM, stated where it will be believed.
 
 CLI:
   python orchestrator.py --mock --no-gate     # full offline spool-up
