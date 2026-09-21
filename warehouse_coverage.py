@@ -1,5 +1,28 @@
 #!/usr/bin/env python3
-# day_trader_pro/warehouse_coverage.py — v1.5
+# day_trader_pro/warehouse_coverage.py — v1.6
+# v1.6 (2026-09-21) — r413 / OPS.38. `shadow` IS RETIRED ON THE BOARD,
+#   BECAUSE THE SILENCE WAS ORDERED RATHER THAN OBSERVED. Operator,
+#   2026-09-21: *"I would like the ones that are definitely never gonna
+#   resolve to be taken off of here"* — after the close left exactly ONE
+#   red on the streams board, `shadow record 0bx MISS: ALL 15 live`, for a
+#   service he had disabled fleet-wide the week before.
+#   🔑 IT WAS A FALSE ALARM WITH A LONG FUTURE. §17: a condition that is
+#   EXPECTED must never reach the channel, or it stops being read and
+#   fails the one time it matters. Left alone this fires every night.
+#   🔴 AND THE ENTRY CARRIES ITS OWN COUNTER-EVIDENCE ON PURPOSE. r280
+#   REFUSED an earlier attempt to call this same stream dead, on measured
+#   grounds ([[ASK.2]]); [[S3.13]] deleted 492,945 objects on a wrong
+#   dead-stream reading; [[DOC.25]] found a dead-weight list naming EIGHT
+#   LIVE STREAMS. The r280 note is struck rather than deleted (r240's
+#   precedent) so the next reader sees that this classification has been
+#   wrong before, and what makes it right now: a RULING, not a board of
+#   zeros. Re-enable the observer and the line goes back.
+#   ✅ MEASURED BOTH WAYS: before, `🔴 1 stream-day(s) need an answer`;
+#   after, `✅ every EVERY-stream had all expected boxes`, rc=0, with
+#   shadow rendering `·` beside its reason rather than vanishing.
+#   Gated by tests/check_stream_exemptions.py E1-E3, and E2 is the one
+#   that outlives this row: EVERY DEAD entry must carry a revision or a
+#   date, so no stream is ever retired without a record again.
 # v1.5 (2026-09-05) — dtp r292 / ASK.1. `character_axis_sample` declared,
 #   with the otv4 r270 push that ships it. CONDITIONAL rather than EVERY:
 #   `character_engine` writes a sample only when an axis value is computable
@@ -264,9 +287,27 @@ STREAM_POLICY = {
     "derived_exit_counterfactual": ("CONDITIONAL", "pusher", "only when a flow exit WOULD have fired"),
     "chain_snapshots":   ("CONDITIONAL", "record", "only boxes that TRADED; NOT reconstructible after the session"),
     "circuit_breaker":   ("CONDITIONAL", "record", "only on a breaker trip"),
-    # 🔴 r280 — RECLASSIFIED. "Never installed on the v4 fleet" is FALSE:
-    # QQQ 2026-09-05 holds 32 date dirs, newest 09-04, with a shadow unit live.
-    "shadow":            ("EVERY", "record", "sweep-precursor primitives; LIVE (r280 corrected 'never installed')"),
+    # ⬛ r280 — SUPERSEDED, KEPT BECAUSE IT IS THE WARNING. It read
+    # ("EVERY", "record", "...LIVE (r280 corrected 'never installed')") after
+    # r280 REFUSED an earlier attempt to call this stream dead: QQQ
+    # 2026-09-05 held 32 date dirs with a shadow unit live, and [[ASK.2]]'s
+    # premise was falsified on exactly that evidence. **shadow has been
+    # wrongly declared DEAD here once already.**
+    # 🔴 r413 — DEAD NOW, AND THE DIFFERENCE IS THE WHOLE POINT: THIS IS A
+    # DECISION, NOT AN ABSENCE. [[SHD.5]] put the stream on notice — the
+    # operator's ruling, *"if it doesn't start producing some utility after
+    # this weekend, it's gonna be fucking scrapped"* — and he DISABLED the
+    # service fleet-wide in the week of 2026-09-15, stated 2026-09-21. An
+    # absence OBSERVED is never grounds for this entry; an absence ORDERED is.
+    # ⚠️ THAT DISTINCTION IS NOT PEDANTRY. [[S3.13]] deleted 492,945 raw/shadow
+    # objects on a "dead stream" reading that was WRONG, and [[DOC.25]] found
+    # a dead-weight list naming EIGHT LIVE STREAMS. Marking a stream DEAD from
+    # a board that shows zeros is how both happened.
+    # ⚠️ AND IT IS REVERSIBLE BY CONSTRUCTION: re-enable the observer and this
+    # line goes back, because the classification records a RULING and not a
+    # measurement. The board renders it `·` with this reason, so it is
+    # retired-and-visible rather than deleted-and-forgotten.
+    "shadow":            ("DEAD", "record", "observer DISABLED fleet-wide w/c 2026-09-15 on the SHD.5 ruling (recorded 2026-09-21, r413) — absence is ORDERED, not observed"),
     "theo_series":       ("DEAD", "batch",  "unsubscribed r118 after it took SPX's chain down"),
     "underlying_series": ("DEAD", "batch",  "published zero events on both symbol spaces (r125b)"),
     "orb_range":         ("DEAD", "record", "retired s3_push v1.8, 2026-08-16"),
