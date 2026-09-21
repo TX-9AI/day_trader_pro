@@ -1,6 +1,28 @@
 #!/usr/bin/env python3
 """
-tests/check_handoff_item.py  v1.3
+tests/check_handoff_item.py  v1.4
+v1.4  2026-09-20  r410 — H11, H11b, H12, H12b, H13 and H13b: THE TURNOVER'S
+      OWN FIGURES, ITS CLOCK, AND THE TOOLS IT PRESCRIBES.
+      🔴 H11 GENERALISES H9d, WHICH WAS WRITTEN FOR EXACTLY THIS AND NEVER
+      SWEPT TO ITS NEIGHBOURS. H9d pins the GENESIS row count as computed;
+      the three token budgets three lines away stayed literals and all
+      three had rotted — the worst by 57%. C.30 inside one function.
+      🔑 H12 PINS THE SCHEDULED CLOCK, the biggest gap the document had: it
+      named the fleet's COUNT and never what moves it. H12b is a DECLARED
+      CONTROL, green at HEAD, and is mutation-proven — it refuses a
+      generator that asks systemd for an Environment block (§18a, and
+      control holds a live funded broker token).
+      🔑 H13 EXISTS BECAUSE §25 SPENT MONTHS ROUTING TO A MISSING FILE. A
+      handoff that names a command makes the same promise, so every tool it
+      prescribes must RESOLVE — and H13b RUNS the transcript tool rather
+      than checking it is present, because its first cut returned the
+      caller's own live transcript and a mirror reads exactly like history.
+      ⚠️ H13 FIRST RESOLVED THROUGH `~` — CHK.9 item 2, the defect OPS.34
+      recorded against r407's gate. It asks THIS checkout now.
+      ⚠️ AND §20 FIRED TWICE WRITING THIS FILE: H11's absence canary matched
+      r410's own changelog and a preserved dated measurement; H12b's matched
+      the comment explaining §18a. Both rescoped — the canary is wrong, not
+      the prose.
 v1.3  2026-09-20  r398 — H10, H10b, H10c and H10d: the permission block. The
 operator moved the line on 2026-09-20 — landing and editing on the file system
 are Claude's, and the PUSH and the BAKE are gated on HIM BEING INFORMED rather
@@ -246,6 +268,100 @@ def main():
     # severity marker and listed long-closed rows as outstanding.
     check("H8 open rows are read from the status column, not the severity mark",
           '"⬜" in cols[3]' in gen)
+
+    # ── H11 — THE READING BUDGETS ARE MEASURED, WHICH IS H9d GENERALISED.
+    # 🔴 H9d PINNED THE ROW COUNT AND THE THREE SIZES BESIDE IT WENT ON ROTTING.
+    # Measured at r410: WORKING_AGREEMENT claimed ~21k against ~30k, GENESIS
+    # ~148k against ~188k, BACKLOG ~142k against ~223k — the last a 57%
+    # understatement in the figure a fresh thread uses to decide HOW to read
+    # the biggest document in the repo. The lesson was learned for the count
+    # and not swept to its neighbours: C.30, inside one function.
+    # 🔑 ANCHORED ON THE SOURCE CALLING THE MEASURER, not on any figure — a
+    # check that pinned a number would be the defect it is testing for.
+    src_gen = open(_g, encoding="utf-8", errors="replace").read()
+    measured = src_gen.count("_tok(")
+    # ⚠️ THE ABSENCE HALF READS THE RENDERED OUTPUT, NOT THE SOURCE — §20.
+    # This file's header must record the figures it removed, and a DATED
+    # 2026-09-12 measurement lower down legitimately preserves the old ones.
+    # A source-wide canary fires on both: on the changelog §5 demands, and on
+    # a historical measurement that is correct for its date. What must not
+    # contain a stale literal is the thing a fresh thread actually READS.
+    check("H11 the reading-list sizes are MEASURED, not literals",
+          measured >= 3 and "~142k tokens" not in out
+          and "~148k tokens" not in out and "~21k tokens" not in out,
+          f"{measured} _tok() call site(s); nothing stale is emitted")
+
+    # ── H11b — AND THE WAY IN IS ANCHORED ON HEADINGS, NEVER LINE NUMBERS.
+    # The first cut of this guidance shipped `awk 'NR>=45 && NR<=475'`, which
+    # is DOC.27's own defect reintroduced by the revision that fixed it: a row
+    # filed tomorrow moves every one of those numbers.
+    check("H11b the BACKLOG recipe is heading-anchored, not line-numbered",
+          "/^## PART 1/" in out and "NR>=45" not in out,
+          "the truncation recipe survives the next row being filed")
+
+    # ── H12 — THE SCHEDULED CLOCK. The file stated the fleet's COUNT and never
+    # what moves it, so a thread could not tell whether `0/15 running` was
+    # normal or a fault — for an agent whose job is wrangling the fleet, the
+    # largest gap this document had.
+    check("H12 the handoff names what runs without being asked",
+          "THE SCHEDULED CLOCK" in out and "dtp-morning.timer" in out,
+          "read from systemd at generation time")
+    # ⚠️ AND IT MUST NOT LEARN THE ENVIRONMENT BLOCK (§18a). Control holds a
+    # live funded broker token; `-p Environment` prints all of it. Pinned on
+    # the SOURCE because the leak would be in what the tool ASKS for, and a
+    # rendered handoff that happened not to leak today proves nothing.
+    # ⚠️ KEYED ON THE QUOTED STRING LITERAL, which is what an argv entry looks
+    # like — the bare word appears in the comment that EXPLAINS the rule, and
+    # a canary that fires on its own doctrine is the one that gets loosened
+    # until it misses the real thing (§20).
+    check("H12b it never asks systemd for an Environment block (§18a)",
+          '"Environment"' not in src_gen and "'Environment'" not in src_gen,
+          "no argv entry requests the block; ExecStart-adjacent only")
+
+    # ── H13 — A PRESCRIBED TOOL MUST EXIST. §25 spent months routing readers
+    # to a `docs/README.md` that was never ported; the one rule whose job is
+    # to stop documents going unread was itself pointing at a missing file.
+    # A handoff that names a command is making the same promise.
+    import re as _re
+    named = _re.findall(r"python3 (~/[\w/.-]+\.py)", out)
+    # 🔴 RESOLVED AGAINST THIS CHECKOUT, NEVER `~`. r408 recorded exactly this
+    # defect in r407's gate: it read a file from the WORKING TREE, passed on
+    # control because the file happened to be there, and would have gone red
+    # in a pristine clone for the environment rather than the content
+    # (CHK.9 item 2). A gate on a repo must ask that repo.
+    # `_root` is already the module-level repo root (line 56) — reusing it
+    # rather than rebinding, which shadowed it and broke the reference ABOVE
+    # this point. Caught by running the gate, not by reading it (§24).
+    def _local(t):
+        tail = t.split("day_trader_pro/", 1)[-1]
+        return os.path.join(_root, tail)
+    missing = [t for t in named
+               if not (os.path.exists(_local(t))
+                       or os.path.exists(os.path.expanduser(t)))]
+    check("H13 every tool the handoff prescribes EXISTS",
+          bool(named) and not missing,
+          f"{len(named)} named, missing: {missing or 'none'}")
+
+    # ── H13b — AND THE TRANSCRIPT TOOL REFUSES TO HAND BACK A MIRROR.
+    # 🔴 DRIVEN, NOT READ. The first cut of `--pick` returned the CALLER'S OWN
+    # live transcript — which reads exactly like history and would confirm
+    # whatever the reader already believed. Caught by running it. The check
+    # runs the real tool and requires it to SAY it skipped, because a silent
+    # skip and a silent mirror are indistinguishable from here (§0.5).
+    _tt = os.path.join(_root, "tools", "transcript_text.py")
+    if os.path.exists(_tt):
+        try:
+            rr = subprocess.run([sys.executable, _tt, "--list"],
+                                capture_output=True, text=True, timeout=180)
+            ok = rr.returncode == 0 and "verdict" in rr.stdout
+            check("H13b the transcript tool runs and classifies stubs",
+                  ok, f"rc={rr.returncode}")
+        except Exception as e:                                  # noqa: BLE001
+            check("H13b the transcript tool runs and classifies stubs",
+                  False, f"{e.__class__.__name__}")
+    else:
+        check("H13b the transcript tool runs and classifies stubs",
+              False, "tools/transcript_text.py is missing")
 
     print()
     if _fails:

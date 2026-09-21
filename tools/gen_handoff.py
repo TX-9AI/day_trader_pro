@@ -1,6 +1,29 @@
 #!/usr/bin/env python3
 """
-tools/gen_handoff.py  v1.4
+tools/gen_handoff.py  v1.5
+v1.5  2026-09-20  r410 — THE TURNOVER MEASURES ITSELF, AND HANDS OVER THE
+      TOOLS INSTEAD OF DESCRIBING THEM. Operator, after watching a thread
+      struggle through its own onboarding: *"make a point to amend the
+      turnover to better serve the next agent who takes the handoff."*
+      🔴 EVERY HARDCODED SIZE IN THE READING LIST HAD ROTTED, in the same
+      way `_genesis_rows` records the row count rotting three lines above
+      them: WORKING_AGREEMENT said ~21k against ~30k, GENESIS ~148k against
+      ~188k, and BACKLOG ~142k against ~223k — a 57% understatement in the
+      one figure a fresh thread uses to plan how to read the biggest
+      document in the repo. All three are now MEASURED at generation time.
+      🔑 THE SCHEDULED CLOCK IS NEW AND IS THE BIGGEST GAP THIS FILE HAD.
+      It stated the fleet's COUNT and never what moves it, so a thread could
+      not tell whether `0/15 running` was normal. Read from systemd —
+      ExecStart-adjacent properties only, NEVER the Environment block (§18a).
+      🔑 AND TWO PRESCRIPTIONS BECOME TOOLS. §25 told every thread to
+      "extract the message text" and supplied no means, so every thread
+      wrote its own extractor; `tools/transcript_text.py --pick` now does it
+      and REFUSES to hand a thread its own live transcript. The menu is
+      named with `menu_extract --inventory` rather than described, which is
+      r409/DOC.27's whole lesson applied to the document that sent the
+      reader to §13 in the first place.
+      ⚠️ AND THE INTERPRETER SPLIT IS STATED — it has cost two revisions.
+
 v1.4  2026-09-20  r398 — THE PERMISSIONS BLOCK CARRIES THE VETO.
 Operator, 2026-09-20: "You are allowed to stage, land, edit and present
 proposed changes unprompted, but I must be given the opportunity to veto
@@ -125,6 +148,13 @@ import sys
 OTV4 = os.path.expanduser("~/options-trader-v4")
 DTP = os.path.expanduser("~/day_trader_pro")
 
+# The three documents the reading list budgets for. Named once, so the sizes
+# printed to a fresh thread are MEASURED off these paths rather than recalled
+# (see `_tok`).
+WA_MD = os.path.join(OTV4, "docs", "WORKING_AGREEMENT.md")
+GEN_MD = os.path.join(OTV4, "docs", "GENESIS.md")
+BKL_MD = os.path.join(OTV4, "docs", "BACKLOG.md")
+
 # The operator's standing brief, VERBATIM. It states who this is and what the
 # layering is; it is not generated and must not drift. Edit it here only when
 # the operator restates it.
@@ -200,6 +230,85 @@ def _genesis_rows(path: str = "/home/ubuntu/options-trader-v4/docs/GENESIS.md") 
         return "?"
 
 
+def _tok(path: str) -> str:
+    """A reading budget, MEASURED at generation time rather than remembered.
+
+    🔴 THREE HARDCODED ESTIMATES SAT BESIDE `_genesis_rows` AND ALL THREE HAD
+    ROTTED THE SAME WAY IT DID. Measured at r410: the WORKING_AGREEMENT line
+    said ~21k and the file is ~30k; GENESIS said ~148k against ~188k; BACKLOG
+    said ~142k against ~223k — a 57% understatement in the one figure a fresh
+    thread uses to decide HOW to read the largest document in the repo.
+    🔑 THE FUNCTION DIRECTLY ABOVE THIS ONE EXISTS FOR EXACTLY THIS DEFECT —
+    its own docstring records the row count reading a literal 418 while the
+    ledger held 375. The lesson was learned for the count and not applied to
+    the sizes three lines away, which is C.30 (*when a rule changes, sweep its
+    readers*) inside a single function.
+    ⚠️ IT IS AN ESTIMATE AND SAYS SO. Bytes/4 is a heuristic, not a tokenizer;
+    what matters is that it TRACKS THE FILE instead of a memory of it. An
+    unreadable file returns "?" rather than raising — the handoff must still
+    emit, and an honest "?" beats a confident wrong number (§0.5).
+    """
+    try:
+        return f"~{os.path.getsize(path) // 4000}k tokens"
+    except Exception:                                           # noqa: BLE001
+        return "size unreadable"
+
+
+def _longest_line(path: str) -> int:
+    """Longest line in a file, so the handoff can warn HOW to read it.
+
+    `BACKLOG.md` carries single lines over 13,000 characters — one table row
+    is a whole revision's reasoning — so a naive full read is refused by the
+    tooling and a naive `head` shows one row. The next thread should know that
+    before it starts, not after three failed reads.
+    """
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            return max((len(ln) for ln in f), default=0)
+    except Exception:                                           # noqa: BLE001
+        return 0
+
+
+def _timers() -> str:
+    """The SCHEDULED CLOCK, read from systemd rather than described.
+
+    🔑 THE HANDOFF NAMED THE FLEET'S STATE AND NEVER WHAT MOVES IT. A thread
+    told "0/15 running" cannot tell whether that is normal, whether anything
+    will wake them, or what closes the session — and for an agent whose stated
+    job is wrangling the fleet that is the most load-bearing fact there is.
+    Establishing it by hand at r409 took the reading of four unit files.
+    ⚠️ ExecStart ONLY, NEVER THE ENVIRONMENT BLOCK (§18a). Control holds a live
+    funded broker token, GitHub write on both repos and the Telegram token;
+    `systemctl show -p Environment` prints all of it. This asks for the one
+    property it needs.
+    ⚠️ AND IT FAILS OUT LOUD. If systemd cannot be read the block SAYS SO by
+    name rather than printing nothing — an absent schedule must never render
+    as "there is no schedule" (§0.5).
+    """
+    units = ("market-brief.timer", "dtp-morning.timer",
+             "dtp-eod-conductor.timer", "dtp-shadow-watch.timer",
+             "dtp-eod-analysis.timer")
+    out = []
+    for u in units:
+        try:
+            st = subprocess.run(["systemctl", "is-enabled", u],
+                                capture_output=True, text=True,
+                                timeout=10).stdout.strip() or "unknown"
+            nxt = subprocess.run(
+                ["systemctl", "show", u, "-p", "NextElapseUSecRealtime",
+                 "--value"], capture_output=True, text=True,
+                timeout=10).stdout.strip()
+        except Exception as e:                                  # noqa: BLE001
+            out.append(f"  {u:<26} COULD NOT READ ({e.__class__.__name__})")
+            continue
+        when = nxt if nxt and nxt != "n/a" else "-"
+        flag = "" if st == "enabled" else f"   <-- {st.upper()}"
+        out.append(f"  {u:<26} {st:<9} next: {when}{flag}")
+    if not out:
+        return "  TIMERS COULD NOT BE READ — say so rather than assuming none."
+    return "\n".join(out)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--no-fleet", action="store_true")
@@ -226,16 +335,40 @@ def main():
     print("FLEET")
     print(fleet)
     print()
+    # 🔑 r410 — WHAT MOVES THE FLEET. A thread told "0/15 running" cannot tell
+    # whether that is normal or a fault, and the fleet wrangler needs the clock
+    # before it needs anything else. Read from systemd, never described.
+    print("THE SCHEDULED CLOCK — what runs without anyone asking (measured)")
+    print(_timers())
+    print("  The fleet is NORMALLY DOWN overnight and outside RTH. Down is not a")
+    print("  fault. The morning unit wakes config.ALWAYS_ON + MAX_DISCRETIONARY —")
+    print("  read those constants, do not assume the count.")
+    print()
     print("READ THESE, IN THIS ORDER — Rule #1: ALWAYS adhere to the WORKING AGREEMENT.")
     print("  1. docs/WORKING_AGREEMENT.md — IN FULL. It is the contract, and §0 and §38")
-    print("     govern everything you are permitted to do on this box. ~21k tokens.")
+    print(f"     govern everything you are permitted to do on this box. {_tok(WA_MD)}.")
     print(f"  2. docs/GENESIS.md — the LAST {a.genesis} rows (`tail -{a.genesis}`), not all {_genesis_rows()}.")
-    print("     The ledger is ~148k tokens whole and ~7k at that depth, and the reason to")
-    print("     read it is continuity, which the recent tail gives you. Older rows are")
-    print("     there when a specific revision matters.")
-    print("  3. docs/BACKLOG.md — the open work. PART 0-3 plus the open tail. It is large")
-    print("     (~142k tokens) and it is the single record of what remains unresolved.")
+    print(f"     The ledger is {_tok(GEN_MD)} whole and a few thousand at that depth, and")
+    print("     the reason to read it is continuity, which the recent tail gives you.")
+    print("     Older rows are there when a specific revision matters.")
+    print("  3. docs/BACKLOG.md — the open work. PART 0-3 plus the open tail. It is")
+    print(f"     THE BIGGEST DOCUMENT HERE ({_tok(BKL_MD)}) and the single record of what")
+    print("     remains unresolved.")
+    print(f"     ⚠️ ITS LINES RUN TO {_longest_line(BKL_MD):,} CHARACTERS — one row is")
+    print("     a whole revision's reasoning, so a plain full read is REFUSED for")
+    print("     size and a `head` shows you a single row. Read it TRUNCATED, which")
+    print("     gives you every row's title and status in one pass:")
+    print("         awk '/^## PART 1/,/^## PART 2/' docs/BACKLOG.md | cut -c1-400")
+    print("     — ANCHORED ON THE HEADINGS, never on line numbers, which move every")
+    print("     time a row is filed. Then read a row in full when it is the one that")
+    print("     matters.")
     print("  4. docs/PLAN_SPEC.md — only when the task touches plans or levels.")
+    print("     Also: §13 for the devtools menu — 78 items, and almost anything you")
+    print("     are about to hand-write already exists there. CITE ITEMS BY LABEL,")
+    print("     NEVER BY NUMBER; the numbers come from a render-time counter and")
+    print("     r409 found all 53 in §13 wrong. Print the live list, never trust")
+    print("     prose about it:")
+    print("         python3 ~/day_trader_pro/tools/menu_extract.py --inventory")
     # ── r388 — THE LAST CONVERSATION. Operator, 2026-09-18: *"Read our last
     # conversation in full as this thread is likely a continuation of that
     # work."* WORKING_AGREEMENT §25 carries the same entry as the AUTHORITY;
@@ -251,7 +384,12 @@ def main():
     print(f"     {TRANSCRIPTS}")
     print("     ⚠️ READ THE TEXT, NOT THE FILE. The raw JSONL runs to megabytes and is")
     print("     mostly tool output; the human/assistant text inside it is a small")
-    print("     fraction of that. Extract the message text and read that.")
+    print("     fraction of that. THE TOOL EXISTS — every thread used to rewrite")
+    print("     it, so it is given rather than described:")
+    print("         python3 ~/day_trader_pro/tools/transcript_text.py --pick")
+    print("     --pick applies the SUBSTANTIVE rule below for you and skips your")
+    print("     own live transcript, saying so rather than handing you a mirror.")
+    print("         ... --list   what is available, raw size against TEXT size")
     print("     ⚠️ NEWEST IS NOT ALWAYS THE RIGHT ONE. A session can be a stub — one")
     print("     has held a single turn — so taking the newest by mtime can read a")
     print("     couple of KB, find nothing, and wrongly conclude there is no history.")
@@ -265,6 +403,18 @@ def main():
     print()
     print("⚠️ Anything not written in those files did not survive the last thread. If a")
     print("decision seems to be missing, it is missing — ask rather than reconstruct it.")
+    print()
+    # 🔑 r410 — THE INTERPRETER SPLIT, because it has now cost two revisions.
+    # r406 scored 7/7 under the venv and 6/7 under bare python3 on ONE import,
+    # and OPS.22 is the open row behind it. A thread that does not know this
+    # reads a green suite as proof of something the land gate will refuse.
+    print("⚠️ TWO PYTHONS, AND THEY DISAGREE — [[OPS.22]], and it has cost two")
+    print("   revisions already. `/usr/bin/python3` here CANNOT resolve the legacy")
+    print("   zone `US/Eastern`, so anything importing `fleet` fails under it; the")
+    print("   venvs carry the tzdata pip package and work. THE LAND GATE RUNS EVERY")
+    print("   CHECK UNDER BARE python3 ([[CHK.9]]), so a gate that is green in your")
+    print("   shell can still refuse the land. Run new checkers BOTH ways before")
+    print("   you believe them.")
     print()
     # 🔴 THE PERMISSIONS ARE DECLARED, NOT INFERRED (operator, 2026-09-12).
     # WORKING_AGREEMENT §38.9 is the authority and this is a POINTER to it, in
