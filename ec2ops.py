@@ -1,4 +1,13 @@
-# day_trader_pro/ec2ops.py — v0.1.1
+# day_trader_pro/ec2ops.py — v0.1.2
+# v0.1.2 (2026-09-21) — r412 / OPS.37. THE INSTANCE RECORD CARRIES
+#   `public_ip`, READ FROM THE REPLY IT ALREADY PARSES. `describe_instances`
+#   returns `PublicIpAddress` in the same object the private IP comes from,
+#   so the ping board gains the address an operator actually SSHes to from
+#   outside the VPC at the cost of ZERO extra API calls and ZERO SSH.
+#   🔑 ADDITIVE BY DESIGN. This dict reaches the close, the morning wake,
+#   rotate_tokens and shadow_watch; a new KEY breaks no reader, whereas
+#   widening fleet.get_fleet's tuple would have broken 21 call sites across
+#   8 files (§23). Gated by tests/check_fleet_public_ip.py P1.
 """
 Thin EC2 wrapper. Every AWS call in the project goes through here so that
 mock mode is a single, well-contained switch.
@@ -121,8 +130,21 @@ def describe_by_names(names):
             if name is None:
                 continue
             iid = inst["InstanceId"]
+            # 🔑 r412 — PUBLIC IP RIDES ALONG FREE. It is in the SAME
+            # `describe_instances` reply the private IP is read from, so no
+            # second API call and no SSH buys it. AWS RELEASES IT ON STOP and
+            # assigns a new one on start, which is [[OPS.20]]'s whole reason
+            # for putting it in the boot alert — reaching a misbehaving box
+            # otherwise means the console and its two-factor login at exactly
+            # the moment you need to be ON the box.
+            # ⚠️ ADDITIVE, AND THAT IS DELIBERATE. This dict reaches the close,
+            # the morning wake, rotate_tokens and shadow_watch; a new KEY
+            # breaks no reader, where changing a shape would break 21 call
+            # sites across 8 files (§23 — grep every reader, not just the one
+            # you are editing).
             rec = {"instance_id": iid, "state": state,
-                   "private_ip": inst.get("PrivateIpAddress", "")}
+                   "private_ip": inst.get("PrivateIpAddress", ""),
+                   "public_ip": inst.get("PublicIpAddress", "")}
             if name in found:
                 ambiguous.setdefault(name, [found[name]["instance_id"]]).append(iid)
                 # Prefer running > pending > stopped; keep first otherwise.

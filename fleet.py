@@ -1,4 +1,24 @@
-# day_trader_pro/fleet.py — v0.8.0
+# day_trader_pro/fleet.py — v0.9.0
+# v0.9.0 (2026-09-21) — r412 / OPS.37. THE PING BOARD SHOWS THE PUBLIC IP.
+#   Operator, 2026-09-21, from a phone at 15:24: *"add the public IP to
+#   report number eight"* — and [[OPS.20]] already recorded why it matters:
+#   **the address changes on every stop/start**, so reaching a misbehaving
+#   box meant fighting the AWS console and its two-factor login at exactly
+#   the moment he needed to be ON the box.
+#   🔴 NEW `get_fleet_ext()` RATHER THAN A WIDER `get_fleet()`. That tuple
+#   is unpacked as `(symbol, ip, state)` at TWENTY-ONE call sites across
+#   EIGHT files — eod_conductor_v2, orchestrator, rotate_tokens,
+#   shadow_watch, fleet_reconcile, orb_budget_fleet and seven more inside
+#   this file. Widening it was one line here and a ValueError in every one
+#   of them, at 09:15 or at the close. §23, and the half-sweep SH.2,
+#   DEP.11 and CFG.2 each record. `get_fleet` now delegates and drops the
+#   fourth field, so nothing pays a second EC2 round trip either.
+#   ⚠️ AN ABSENT ADDRESS IS NAMED, NEVER BLANK (§0.5, and OPS.20 learned it
+#   on this same field): `(none)` on a RUNNING box is a real finding, `-`
+#   on a stopped one is expected because AWS releases it on stop.
+#   ✅ VERIFIED BEFORE SHIPPING, the way r387 did: all 15 boxes asked for
+#   their own IMDSv2 `public-ipv4` and MATCHED the control-side answer
+#   15/15, 2026-09-21 15:29 ET.
 # v0.8.0 (2026-09-21) — r406 / OPS.32. `run --timeout N` — A PER-BOX COMMAND
 #   BUDGET, AND THE BANNER NOW STATES IT.
 #   `_exec` passed no timeout, so every menu fan-out inherited ssh_util's
@@ -135,15 +155,37 @@ def _today_et():
     return datetime.now(_ET).strftime("%Y-%m-%d")
 
 
-def get_fleet(only=None):
-    """Return sorted list of (symbol, ip, state) for the monitored universe."""
+def get_fleet_ext(only=None):
+    """(symbol, private_ip, state, public_ip) — the FULL record.
+
+    🔑 r412 — A SECOND ACCESSOR RATHER THAN A WIDER TUPLE, ON PURPOSE.
+    `get_fleet` is unpacked as a 3-tuple at **21 call sites across 8 files**,
+    including `eod_conductor_v2` (the close), `orchestrator` (the morning
+    wake), `rotate_tokens` and `shadow_watch`. Widening it would have been a
+    one-line edit here and a break in every one of them — §23, and the same
+    half-sweep [[SH.2]], [[DEP.11]] and [[CFG.2]] each record.
+    ⚠️ ONE `discover()` CALL EITHER WAY. `get_fleet` now delegates here and
+    drops the fourth field, so nothing pays a second EC2 round trip for the
+    convenience.
+    """
     symbols = only or config.UNIVERSE
     mapping, _ = instance_registry.discover(symbols)
     out = []
     for s in sorted(mapping):
         rec = mapping[s]
-        out.append((s, rec.get("private_ip", ""), rec.get("state", "?")))
+        out.append((s, rec.get("private_ip", ""), rec.get("state", "?"),
+                    rec.get("public_ip", "")))
     return out
+
+
+def get_fleet(only=None):
+    """Return sorted list of (symbol, ip, state) for the monitored universe.
+
+    ⚠️ ITS SHAPE IS LOAD-BEARING — see `get_fleet_ext` for why it did not grow
+    a fourth field. Every existing caller keeps the contract it was written
+    against.
+    """
+    return [(s, ip, st) for s, ip, st, _pub in get_fleet_ext(only)]
 
 
 def _targets(fleet, include_all):
@@ -170,21 +212,46 @@ def _exec(symbol, ip, command, timeout=None):
     return ssh_util.ssh_run(ip, command, timeout=timeout)
 
 
+def _pub(state, public_ip):
+    """Render a public IP, NAMING an absence instead of printing a blank.
+
+    🔴 §0.5, AND [[OPS.20]] LEARNED IT ON THIS EXACT FIELD: *"no IP field"*
+    and *"lookup failed"* must not look alike. Three different facts here:
+      · a running box WITH an address            -> the address
+      · a running box WITHOUT one                -> `(none)`, which is a REAL
+        finding — that box cannot be reached from outside at all
+      · a stopped box                            -> `-`, expected, because
+        AWS RELEASES the address on stop
+    A blank in all three cases would render the anomaly as tidy.
+    """
+    if public_ip:
+        return public_ip
+    return "-" if state != "running" else "(none)"
+
+
 def cmd_ping(only=None, include_all=False):
-    fleet = get_fleet(only)
+    fleet_ext = get_fleet_ext(only)
+    pub = {s: p for s, _ip, _st, p in fleet_ext}
+    state = {s: st for s, _ip, st, _p in fleet_ext}
+    fleet = [(s, ip, st) for s, ip, st, _p in fleet_ext]
     running, skipped = _targets(fleet, include_all)
     print(f"Pinging {len(running)} running box(es) one by one...\n")
     ok = 0
-    print(f"{'SYMBOL':<8}{'PRIVATE IP':<18}RESULT")
+    # ⚠️ PUBLIC IP SITS BESIDE THE PRIVATE ONE because it is what an operator
+    # actually SSHes to from outside the VPC, and it CHANGES ON EVERY
+    # STOP/START ([[OPS.20]]) — a copy taken yesterday is wrong today.
+    print(f"{'SYMBOL':<8}{'PRIVATE IP':<18}{'PUBLIC IP':<18}RESULT")
     for s, ip, _ in running:
         rc, _out, err = _exec(s, ip, "echo OK")
+        p = _pub(state.get(s, "running"), pub.get(s, ""))
         if rc == 0:
             ok += 1
-            print(f"{s:<8}{ip:<18}✅ reachable")
+            print(f"{s:<8}{ip:<18}{p:<18}✅ reachable")
         else:
-            print(f"{s:<8}{ip:<18}🚨 {err.strip()[:40] or 'failed'}")
+            print(f"{s:<8}{ip:<18}{p:<18}🚨 {err.strip()[:40] or 'failed'}")
     for s, ip, st in skipped:
-        print(f"{s:<8}{(ip or '-'):<18}· skipped ({st})")
+        print(f"{s:<8}{(ip or '-'):<18}{_pub(st, pub.get(s, '')):<18}"
+              f"· skipped ({st})")
     print(f"\nReachable: {ok}/{len(running)} running box(es)")
     return 0 if ok == len(running) else 1
 
