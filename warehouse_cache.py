@@ -1,5 +1,28 @@
 #!/usr/bin/env python3
-# day_trader_pro/warehouse_cache.py — v1.6
+# day_trader_pro/warehouse_cache.py — v1.7
+# v1.7 (2026-09-23) — dtp r417 / WH.20. 🔴 v1.6 BUILT THE FORWARD SCAN AND THEN
+#   GATED IT AWAY FROM THE STREAMS THAT NEEDED IT MOST. The window was armed
+#   only for `dt.startswith("derived_")`, justified by "a raw stream is
+#   partitioned by the day it describes". That is TRUE of `candles`, `ohlc` and
+#   `trades`, whose pushers derive `dt=` from the row — and FALSE of every
+#   `push_series` table, which stamped `dt=` from `datetime.now(ET)` at PUSH
+#   time (fixed at source in the otv4 half of this same revision).
+#   📊 MEASURED IN THE BUCKET 2026-09-23, 224,336 raw series objects walked:
+#   566 sat in the wrong `dt=` — `quote_series` 389, `surface_series` 146 —
+#   while `greeks_series`, `last_trade`, `session_summary` and `theo_series`
+#   were clean at zero. QQQ's 2026-09-22 session was split 6 objects into
+#   dt=2026-09-22 and 50 into dt=2026-09-23, and dt=2026-09-22 ALSO held 27
+#   objects of 09-21 rows: a reader of that partition got a fraction of the day
+#   it asked for PLUS a chunk of the day before, silently.
+#   ⚠️ `surface_series` IS WHY A NAME TEST CANNOT WORK: pushed with ns="dseries"
+#   yet written to `raw/surface_series/`, so `startswith("derived_")` missed it.
+#   The namespace and the key prefix are different things and only the key
+#   decides what a reader lists. `PUSH_DAY_FILED` is therefore an explicit list,
+#   pinned against `s3_push`'s own tables by `check_forward_scan_series` F1.
+#   🔑 THE PREDICATE IS EXTRACTED AS `forward_window()` so it can be gated at
+#   all — the whole defect was one line buried in a streaming loop.
+#   ⚠️ WIDENING IS SAFE BECAUSE ROWS ARE STILL KEPT BY THEIR OWN ET DAY below:
+#   a wider scan can cost listings, never admit a row from the wrong session.
 # v1.6 (2026-09-05) — dtp r290 / S3.21. 🔴 THIS METHOD READ THE WRONG ROWS IN
 #   BOTH DIRECTIONS, AND HAD SINCE IT WAS WRITTEN. It listed only the requested
 #   `dt=` partitions and filtered nothing afterwards — but a DERIVED partition
@@ -231,6 +254,34 @@ for _sig in (signal.SIGINT, signal.SIGTERM):
         pass
 
 
+# ── 🔴 r417 — THE TABLES WHOSE `dt=` IS THE PUSH DAY, NOT THE ROW'S DAY ────
+# Everything `s3_push.push_series` writes, raw namespace AND dseries namespace,
+# because both land under `raw/<table>/`. Kept as an explicit list rather than
+# a prefix test: `surface_series` is pushed with ns="dseries" and still writes
+# `raw/surface_series/`, so no name pattern separates these from `candles`.
+# ⚠️ Mirrors s3_push.SERIES_TABLES + DERIVED_SERIES_TABLES. If a table joins
+# either list there and not here, its history reads short and says nothing.
+PUSH_DAY_FILED = frozenset((
+    "greeks_series", "quote_series", "prints", "last_trade",
+    "session_summary", "theo_series", "underlying_series",
+    "fork_series", "indicator_series", "surface_series",
+    "character_axis_sample",
+))
+
+
+def forward_window(datatype: str, fwd: int) -> int:
+    """Days to scan PAST the requested date for `datatype`. 0 = none.
+
+    Extracted so the rule is testable without S3: the whole defect was a
+    one-line predicate whose justifying comment was true of `candles` and
+    false of every `push_series` table, and a predicate buried inside a
+    streaming loop is one nobody can put a gate on.
+    """
+    if datatype.startswith("derived_") or datatype in PUSH_DAY_FILED:
+        return int(fwd)
+    return 0
+
+
 class WarehouseCache:
     """A disposable SQLite mirror of the columns one report needs.
 
@@ -328,11 +379,33 @@ class WarehouseCache:
         # production callers (S3.11), so the correct behaviour sat on the dead
         # road while every real report used this one.
         fwd = WR.DERIVED_FORWARD_DAYS if forward is None else int(forward)
-        # ⚠️ ONLY FOR DERIVED STREAMS. A raw stream like `candles` or `ohlc` is
-        # partitioned by the day it describes, so a forward scan there would
-        # pull genuinely later sessions in.
-        if not dt.startswith("derived_"):
-            fwd = 0
+        # ⚠️ NOT FOR EVERY RAW STREAM — BUT NOT FOR NONE OF THEM EITHER.
+        # 🔴 r417 — THIS GATE'S JUSTIFICATION WAS TRUE OF `candles` AND `ohlc`
+        # AND FALSE OF EVERY `push_series` TABLE, AND THE WHOLE POINT OF THE
+        # FORWARD SCAN WAS BEING DENIED TO THE STREAMS THAT NEED IT MOST.
+        # `push_candles`/`push_table` derive `dt=` from the row, so those are
+        # genuinely partitioned by the day they describe and a forward scan
+        # there WOULD pull later sessions in — that part stands.
+        # But `push_series` stamped `dt=` from `datetime.now(ET)` at PUSH time
+        # (fixed at source in this same revision), so its partitions carry the
+        # PUSH day. Measured across the bucket 2026-09-23: 566 of 224,336 raw
+        # series objects sat in the wrong `dt=` — `quote_series` 389,
+        # `surface_series` 146 — and QQQ's 2026-09-22 session was split 6
+        # objects into dt=09-22 and 50 into dt=09-23. A reader of dt=09-22 got
+        # 6 of 56 of that day PLUS 27 objects belonging to 09-21. Silent, and
+        # plausible, which is C.9's failure mode exactly.
+        # ⚠️ `surface_series` IS WRITTEN UNDER `raw/<table>/`, NOT
+        # `raw/derived_<table>/`, EVEN THOUGH IT IS PUSHED WITH ns="dseries" —
+        # so `startswith("derived_")` missed it. The namespace and the key
+        # prefix are different things and only the key decides what a reader
+        # lists.
+        # 🔑 THE FORWARD SCAN IS SAFE HERE PRECISELY BECAUSE ROWS ARE KEPT BY
+        # THEIR OWN ET DAY below: scanning wider can only cost listings, never
+        # admit a row from the wrong session. And it stays correct AFTER the
+        # pusher fix, because rows filed under their own day are found on the
+        # first partition scanned — the window then costs nothing and covers
+        # the history that is still mis-filed.
+        fwd = forward_window(dt, fwd)
         scan = list(dates)
         if fwd:
             _last = datetime.strptime(dates[-1], "%Y-%m-%d")
