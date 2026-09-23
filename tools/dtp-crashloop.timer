@@ -1,0 +1,12 @@
+[Unit]
+Description=crash-loop sentinel timer (every 5 min through the session, ET)
+
+[Timer]
+# systemd resolves America/New_York itself, so DST needs no maintenance —
+# the same form dtp-morning.timer already uses. Holidays are NOT expressible
+# here and are refused by the script via market_calendar.is_trading_day().
+OnCalendar=Mon-Fri *-*-* 09..16:00/5:00 America/New_York
+Persistent=false
+
+[Install]
+WantedBy=timers.target
