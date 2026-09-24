@@ -1,6 +1,25 @@
 #!/usr/bin/env python3
 """
-tools/scratch_purge.py  v1.1
+tools/scratch_purge.py  v1.2
+v1.2  2026-09-23  r422 / OPS.46 — `--prune-builds` AND `--if-over`, BECAUSE THE
+      THING THAT FILLS THE QUOTA LIVES WHERE THIS TOOL CORRECTLY REFUSED TO GO.
+      Operator, 2026-09-23: *"Your scratchpad has a limit. We've reached it
+      before. You can't get a shell when we hit it. And you take up RAM too."*
+      🔴 `archive_scratch` SKIPS LIVE SESSIONS, rightly — deleting a live
+      session's working files mid-task breaks it. But on 2026-09-23 the 1.4 GB
+      that exhausted the quota was ENTIRELY the live session, so a timer built
+      on the old behaviour would have skipped the only directory that mattered
+      and logged "nothing to do". Checked before building, not after.
+      📊 MEASURED: 169 MB of a 176 MB scratchpad — 96% — was six `git clone`
+      directories from revisions that had ALREADY LANDED; one was 130 MB.
+      🔑 A CLONE IS ALWAYS SAFE TO DELETE: its contents either came from git or
+      were copied in from `stage/`, which is the payload and is never a clone.
+      So `--prune-builds` keys on `.git` alone and runs INSIDE live sessions.
+      There is deliberately no "is it clean" test — a build clone is dirty ON
+      PURPOSE, because gates run against patched files copied into it.
+      ⚠️ `--if-over MB` makes it cheap to run on a timer, and it SAYS what it
+      measured and what it decided either way (§0.5).
+      ⚠️ `/tmp` IS tmpfs, so every byte pruned is host RAM returned, not disk.
 v1.1  2026-09-20  r404 / OPS.27 — THREE DEFECTS, ALL FOUND BY VERIFYING THE
       FIRST LIVE RUN RATHER THAN BY ACCEPTING THAT IT HAD WORKED.
       🔴 (1) IT DELETED, SILENTLY, IN THE TOOL WHOSE STATED PRINCIPLE IS THAT
@@ -113,6 +132,29 @@ RETENTION_DAYS = int(os.environ.get("CLAUDE_SCRATCH_RETENTION_DAYS", "14"))
 # thread a dangling reference — the failure mi_handoff_fresh_claude's own
 # comment records from its first cut.
 HANDOFF_KEEP = int(os.environ.get("CLAUDE_HANDOFF_KEEP", "3"))
+
+# ── 🔴 r422 / OPS.46 — BUILD CLONES ARE THE GROWTH, AND THEY LIVE INSIDE THE
+# LIVE SESSION WHERE `archive_scratch` CORRECTLY REFUSES TO GO.
+# Measured 2026-09-23 on this box: 169 MB of a 176 MB scratchpad — 96% — was
+# six `git clone` directories from revisions that had already landed. One was
+# 130 MB. On 2026-09-23 the same accumulation reached ~1.4 GB and a clone
+# failed with `Disk quota exceeded` while `df` still showed 540 MB free: the
+# filesystem had room and the USER did not, so no shell, no clone, no land.
+# 🔑 A CLONE IS THE ONE THING HERE THAT IS ALWAYS SAFE TO DELETE. Everything in
+# it either came from git (reconstructible in seconds) or was copied IN from
+# `stage/`, which is the payload and is never a clone. So the rule keys on the
+# presence of `.git` and nothing else — no "is it clean" test, because a build
+# clone is DELIBERATELY dirty (gates run against patched files copied into it).
+# ⚠️ AND IT RESPECTS A GRACE WINDOW, because an in-flight build is a clone too.
+BUILD_GRACE_MIN = int(os.environ.get("CLAUDE_BUILD_GRACE_MIN", "120"))
+# ⚠️ SIX, NOT FOUR, AND THE DRY RUN IS WHY. The real layout is
+#   <root>/<project>/<session>/scratchpad/<rev>/<clone>
+# which puts a build clone at DEPTH 5. The first cut capped the walk at 4 and
+# reported "no build clones found" against a scratchpad holding six of them —
+# a confident zero, which is the worst kind. Found by running it against the
+# live tree rather than reasoning about the path.
+BUILD_SCAN_DEPTH = int(os.environ.get("CLAUDE_BUILD_SCAN_DEPTH", "6"))
+_VERSION = "v1.2"
 HANDOFF_DIRS = [os.environ.get(
     "CLAUDE_HANDOFF_DIR", os.path.join(HOME, "options-trader-v4", "handoffs"))]
 # A directory younger than this is left alone even when nothing holds it open —
@@ -432,13 +474,132 @@ def sweep_retention(dry: bool) -> int:
     return dropped
 
 
+def _tombstone(path: str, size: int) -> None:
+    """Leave the explanation WHERE THE DIRECTORY WAS.
+
+    🔴 THE OPERATOR'S OBJECTION, AND IT IS THE RIGHT ONE: *"I don't want future
+    agents wondering why their files are getting deleted."* A log in
+    `logs/scratch_purge.log` is a durable record and it is NOT where a confused
+    agent looks — it looks at the path that used to hold its build. An absence
+    with no note at the scene is the plausible-silence class this project keeps
+    paying for (§0.5): the tool knows exactly what happened and the person who
+    needs that knowledge never meets it.
+    ⚠️ SO THE NOTE GOES AT THE PATH, carries the RECREATE COMMAND, and points
+    at the full log. It is a few hundred bytes standing in for hundreds of
+    megabytes, and it is never itself pruned — it holds no `.git`.
+    """
+    try:
+        with open(path + ".PRUNED.txt", "w", encoding="utf-8") as fh:
+            fh.write(
+                "This directory was a GIT CLONE and was removed by\n"
+                "  tools/scratch_purge.py " + _VERSION + "\n"
+                "at " + _et_stamp() + ", freeing " + _sz(size) + ".\n"
+                "\n"
+                "WHY: /tmp is a tmpfs, so scratch bytes are HOST RAM, and the\n"
+                "scratch root is under a per-user quota. When that quota is hit\n"
+                "nothing can be written at all — no shell, no clone, no land\n"
+                "(observed 2026-09-23).\n"
+                "\n"
+                "NOTHING UNIQUE WAS LOST. A build clone's contents come either\n"
+                "from git or from the sibling stage/ directory, which is the\n"
+                "payload and is NEVER pruned. Recreate with:\n"
+                "    git clone --depth 1 file:///home/ubuntu/options-trader-v4 "
+                + path + "\n"
+                "  (or .../day_trader_pro for the dtp half)\n"
+                "\n"
+                "Full record: " + LOG_PATH + "\n"
+                "Delete this note freely; it is only here to answer the\n"
+                "question 'where did my build directory go'.\n")
+    except OSError as exc:
+        _log(f"  WARN could not write tombstone for {path}: {exc}")
+
+
+def prune_builds(dry: bool, grace_min: int = None) -> tuple:
+    """Remove git clones under SCRATCH_ROOT. -> (removed, bytes_freed).
+
+    Runs INSIDE live sessions on purpose — that is the whole point, because the
+    live session is where build clones accumulate and it is the one
+    `archive_scratch` must not touch wholesale.
+    """
+    grace = (BUILD_GRACE_MIN if grace_min is None else grace_min) * 60
+    if not os.path.isdir(SCRATCH_ROOT):
+        _log(f"no scratch root at {SCRATCH_ROOT} — no builds to prune")
+        return 0, 0
+    now = time.time()
+    removed = freed = 0
+    stack = [(SCRATCH_ROOT, 0)]
+    found = []
+    while stack:
+        d, depth = stack.pop()
+        if depth > BUILD_SCAN_DEPTH:
+            continue
+        try:
+            entries = os.listdir(d)
+        except OSError:
+            continue
+        if ".git" in entries:
+            found.append(d)
+            continue                      # do not descend into a clone
+        for e in sorted(entries):
+            sub = os.path.join(d, e)
+            if os.path.isdir(sub) and not os.path.islink(sub):
+                stack.append((sub, depth + 1))
+    if not found:
+        _log("no build clones found")
+        return 0, 0
+    for d in sorted(found):
+        rel = d[len(SCRATCH_ROOT):].lstrip(os.sep)
+        try:
+            age = now - os.lstat(d).st_mtime
+        except OSError:
+            continue
+        if age < grace:
+            _log(f"SKIP build {rel} — touched {int(age / 60)}m ago, inside the "
+                 f"{grace // 60}m grace window (may be an in-flight build)")
+            continue
+        _, size = dir_stats(d)
+        if not _contained(d, SCRATCH_ROOT):
+            _log(f"SKIP build {rel} — outside {SCRATCH_ROOT}, refusing")
+            continue
+        _log(f"{'WOULD PRUNE' if dry else 'PRUNE'} build {rel} {_sz(size)} "
+             f"(git clone — reconstructible)")
+        if not dry:
+            try:
+                shutil.rmtree(d)
+            except OSError as exc:
+                _log(f"  FAILED to remove {rel}: {exc}")
+                continue
+            _tombstone(d, size)
+        removed += 1
+        freed += size
+    return removed, freed
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[1])
     ap.add_argument("--dry-run", action="store_true",
                     help="report what would move; change nothing")
     ap.add_argument("--wait", type=int, default=0,
                     help="seconds to wait for other claude processes to exit")
+    ap.add_argument("--prune-builds", action="store_true",
+                    help="also remove git clones under the scratch root, "
+                         "INCLUDING inside live sessions (a clone is derived)")
+    ap.add_argument("--if-over", type=int, default=0, metavar="MB",
+                    help="do nothing unless the scratch root exceeds MB; "
+                         "for a timer, so a healthy box costs one log line")
     a = ap.parse_args(argv)
+
+    # ⚠️ THE THRESHOLD CHECK REPORTS WHAT IT MEASURED AND WHAT IT DECIDED.
+    # A guard that exits silently is indistinguishable from one that never
+    # ran, which is the plausible-silence class this repo keeps paying for.
+    if a.if_over:
+        _, cur = dir_stats(SCRATCH_ROOT)
+        if cur < a.if_over * (1 << 20):
+            _log(f"scratch {_sz(cur)} is under the {a.if_over} MB threshold "
+                 f"— nothing to do")
+            return 0
+        _log(f"scratch {_sz(cur)} EXCEEDS the {a.if_over} MB threshold "
+             f"— proceeding")
 
     _log(f"root={SCRATCH_ROOT} archive={ARCHIVE} retention={RETENTION_DAYS}d")
     _log(f"before: {quota_state()}")
@@ -448,6 +609,10 @@ def main(argv=None) -> int:
         else:
             _log(f"still {len(other_claude_pids())} claude process(es) after {a.wait}s "
                  f"— their scratch is SKIPPED, not forced")
+
+    pruned = pfreed = 0
+    if a.prune_builds:
+        pruned, pfreed = prune_builds(a.dry_run)
 
     sm, sf, se = archive_scratch(a.dry_run)
     hm, hf = archive_handoffs(a.dry_run)
@@ -459,7 +624,8 @@ def main(argv=None) -> int:
     _log(f"{'would archive' if a.dry_run else 'archived'}: "
          f"{sm} scratch dir(s) {_sz(sf)}, {hm} generated handoff(s) {_sz(hf)}; "
          f"removed {se} empty scratch dir(s); "
-         f"{dropped} archive entr{'y' if dropped == 1 else 'ies'} past {RETENTION_DAYS}d")
+         f"{dropped} archive entr{'y' if dropped == 1 else 'ies'} past {RETENTION_DAYS}d; "
+         f"{'would prune' if a.dry_run else 'pruned'} {pruned} build clone(s) {_sz(pfreed)}")
     _log(f"handoff dir: {HANDOFF_DIRS[0]} (keep newest {HANDOFF_KEEP})")
     _log(f"log: {LOG_PATH}")
     _log(f"after:  {quota_state()}")

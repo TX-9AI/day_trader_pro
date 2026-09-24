@@ -1,6 +1,22 @@
 #!/usr/bin/env python3
 """
-tests/check_scratch_purge.py  v1.1
+tests/check_scratch_purge.py  v1.2
+v1.2  2026-09-23  r422 / OPS.46 — P19..P22 FOR BUILD-CLONE PRUNING.
+      🔑 P20 DECIDES WHETHER THE FEATURE SHIPS, and it exists because of the
+      operator's objection rather than my design: *"I don't want future agents
+      wondering why their files are getting deleted."* A durable log does not
+      answer that — a confused agent looks at the PATH its build used to
+      occupy, not at `logs/`. So a prune must leave a TOMBSTONE there carrying
+      the recreate command, and P20 fails if it does not. MUTATION-PROVEN:
+      silencing `_tombstone()` reds P20 alone, printing
+      `clone removed=True tombstone=False`.
+      ⚠️ P21 AND P22 ARE DECLARED CONTROLS, and they are what make pruning safe
+      to run INSIDE a live session: a clone touched within the grace window
+      survives (it may be an in-flight build), and `stage/` — the payload,
+      which holds no `.git` — is never touched.
+      ⚠️ P19 pins that `--if-over` SAYS what it measured when it declines to
+      act. A guard that exits silently is indistinguishable from one that
+      never ran (§0.5).
 v1.1  2026-09-20  r404 / OPS.27 — P14..P18, AND THIS GATE STOPS MUTATING THE
       TREE IT CHECKS.
       🔴 v1.0 SWEPT THE LIVE `handoffs/` FOLDER EVERY TIME IT RAN. Only P2/P3
@@ -439,6 +455,63 @@ ck("P15", _HO_BEFORE == _HO_AFTER,
    f"this gate changed the live handoffs/ directory. before={_HO_BEFORE} "
    f"after={_HO_AFTER} — a checker that mutates its subject is worse than no "
    f"checker, and this file is named by a land.spec so it runs on every land")
+
+# ── r422 / OPS.46 — BUILD-CLONE PRUNING ─────────────────────────────────────
+# 🔴 THE OPERATOR'S OBJECTION IS P20, AND IT IS THE CHECK THAT DECIDES WHETHER
+# THIS SHIPS: *"I don't want future agents wondering why their files are
+# getting deleted."* A durable log is not where a confused agent looks — it
+# looks at the path that used to hold its build. So the tombstone must exist AT
+# THE PATH and must carry the recreate command.
+def _mk_clone(root, rel):
+    d = os.path.join(root, rel)
+    os.makedirs(os.path.join(d, ".git"), exist_ok=True)
+    with open(os.path.join(d, "payload.txt"), "w") as fh:
+        fh.write("from git")
+    return d
+
+
+def _age(path, minutes):
+    old = time.time() - minutes * 60
+    os.utime(path, (old, old))
+
+
+with tempfile.TemporaryDirectory() as tmp:
+    sr = os.path.join(tmp, "scratch"); ar = os.path.join(tmp, "arch")
+    proj = os.path.join(sr, "proj", "sess", "scratchpad")
+    os.makedirs(proj, exist_ok=True)
+    stale = _mk_clone(proj, "r100/bo")
+    fresh = _mk_clone(proj, "r101/bo")
+    stage = os.path.join(proj, "r100", "stage")
+    os.makedirs(stage, exist_ok=True)
+    with open(os.path.join(stage, "land.spec"), "w") as fh:
+        fh.write("REV r100")          # the PAYLOAD — must never be pruned
+    _age(stale, 600)                  # well outside the grace window
+    env = {"CLAUDE_SCRATCH_ROOT": sr, "CLAUDE_SCRATCH_ARCHIVE": ar,
+           "CLAUDE_BUILD_GRACE_MIN": "120"}
+
+    # P19 — --if-over UNDER the threshold does nothing, and SAYS so
+    r19 = run(env, "--prune-builds", "--if-over", "100000")
+    ck("P19", os.path.isdir(stale) and "under the" in (r19.stdout + r19.stderr),
+       "--if-over below threshold must not prune, and must say what it "
+       "measured; a guard that exits silently reads like one that never ran")
+
+    # P20 — the prune leaves a TOMBSTONE at the path, naming the recreate
+    r20 = run(env, "--prune-builds")
+    tomb = stale + ".PRUNED.txt"
+    body = open(tomb).read() if os.path.exists(tomb) else ""
+    ck("P20", (not os.path.isdir(stale)) and os.path.exists(tomb)
+       and "git clone" in body and "tmpfs" in body,
+       f"clone removed={not os.path.isdir(stale)} tombstone={os.path.exists(tomb)} "
+       f"names-recreate={'git clone' in body} — the note must sit WHERE the "
+       f"directory was and say how to rebuild it")
+
+    # P21 — CONTROL: a clone inside the grace window survives
+    ck("P21", os.path.isdir(fresh),
+       "a freshly-touched clone may be an in-flight build and must be SKIPPED")
+
+    # P22 — CONTROL: the sibling stage/ payload is never touched
+    ck("P22", os.path.exists(os.path.join(stage, "land.spec")),
+       "stage/ is the PAYLOAD, holds no .git, and must survive a prune")
 
 bad = [n for n, ok, _ in _res if not ok]
 print(f"\n  {len(_res) - len(bad)}/{len(_res)} passed")

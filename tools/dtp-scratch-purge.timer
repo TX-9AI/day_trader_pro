@@ -1,0 +1,11 @@
+[Unit]
+Description=scratch purge timer (every 30 min; /tmp is tmpfs, so this is RAM)
+
+[Timer]
+# Not market-scoped: an agent fills the scratchpad whenever it works, not only
+# during RTH. Cheap because --if-over short-circuits on a healthy box.
+OnCalendar=*:0/30
+Persistent=false
+
+[Install]
+WantedBy=timers.target

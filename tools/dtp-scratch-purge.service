@@ -1,0 +1,13 @@
+[Unit]
+Description=day_trader_pro scratch purge (prune stale build clones from tmpfs)
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/day_trader_pro
+# ⚠️ --if-over MAKES A HEALTHY BOX COST ONE LOG LINE. The threshold is half the
+# observed failure point (~1.4 GB, 2026-09-23), so it acts well before a write
+# can fail. --prune-builds is what reaches INSIDE the live session, which is
+# where build clones accumulate and where archive_scratch correctly will not go.
+ExecStart=/usr/bin/python3 /home/ubuntu/day_trader_pro/tools/scratch_purge.py --if-over 600 --prune-builds
