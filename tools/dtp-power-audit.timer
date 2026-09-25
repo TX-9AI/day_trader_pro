@@ -1,0 +1,15 @@
+[Unit]
+Description=fleet power audit timer (hourly outside the trading window, ET)
+
+[Timer]
+# 🔑 IT RUNS WHEN BEING UP IS WRONG, not when it is normal. Hourly from 17:00
+# through 08:00 ET covers every hour the fleet is meant to be down, including
+# overnight and weekends — the window in which tonight's box sat running for
+# 2h40m with nothing watching. systemd resolves America/New_York itself, so
+# DST needs no maintenance (same form as dtp-crashloop.timer).
+OnCalendar=*-*-* 17..23:05:00 America/New_York
+OnCalendar=*-*-* 00..08:05:00 America/New_York
+Persistent=false
+
+[Install]
+WantedBy=timers.target

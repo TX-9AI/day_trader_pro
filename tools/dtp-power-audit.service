@@ -1,0 +1,10 @@
+[Unit]
+Description=day_trader_pro fleet power audit (boxes up outside the trading window)
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/day_trader_pro
+EnvironmentFile=/home/ubuntu/day_trader_pro/.env
+ExecStart=/home/ubuntu/day_trader_pro/venv/bin/python /home/ubuntu/day_trader_pro/tools/fleet_power_audit.py --quiet --notify

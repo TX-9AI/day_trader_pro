@@ -1,4 +1,11 @@
-# day_trader_pro/fleet.py — v0.9.0
+# day_trader_pro/fleet.py — v0.9.1
+# v0.9.1 (2026-09-24) — r424 / OPS.48. `_wake()` NO LONGER CALLS boto3 ITSELF.
+#   It was a SECOND way to power a box, and a second way is a way past the
+#   ledger: a wake issued here left no row anywhere, so "who started this box"
+#   was unanswerable for precisely the path someone reaches for when the
+#   orchestrator is not what they want. It now routes through ec2ops.start().
+#   The dead registry-starter probe is removed with it — see _wake's docstring
+#   for why a hole that opens on a future unrelated edit is the worse kind.
 # v0.9.0 (2026-09-21) — r412 / OPS.37. THE PING BOARD SHOWS THE PUBLIC IP.
 #   Operator, 2026-09-21, from a phone at 15:24: *"add the public IP to
 #   report number eight"* — and [[OPS.20]] already recorded why it matters:
@@ -138,6 +145,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import config
+import ec2ops
 import instance_registry
 import ssh_util
 
@@ -305,10 +313,26 @@ def cmd_run(command, only=None, include_all=False, timeout=None):
 # ─── Fleet update (fresh pull + restart + verify) ────────────────────────────
 
 def _wake(stopped):
-    """Start stopped instances. Best-effort and non-fatal:
-      1) if the registry exposes a starter, use it;
-      2) else fall back to boto3 start_instances using instance_id from discover;
-      3) else print how to start them by hand and continue with running boxes.
+    """Start stopped instances through ec2ops — the ONE power chokepoint.
+
+    🔴 r424 / OPS.48 — THIS FUNCTION USED TO CALL boto3 start_instances ITSELF.
+    That made it a second way to power a box, and a second way is a way past
+    the ledger: a wake issued here would have left no row in
+    logs/fleet_power.log, so "who started this box" would have been
+    unanswerable for exactly the path an operator reaches for when the
+    orchestrator is not what they want. It now routes through ec2ops.start(),
+    which records every power change.
+
+    ⚠️ THE REGISTRY-STARTER PROBE WAS ALSO REMOVED, and it is worth saying why
+    rather than deleting it quietly: it looked up "start_instances", "start" or
+    "wake" on instance_registry and used whichever existed. instance_registry
+    defines NONE of them, so the loop has never once fired and its removal is
+    behaviour-neutral today — but the day someone adds a `start()` helper to
+    the registry it would have silently become the wake path and bypassed the
+    ledger again. A hole that opens on an unrelated future edit is worse than
+    one that is open now, because nothing will be looking.
+
+    Best-effort and non-fatal: a failed wake continues with running boxes.
     """
     symbols = [s for s, _, _ in stopped]
     if not symbols:
@@ -318,19 +342,7 @@ def _wake(stopped):
         print(f"  [mock] would start: {', '.join(symbols)}")
         return
 
-    # 1) registry-provided starter, if present
-    for fn in ("start_instances", "start", "wake"):
-        if hasattr(instance_registry, fn):
-            try:
-                getattr(instance_registry, fn)(symbols)
-                print(f"  instance_registry.{fn}() issued for {len(symbols)} box(es)")
-                return
-            except Exception as e:
-                print(f"  registry.{fn}() failed ({e}); trying boto3…")
-
-    # 2) boto3 fallback via instance_id from the registry
     try:
-        import boto3
         mapping, _ = instance_registry.discover(symbols)
         ids = [mapping[s].get("instance_id")
                for s in symbols
@@ -340,10 +352,9 @@ def _wake(stopped):
                   "     Start these in the EC2 console (or add instance_id to the\n"
                   "     registry), then re-run `update` without --wake.")
             return
-        region = getattr(config, "AWS_REGION", None)
-        ec2 = boto3.client("ec2", region_name=region) if region else boto3.client("ec2")
-        ec2.start_instances(InstanceIds=ids)
-        print(f"  start_instances issued for {len(ids)} instance(s)")
+        ec2ops.start(ids)
+        print(f"  ec2ops.start() issued for {len(ids)} instance(s) — logged to "
+              f"{os.path.basename(ec2ops.POWER_LOG)}")
     except Exception as e:
         print(f"  ⚠️  wake failed ({e}); continuing with already-running boxes.")
 

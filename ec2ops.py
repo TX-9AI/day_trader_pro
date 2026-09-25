@@ -1,4 +1,19 @@
-# day_trader_pro/ec2ops.py — v0.1.3
+# day_trader_pro/ec2ops.py — v0.1.4
+# v0.1.4 (2026-09-24) — r424 / OPS.48. THE POWER LEDGER, WRITTEN AT THE
+#   CHOKEPOINT RATHER THAN AT THE ERGONOMIC PATH. Every start and stop now
+#   appends who/what/when/scope to logs/fleet_power.log.
+#   🔴 THE FIRST SCOPING OF THIS ROW WOULD NOT HAVE CAUGHT THE INCIDENT THAT
+#   PRODUCED IT. OPS.48 was first proposed as a log inside wake_and_bake; but
+#   on 2026-09-24 SPX was woken by an ad-hoc `python -c` calling ec2ops.start()
+#   directly, bypassing wake_and_bake entirely. A gate on the convenient path
+#   never binds the improvised one — the same failure shape r420's P4 and
+#   r417's reader gate both record. start()/stop() are where orchestrator,
+#   wake_and_bake, eod_backfill, fleet.py and any throwaway one-liner all
+#   converge, so this is the ONLY place a record binds all of them.
+#   ⚠️ THE LEDGER CAN NEVER RAISE. A stop that failed because its LOG could not
+#   be written would strand a running box — the precise cost this module exists
+#   to avoid — so every logging failure is swallowed and the power operation
+#   proceeds regardless. Pinned by check_fleet_power_log.py P4.
 # v0.1.3 (2026-09-24) — r423 / OPS.47. ADD `describe_by_tag()`, the fleet's
 #   single source of truth for WHO EXISTS. Filters on config.FLEET_TAG_KEY /
 #   FLEET_TAG_VALUE and on running-or-stopped state, so a terminated box can
@@ -35,6 +50,7 @@ Public surface:
 
 import json
 import os
+import sys
 import time
 
 import config
@@ -226,10 +242,55 @@ def describe_by_names(names):
     return found
 
 
+HERE = os.path.dirname(os.path.abspath(__file__))
+POWER_LOG = os.environ.get("OT_FLEET_POWER_LOG",
+                           os.path.join(HERE, "logs", "fleet_power.log"))
+
+
+def _caller():
+    """The first frame OUTSIDE this module — who actually asked for the power
+    change. An ad-hoc `python -c` resolves to <string>, which is itself the
+    answer worth having: it says no tool did this, a person or an agent typed
+    it."""
+    try:
+        import traceback
+        for fr in reversed(traceback.extract_stack()[:-2]):
+            if os.path.basename(fr.filename) != "ec2ops.py":
+                return f"{os.path.basename(fr.filename)}:{fr.lineno}:{fr.name}"
+    except Exception:                                          # noqa: BLE001
+        pass
+    return "unknown"
+
+
+def _power_log(action, ids, note=""):
+    """Append one row to the power ledger. NEVER raises — see the v0.1.4 note."""
+    try:
+        try:
+            import ettime
+            ts = ettime.now_et().strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:                                      # noqa: BLE001
+            import datetime
+            from zoneinfo import ZoneInfo
+            ts = datetime.datetime.now(
+                ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S")
+        argv = " ".join(sys.argv)[:200] or "-"
+        mock = " MOCK" if config.MOCK_AWS else ""
+        row = (f"{ts} ET  {action:<5}{mock}  {','.join(ids)}  "
+               f"caller={_caller()}  pid={os.getpid()}  argv={argv}{note}\n")
+        d = os.path.dirname(POWER_LOG)
+        if d:
+            os.makedirs(d, exist_ok=True)
+        with open(POWER_LOG, "a", encoding="utf-8") as fh:
+            fh.write(row)
+    except Exception:                                          # noqa: BLE001
+        pass
+
+
 def start(instance_ids):
     ids = [i for i in instance_ids if i]
     if not ids:
         return
+    _power_log("START", ids)
     if config.MOCK_AWS:
         _mock_set_state(ids, "pending")
         # Simulate the transition to running immediately for the demo.
@@ -243,6 +304,7 @@ def stop(instance_ids):
     ids = [i for i in instance_ids if i]
     if not ids:
         return
+    _power_log("STOP", ids)
     if config.MOCK_AWS:
         _mock_set_state(ids, "stopping")
         _mock_set_state(ids, "stopped")
