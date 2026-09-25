@@ -1,4 +1,29 @@
-# day_trader_pro/trade_report.py — v1.19
+# day_trader_pro/trade_report.py — v1.20
+# v1.20 (2026-09-25) — r428 / OPS.52. R PER BUCKET, AND THE HEADLINE STOPS
+#   RANKING ACROSS LINEAGES. Operator on the TEST boxes: *"the 2 test boxes are
+#   trading a 10% nominal position size... The P&L will be minuscule, but the
+#   R-multiple is what I'll be looking at."*
+#   🔴 RANKING BY NET $ ACROSS LINEAGES IS MEANINGLESS AND WAS ACTIVELY
+#   MISLEADING. At 10% nominal a TEST bucket can never be best or worst in
+#   dollars; it sits near zero forever and reads as "nothing happening", which
+#   is the opposite of the truth. best/worst for the STRATEGY dimension is now
+#   computed WITHIN each lineage and labelled with it.
+#   🔑 R IS SIZE-INVARIANT, which is exactly why the operator asked for it:
+#   P&L and risk both scale with contracts, so pnl/risk is unaffected by the
+#   10% sizing. Dollars are not comparable across lineages; R is.
+#
+#   🔴 R IS GROSS OF FEES, DELIBERATELY, AND THIS IS A RULING — NOT A DEFECT.
+#   Operator, 2026-09-25: *"We have to leave fees out because that distorts
+#   small contracts. In some cases, the fees will exceed the contract values
+#   simply because it's such small numbers, but the R value shouldn't be
+#   diminished because of this."*
+#   ⚠️ IT WILL LOOK LIKE A BUG TO A FRESH READER, so it is written here and
+#   pinned by check_r_excludes_fees.py. On a $13-17 underlying with $0.50
+#   strikes, options price in cents — fleet median entry premium is $1.48 and
+#   the bottom band medians $0.39 — while per-contract fees are FIXED. Netting
+#   them would make R a measure of the price point rather than of the strategy,
+#   and the two test boxes exist to measure fills and management, not tick
+#   size. FEES REMAIN VISIBLE IN THEIR OWN COLUMN; they simply never enter R.
 # v1.19 (2026-09-25) — r426 / OPS.50. TWO ENGINES NOW WRITE INTO ONE CORPUS, SO
 #   EVERY PER-STRATEGY ROW IS KEYED (lineage, code) AND THE TWO ARE NEVER
 #   SUMMED. Six strategy names exist in both engines and all six are DIFFERENT
@@ -512,6 +537,28 @@ def bucket(trades: List[dict], key: str) -> Dict[str, dict]:
 from fees_bridge import bucket_fees, FEES_ERR                    # noqa: E402,F401
 
 
+def _bucket_r(rows) -> dict:
+    """{'r_gross', 'r_n'} — aggregate R for a bucket, GROSS OF FEES (r428).
+
+    🔴 GROSS IS THE RULING, NOT AN OVERSIGHT. See the v1.20 header. `pnl_usd`
+    is gross by construction — verified against premium math on every row of
+    2026-09-24 — and nothing here nets fees into it.
+    ⚠️ r_n TRAVELS WITH r_gross. A bucket where few rows carry a usable risk
+    basis has an R built on a fraction of itself, and an R printed without its
+    n is the kind of number this repo keeps having to retract.
+    """
+    num, den, n = 0.0, 0.0, 0
+    for t in rows:
+        rt = risk_taken(t)
+        pnl = _f(t.get("pnl_usd"))
+        if rt is None or rt <= 0 or pnl is None:
+            continue
+        num += pnl
+        den += rt
+        n += 1
+    return {"r_gross": round(num / den, 3) if den else None, "r_n": n}
+
+
 def stats_of(rows: List[dict]) -> dict:
     pnls = [_f(r.get("pnl_usd")) for r in rows]
     pnls = [p for p in pnls if p is not None]
@@ -532,6 +579,12 @@ def stats_of(rows: List[dict]) -> dict:
         "gross_win": round(sum(wins), 2),
         "gross_loss": round(sum(p for p in pnls if p <= 0), 2),
         "median_hold_min": round(statistics.median(holds), 1) if holds else None,
+        # r428 — AGGREGATE R FOR THIS BUCKET, on the stop actually taken, and
+        # GROSS OF FEES by the operator's ruling (see the v1.20 header).
+        # Aggregate rather than mean-of-R so one huge-risk trade cannot be
+        # averaged away by many small ones — the same choice the HEADLINE R
+        # already makes, so the two agree by construction.
+        **_bucket_r(rows),
         # r294 — the modelled round-trip cost of THIS bucket, and how many of
         # its rows the model could not price. Both travel together; a total
         # that hides its unpriced count understates itself.
@@ -655,11 +708,29 @@ def exit_concentration(trades: List[dict], min_n: int) -> Dict[str, dict]:
 
 
 # ── display ──────────────────────────────────────────────────────────────────
+def _r_cell(a) -> str:
+    """R for one row of a dimension table, or a dash — never a fabricated 0.
+
+    ⚠️ A BUCKET WITH NO USABLE RISK BASIS PRINTS `-`, NOT 0.000. Zero R and
+    "we could not measure R" are different facts, and printing the first for
+    the second is the plausible-silence class this repo keeps finding in its
+    own instruments (§0.5).
+    ⚠️ AND IT IS FLAGGED WHEN THE BASIS IS THIN: an R computed from under half
+    the bucket's rows gets a `~`, because an unqualified number invites a
+    conclusion the sample cannot carry.
+    """
+    r = a.get("r_gross")
+    if r is None:
+        return f"{'-':>8}"
+    thin = a.get("r_n", 0) < max(1, a.get("n", 0) / 2)
+    return f"{('~' if thin else '') + f'{r:+.3f}':>8}"
+
+
 def show(title: str, d: Dict[str, dict], min_n: int, width: int = 26) -> None:
     if not d:
         return
     print(f"\n{title}")
-    print(f"  {'':<{width}}{'N':>5}{'WIN%':>7}{'NET $':>11}{'AVG $':>9}"
+    print(f"  {'':<{width}}{'N':>5}{'WIN%':>7}{'NET $':>11}{'R':>8}{'AVG $':>9}"
           f"{'HOLD m':>7}{'FEES $':>10}")
     for k, a in sorted(d.items(), key=lambda kv: -kv[1]["net"]):
         h = f"{a['median_hold_min']:>7.1f}" if a["median_hold_min"] is not None else "      -"
@@ -684,7 +755,7 @@ def show(title: str, d: Dict[str, dict], min_n: int, width: int = 26) -> None:
             fee_s = f"{-f:>10.2f}"
         star = "*" if a.get("fees_unpriced") else " "
         print(f"  {k[:width]:<{width}}{a['n']:>5}{a['win_rate']:>7.0%}"
-              f"{a['net']:>11.2f}{a['avg']:>9.2f}{h}{fee_s}{star}")
+              f"{a['net']:>11.2f}{_r_cell(a)}{a['avg']:>9.2f}{h}{fee_s}{star}")
 
 
 # ── r202 — THE TRADES THEMSELVES ──────────────────────────────────────────
@@ -1054,6 +1125,20 @@ def main(argv: List[str]) -> int:
                      ("symbol_x_strategy", crosses["symbol_x_strategy"])]:
         findings[f"best_{label}"] = rank(d, args.min_n)
         findings[f"worst_{label}"] = rank(d, args.min_n, worst=True)
+        # 🔴 r428 — THE STRATEGY DIMENSION IS RANKED WITHIN EACH LINEAGE, NEVER
+        # ACROSS. The TEST boxes run ~10% nominal size, so a TEST bucket can
+        # never be best or worst in DOLLARS: it sits near zero and reads as
+        # "nothing happening", which is the opposite of the truth. Ranking two
+        # engines against each other by net $ compares position sizes, not
+        # strategies. The global line above is kept for the other dimensions
+        # and for a single-lineage window; these per-lineage ones are what the
+        # headline actually prints for strategy.
+        if label == "strategy":
+            for _lin in sorted({k.split("/", 1)[0] for k in d if "/" in k}):
+                _sub = {k: v for k, v in d.items() if k.startswith(f"{_lin}/")}
+                findings[f"best_strategy@{_lin}"] = rank(_sub, args.min_n)
+                findings[f"worst_strategy@{_lin}"] = rank(_sub, args.min_n,
+                                                          worst=True)
     findings["best_trade"] = best_t
     findings["worst_trade"] = worst_t
 
@@ -1158,7 +1243,25 @@ def main(argv: List[str]) -> int:
             print("       exits may be cutting runners as fast as mistakes.")
 
     print("\nHEADLINE")
-    for lab in ("strategy", "symbol", "session_phase", "day_of_week"):
+    # r428 — strategy first, ONE PAIR PER LINEAGE. Dollars are not comparable
+    # across engines at 10% nominal; R is, and it is in the table above.
+    _lins = sorted({k.split("@", 1)[1] for k in findings
+                    if k.startswith("best_strategy@") and findings[k]})
+    for _lin in _lins:
+        b = findings.get(f"best_strategy@{_lin}")
+        w = findings.get(f"worst_strategy@{_lin}")
+        if b:
+            print(f"  best strategy  [{_lin}] {b['key'][:24]:<24} "
+                  f"net {b['net']:>+10.2f} (n={b['n']})")
+        if w and w.get("n_elig", 2) >= 2 and w["key"] != (b or {}).get("key"):
+            print(f"  worst strategy [{_lin}] {w['key'][:24]:<24} "
+                  f"net {w['net']:>+10.2f} (n={w['n']})")
+    if len(_lins) > 1:
+        print("  \u26a0\ufe0f  ranked WITHIN each lineage — the TEST boxes run ~10% "
+              "nominal size, so")
+        print("      cross-lineage dollar comparison measures position size, "
+              "not strategy. Use R.")
+    for lab in (() if _lins else ("strategy",)) + ("symbol", "session_phase", "day_of_week"):
         b, w = findings.get(f"best_{lab}"), findings.get(f"worst_{lab}")
         if b:
             print(f"  best {lab:<14} {b['key'][:30]:<30} net {b['net']:>+10.2f} (n={b['n']})")
