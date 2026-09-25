@@ -1,4 +1,7 @@
-# day_trader_pro/selector.py  v0.4.1
+# day_trader_pro/selector.py  v0.4.2
+# v0.4.2 (2026-09-24)  r423 / OPS.47. PANEL 15 -> 17 (AAL, SOFI), mirroring
+#   config.UNIVERSE. Pinned by tests/test_panel_mirror.py C1, which exists
+#   precisely so these two lists cannot drift apart in three repositories.
 # v0.3.1 (2026-08-17)  THE PANEL IS HARDCODED, NOT AN ENV VAR. v0.3.0 read
 #   OT_PANEL_OVERRIDE; the operator's answer  "I'm not setting jack shit in
 #   the morning"  is the correct one: a variable that must be exported before
@@ -218,7 +221,8 @@ def _validate(raw):
 # **A box that stopped collecting because it stopped trading would be a box
 # whose pitchfork and ADX depth quietly dies** - WA §30.
 PANEL = ["NVDA", "SPX", "PLTR", "MU", "QQQ", "GOOGL", "AMZN", "AVGO",
-         "TSLA", "META", "NFLX", "CRM", "UNH", "CVX", "AMD"]
+         "TSLA", "META", "NFLX", "CRM", "UNH", "CVX", "AMD",
+         "AAL", "SOFI"]
 
 
 def select(report):

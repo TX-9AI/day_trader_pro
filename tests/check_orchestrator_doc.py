@@ -1,5 +1,14 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/check_orchestrator_doc.py — v1.0
+# day_trader_pro/tests/check_orchestrator_doc.py — v1.1
+# v1.1 (2026-09-24) — r423 / OPS.47. REPOINTED: the wake is governed by
+#   FLEET_TAG_KEY / FLEET_TAG_VALUE now, so O2 demands the prose name THOSE
+#   rather than the retired baseline constants, and O3 becomes a CREEP
+#   DETECTOR — it goes red if the wake list is ever derived from UNIVERSE
+#   again. ⚠️ MY FIRST CREEP PREDICATE WAS WRONG AND IS RECORDED RATHER THAN
+#   TIDIED: it tested whether any line mentioned both names, which flagged the
+#   entirely correct reporting line that NAMES boxes missing from the brief.
+#   It now tests the ASSIGNMENT. A substring is not a predicate; this was the
+#   fourth checker self-match of the session (section 20).
 # v1.0 (2026-09-20) — r409 / DOC.27. THE MORNING SPOOL-UP'S DOCSTRING SAID IT
 #   WAKES TWO BOXES. IT WAKES FIFTEEN, AND THE FILE CONTRADICTED ITSELF.
 #   `orchestrator.py` is the file that decides what the fleet does at 09:15 ET.
@@ -104,30 +113,54 @@ def main():
         report("O1", not prose.strip() == "",
                "code does NOT select; prose must say so (inverted case)")
 
-    # ── O2 — name the constants, not a frozen list ─────────────────────────
-    names = ("ALWAYS_ON" in prose) and ("MAX_DISCRETIONARY" in prose)
+    # ── O2 — name the constants THAT NOW GOVERN ────────────────────────────
+    # 🔴 r423 — REPOINTED, NOT LOOSENED. This check asked for ALWAYS_ON and
+    # MAX_DISCRETIONARY because those decided the wake. They no longer do: the
+    # fleet is DISCOVERED by FLEET_TAG_KEY=FLEET_TAG_VALUE and config.UNIVERSE
+    # is not consulted at all. Leaving the old assertion would have pinned the
+    # prose to a policy the operator retired — a gate can rot the same way a
+    # docstring can, and this one would have insisted the file keep describing
+    # something untrue. The behavioural half now lives in
+    # check_fleet_discovery.py F1-F5, which is stronger than any prose test.
+    names = ("FLEET_TAG_KEY" in prose) or ("FLEET_TAG_VALUE" in prose)
     report("O2", names,
-           "prose names ALWAYS_ON and MAX_DISCRETIONARY, so it cannot rot "
-           "when either moves"
+           "prose names the tag constants that govern the wake, so it cannot "
+           "rot when they move"
            if names else
-           "prose does not name both governing constants — a hardcoded "
-           "wake list rots the next time either changes")
+           "prose does not name FLEET_TAG_KEY/FLEET_TAG_VALUE — the wake is "
+           "discovered by tag and a doc that does not say so rots on the next "
+           "change")
 
-    # ── O3 — CONTROL. Green at HEAD by design; it pins the premise. ────────
+    # ── O3 — CONTROL. The premise O2 now rests on is the TAG, not a count. ──
     cfg = os.path.join(ROOT, "config.py")
     try:
         ctext = open(cfg, encoding="utf-8", errors="replace").read()
-        always = re.search(r"^ALWAYS_ON\s*=\s*(\[[^\]]*\])", ctext, re.M)
-        maxd = re.search(r"^MAX_DISCRETIONARY\s*=\s*(\d+)", ctext, re.M)
-        if always and maxd:
-            n = len(ast.literal_eval(always.group(1))) + int(maxd.group(1))
+        k = re.search(r"^FLEET_TAG_KEY\s*=", ctext, re.M)
+        v = re.search(r"^FLEET_TAG_VALUE\s*=", ctext, re.M)
+        # ⚠️ AND THE UNIVERSE MUST NOT BE BACK IN THE WAKE PATH. If a future
+        # edit re-introduces config.UNIVERSE as the wake source, this says so.
+        src = open(os.path.join(ROOT, "orchestrator.py"),
+                   encoding="utf-8", errors="replace").read()
+        code = [ln for ln in src.splitlines()
+                if ln.strip() and not ln.lstrip().startswith("#")]
+        # ⚠️ THE ASSIGNMENT, NOT THE MENTION. My first cut tested
+        # `"wake_list" in ln and "UNIVERSE" in ln`, which flagged the perfectly
+        # correct reporting line
+        #     _unlisted = [s for s in wake_list if s not in config.UNIVERSE]
+        # — a check that NAMES boxes missing from the brief. Creep means
+        # wake_list is DERIVED from the universe, so the test is an assignment
+        # to wake_list whose right-hand side mentions it. Fourth self-match of
+        # this session; the lesson is that a substring is never a predicate.
+        creep = bool(re.search(r"^\s*wake_list\s*=\s*[^#\n]*UNIVERSE",
+                               "\n".join(code), re.M))
+        if k and v and not creep:
             report("O3", True,
-                   f"CONTROL — ALWAYS_ON={always.group(1)} + "
-                   f"MAX_DISCRETIONARY={maxd.group(1)} => wakes {n}")
+                   "CONTROL — config.py defines FLEET_TAG_KEY/FLEET_TAG_VALUE "
+                   "and orchestrator does not derive wake_list from UNIVERSE")
         else:
             report("O3", False,
-                   "CONTROL — could not read ALWAYS_ON / MAX_DISCRETIONARY "
-                   "from config.py; the premise O2 rests on is unreadable")
+                   f"CONTROL — tag constants present={bool(k and v)}, "
+                   f"UNIVERSE back in the wake path={creep}")
     except OSError as e:
         report("O3", False, f"CONTROL — config.py unreadable: {e}")
     return rc

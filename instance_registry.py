@@ -1,4 +1,9 @@
-# day_trader_pro/instance_registry.py — v0.1.0
+# day_trader_pro/instance_registry.py — v0.1.1
+# v0.1.1 (2026-09-24) — r423 / OPS.47. ADD `discover_fleet()`: the map with no
+#   symbol list handed in. `discover(symbols)` survives for callers that want a
+#   named subset; the morning wake and the close both use the new one so they
+#   cannot disagree about who is out there. Operator pins still outrank
+#   discovery, unchanged — a pin is an operator decision and a tag is not.
 """
 Maps trading symbols -> EC2 instance IDs by reading the fleet's tag "Name".
 
@@ -48,6 +53,24 @@ def save_map(m):
 # --------------------------------------------------------------------------
 # Discovery
 # --------------------------------------------------------------------------
+def discover_fleet():
+    """The live fleet, DISCOVERED BY TAG. -> {symbol: {...}}.
+
+    🔑 r423 — the counterpart to `discover()`, which resolves a LIST. This asks
+    AWS what carries `config.FLEET_TAG_KEY=FLEET_TAG_VALUE` and returns that.
+    Pinned cache entries still win, so a hand-pinned replacement instance is
+    honoured exactly as it is in `discover()`.
+    ⚠️ A BOX WITH THE TAG BUT NO Name TAG IS SKIPPED BY ec2ops, because the
+    symbol IS the Name and an unnamed box cannot be addressed.
+    """
+    cache = load_map()
+    pinned = {s: r for s, r in cache["instances"].items() if r.get("pinned")}
+    found = ec2ops.describe_by_tag()
+    for sym, rec in pinned.items():
+        found[sym] = rec                 # a pin outranks discovery
+    return found
+
+
 def discover(symbols=None):
     """
     Query EC2 for the given symbols (default: full universe) and return a

@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/s3_sweep.py  v1.1
+day_trader_pro/s3_sweep.py  v1.2
+
+v1.2  2026-09-24  r423 / OPS.47 — the hardcoded fallback fleet size 15 -> 17,
+      tracking config.UNIVERSE (AAL, SOFI). Fallback only; the live path reads
+      the real list.
 Control-side warehouse hygiene. Lists first, deletes only when told twice.
 
 v1.1  2026-08-23  AUDIT F2 + F10 — the third guard bug, and a fourth list.
@@ -94,7 +98,8 @@ except Exception as _exc:                                       # noqa: BLE001
     print(f"  ⚠️ selector.PANEL unavailable ({_exc}) — using the built-in "
           f"fallback list. Do NOT --apply a culled sweep in this state.")
     PANEL = {"NVDA", "SPX", "PLTR", "MU", "QQQ", "GOOGL", "AMZN", "AVGO",
-             "TSLA", "META", "NFLX", "CRM", "UNH", "CVX", "AMD"}
+             "TSLA", "META", "NFLX", "CRM", "UNH", "CVX", "AMD",
+             "AAL", "SOFI"}
 
 # v1.1 — F2. The legacy rule holds only where the push side keyed the object
 # on sha256(canon(record)). Whole-file streams key on the raw bytes and store

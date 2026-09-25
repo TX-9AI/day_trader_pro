@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/test_panel_mirror.py — v1.0
+day_trader_pro/tests/test_panel_mirror.py — v1.1
+
+v1.1  2026-09-24  r423 / OPS.47 — 15 -> 17. AAL and SOFI join the REPORTING
+      universe. This gate's subject is unchanged and deliberately so: it pins
+      that the three repositories agree on the list, not that the list gates
+      anything. Since r423 the WAKE is discovered by tag and does not consult
+      this list at all — see tests/check_fleet_discovery.py F4.
 
 One fleet, named in three repositories. This pins them together.
 
@@ -63,8 +69,11 @@ def main() -> int:
     panel = list(selector.PANEL)
 
     # ── C1/C2 the mirror ─────────────────────────────────────────────────
-    check("C1 UNIVERSE size", len(uni) == 15,
-          f"UNIVERSE has {len(uni)} names, expected 15")
+    # r423 — 17: AAL and SOFI joined the REPORTING universe. The wake no
+    # longer reads this list at all (it discovers by tag), so this number is
+    # now about the brief's coverage and nothing else.
+    check("C1 UNIVERSE size", len(uni) == 17,
+          f"UNIVERSE has {len(uni)} names, expected 17")
     check("C1 UNIVERSE == selector.PANEL", set(uni) == set(panel),
           f"only in UNIVERSE={sorted(set(uni) - set(panel))} "
           f"only in PANEL={sorted(set(panel) - set(uni))}")

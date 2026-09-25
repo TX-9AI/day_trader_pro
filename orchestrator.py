@@ -1,4 +1,16 @@
-# day_trader_pro/orchestrator.py — v0.6.1
+# day_trader_pro/orchestrator.py — v0.7.0
+# v0.7.0 (2026-09-24) — r423 / OPS.47. THE WAKE COUNT COMES FROM THE INSTANCE
+#   MAP. Operator: *"There's no discretionary. It's just the 15. We wake 15
+#   boxes daily. If there's 15 in the instance map then wake 15, if there's 20
+#   then wake 20."* The 2-baseline-plus-13-discretionary split was VOCABULARY
+#   FOR A TIER THAT DOES NOT EXIST — v0.6.1 already measured it summing to the
+#   whole fleet, and this revision stops describing it that way at the source.
+#   The wake list is now every tagged box. 🔑 UNIVERSE NO LONGER GATES THE
+#   WAKE; a discovered box ABSENT from the reporting list is still woken and
+#   is NAMED on the console, because dropping it silently is how a live box
+#   trades all day with nobody watching it. ALWAYS_ON survives ONLY as the
+#   floor for a discovery that returns nothing — a blind morning trades the
+#   two majors rather than trading nothing, which is section 0.5.
 # v0.6.1 (2026-09-20) — r409 / DOC.27. THE MANDATORY-READING BLOCK SAID THIS
 #   FILE WAKES TWO BOXES. IT WAKES FIFTEEN, AND THE FILE CONTRADICTED ITSELF.
 #   The prose carried v0.2.0's "DISCRETIONARY SELECTION RETIRED ... wakes ONLY
@@ -68,14 +80,18 @@ and warming its feed before the 09:30 open.
 Flow:
   0. Master switch (control_state) — no-op if control is DISABLED.
   1. Trading-day gate (skip weekends/holidays) unless --no-gate.
-  2. Resolve the WAKE LIST to instance IDs — config.ALWAYS_ON plus exactly
-     config.MAX_DISCRETIONARY names (see WHAT WAKES, below).
+  2. DISCOVER the fleet by tag (config.FLEET_TAG_KEY=FLEET_TAG_VALUE) and
+     resolve it to instance IDs. config.UNIVERSE is NOT consulted (r423).
   3. Start them (unless --dry-run/--mock).
   4. Confirm they reach 'running'; page on any that don't.
   5. Telegram the morning wake summary (always sends; a silent failed morning
      is the worst outcome).
 
-WHAT WAKES: config.ALWAYS_ON plus EXACTLY config.MAX_DISCRETIONARY names,
+WHAT WAKES (r423): every live EC2 instance tagged
+config.FLEET_TAG_KEY=config.FLEET_TAG_VALUE, except config.REPORTER_TAG which
+is refused BY NAME. If discovery returns nothing the ALWAYS_ON floor wakes.
+config.UNIVERSE is now the REPORTING universe only — it decides what the
+morning brief covers, never what starts. Superseded prose:
 chosen by selector.select() from market_brief's move_ranked, with a
 deterministic backfill that guarantees the count. READ THE CONSTANTS - never a
 list written here. At r409 they are ["SPX","QQQ"] + 13, which is the WHOLE
@@ -107,7 +123,7 @@ CLI:
 
 Changelog:
   v0.3.0 (2026-07-15) — RESTORE report-driven selection at fixed fleet size.
-    Wakes ALWAYS_ON (SPX+QQQ) + EXACTLY MAX_DISCRETIONARY (8) discretionary
+    r423: wakes THE DISCOVERED FLEET. Superseded: ALWAYS_ON + MAX_DISCRETIONARY
     names chosen by selector.select() from market_brief's move_ranked (model
     concurs/swaps; deterministic backfill guarantees the count). After each
     box reaches running, writes ~/brief_flags.json onto it (its signed
@@ -149,8 +165,43 @@ def run(dry_run=False, gate=True):
     #    reporter's move_ranked, backfill to EXACTLY MAX_DISCRETIONARY.
     baseline = list(config.ALWAYS_ON)
     sel = _load_selection()          # {"final","discretionary","brief_strength",...}
-    wake_list = sel["final"]         # baseline + exactly-N discretionary
     brief_strength = sel.get("brief_strength", {})
+
+    # ── 🔑 r423 — THE WAKE IS WHAT AWS HOLDS, NOT WHAT A LIST REMEMBERS ─────
+    # Operator: *"I want that number to be based on however many are in the
+    # current instance map. If there's 15 in the instance map then wake 15, if
+    # there's 20 then wake 20."* And, on the universe: *"yes for the morning
+    # report, but no for the waking."*
+    # ⚠️ THE SELECTION STILL RUNS AND STILL FEEDS `brief_strength`, which is
+    # pushed to the boxes — it simply no longer decides WHO WAKES. Ripping the
+    # call out as well would have taken a second thing with it, and one change
+    # at a time on the path that starts the trading day.
+    # ⚠️ THE FLOOR IS THE FALLBACK, NOT THE POLICY: if discovery returns
+    # nothing — no credentials, an API failure, a mistagged fleet — we wake
+    # ALWAYS_ON rather than nothing, and we SAY which happened. A silent
+    # zero-box morning is indistinguishable from a quiet one.
+    try:
+        _discovered = instance_registry.discover_fleet()
+    except Exception as exc:                                   # noqa: BLE001
+        print(f"  ⚠️ fleet discovery FAILED ({exc}) — falling back to the "
+              f"ALWAYS_ON floor")
+        _discovered = {}
+    if _discovered:
+        wake_list = sorted(_discovered)
+        print(f"  fleet discovered by tag "
+              f"{config.FLEET_TAG_KEY}={config.FLEET_TAG_VALUE}: "
+              f"{len(wake_list)} box(es)")
+        _unlisted = [s for s in wake_list if s not in config.UNIVERSE]
+        if _unlisted:
+            # ⚠️ NAMED, NOT DROPPED. A box that trades but is absent from the
+            # reporting universe will be missing from the brief, which is a
+            # real gap and must not be discovered weeks later.
+            print(f"  ⚠️ trading but NOT in the reporting UNIVERSE: "
+                  f"{' '.join(_unlisted)}")
+    else:
+        wake_list = list(baseline)
+        print(f"  ⚠️ fleet discovery returned NOTHING — waking the ALWAYS_ON "
+              f"floor only: {wake_list}")
     if sel.get("fallback"):
         # v0.3.1 — this message used to claim "Waking SPX+QQQ; no discretionary
         # names", which was WRONG whenever the EXACTLY-N backfill did its job:

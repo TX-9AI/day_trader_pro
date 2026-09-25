@@ -1,4 +1,11 @@
-# day_trader_pro/eod_report.py — v0.3
+# day_trader_pro/eod_report.py — v0.4
+# v0.4 (2026-09-24) — r423 / OPS.47. THE CLOSE STOPS WHAT THE OPEN WOKE.
+#   🔴 THIS IS THE HALF THAT WOULD HAVE BITTEN. Once the wake discovered by
+#   tag while the close still resolved config.UNIVERSE, any box that carried
+#   the tag and was NOT in the reporting list would have been started at 09:15
+#   and NEVER STOPPED — running, billing and trading unattended overnight.
+#   The open and the close now read the SAME `discover_fleet()`, so the two
+#   ends of the day cannot disagree about who is out there.
 # v0.3 (2026-09-05) — dtp r287 / TZ.1 — the naive `today` here asked a UTC box and rolled at 20:00 ET
 #   (19:00 in winter), so anything run after that silently asked for TOMORROW and came
 #   back empty. It now goes through `ettime`, the one ET/UTC boundary.
@@ -93,7 +100,15 @@ def run(dry_run=False):
               "(you manage shutdown yourself in deco mode)")
         return 0
 
-    mapping, _ = instance_registry.discover(config.UNIVERSE)
+    # 🔴 r423 — THE CLOSE MUST STOP WHAT THE OPEN WOKE. The wake discovers by
+    # tag; if this still enumerated config.UNIVERSE, a box that carried the tag
+    # but was absent from the list would be STARTED IN THE MORNING AND NEVER
+    # STOPPED — running, trading and billing all night with nothing to halt it.
+    # ⚠️ AND THIS FILE'S OWN DOCSTRING HAS CLAIMED TAG DISCOVERY SINCE v0.3
+    # ("every RUNNING box tagged Project=day_trader") while the code resolved a
+    # list, and its own alert says "No tagged boxes running". The documentation
+    # described the design for months; only the code lagged. Now it is true.
+    mapping = instance_registry.discover_fleet()
     running = {s: r for s, r in mapping.items() if r.get("state") == "running"}
 
     if not running:

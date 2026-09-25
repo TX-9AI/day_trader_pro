@@ -1,4 +1,12 @@
-# day_trader_pro/ec2ops.py — v0.1.2
+# day_trader_pro/ec2ops.py — v0.1.3
+# v0.1.3 (2026-09-24) — r423 / OPS.47. ADD `describe_by_tag()`, the fleet's
+#   single source of truth for WHO EXISTS. Filters on config.FLEET_TAG_KEY /
+#   FLEET_TAG_VALUE and on running-or-stopped state, so a terminated box can
+#   never be woken. 🔑 THE CONTROL BOX IS REFUSED BY NAME AND SAYS SO. The
+#   guard does not ask whether control is tagged, because the failure being
+#   defended against IS someone tagging it by mistake — a tag test would
+#   authorise exactly the accident it is meant to stop. Pinned by
+#   tests/check_fleet_discovery.py F2, which is the ship-blocker.
 # v0.1.2 (2026-09-21) — r412 / OPS.37. THE INSTANCE RECORD CARRIES
 #   `public_ip`, READ FROM THE REPLY IT ALREADY PARSES. `describe_instances`
 #   returns `PublicIpAddress` in the same object the private IP comes from,
@@ -104,6 +112,67 @@ def _mock_set_state(instance_ids, new_state):
 # --------------------------------------------------------------------------
 # Public API
 # --------------------------------------------------------------------------
+def describe_by_tag(key=None, value=None):
+    """Every live instance carrying tag `key`=`value` -> {Name: {...}}.
+
+    🔑 r423 — THE FLEET IS WHAT AWS HOLDS, NOT WHAT A LIST REMEMBERS. Until
+    now every fleet operation resolved `config.UNIVERSE` through
+    `describe_by_names`, so a box that existed but was not in the list was
+    invisible, and a symbol in the list with no box was a "missing instance"
+    alert. Discovery by tag inverts that: the environment is the source of
+    truth and the list becomes what it always should have been — a REPORTING
+    universe, not an inventory of machines.
+    ⚠️ THE CONVENTION ALREADY EXISTED AND ONLY THE CODE LAGGED. All fifteen
+    trading boxes carry `Project=day_trader`; the control box and QQQ-TEST do
+    not. `eod_report.py`'s docstring has claimed "every RUNNING box tagged
+    Project=day_trader" since v0.3 while its code called
+    `instance_registry.discover(config.UNIVERSE)`, and `check_iam.py` is the
+    only file that genuinely reads the tag. This makes the code true.
+    ⚠️ THE CONTROL BOX IS EXCLUDED BY NAME, NOT BY TAG. `config.REPORTER_TAG`
+    was declared with the comment "It is never woken or stopped" and was read
+    by NOTHING. Tag hygiene is now load-bearing for what trades, so the one
+    machine that must never be woken is refused on its name regardless of what
+    anybody tags it.
+    """
+    key = key or config.FLEET_TAG_KEY
+    value = value or config.FLEET_TAG_VALUE
+    if config.MOCK_AWS:
+        return _mock_describe_by_tag(key, value)
+    resp = _ec2().describe_instances(
+        Filters=[{"Name": "tag:%s" % key, "Values": [value]}])
+    out = {}
+    for reservation in resp.get("Reservations", []):
+        for inst in reservation.get("Instances", []):
+            st = (inst.get("State") or {}).get("Name", "?")
+            if st in ("terminated", "shutting-down"):
+                continue
+            name = _name_tag(inst)
+            if not name:
+                continue
+            if name == config.REPORTER_TAG:
+                # ⚠️ NAMED, NOT SILENT. If control ever acquires the fleet tag
+                # the operator needs to see it, not have it quietly dropped.
+                print("  ⚠️ %s carries %s=%s and is the CONTROL box — refusing "
+                      "to include it" % (name, key, value))
+                continue
+            out[name] = {
+                "instance_id": inst.get("InstanceId"),
+                "state": st,
+                "private_ip": inst.get("PrivateIpAddress", ""),
+                "public_ip": inst.get("PublicIpAddress", ""),
+                "pinned": False,
+            }
+    return out
+
+
+def _mock_describe_by_tag(key, value):
+    """Offline: every mock instance is treated as tagged."""
+    state = _mock_load()
+    return {n: {"instance_id": _mock_instance_id(n), "state": st,
+                "private_ip": "", "public_ip": "", "pinned": False}
+            for n, st in state.items() if n != config.REPORTER_TAG}
+
+
 def describe_by_names(names):
     """
     Resolve a list of tag Names to {name: {"instance_id", "state"}}.

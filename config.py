@@ -1,4 +1,16 @@
-# day_trader_pro/config.py — v0.1.6
+# day_trader_pro/config.py — v0.1.7
+# v0.1.7 (2026-09-24) — r423 / OPS.47. THE FLEET IS DISCOVERED, NOT RECITED —
+#   AND `UNIVERSE` NOW MEANS THE MORNING REPORT, NOT THE WAKE. Operator:
+#   *"I want that number to be based on however many are in the current
+#   instance map"* and *"is it even important at all to have a universe? Yes
+#   for the morning report, but no for the waking."* Adds FLEET_TAG_KEY /
+#   FLEET_TAG_VALUE (Project=day_trader), the ONE lever that now decides what
+#   trades. UNIVERSE 15 -> 17 (AAL, SOFI) and is REPORTING-ONLY. ALWAYS_ON is
+#   demoted from "the baseline half of 2+13" to a FLOOR used only when
+#   discovery returns nothing; MAX_DISCRETIONARY binds the selector alone.
+#   🔴 TAG HYGIENE IS NOW LOAD-BEARING FOR WHAT TRADES: an untagged box does
+#   not wake, and a mistagged one would — which is why the control box is
+#   refused BY NAME in ec2ops, not by trusting its tags.
 # v0.1.6 (2026-09-21) — r406 / OPS.32. ADD SSH_COMMAND_TIMEOUT. How long a
 #   remote command may RUN is a different question from how long to wait for a
 #   TCP handshake, and until now one constant answered both: ssh_util derived
@@ -71,21 +83,46 @@ REGION = os.environ.get("DTP_REGION", "us-east-2")
 UNIVERSE = [
     "NVDA", "SPX", "PLTR", "MU", "QQQ", "GOOGL", "AMZN", "AVGO",
     "TSLA", "META", "NFLX", "CRM", "UNH", "CVX", "AMD",
-]  # 15 — the panel. SPX + QQQ are ALWAYS_ON; the other 13 are the fixed panel.
+    "AAL", "SOFI",
+]  # 17 — the REPORTING universe. r423: this no longer decides what wakes.
 # SPY intentionally excluded: SPX runs daily and tracks the same underlying,
 # so a SPY box would be redundant and is never woken.
 
 # The reporter / control server's own tag Name. It is never woken or stopped.
 REPORTER_TAG = os.environ.get("DTP_REPORTER_TAG", "1-REPORTER")
 
+# ── 🔑 r423 — THE FLEET IS DISCOVERED BY TAG, NOT ENUMERATED FROM A LIST ────
+# Operator, 2026-09-24: *"I've always wondered whether it's even important at
+# all to have a universe, and I would say yes for the morning report, but no
+# for the waking."* Correct, and the convention was already on the instances:
+# all fifteen trading boxes carry Project=day_trader; the control box and
+# QQQ-TEST do not. So the wake asks AWS what exists instead of reciting a list.
+# ⚠️ WHAT THIS BUYS: onboarding a box becomes a TAG, not a commit. Launch it
+# with this tag and it wakes; remove the tag and it does not. That is also the
+# enrolment switch for a fork box joining the fleet.
+# ⚠️ AND WHAT IT COSTS, SAID PLAINLY: the tag becomes load-bearing for what
+# trades. A stray instance carrying it WILL be woken. Two things bound that —
+# REPORTER_TAG is refused by name in ec2ops.describe_by_tag whatever it is
+# tagged, and the operator's own provisioning defaults every new box to
+# PAPER-ONLY QQQ until he changes it by hand.
+FLEET_TAG_KEY = os.environ.get("DTP_FLEET_TAG_KEY", "Project")
+FLEET_TAG_VALUE = os.environ.get("DTP_FLEET_TAG_VALUE", "day_trader")
+
 # --------------------------------------------------------------------------
 # Selection policy
 # --------------------------------------------------------------------------
-# These two always trade regardless of what the model returns.
+# 🔴 r423 — NEITHER OF THESE DECIDES WHAT WAKES ANY MORE. The wake is
+# discovered by FLEET_TAG_KEY/VALUE above. They survive for two narrower jobs:
+# ALWAYS_ON is the FLOOR if the tag query returns nothing (a fleet that cannot
+# be discovered must still trade SPX and QQQ rather than nothing at all), and
+# MAX_DISCRETIONARY still bounds the selector if discretionary selection is
+# ever restored.
+# ⚠️ AND THE OLD ARITHMETIC WAS A FICTION THAT SURVIVED BECAUSE NOBODY
+# MULTIPLIED IT OUT: with UNIVERSE at 15 and ALWAYS_ON at 2, the model was
+# asked to choose MAX_DISCRETIONARY=13 names from a pool of exactly 13. It
+# could not return anything else. The operator: *"it's not 2 baseline and 13
+# discretionary any more. There's no discretionary. It's just the 15."*
 ALWAYS_ON = ["SPX", "QQQ"]
-# Max additional discretionary picks the model is allowed to wake.
-# Total running fleet is therefore between len(ALWAYS_ON) and
-# len(ALWAYS_ON) + MAX_DISCRETIONARY  (i.e. exactly 15: 2 baseline + 13).
 MAX_DISCRETIONARY = 13
 
 # --------------------------------------------------------------------------
