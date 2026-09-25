@@ -1,5 +1,16 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/check_crashloop_sentinel.py — v1.0
+# day_trader_pro/tests/check_crashloop_sentinel.py — v1.1
+# v1.1 (2026-09-25) — r429 / OPS.53. C9's FIXTURE WAS BUILT ON AN UNMEASURED
+#   ASSUMPTION AND IS CORRECTED, NOT DELETED (r240). It was written as "three
+#   hourly BAKES" and asserts silence — but A BAKE DOES NOT INCREMENT
+#   NRestarts. Measured 2026-09-25: AAL had FOUR manual starts (boot, wake, the
+#   operator's bake) plus THREE automatic restarts and NRestarts read exactly
+#   3; SOFI was baked in the same window, never crashed, and reads 0. So C9
+#   actually models a SLOW CRASH LOOP — AAL's incident — and its silence is
+#   correct only for the BURST rule. §0.4: a fixture nobody had measured.
+#   ⚠️ AND C7 EARNED ITS KEEP THIS REVISION. r429's first cut placed the new
+#   session rule as an `elif` above the recovery branch and swallowed the
+#   RECOVERED alert; C7 went red and caught it. Checks themselves unchanged.
 # v1.0 (2026-09-23) — dtp r418 / OPS.41. THE ALARM MUST FIRE ON A LOOP AND STAY
 #   SILENT ON MAINTENANCE, AND BOTH HALVES ARE CHECKS.
 #   🔴 WHAT IT IS WRITTEN FROM: QQQ's optionsbot restarted 41 times on a corrupt
@@ -157,9 +168,24 @@ def main():
             c9 += 1
             st9, al = ev(st9, _obs(c9), t9)
             fired9 += len([a for a in al if a.get("kind") == "loop"])
+        # 🔴 r429 — THIS FIXTURE'S PREMISE WAS WRONG AND IS CORRECTED HERE
+        # RATHER THAN DELETED (r240). It was written as "three hourly BAKES"
+        # and asserts they stay quiet — but a bake does NOT increment
+        # NRestarts, so this scenario cannot be a bake. MEASURED 2026-09-25:
+        # AAL had FOUR manual starts (boot, wake, operator bake) plus THREE
+        # automatic restarts after exit-1, and NRestarts read exactly 3; SOFI
+        # was baked in the same window, never crashed, and reads 0. NRestarts
+        # counts ONLY restarts the Restart= policy performed.
+        # ⚠️ SO WHAT THIS ACTUALLY MODELS IS A SLOW CRASH LOOP — three
+        # automatic restarts an hour apart — which is precisely AAL's incident.
+        # It correctly stays quiet for the BURST rule (kind="loop"), which is
+        # all it ever asserted; the new session rule (kind="session_loop") is
+        # what catches it, and check_crashloop_session S1 pins that.
+        # §0.4: the fixture was built from an assumption nobody had measured.
         ck("C9", fired9 == 0,
-           f"three hourly bakes fired {fired9} alert(s) at the shipped "
-           f"defaults — want 0")
+           f"three hourly automatic restarts fire {fired9} BURST alert(s) — "
+           f"want 0; the slow-loop rule catches them instead (see "
+           f"check_crashloop_session S1)")
 
     if _fails:
         print(f"\nRED — {len(_fails)} check(s) failed: {' '.join(_fails)}")

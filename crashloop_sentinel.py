@@ -1,5 +1,22 @@
 #!/usr/bin/env python3
-# day_trader_pro/crashloop_sentinel.py — v1.0
+# day_trader_pro/crashloop_sentinel.py — v1.1
+# v1.1 (2026-09-25) — r429 / OPS.53. A LOOP WHOSE PERIOD IS THE WINDOW WAS
+#   INVISIBLE. AAL restarted at 14:11, 15:11 and 16:07 UTC — about SIXTY
+#   minutes apart against WINDOW_S=3600 — so each event aged out before three
+#   could coexist. The log read "in-window=2" then "in-window=1", THRESHOLD was
+#   never reached, and ZERO alerts went out while the box sat blind for roughly
+#   23 minutes across two episodes in prime RTH.
+#   ⚠️ THE ARITHMETIC WAS NEVER WRONG AND I SAID IT WAS. `hist + [now] * delta`
+#   already credits every restart between two polls, so a BURST always alerted.
+#   I reported "under-counts fast loops" from the summary numbers before
+#   reading the evaluator, and told both the operator and the peer session the
+#   opposite of the truth. The window is the wrong instrument for a SLOW loop;
+#   the counting was fine. check S2 pins that the burst rule still works.
+#   🔑 THE FIX IS A SECOND RULE ALONGSIDE, NOT INSTEAD: restarts accumulated
+#   over the ET TRADING DAY, which nothing can age out. On AAL's real timeline
+#   it fires at 15:15 UTC — after the second restart, ~52 min before the third.
+#   ⚠️ ONCE PER DAY PER BOX (§17). Each box already telegraphs its own restart;
+#   the value added here is naming the PATTERN, not repeating the event.
 # v1.0 (2026-09-23) — dtp r418 / OPS.41. A CRASH LOOP LOOKS EXACTLY LIKE A
 #   HEALTHY RESTART, AND THAT IS WHY FORTY-ONE OF THEM WENT UNNAMED.
 #   🔴 THE FAILURE, FROM THE OPERATOR'S OWN PHONE, 2026-09-23. QQQ's
@@ -62,6 +79,21 @@ WINDOW_S = int(os.environ.get("DTP_CRASHLOOP_WINDOW_S", "3600"))
 # Re-alert cadence for a loop that is still burning, so one alert does not have
 # to carry an unbounded incident.
 RENOTIFY_S = int(os.environ.get("DTP_CRASHLOOP_RENOTIFY_S", "1800"))
+
+# 🔴 r429 / OPS.53 — THE ROLLING WINDOW CANNOT SEE A LOOP WHOSE PERIOD IS THE
+# WINDOW. Measured on AAL, 2026-09-25: optionsbot self-shut-down and restarted
+# at 14:11, 15:11 and 16:07 UTC — roughly SIXTY minutes apart against
+# WINDOW_S=3600 — so the sentinel logged "in-window=2" then "in-window=1" as
+# each event aged out, and never reached THRESHOLD. Three crash loops, ~23
+# minutes blind across two of them in prime RTH, and ZERO alerts.
+# ⚠️ THE COUNTING WAS NEVER WRONG. `hist + [now] * delta` already credits every
+# restart between two polls, so a BURST alerts correctly; I first diagnosed
+# this as under-counting fast loops and that was backwards. The window is the
+# wrong instrument for a SLOW loop, not the arithmetic.
+# 🔑 SO A SECOND RULE RUNS ALONGSIDE, NOT INSTEAD: restarts accumulated over
+# the ET TRADING DAY, which cannot expire under a box that restarts on any
+# cadence. The rolling window still catches bursts inside the hour.
+SESSION_THRESHOLD = int(os.environ.get("DTP_CRASHLOOP_SESSION_THRESHOLD", "2"))
 STATE_PATH = os.environ.get(
     "DTP_CRASHLOOP_STATE",
     os.path.join(_HERE, "data", "crashloop_state.json"))
@@ -92,6 +124,19 @@ def save_state(state, path=None):
         return False
 
 
+def _et_day(now) -> str:
+    """The ET trading day `now` falls in. The reset boundary for the session
+    counter — UTC midnight would split a session in half (r125)."""
+    try:
+        import ettime
+        return ettime.et_day(now)
+    except Exception:                                          # noqa: BLE001
+        import datetime
+        from zoneinfo import ZoneInfo
+        return datetime.datetime.fromtimestamp(
+            now, ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
+
+
 def evaluate(prev, obs, now):
     """(new_state, alerts) — pure, so the rule is testable without a fleet.
 
@@ -111,6 +156,11 @@ def evaluate(prev, obs, now):
             new[sym] = {"restarts": p.get("restarts"), "events": hist,
                         "last_alert": p.get("last_alert", 0),
                         "level": p.get("level", 0),
+                        # ⚠️ AN UNREADABLE POLL MUST NOT WIPE THE SESSION
+                        # TALLY. A box that is briefly unreachable and then
+                        # restarts again is the same loop, not a fresh one.
+                        "session_day": p.get("session_day"),
+                        "session_restarts": int(p.get("session_restarts", 0)),
                         "unreachable": int(p.get("unreachable", 0)) + 1}
             # Two consecutive misses, not one — a single ssh blip is noise.
             if new[sym]["unreachable"] == 2:
@@ -136,6 +186,18 @@ def evaluate(prev, obs, now):
         last_alert = p.get("last_alert", 0)
         n = len(hist)
 
+        # ── r429 — THE SESSION TALLY, which nothing can age out ────────────
+        # Same delta, a different clock: this one resets on the ET TRADING DAY
+        # and not on a rolling hour, so a box restarting once an hour still
+        # accumulates. AAL 2026-09-25 is the case it exists for.
+        today = _et_day(now)
+        if p.get("session_day") == today:
+            session_n = int(p.get("session_restarts", 0)) + delta
+        else:
+            session_n = delta          # new ET day: start this session's count
+        session_alerted = (p.get("session_day") == today
+                           and bool(p.get("session_alerted")))
+
         if n >= THRESHOLD:
             due = (level == 0) or (now - last_alert >= RENOTIFY_S)
             if due:
@@ -158,8 +220,28 @@ def evaluate(prev, obs, now):
             })
             level, last_alert = 0, now
 
+        # ── r429 — THE SLOW-LOOP RULE, DELIBERATELY NOT IN THE elif CHAIN ──
+        # 🔴 IT WAS AN elif FIRST AND THAT BROKE RECOVERY. Sitting above
+        # `elif level and n == 0`, it swallowed the RECOVERED alert whenever a
+        # box had session restarts — caught by check_crashloop_sentinel C7,
+        # which is exactly why that gate exists. The two rules answer different
+        # questions and must not compete for one branch.
+        if session_n >= SESSION_THRESHOLD and not session_alerted:
+            err2 = (o.get("err") or "").strip()
+            tail2 = f"\nlast error: {err2[:160]}" if err2 else ""
+            alerts.append({
+                "sym": sym, "kind": "session_loop", "count": session_n,
+                "text": (f"\U0001F501 REPEAT RESTARTS | {sym} | optionsbot has "
+                         f"restarted {session_n}\u00d7 today (total {cur}) — "
+                         f"spread out, so the {int(WINDOW_S/60)}-min burst rule "
+                         f"will not catch it{tail2}"),
+            })
+            session_alerted, last_alert = True, now
+
         new[sym] = {"restarts": cur, "events": hist, "last_alert": last_alert,
-                    "level": level, "unreachable": 0}
+                    "level": level, "unreachable": 0,
+                    "session_day": today, "session_restarts": session_n,
+                    "session_alerted": session_alerted}
     return new, alerts
 
 
