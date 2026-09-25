@@ -1,6 +1,18 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/fleet_power_audit.py  v1.0
+day_trader_pro/tools/fleet_power_audit.py  v1.1
+
+v1.1  2026-09-25  r425 / OPS.49 — SELF-EXPIRING ACKNOWLEDGEMENTS, so a box that
+      is up ON PURPOSE stops nagging without anyone muting the watcher.
+      🔴 BUILT THE NIGHT v1.0 SHIPPED, because v1.0's first real run flagged two
+      brand-new boxes the operator had just attached deliberately and would have
+      repeated it hourly until 08:00 ET. An alert that fires ~12 times for a
+      known-good condition is how a true alert gets ignored — §17, and the whole
+      reason ALERT_SPEC exists in this repo.
+      🔑 AN ACK IS DATED AND DIES BY ITSELF. It covers one ET day, so the
+      quietening is never permanent and nobody has to remember to undo it; an
+      expired ack is IGNORED AND SAID OUT LOUD rather than silently dropped,
+      because "why did this stop alerting" must always have an answer on screen.
 
 v1.0  2026-09-24  r424 / OPS.48 — WHO IS STILL UP, AND WHO LEFT THEM THAT WAY.
 
@@ -46,6 +58,9 @@ except Exception:      # noqa: BLE001
 RTH_OPEN_MIN = 9 * 60 + 15      # 09:15 ET — the orchestrator's wake
 RTH_DONE_MIN = 16 * 60 + 30     # 16:30 ET — conductor has had time to finish
 
+ACK_PATH = os.environ.get(
+    "OT_POWER_ACK", os.path.join(ROOT, "logs", "power_ack.txt"))
+
 ROW = re.compile(
     r"^(?P<ts>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) ET\s+"
     r"(?P<action>START|STOP)(?P<mock>\s+MOCK)?\s+(?P<ids>\S+)\s+"
@@ -58,6 +73,34 @@ def _now_et():
     import datetime
     from zoneinfo import ZoneInfo
     return datetime.datetime.now(ZoneInfo("America/New_York"))
+
+
+def read_acks(path, today):
+    """-> ({symbol: reason} live today, [(symbol, day) expired]).
+
+    Format, one per line:  SYMBOL  YYYY-MM-DD  free-text reason
+    ⚠️ An ack for a PAST day is not silently discarded — it is returned so the
+    audit can say it lapsed. A suppression that vanishes without a word is the
+    same failure as an alert that never fires.
+    """
+    live, expired = {}, []
+    if not os.path.exists(path):
+        return live, expired
+    with open(path, encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            line = line.split("#", 1)[0].strip()
+            if not line:
+                continue
+            parts = line.split(None, 2)
+            if len(parts) < 2:
+                continue
+            sym, day = parts[0].upper(), parts[1]
+            reason = parts[2] if len(parts) > 2 else ""
+            if day >= today:
+                live[sym] = f"{day} {reason}".strip()
+            else:
+                expired.append((sym, day))
+    return live, expired
 
 
 def read_ledger(path):
@@ -93,9 +136,27 @@ def main(argv=None):
                     help="treat 09:15-16:30 ET as expected-up (default)")
     ap.add_argument("--notify", action="store_true",
                     help="send a Telegram alert when a box is up out of window")
+    ap.add_argument("--ack", metavar="SYM[,SYM]",
+                    help="acknowledge boxes as intentionally up FOR TODAY (ET)")
+    ap.add_argument("--ack-reason", default="", help="why, recorded with --ack")
+    ap.add_argument("--ack-file", default=ACK_PATH, help="acknowledgement file")
     a = ap.parse_args(argv)
 
     now = _now_et()
+    today = f"{now:%Y-%m-%d}"
+
+    if a.ack:
+        d = os.path.dirname(a.ack_file)
+        if d:
+            os.makedirs(d, exist_ok=True)
+        with open(a.ack_file, "a", encoding="utf-8") as fh:
+            for sym in [x.strip().upper() for x in a.ack.split(",") if x.strip()]:
+                fh.write(f"{sym} {today} {a.ack_reason}\n".rstrip() + "\n")
+                print(f"  acknowledged {sym} for {today} ET"
+                      + (f" — {a.ack_reason}" if a.ack_reason else ""))
+        print("  (acks cover ONE ET day and expire by themselves)")
+        return 0
+
     minutes = now.hour * 60 + now.minute
     weekday = now.weekday() < 5
     in_window = weekday and RTH_OPEN_MIN <= minutes <= RTH_DONE_MIN
@@ -106,13 +167,17 @@ def main(argv=None):
                if isinstance(r, dict) and r.get("state") == "running"}
 
     ledger, ledger_exists = read_ledger(a.log)
+    acks, expired = read_acks(a.ack_file, today)
 
-    orphans, unexplained = [], []
+    orphans, unexplained, acked = [], [], []
     for sym in sorted(running):
         iid = running[sym].get("instance_id", "")
         ev = last_power_event(ledger.get(iid, []))
         if in_window:
             continue                      # expected up; nothing to say
+        if sym in acks:
+            acked.append((sym, acks[sym]))
+            continue
         if ev is None:
             unexplained.append((sym, iid))
         else:
@@ -134,6 +199,12 @@ def main(argv=None):
     if not ledger_exists:
         print(f"  ⚠️  no ledger at {a.log} — it is written on the first power "
               f"change through ec2ops; nothing here is attributable yet")
+
+    for sym, why in acked:
+        print(f"  \u2713 {sym} running, ACKNOWLEDGED for today ({why})")
+    for sym, day in expired:
+        print(f"  \u26a0\ufe0f  ack for {sym} LAPSED on {day} — it covers one ET "
+              f"day and is no longer suppressing anything")
 
     if in_window:
         print("  inside the trading window — running boxes are expected")

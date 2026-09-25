@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """
-tests/check_fleet_power_log.py  v1.1
+tests/check_fleet_power_log.py  v1.2
+v1.2  2026-09-25  r425 / OPS.49 — ADD A1-A3 for self-expiring acknowledgements.
+      🔑 A2 IS THE ONE THAT MATTERS: an ack must DIE ON ITS OWN. A suppression
+      that outlives its day is indistinguishable from a muted alert, and the
+      whole reason this exists is that v1.0 would have nagged hourly about two
+      boxes that were up on purpose (§17).
 v1.1  2026-09-24  r424 — ADD P7 after two defects were found by RUNNING the
       tool: an undercounting `or`, and a test that sent a live Telegram.
 v1.0  2026-09-24  r424 / OPS.48 — EVERY POWER CHANGE LEAVES A ROW, AND NO
@@ -210,6 +215,53 @@ def main():
                f"unexplained) — got {body.splitlines()[0] if body else 'NO ALERT'}")
     except Exception as exc:                                   # noqa: BLE001
         ck("P7", False, f"alert path unusable ({type(exc).__name__}: {exc})")
+
+    # ── A1-A3 — acknowledgements suppress TODAY and die by themselves ─────
+    try:
+        import datetime
+        from zoneinfo import ZoneInfo
+        sys.path.insert(0, os.path.join(ROOT, "tools"))
+        import fleet_power_audit as fpa
+
+        tmp4 = tempfile.mkdtemp(prefix="powack_")
+        ack = os.path.join(tmp4, "ack.txt")
+        led2 = os.path.join(tmp4, "l.log")
+        open(led2, "w").close()
+        FIXED = datetime.datetime(2026, 9, 24, 22, 0,
+                                  tzinfo=ZoneInfo("America/New_York"))
+        rn, rd = fpa._now_et, fpa.ec2ops.describe_by_tag
+        fpa._now_et = lambda: FIXED
+        fpa.ec2ops.describe_by_tag = lambda *a, **k: {
+            "AAL": {"instance_id": "i-aaa", "state": "running"},
+            "SPX": {"instance_id": "i-xxx", "state": "running"}}
+        try:
+            # A1 — a live ack suppresses that box and only that box
+            with open(ack, "w", encoding="utf-8") as fh:
+                fh.write("AAL 2026-09-24 provisioning\n")
+            live, exp = fpa.read_acks(ack, "2026-09-24")
+            rc_a1 = fpa.main(["--log", led2, "--ack-file", ack])
+            ck("A1", "AAL" in live and "SPX" not in live and rc_a1 == 1,
+               f"ack covers AAL only (live={sorted(live)}); SPX still flags "
+               f"(rc={rc_a1}) — an ack must never suppress a box nobody acked")
+
+            # A2 — 🔑 AN ACK DIES ON ITS OWN, and the lapse is reported
+            with open(ack, "w", encoding="utf-8") as fh:
+                fh.write("AAL 2026-09-23 stale\n")
+            live2, exp2 = fpa.read_acks(ack, "2026-09-24")
+            ck("A2", not live2 and exp2 == [("AAL", "2026-09-23")],
+               f"yesterday's ack does NOT suppress (live={sorted(live2)}) and "
+               f"is returned as lapsed {exp2} so it can be said out loud")
+
+            # A3 — DECLARED CONTROL: no ack file at all changes nothing
+            live3, exp3 = fpa.read_acks(os.path.join(tmp4, "nope.txt"),
+                                        "2026-09-24")
+            ck("A3", live3 == {} and exp3 == [],
+               "a missing ack file is not an error and suppresses nothing")
+        finally:
+            fpa._now_et, fpa.ec2ops.describe_by_tag = rn, rd
+    except Exception as exc:                                   # noqa: BLE001
+        for t in ("A1", "A2", "A3"):
+            ck(t, False, f"ack path unusable ({type(exc).__name__}: {exc})")
 
     if _fails:
         print(f"\nRED — {len(_fails)} check(s) failed: {' '.join(_fails)}")
