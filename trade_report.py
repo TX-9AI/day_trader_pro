@@ -1,4 +1,17 @@
-# day_trader_pro/trade_report.py — v1.18
+# day_trader_pro/trade_report.py — v1.19
+# v1.19 (2026-09-25) — r426 / OPS.50. TWO ENGINES NOW WRITE INTO ONE CORPUS, SO
+#   EVERY PER-STRATEGY ROW IS KEYED (lineage, code) AND THE TWO ARE NEVER
+#   SUMMED. Six strategy names exist in both engines and all six are DIFFERENT
+#   CODE (md5 differs; sizes differ 14-44% in both directions), so `ORBS` alone
+#   names two strategies. Rows read MAIN/ORBS and TEST/ORBS.
+#   ⚠️ A FLEET P&L TOTAL IS STILL LEGITIMATE — it is the operator's money
+#   whichever engine made it — and is labelled "all lineages". A per-STRATEGY
+#   total across lineages is not, and is now structurally impossible rather
+#   than left to memory.
+#   ⚠️ `_STRAT_ABBR` IS GONE FROM THIS FILE. It was a second copy of otv4's and
+#   the two HAD ALREADY DRIFTED unnoticed (8 entries here, 10 there;
+#   CondorManagement and CreditRoll existed only in otv4). strategy_registry is
+#   the owner and check_strategy_registry R5 pins the mirror.
 # v1.18 (2026-09-07) — dtp r315 / S3.22. ENGINE_EPOCH 2026-08-25 -> 2026-09-01,
 #   epoch 3, after r314 stripped every pre-09-01 trade object. The floor and
 #   the bucket now agree; leaving it would default to a window whose first six
@@ -260,6 +273,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 import ettime                                            # noqa: E402
+import strategy_registry as SR                            # noqa: E402
 
 try:
     import config
@@ -461,6 +475,12 @@ def load_trades(since, mode, bundles_dir=None):
         r["_phase"] = session_phase(et)
         r["_hold"] = hold_minutes(r)
         r["_sym"] = str(r.get("symbol") or r.get("box") or "(none)")
+        # 🔴 r426 — THE ENGINE THAT MADE THE TRADE. The record's own `lineage`
+        # wins; until both producers write one, rows before TEST_EPOCH are MAIN
+        # by construction and rows after it are UNKN — never silently MAIN.
+        r["_lineage"] = SR.resolve_lineage(r, r["_date"])
+        r["_strat"] = SR.code(r.get("strategy"))
+        r["_strat_key"] = f'{r["_lineage"]}/{r["_strat"]}'
         by_day[r["_date"]] += 1
     if since:
         trades = [r for r in trades if r["_date"] >= since]
@@ -680,19 +700,55 @@ def show(title: str, d: Dict[str, dict], min_n: int, width: int = 26) -> None:
 # 🔑 CONTRACTS IS NOT DECORATION. `SPX 6.95 -> 7.45` reads as a modest winner;
 # `x50` is what makes it $2,500 and what the r201 budget would clip to 7. A
 # per-trade view without size cannot answer the question it gets opened for.
-_STRAT_ABBR = {
-    "ORBStrategy": "ORB", "RunawayContinuation": "RUN",
-    "GEXPinButterfly": "BFLY", "SweepCreditSpread": "SWP",
-    "TrendCreditSpread": "TCS", "IronCondorStrategy": "CNDR",
-    "SweepReversal": "SWPR", "ContinuationStrategy": "CONT",
-}
-
-
 def _abbr(name: str) -> str:
-    """Short strategy tag. ⚠️ An UNKNOWN name is truncated, never dropped — a
-    blank column would silently hide a strategy nobody had added here."""
-    n = str(name or "?")
-    return _STRAT_ABBR.get(n, n[:4].upper())
+    """Short strategy tag, from the ONE registry (r426).
+
+    ⚠️ r202's rule stands — an unknown name is never DROPPED, because a blank
+    column hides a strategy nobody registered. But it is no longer truncated
+    into something that reads like a real code: with two engines,
+    LiquidityHunt -> "LIQU" and Breakout -> "BREA" are wrong AND plausible,
+    which is worse than obviously unknown. The registry returns "?LIQ".
+    """
+    return SR.code(name)
+
+
+def lineage_block(trades) -> None:
+    """Which engine made these trades, and what this report could NOT classify.
+
+    🔑 THE HEADER ALWAYS NAMES THE LINEAGES INCLUDED, even when that is only
+    MAIN. A rollup that does not say what it pooled is how r421's two-population
+    finding happened: pre- and post-epoch TrendCreditSpread were different
+    designs read as one strategy, and nothing in the output said so.
+    ⚠️ §0.5 — UNREGISTERED AND UNKNOWN ARE REPORTED, NOT DROPPED. A strategy
+    nobody added to the registry, and a row too new to infer an engine for,
+    each get named with their count. Silence here is the defect.
+    """
+    from collections import Counter
+    lin = Counter(t.get("_lineage") or SR.UNKNOWN for t in trades)
+    unreg = Counter(str(t.get("strategy") or "?") for t in trades
+                    if not SR.is_registered(t.get("strategy")))
+    retired = Counter(str(t.get("strategy")) for t in trades
+                      if SR.status(t.get("strategy")) == SR.RETIRED)
+
+    print("\nPROVENANCE")
+    parts = ", ".join(f"{k} {v}" for k, v in sorted(lin.items()))
+    print(f"  lineages in this window: {parts}")
+    if lin.get(SR.UNKNOWN):
+        print(f"  \u26a0\ufe0f  {lin[SR.UNKNOWN]} trade(s) carry NO lineage tag and are dated on "
+              f"or after {SR.TEST_EPOCH},")
+        print("      so which engine made them cannot be inferred. They are NOT "
+              "counted as MAIN.")
+    if retired:
+        for n, c in sorted(retired.items()):
+            print(f"  \u2022 {SR.code(n)} {n} is RETIRED ({c} trade(s)) \u2014 superseded by "
+                  f"{SR.superseded_by(n)}")
+    if unreg:
+        print(f"  \U0001f534 {sum(unreg.values())} trade(s) in {len(unreg)} UNREGISTERED "
+              f"strategy(ies) \u2014 add them to strategy_registry:")
+        for n, c in sorted(unreg.items(), key=lambda x: -x[1]):
+            print(f"      {SR.code(n):<5} {n}  ({c} trade(s))")
+    else:
+        print("  every strategy in this window is registered")
 
 
 def rows_table(trades) -> None:
@@ -947,7 +1003,7 @@ def main(argv: List[str]) -> int:
             n_scored += 1
 
     dims = {
-        "by_strategy":      bucket(trades, "strategy"),
+        "by_strategy":      bucket(trades, "_strat_key"),
         "by_setup_type":    bucket(trades, "setup_type"),
         "by_exit_reason":   bucket(trades, "exit_reason"),
         "by_symbol":        bucket(trades, "_sym"),
@@ -958,8 +1014,8 @@ def main(argv: List[str]) -> int:
         "by_sentiment":     bucket(trades, "_sentiment"),
     }
     crosses = {
-        "symbol_x_strategy": cross(trades, "_sym", "strategy"),
-        "phase_x_strategy":  cross(trades, "_phase", "strategy"),
+        "symbol_x_strategy": cross(trades, "_sym", "_strat_key"),
+        "phase_x_strategy":  cross(trades, "_phase", "_strat_key"),
         # THE cross for the operator's question: does a bullish morning help
         # longs and hurt shorts? sentiment x strategy would not test that.
         "sentiment_x_direction": cross(trades, "_sentiment", "direction"),
@@ -1057,6 +1113,7 @@ def main(argv: List[str]) -> int:
         return 0
 
     show("BY STRATEGY", dims["by_strategy"], args.min_n)
+    lineage_block(trades)
     show("BY SYMBOL", dims["by_symbol"], args.min_n)
     show("BY SETUP TYPE", dims["by_setup_type"], args.min_n)
     # v1.9 — the dimension is gone; the FACT is stated once. An absent
