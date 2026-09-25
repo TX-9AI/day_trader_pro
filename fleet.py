@@ -1,4 +1,20 @@
-# day_trader_pro/fleet.py — v0.9.1
+# day_trader_pro/fleet.py — v0.10.0
+# v0.10.0 (2026-09-25) — r427 / OPS.51. THE CLOSE IS SCOPED BY THE INSTANCE MAP,
+#   NOT BY config.UNIVERSE. Operator: *"I want the conductor to do the close
+#   using the instance map."*
+#   🔴 r423 MOVED THE WAKE TO TAG DISCOVERY AND LEFT THIS BEHIND, which is the
+#   same divergence r423 itself fixed inside eod_report — caught there, missed
+#   here. A box carrying Project=day_trader but ABSENT from UNIVERSE would be
+#   WOKEN at 09:15 and NEVER STOPPED: it runs, bills and trades all night, and
+#   the close reports success because it never knew the box existed.
+#   🔑 THE UNION, NOT A REPLACEMENT, AND THE ASYMMETRY IS THE WHOLE POINT. For a
+#   SHUTDOWN path the two errors are not equal: including a box that is already
+#   down costs one no-op API call, while omitting one leaves it running until
+#   somebody notices. So scope is every name EITHER source knows, and a
+#   discovery failure FALLS BACK TO UNIVERSE rather than to nothing — a close
+#   that declines to stop anything is the failure this file exists to prevent.
+#   ⚠️ IT SAYS WHICH SOURCE IT USED, every time (§0.5). "discovery unavailable,
+#   falling back to UNIVERSE" is a fact the next reader needs; silence is not.
 # v0.9.1 (2026-09-24) — r424 / OPS.48. `_wake()` NO LONGER CALLS boto3 ITSELF.
 #   It was a SECOND way to power a box, and a second way is a way past the
 #   ledger: a wake issued here left no row anywhere, so "who started this box"
@@ -163,6 +179,36 @@ def _today_et():
     return datetime.now(_ET).strftime("%Y-%m-%d")
 
 
+def default_scope():
+    """Every box the INSTANCE MAP or UNIVERSE knows — the union (r427).
+
+    🔑 Returns a sorted list of symbols. Discovery first, because the instance
+    map is the ground truth about what exists; UNIVERSE folded in because a box
+    that is listed but momentarily untagged must still be closed.
+    ⚠️ NEVER RETURNS EMPTY. If discovery raises or comes back with nothing, the
+    result is UNIVERSE and the reason is printed. A shutdown path that silently
+    scopes to nothing is strictly worse than one that over-covers.
+    """
+    universe = list(getattr(config, "UNIVERSE", ()) or ())
+    try:
+        discovered = list(instance_registry.discover_fleet() or {})
+    except Exception as exc:                                   # noqa: BLE001
+        print(f"  [scope] discovery unavailable ({type(exc).__name__}); "
+              f"falling back to UNIVERSE ({len(universe)})")
+        return sorted(universe)
+    if not discovered:
+        print(f"  [scope] discovery returned NOTHING; falling back to "
+              f"UNIVERSE ({len(universe)})")
+        return sorted(universe)
+    extra = sorted(set(discovered) - set(universe))
+    missing = sorted(set(universe) - set(discovered))
+    if extra:
+        print(f"  [scope] tagged but NOT in UNIVERSE, included anyway: {extra}")
+    if missing:
+        print(f"  [scope] in UNIVERSE but not discovered, kept in scope: {missing}")
+    return sorted(set(discovered) | set(universe))
+
+
 def get_fleet_ext(only=None):
     """(symbol, private_ip, state, public_ip) — the FULL record.
 
@@ -176,7 +222,7 @@ def get_fleet_ext(only=None):
     drops the fourth field, so nothing pays a second EC2 round trip for the
     convenience.
     """
-    symbols = only or config.UNIVERSE
+    symbols = only or default_scope()
     mapping, _ = instance_registry.discover(symbols)
     out = []
     for s in sorted(mapping):
