@@ -1,4 +1,42 @@
-# day_trader_pro/orchestrator.py — v0.7.0
+# day_trader_pro/orchestrator.py — v0.8.0
+# v0.8.0 (2026-09-26) — r431 / OPS.55. THE MORNING PATH STOPS CARRYING A PRIOR
+#   NOTHING READS. Operator, 2026-09-25: *"the market brief never actually
+#   correlated with the days Trading — it was Information, but there was no
+#   edge to be gained and no morning bias ended up correlating."*
+#   📊 IT NEVER CORRELATED BECAUSE IT WAS NEVER CONNECTED, and that is measured
+#   rather than assumed. The chain ran: brief scores -> `_load_selection()` ->
+#   `selector.select()` -> `brief_strength` -> `_push_brief_flags()` SSHing
+#   `~/brief_flags.json` onto EVERY running box — and ENDED THERE. otv4's
+#   `risk/setup_scorer.py`, the only thing that ever applied the nudge, was
+#   DELETED at OTV4 r152; `BRIEF_CONVICTION_WEIGHT` has had exactly one
+#   occurrence in that tree since — its own definition — and r382 recorded it
+#   as an orphan on 2026-09-14. Months of an LLM classification pass, a
+#   selector run and one SSH per box to deliver a number nothing opens.
+#   🔴 AND LEAVING IT WOULD HAVE PAGED HIM ON THE FIRST NEW MORNING.
+#   `_load_selection` audits report.json and Telegrams when the `move_ranked`
+#   sidecar is absent, and market_brief v1.7.0 emits none BY DESIGN. The gate
+#   CAPTURED the exact alert: *"MORNING REPORT PROBLEM | no move_ranked
+#   sidecar ... the Stage-3 sentiment nudge is a constant"* — true about the
+#   file, false about the world, at 09:15 on a trading morning (§17).
+#   ⚠️ `_format_ack` LOSES THE RANK COLUMN AND ITS `sel` ARGUMENT. v0.2.1
+#   printed each box's reporter rank and a near-miss list "to support tuning
+#   MAX_DISCRETIONARY"; r423 made the wake the discovered fleet, so there is
+#   no cutoff to tune and no near-miss to show, and C.46 ruled the number
+#   unfit to display. 🔑 ITS TITLE HAD ALSO BEEN LYING SINCE r423 — hardcoded
+#   "2 baseline + N discretionary" against a wake that is however many boxes
+#   carry the tag. It now counts what it woke.
+#   🔑 BOTH FUNCTIONS ARE STRUCK, NOT DELETED (r240): they are the only
+#   remaining record of how the score C.46 ruled on reached a box.
+#   GATE: tests/check_no_brief_prior.py B1-B4. B1/B2/B4 BORN RED; B3 is a
+#   DECLARED REGRESSION GUARD and it earned its place immediately — the first
+#   cut left a `sel` reference in `_format_ack` and B3 caught the NameError
+#   that would have killed the wake outright.
+#   ⚠️ AND THE GATE'S OWN FIRST CUT POLLUTED THE PRODUCTION POWER LEDGER: B2
+#   drives `run(dry_run=False)` under MOCK to actually reach the push, which
+#   reaches `ec2ops.start` and wrote four `START MOCK` rows into
+#   logs/fleet_power.log — a checker manufacturing entries in an audit trail
+#   another checker reads. `OT_FLEET_POWER_LOG` is now redirected to scratch
+#   and the four rows were removed. Same shape as otv4 OPS.6.
 # v0.7.0 (2026-09-24) — r423 / OPS.47. THE WAKE COUNT COMES FROM THE INSTANCE
 #   MAP. Operator: *"There's no discretionary. It's just the 15. We wake 15
 #   boxes daily. If there's 15 in the instance map then wake 15, if there's 20
@@ -161,11 +199,22 @@ def run(dry_run=False, gate=True):
         print("Not a trading day; nothing to do.")
         return 0
 
-    # 2. Baseline + discretionary. Load the brief, let the model concur on the
-    #    reporter's move_ranked, backfill to EXACTLY MAX_DISCRETIONARY.
+    # 2. The wake floor.
+    # ── 🔑 r431 — THE BRIEF'S PRIOR IS GONE FROM THIS PATH ─────────────────
+    # Operator, 2026-09-25: *"the market brief never actually correlated with
+    # the days Trading ... no morning bias ended up correlating."*
+    # 📊 IT NEVER CORRELATED BECAUSE IT WAS NEVER CONNECTED. The chain ended
+    # in mid-air: `_push_brief_flags` delivered `~/brief_flags.json` to every
+    # box, and otv4's `risk/setup_scorer.py` — the only consumer that ever
+    # applied it — was DELETED at OTV4 r152. `BRIEF_CONVICTION_WEIGHT` has had
+    # zero readers in that tree ever since, recorded as an orphan by r382 on
+    # 2026-09-14. Months of an LLM pass, a selector run and one SSH per box to
+    # write a file nothing opens.
+    # ⚠️ AND LEAVING IT WOULD HAVE PAGED HIM ON THE FIRST NEW MORNING:
+    # `_load_selection` audits report.json and Telegrams when `move_ranked` is
+    # missing, and market_brief v1.7.0 emits no sidecar BY DESIGN. The alert
+    # would have been true about the file and false about the world (§17).
     baseline = list(config.ALWAYS_ON)
-    sel = _load_selection()          # {"final","discretionary","brief_strength",...}
-    brief_strength = sel.get("brief_strength", {})
 
     # ── 🔑 r423 — THE WAKE IS WHAT AWS HOLDS, NOT WHAT A LIST REMEMBERS ─────
     # Operator: *"I want that number to be based on however many are in the
@@ -202,27 +251,6 @@ def run(dry_run=False, gate=True):
         wake_list = list(baseline)
         print(f"  ⚠️ fleet discovery returned NOTHING — waking the ALWAYS_ON "
               f"floor only: {wake_list}")
-    if sel.get("fallback"):
-        # v0.3.1 — this message used to claim "Waking SPX+QQQ; no discretionary
-        # names", which was WRONG whenever the EXACTLY-N backfill did its job:
-        # on 2026-07-30 the model call returned truncated JSON, the backfill
-        # refilled all 13 from the brief's move_ranked order, and the alert still
-        # announced a baseline-only wake. That inaccuracy cost real alarm on a
-        # morning when the wake was in fact healthy. Report what ACTUALLY woke.
-        _disc = sel.get("discretionary", [])
-        _n_bf = sum(1 for v in (sel.get("rationale") or {}).values()
-                    if isinstance(v, str) and v.startswith("backfill"))
-        if _disc:
-            notify.send(
-                "\u26A0\uFE0F *day_trader_pro* model selection FAILED — cohort "
-                f"came from reporter rank instead.\n({sel.get('error')})\n"
-                f"Woke {len(_disc)} discretionary ({_n_bf} by backfill): "
-                f"{', '.join(_disc)}\nTrading is unaffected; the brief's ranking "
-                "drove the picks, the model's judgement did not.")
-        else:
-            notify.send("\U0001F534 *day_trader_pro* selection fell back to "
-                        f"BASELINE-ONLY ({sel.get('error')}). Waking "
-                        f"{'+'.join(baseline)} — no discretionary names.")
     print(f"Wake list ({len(wake_list)}): {wake_list}")
 
     # 3. Resolve to instance IDs
@@ -242,9 +270,9 @@ def run(dry_run=False, gate=True):
 
     not_running = [iid for iid, ok in reached.items() if not ok]
 
-    # 4b. Deliver each box its signed move-strength for the setup-score nudge.
-    if not dry_run:
-        _push_brief_flags(resolved, reached, brief_strength)
+    # 4b. r431 — STRUCK. No prior is delivered. `_push_brief_flags` survives
+    #     below, unreferenced, under r240: it is the only remaining record of
+    #     how the number C.46 ruled on reached a box.
 
     # 4c. v0.4.0 — fleet/origin parity, reported not enforced (see _fleet_parity)
     _parity = ""
@@ -257,7 +285,7 @@ def run(dry_run=False, gate=True):
     # 5. Morning ack (always sends). The parity line rides ALONG WITH IT rather
     #    than only to stdout — under systemd stdout is journald, i.e. invisible
     #    unless someone goes looking, which defeats the point of the check.
-    _ack = _format_ack(wake_list, baseline, resolved, missing, reached, dry_run, sel)
+    _ack = _format_ack(wake_list, baseline, resolved, missing, reached, dry_run)
     if _parity:
         _ack = f"{_ack}\n{_parity.strip()}"
     notify.send(_ack)
@@ -290,7 +318,10 @@ def _report_date_et():
 
 
 def _load_selection():
-    """Load report.json and run selector.select(). Never raises — returns a
+    """🔴 STRUCK r431 — NOT CALLED. Kept under r240 as the record of how the
+    brief's prior was assembled; see the r431 note in run().
+
+    Load report.json and run selector.select(). Never raises — returns a
     baseline-only fallback dict on any failure.
 
     v0.3.0 STALENESS GUARD. On 2026-07-29 this function was found to have been
@@ -451,7 +482,10 @@ def _fleet_parity(resolved, reached):
 
 
 def _push_brief_flags(resolved, reached, brief_strength):
-    """Write ~/brief_flags.json onto each running box: {symbol, strength, date}.
+    """🔴 STRUCK r431 — NOT CALLED. No box has read this file since otv4 r152
+    deleted risk/setup_scorer.py. Kept under r240.
+
+    Write ~/brief_flags.json onto each running box: {symbol, strength, date}.
     Best-effort per box; a delivery failure never fails the wake (the bot's
     setup_scorer treats a missing/blank flag as strength 0 = no nudge).
     IPs come from fleet.get_fleet() — the same (symbol, ip, state) source the
@@ -507,61 +541,55 @@ def _fmt_score(r, strength=None):
     return " ".join(parts) if parts else "n/a"
 
 
-def _format_ack(wake_list, baseline, resolved, missing, reached, dry_run, sel):
-    """Per-server morning message with WHY each box was selected: its reporter
-    rank and signal strength/score, plus the near-miss names just below the
-    cutoff — so the discretionary cutoff can be tuned from what you observe."""
+def _format_ack(wake_list, baseline, resolved, missing, reached, dry_run):
+    """Per-server morning message: what woke, and whether it came up.
+
+    ── 🔑 r431 — THE RANK COLUMN IS GONE, AND SO IS THE `sel` ARGUMENT ──────
+    v0.2.1 printed each discretionary box's reporter rank and signal
+    strength, plus a near-miss list, "to support tuning MAX_DISCRETIONARY
+    from observed signal spread". There is nothing left to tune: r423 made
+    the wake the DISCOVERED FLEET, so there is no cutoff and no near-miss,
+    and C.46 ruled the number itself unfit to show. Printing a rank beside a
+    box that was woken because AWS says it exists would assert a reason that
+    is not the reason.
+    ⚠️ AND THE TITLE WAS LYING SINCE r423. It read "2 baseline + N
+    discretionary" with the 2 HARDCODED, while the wake had already become
+    however many boxes carry the fleet tag. It now counts what it actually
+    woke and names where each box came from.
+    """
     verb = "Would wake" if dry_run else "Woke"
     disc = [s for s in wake_list if s not in baseline]
-    lines = [f"*day_trader_pro — morning wake (2 baseline + {len(disc)} discretionary)*"]
+    lines = [f"*day_trader_pro — morning wake ({len(wake_list)} box(es): "
+             f"{len(wake_list) - len(disc)} floor + {len(disc)} discovered)*"]
     if dry_run:
         lines.append("_(dry run — nothing was actually started)_")
     # ── HALF-DAY BANNER (r319 / DEP.12) ────────────────────────────────────
-    # Operator, 2026-09-07: a banner in the market brief ABOVE the symbols
-    # strength list. It sits here, before the wake list, so it is the first
-    # thing under the title rather than something scrolled past.
+    # Operator, 2026-09-07: a banner ABOVE the symbols list. It sits here,
+    # before the wake list, so it is the first thing under the title.
     # 🔴 IT WARNS; IT CHANGES NOTHING. Every exit time in the fleet is still
     # keyed to a 16:00 close - VERTICAL_HOLD_TO_ET 15:45, the 15:40 flatten
     # ladder, the butterfly's 15:45 hard close - so on a 13:00 day they all
-    # fire after the bell. That is DEP.12 and it is UNFIXED. This line exists
-    # so the operator knows before the open, not so the code copes.
+    # fire after the bell. That is DEP.12 and it is UNFIXED.
     # ⚠️ TELEGRAM-SAFE: no angle brackets and no ampersand. r290 cost a day to
-    # a single "<" in a sent message, and the failure is the whole message
-    # failing to parse rather than one character rendering oddly.
+    # a single "<" in a sent message.
     if market_calendar.is_half_day():
         lines.append("⚠️ *HALF DAY — the market closes 13:00 ET.*")
         lines.append("_Exit times are still set for a 16:00 close; "
                      "they will fire after the bell._")
     lines.append(f"*{verb} {len(resolved)} server(s):*")
 
-    ranked = sel.get("ranked", [])
-    rank_by = {r["symbol"]: r for r in ranked}
-    strength = sel.get("brief_strength", {})
-
-    # Baseline (floor) first
     for s in baseline:
         if s in resolved:
             iid = resolved[s]
             mark = "•" if dry_run else ("✅" if reached.get(iid) else "🚨")
             lines.append(f"  {mark} {s} [floor] `{_short(iid)}`")
 
-    # Discretionary, in wake order, each with rank + strength/score
     for s in disc:
         if s not in resolved:
             continue
         iid = resolved[s]
         mark = "•" if dry_run else ("✅" if reached.get(iid) else "🚨")
-        r = rank_by.get(s, {})
-        rk = f"#{r['rank']}" if r.get("rank") else "#?"
-        lines.append(f"  {mark} {s} [{rk} {_fmt_score(r, strength.get(s))}] `{_short(iid)}`")
-
-    # Near-miss: highest-ranked names that did NOT make the cut — the boundary
-    # you use to judge whether the discretionary count is right.
-    misses = [r for r in ranked if not r.get("selected")][:6]
-    if misses:
-        lines.append("*— cutoff — just missed:*")
-        for r in misses:
-            lines.append(f"  · {r['symbol']} [#{r['rank']} {_fmt_score(r)}]")
+        lines.append(f"  {mark} {s} `{_short(iid)}`")
 
     if missing:
         lines.append(f"⚠️ Unresolved (no live instance): {', '.join(missing)}")
