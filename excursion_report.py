@@ -1,6 +1,14 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/excursion_report.py — v3.7 — MFE/MAE distributions from the
+day_trader_pro/excursion_report.py — v3.8 — MFE/MAE distributions from the
+v3.8  2026-09-26 — r433 — REPORTS_DIR honours $DTP_REPORTS_DIR. A checker was
+       RUNNING this report — correctly, since §21 forbids asserting on source —
+       and every run landed on the operator's banked
+       reports/excursions_<date>_bundle_warehouse.txt. The bytes were identical
+       so nothing was corrupted; what was destroyed is the answer to "when was
+       this report produced", and only a checker could have answered that
+       falsely. Third instance this session, after the power ledger (r431) and
+       the saturday brief's ledger (r432), which inverted an answer outright.
 v3.7  2026-09-16 — r383 / EXIT.4 — THE FLOOR VERDICT NOW SEPARATES THE FLOOR A
        ROW DECLARED FROM THE FLOOR IT GOT. It reported one averaged number, so a
        stop that announced -20% and filled at -23% read as a clean -20% stop.
@@ -280,7 +288,17 @@ from typing import Optional
 import ettime                                            # noqa: E402
 
 SCRIPT_DIR   = os.path.dirname(os.path.abspath(__file__))
-REPORTS_DIR  = os.path.join(SCRIPT_DIR, "reports")
+# 🔴 OVERRIDABLE SO A CHECKER STOPS OVERWRITING THE OPERATOR'S ARTEFACTS.
+# check_floor_overshoot RUNS this report for 2026-09-14 and 2026-09-07 — and
+# it is RIGHT to run it rather than grep its source (§21). But the run lands
+# on reports/excursions_<date>_bundle_warehouse.txt, the operator's own dated
+# artefact, so every sweep reset the mtime on two banked reports. The bytes
+# were identical, so nothing was corrupted; what was destroyed is the answer
+# to "when was this report actually produced", and only a checker could have
+# answered it falsely. Third instance this session after dtp r431 (power
+# ledger) and r432 (the saturday ledger, which INVERTED an answer).
+REPORTS_DIR  = os.environ.get("DTP_REPORTS_DIR",
+                              os.path.join(SCRIPT_DIR, "reports"))
 TRADES_DIR   = os.path.join(SCRIPT_DIR, "trades")
 CONTRACT_MULTIPLIER = 100
 

@@ -1,6 +1,15 @@
 #!/usr/bin/env python3
 """
-tests/check_floor_overshoot.py  v1.1
+tests/check_floor_overshoot.py  v1.2
+
+v1.2  2026-09-26  r433 — the report it DRIVES now writes to scratch. F3/F4/F5
+      run excursion_report.py for real, which is right, but the child landed on
+      reports/excursions_2026-09-14 and _2026-09-07 — two of the operator's
+      banked artefacts — resetting their mtime on every sweep. Found by diffing
+      the whole of /home/ubuntu across a sweep. ⚠️ I MISATTRIBUTED THIS TWICE
+      FIRST: to check_excursions_item.py on a NAME match, then again by
+      assumption, before bisecting the sweep checker-by-checker. Reading is
+      unaffected — --bundles-dir is still passed explicitly.
 
 v1.1  2026-09-18  r388 — 🔴 F1 WAS PINNED TO A COUNT AND THE COUNT GROWS. MINE.
       I wrote `EXPECT_N = 171` / `EXPECT_WORSE = 146` against a 13-session
@@ -78,6 +87,7 @@ import glob
 import json
 import os
 import subprocess
+import tempfile
 import sys
 from statistics import median
 
@@ -98,6 +108,16 @@ R383_N, R383_WORSE = 171, 146
 MIN_CORPUS = 40
 MIN_WORSE_SHARE = 0.70
 BUNDLES = os.path.join(_root, "reports", "warehouse")
+
+# 🔴 THE REPORT IS RUN FOR REAL (F3-F5) AND MUST NOT LAND IN reports/.
+# Driving the report instead of grepping it is correct — a source assertion
+# passes against a block that never executes (§21, the r201 shape). But the
+# child WRITES reports/excursions_<date>_bundle_warehouse.txt, so this gate was
+# resetting the mtime on two of the operator's banked reports on every sweep.
+# Reading is unaffected: --bundles-dir is passed explicitly, so only the
+# child's OUTPUT directory moves.
+_SCRATCH_REPORTS = os.path.join(tempfile.mkdtemp(prefix="floor_gate_"), "reports")
+_SCRATCH_ENV = dict(os.environ, DTP_REPORTS_DIR=_SCRATCH_REPORTS)
 
 
 def check(name: str, ok: bool, detail: str = "") -> None:
@@ -171,7 +191,8 @@ def main() -> int:
         res = subprocess.run(
             [sys.executable, os.path.join(_root, "excursion_report.py"),
              "--date", "2026-09-14", "--bundles-dir", BUNDLES],
-            capture_output=True, text=True, timeout=180, cwd=_root)
+            capture_output=True, text=True, timeout=180, cwd=_root,
+            env=_SCRATCH_ENV)
         out = (res.stdout or "") + (res.stderr or "")
     except Exception as exc:                                   # noqa: BLE001
         out = f"<run failed: {exc}>"
@@ -190,7 +211,8 @@ def main() -> int:
         res2 = subprocess.run(
             [sys.executable, os.path.join(_root, "excursion_report.py"),
              "--date", "2026-09-07", "--bundles-dir", BUNDLES],
-            capture_output=True, text=True, timeout=180, cwd=_root)
+            capture_output=True, text=True, timeout=180, cwd=_root,
+            env=_SCRATCH_ENV)
         empty_out = (res2.stdout or "") + (res2.stderr or "")
     except Exception as exc:                                   # noqa: BLE001
         empty_out = f"<run failed: {exc}>"
