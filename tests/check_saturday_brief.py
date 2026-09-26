@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_saturday_brief.py  v1.1
+day_trader_pro/tests/check_saturday_brief.py  v1.2
+v1.2  2026-09-26  r432 — writes to ITS OWN log and ledger, never the operator's.
+      The ledger exists to answer "is the brief still happening?" by `tail`.
+      This file was filling it with deliberate failures, and on 2026-09-26
+      that answer came back wrong on the morning of the first real Saturday.
 v1.1  2026-09-20  dtp r396 / SAT.3 — S2b REPLACED. It asserted
       '"deploy.sh" not in TOOLS', i.e. that a string was absent from a list
       that DOES NOT SCOPE SHELL COMMANDS — a check providing no protection
@@ -41,6 +45,13 @@ PROMPT = os.path.join(ROOT, "tools", "saturday_brief.prompt")
 # assert. A red for the wrong reason is worse than no red.
 import tempfile
 _TMPOUT = os.path.join(tempfile.gettempdir(), "check_saturday_brief_out.md")
+_SCRATCH = {
+    "SATURDAY_BRIEF_LOG": os.path.join(tempfile.gettempdir(),
+                                       "check_saturday_brief.log"),
+    "SATURDAY_BRIEF_LEDGER": os.path.join(tempfile.gettempdir(),
+                                          "check_saturday_brief.ledger"),
+}
+
 
 FAILS, RAN = [], []
 
@@ -144,14 +155,14 @@ ck("S3b", "Telegram" in p or "§17" in p,
 # today; it is caught here only because the mutation was run.
 # `claude` is removed from PATH so --smoke fails FAST instead of buying a run;
 # reaching the smoke banner proves the branch is live.
-env = dict(os.environ, SATURDAY_BRIEF_CLAUDE="/bin/false")
+env = dict(os.environ, **_SCRATCH, SATURDAY_BRIEF_CLAUDE="/bin/false")
 r = subprocess.run(["bash", SH, "--smoke"], capture_output=True, text=True,
                    timeout=120, env=env)
 ck("S4", "smoke:" in r.stdout and r.returncode != 0,
    f"--smoke ENTERS its own branch and REPORTS FAILURE when the binary is "
    f"unusable (rc={r.returncode}) — no live API call is bought by this gate")
 
-r = subprocess.run(["bash", SH, "--dry"], capture_output=True, text=True,
+r = subprocess.run(["bash", SH, "--dry"], env=dict(os.environ, **_SCRATCH), capture_output=True, text=True,
                    timeout=60)
 ck("S4b", r.returncode == 0 and "prompt file present" in r.stdout,
    f"--dry runs, touches nothing, and confirms the prompt is there "
@@ -168,7 +179,7 @@ try:
     # gate that dies tells the reader less than one that fails.
     r = subprocess.run(["bash", SH], capture_output=True, text=True,
                        timeout=120,
-                       env=dict(os.environ, SATURDAY_BRIEF_CLAUDE="/bin/false",
+                       env=dict(os.environ, **_SCRATCH, SATURDAY_BRIEF_CLAUDE="/bin/false",
                                 SATURDAY_BRIEF_OUT=_TMPOUT))
     ck("S5", r.returncode != 0 and "REFUSED" in (r.stdout + r.stderr),
        f"a MISSING prompt REFUSES (rc={r.returncode}) rather than invoking "
@@ -186,7 +197,7 @@ ck("S5b", os.path.exists(PROMPT), "the prompt file was restored by this check")
 # would be cron writing into an agent he is attached to. The wrapper prints
 # the flags it will actually pass; a source grep would be satisfied by a
 # comment (§21), and a neutered binary hides the difference entirely.
-cmd = subprocess.run(["bash", SH, "--print-cmd"], capture_output=True,
+cmd = subprocess.run(["bash", SH, "--print-cmd"], env=dict(os.environ, **_SCRATCH), capture_output=True,
                      text=True, timeout=60).stdout.strip()
 ck("S9", "--session-id" in cmd,
    f"the invocation forces an ISOLATED session id: {cmd[:60]}")
@@ -227,18 +238,25 @@ ck("S6d", cn is not None and cnd not in (None, "6"),
 # that crashes mid-brief leaves one behind; without expiry the fallback would
 # stand down every week while nothing was produced — precisely the silent
 # failure the layers exist to prevent.
+# 🔴 THE GATE WRITES TO ITS OWN LOG AND LEDGER, NEVER THE OPERATOR'S.
+# This file runs the real script with /bin/false standing in for claude — a
+# correct test of the failure path — and every one of those runs used to
+# append `FAILED fallback rc=1` to the ledger the operator tails to ask "is
+# the brief still happening?". 97 such lines accumulated and on 2026-09-26
+# they were read as a broken timer, on the morning of its FIRST Saturday.
+
 MARK = "/home/ubuntu/.saturday_brief_inflight"
 _pre = os.path.exists(MARK)
 try:
     subprocess.run(["touch", "-d", "5 hours ago", MARK], check=True)
     r = subprocess.run(["bash", SH], capture_output=True, text=True, timeout=120,
-                       env=dict(os.environ, SATURDAY_BRIEF_CLAUDE="/bin/false",
+                       env=dict(os.environ, **_SCRATCH, SATURDAY_BRIEF_CLAUDE="/bin/false",
                                 SATURDAY_BRIEF_OUT=_TMPOUT))
     ck("S7", "ABANDONED" in r.stdout,
        "a 5-hour-old in-flight marker is treated as ABANDONED, not obeyed")
     subprocess.run(["touch", MARK], check=True)
     r = subprocess.run(["bash", SH], capture_output=True, text=True, timeout=120,
-                       env=dict(os.environ, SATURDAY_BRIEF_CLAUDE="/bin/false",
+                       env=dict(os.environ, **_SCRATCH, SATURDAY_BRIEF_CLAUDE="/bin/false",
                                 SATURDAY_BRIEF_OUT=_TMPOUT))
     ck("S7b", "IN FLIGHT" in r.stdout,
        "a FRESH marker IS obeyed — the expiry did not simply disable the guard")

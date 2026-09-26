@@ -15,7 +15,12 @@ THEN PRODUCE THE BRIEF THE SPEC DESCRIBES. Its standing sections, in order:
            matters is a red that is NEW and a green that used to be red. A
            NEWLY-RED checker is the first target, ahead of the loss table.
   1  Data parity: fleet vs the S3 warehouse bucket.
-  2  Disk usage across all fifteen boxes.
+  2  Disk usage across all SEVENTEEN boxes. ⚠️ AAL and SOFI joined the fleet
+     2026-09-24 and traded from 09-25. They run the TEST engine (a different
+     repo, OTV4TEST) at 10% nominal position size, so their P&L is tiny BY
+     DESIGN and the R-multiple is what the operator reads for them. Do not
+     compare their dollars against a mainline box. Say "15/17" plainly if a
+     fleet-wide command only reaches the mainline fifteen.
   3  R-suite: EACH item as its OWN sequential section, never a summary
      paragraph of the whole suite.
   4  Losses, and — the operator's addition — BIG MOVES ON THE TAPE WE FAILED

@@ -1,5 +1,21 @@
 #!/usr/bin/env bash
-# day_trader_pro/tools/saturday_brief.sh — v1.1
+# day_trader_pro/tools/saturday_brief.sh — v1.2
+# v1.2 (2026-09-26) — r432. LOG and LEDGER are OVERRIDABLE, because the gate
+#   was writing into them. check_saturday_brief runs THIS script for real with
+#   SATURDAY_BRIEF_CLAUDE=/bin/false and a `touch -d "5 hours ago"` in-flight
+#   marker — both correct tests — and every such run appended to the
+#   PRODUCTION ledger. 97 `FAILED fallback rc=1` lines accumulated, which is
+#   /bin/false exiting 1 exactly as instructed, plus 37 `REFUSED: no prompt
+#   file` lines from S5 renaming the prompt away.
+#   🔴 ON 2026-09-26 THAT LEDGER WAS READ AS A DEAD TIMER AND REPORTED TO THE
+#   OPERATOR AS SUCH — on the morning of its FIRST EVER SATURDAY. The only
+#   line cron ever wrote is `2026-09-23T07:17:10Z CANARY pass`. The mechanism
+#   had never failed; its own test had made its evidence unreadable.
+#   ⚠️ A CHECKER MAY NOT MANUFACTURE ENTRIES IN THE AUDIT TRAIL THE OPERATOR
+#   READS. Same defect found in dtp's power ledger hours earlier (r431) and in
+#   otv4 OPS.6, where checkers resolving ~-expanded defaults built a month of
+#   stray bot.log on control. The peer session states it as §40.1: a check may
+#   assert only what its OWN child could have done.
 # v1.1 (2026-09-20) — dtp r396 / SAT.3. THE SAFETY CLAIM IN v1.0 WAS FALSE
 #   and is corrected in the body; this file now EXPORTS VERTIGO_UNATTENDED=1
 #   on every path and the lander refuses it. SATURDAY_BRIEF_OUT is
@@ -82,13 +98,22 @@ STAMP="$(date +%Y-%m-%d)"
 # wrapper correctly stood down and three checks failed for a reason that had
 # nothing to do with what they assert.
 OUT="${SATURDAY_BRIEF_OUT:-$OTV4/handoffs/saturday_${STAMP}.md}"
-LOG="/home/ubuntu/saturday_brief.log"
+# 🔴 OVERRIDABLE SO THE GATE STOPS WRITING INTO THE OPERATOR'S EVIDENCE.
+# check_saturday_brief runs THIS script for real with SATURDAY_BRIEF_CLAUDE
+# set to /bin/false and a 5-hour-old in-flight marker. Both are correct tests.
+# Both appended to the PRODUCTION log and ledger, so a `tail` of the ledger
+# showed 97 `FAILED fallback rc=1` lines that were /bin/false doing its job —
+# and on 2026-09-26 that read as a dead timer and cost a false alarm to the
+# operator before its first Saturday had even arrived. A checker may not
+# manufacture entries in the audit trail the operator reads (otv4 OPS.6; the
+# peer session's §40.1: a check may assert only what its OWN child could do).
+LOG="${SATURDAY_BRIEF_LOG:-/home/ubuntu/saturday_brief.log}"
 # 🔑 A ONE-LINE-PER-RUN LEDGER, SEPARATE FROM THE CHATTY LOG. The failure this
 # arrangement most needs to survive is SILENCE — a timer that stops firing is
 # indistinguishable from a quiet week — so every invocation appends exactly
 # one line saying what it did. `tail` on this answers "is the brief still
 # happening?" without reading a megabyte of session output.
-LEDGER="/home/ubuntu/saturday_brief.ledger"
+LEDGER="${SATURDAY_BRIEF_LEDGER:-/home/ubuntu/saturday_brief.ledger}"
 PROMPT_FILE="/home/ubuntu/day_trader_pro/tools/saturday_brief.prompt"
 
 # 🔑 READ AND MEASURE ONLY. Bash is needed because every measurement in this
