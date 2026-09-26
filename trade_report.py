@@ -1,4 +1,18 @@
-# day_trader_pro/trade_report.py — v1.20
+# day_trader_pro/trade_report.py — v1.21
+# v1.21 (2026-09-26) — r451 / RPT.33. R WAS READING A WINNER'S P&L AS ITS STOP.
+#   `_STOP_PCT_RE` matched ANY "NN%" in exit_reason, and every real reason
+#   carries a `pnl=N%` suffix, so `orb_trail_stop pnl=55.0%` was read as a 55%
+#   STOP and risk_taken came out equal to the trade's own profit: every such
+#   winner scored EXACTLY +1.00R (a loser -1.00R). `orb_stop_respected … by more
+#   than 50% of the … stop` and `volt_trail_stop … the 50% lock` were read as 50%
+#   stops too. MEASURED on the banked corpus, 764 closed trades since 09-01:
+#   259 at exactly |1.00|R, 351 rows' R wrong, book mean R +0.584 where it is
+#   +0.106, RunawayContinuation +1.242 where it is +0.211. The docstring below
+#   always said winners get NO percentage; the regex never enforced it.
+#   FIX: anchored to a stop token, `stop_N%` — our whole stop vocabulary since
+#   09-01 is hard_stop_N%, premium_stop_N%, stop_N% and tcs_stop_N%_of_credit
+#   (measured), all matched. Found by OTV4TEST in their inherited copy (their
+#   r155); measured here on our own corpus before adopting.
 # v1.20 (2026-09-25) — r428 / OPS.52. R PER BUCKET, AND THE HEADLINE STOPS
 #   RANKING ACROSS LINEAGES. Operator on the TEST boxes: *"the 2 test boxes are
 #   trading a 10% nominal position size... The P&L will be minuscule, but the
@@ -887,7 +901,7 @@ def capital_at_risk(t) -> Optional[float]:
     return prem * n * 100.0                      # debit
 
 
-_STOP_PCT_RE = re.compile(r"(\d{1,2}(?:\.\d+)?)\s*%")
+_STOP_PCT_RE = re.compile(r"stop_(\d{1,2}(?:\.\d+)?)\s*%")   # r451: a STOP token, never a pnl=
 
 
 def stop_pct_from_exit(t) -> Optional[float]:

@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/test_r_value.py — v1.1
+# day_trader_pro/tests/test_r_value.py — v1.2
+# v1.2 (2026-09-26) — dtp r451 / RPT.33. E2 WAS BUILT FROM A BELIEF, NOT FROM A
+#      ROW. It asserted winners carry no stop percentage using BARE reasons
+#      ("orb_trail_stop", "target_hit"), but every real row carries a suffix —
+#      "orb_trail_stop pnl=55.0%" — so the unanchored regex read the P&L as a
+#      stop and the check could not see it (§0.4). E4 uses REAL reason strings,
+#      copied verbatim from the banked fleet corpus on 2026-09-26, and E1e pins
+#      that a real stop reason still resolves to its stop, not its pnl.
 # v1.1 (2026-09-04) — dtp r269. MODIFIED R, ON THE STOP THAT ACTUALLY ENDED
 #      THE TRADE. E1-E3 added: the exit reason's own percentage is the
 #      denominator, a winner has no percentage and must not be given one, and
@@ -125,6 +132,35 @@ def main():
     check("E3 0% and 100% are rejected",
           T.stop_pct_from_exit({"exit_reason": "hard_stop_0%"}) is None
           and T.stop_pct_from_exit({"exit_reason": "x_100%"}) is None)
+
+    # ══ E4 — REAL REASONS FROM THE CORPUS (r451). A winner's pnl= is NOT a stop ══
+    # Copied verbatim from reports/warehouse/fleet_trades_2026-*.json. Each of
+    # these read as a STOP before r451, so every such winner scored exactly
+    # +1.00R: its own profit divided by itself.
+    real_not_stop = (
+        "orb_trail_stop pnl=55.0%",
+        "orb_fvg_trail_stop pnl=298.1%",
+        "target_hit pnl=111.6%",
+        "nickel_close pnl=91.8%",
+        "breach: 1m close 7630.12 through 7627.87 pnl=-2.0%",
+        "structure_stop: 1m close 13.51 through 13.51 pnl=-18.2%",
+        "exhaustion: new short extreme on weaker momentum — continuing on fumes pnl=-8.3%",
+        "orb_stop_respected: 378.55 is beyond the low stop 378.63 by more than 50% of the 0.12 stop it was sized on",
+        "volt_trail_stop: 1m close 13.47 through the 50% lock 13.46 (armed at 0.5R, peak 13.42)",
+    )
+    wrong = [r for r in real_not_stop if T.stop_pct_from_exit({"exit_reason": r}) is not None]
+    check("E4 no real non-stop reason yields a stop percentage", not wrong,
+          f"read as a stop: {wrong[:3]}")
+    real_stop = {"hard_stop_25% pnl=-25.9%": 0.25, "stop_24% pnl=-27.4%": 0.24,
+                 "premium_stop_15% pnl=-22.2%": 0.15}
+    bad = {r: T.stop_pct_from_exit({"exit_reason": r}) for r, want in real_stop.items()
+           if T.stop_pct_from_exit({"exit_reason": r}) != want}
+    check("E1e a real stop reason resolves to its STOP, not its pnl", not bad, f"{bad}")
+    tw = {"contracts": 10, "entry_premium": 1.00, "pnl_usd": 550.0, "spread_width": 0,
+          "exit_reason": "orb_trail_stop pnl=55.0%", "stop_premium": 0.75}
+    check("E4b a real trail-stop winner is measured on its entry floor, not +1.00R",
+          T._r_basis(tw) == "s" and abs(T.modified_r(tw) - 2.2) < 1e-9,
+          f"basis={T._r_basis(tw)} R={T.modified_r(tw)}")
 
     print()
     if FAILED:
