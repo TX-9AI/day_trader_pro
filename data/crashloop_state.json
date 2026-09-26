@@ -1,0 +1,172 @@
+{
+"AAL": {
+"events": [],
+"last_alert": 0,
+"level": 0,
+"restarts": 3,
+"session_alerted": false,
+"session_day": "2026-09-25",
+"session_restarts": 0,
+"unreachable": 0
+},
+"AMD": {
+"events": [],
+"last_alert": 0,
+"level": 0,
+"restarts": 0,
+"session_alerted": false,
+"session_day": "2026-09-25",
+"session_restarts": 0,
+"unreachable": 0
+},
+"AMZN": {
+"events": [],
+"last_alert": 0,
+"level": 0,
+"restarts": 0,
+"session_alerted": false,
+"session_day": "2026-09-25",
+"session_restarts": 0,
+"unreachable": 0
+},
+"AVGO": {
+"events": [],
+"last_alert": 0,
+"level": 0,
+"restarts": 0,
+"session_alerted": false,
+"session_day": "2026-09-25",
+"session_restarts": 0,
+"unreachable": 0
+},
+"CRM": {
+"events": [],
+"last_alert": 0,
+"level": 0,
+"restarts": 0,
+"session_alerted": false,
+"session_day": "2026-09-25",
+"session_restarts": 0,
+"unreachable": 0
+},
+"CVX": {
+"events": [],
+"last_alert": 0,
+"level": 0,
+"restarts": 0,
+"session_alerted": false,
+"session_day": "2026-09-25",
+"session_restarts": 0,
+"unreachable": 0
+},
+"GOOGL": {
+"events": [],
+"last_alert": 0,
+"level": 0,
+"restarts": 0,
+"session_alerted": false,
+"session_day": "2026-09-25",
+"session_restarts": 0,
+"unreachable": 0
+},
+"META": {
+"events": [],
+"last_alert": 0,
+"level": 0,
+"restarts": 0,
+"session_alerted": false,
+"session_day": "2026-09-25",
+"session_restarts": 0,
+"unreachable": 0
+},
+"MU": {
+"events": [],
+"last_alert": 0,
+"level": 0,
+"restarts": 0,
+"session_alerted": false,
+"session_day": "2026-09-25",
+"session_restarts": 0,
+"unreachable": 0
+},
+"NFLX": {
+"events": [],
+"last_alert": 0,
+"level": 0,
+"restarts": 0,
+"session_alerted": false,
+"session_day": "2026-09-25",
+"session_restarts": 0,
+"unreachable": 0
+},
+"NVDA": {
+"events": [],
+"last_alert": 0,
+"level": 0,
+"restarts": 0,
+"session_alerted": false,
+"session_day": "2026-09-25",
+"session_restarts": 0,
+"unreachable": 0
+},
+"PLTR": {
+"events": [],
+"last_alert": 0,
+"level": 0,
+"restarts": 0,
+"session_alerted": false,
+"session_day": "2026-09-25",
+"session_restarts": 0,
+"unreachable": 0
+},
+"QQQ": {
+"events": [],
+"last_alert": 0,
+"level": 0,
+"restarts": 0,
+"session_alerted": false,
+"session_day": "2026-09-25",
+"session_restarts": 0,
+"unreachable": 0
+},
+"SOFI": {
+"events": [],
+"last_alert": 0,
+"level": 0,
+"restarts": 0,
+"session_alerted": false,
+"session_day": "2026-09-25",
+"session_restarts": 0,
+"unreachable": 0
+},
+"SPX": {
+"events": [],
+"last_alert": 0,
+"level": 0,
+"restarts": 0,
+"session_alerted": false,
+"session_day": "2026-09-25",
+"session_restarts": 0,
+"unreachable": 0
+},
+"TSLA": {
+"events": [],
+"last_alert": 0,
+"level": 0,
+"restarts": 0,
+"session_alerted": false,
+"session_day": "2026-09-25",
+"session_restarts": 0,
+"unreachable": 0
+},
+"UNH": {
+"events": [],
+"last_alert": 0,
+"level": 0,
+"restarts": 0,
+"session_alerted": false,
+"session_day": "2026-09-25",
+"session_restarts": 0,
+"unreachable": 0
+}
+}

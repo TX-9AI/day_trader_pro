@@ -1,5 +1,26 @@
 #!/usr/bin/env python3
-# day_trader_pro/tools/check_land_discipline.py — v1.2
+# day_trader_pro/tools/check_land_discipline.py — v1.3
+# v1.3 (2026-09-26) — dtp r435. NEW CHECK **LEDGER**, AND ITS ABSENCE HAD
+#   ALREADY COST EIGHT ROWS. v1.1's capability detection is right in principle
+#   — absent artifact => SKIP and say so by name, so dtp never cries wolf over
+#   files it does not carry. ⚠️ BUT IT ASSUMED THE LEDGER IS A PER-REPO
+#   ARTEFACT AND IT IS NOT: the revision sequence is SHARED across both trees
+#   (dtp r431 and otv4 r430 are the same counter) while GENESIS.md lives only
+#   in otv4. So dtp's GENESIS check SKIPPED on every run, structurally, and
+#   nothing could ever notice a dtp revision landing with no ledger row.
+#   📊 FOUND BY THE OPERATOR, NOT BY THIS FILE: *"how did you commit them
+#   without adding to the Genesis? Don't you use a checker?"* — after r431,
+#   r432 and r433 were committed with no rows. 🔴 AND ITS FIRST RUN FOUND FIVE
+#   MORE, going back weeks: r316, r392, r394, r396 and r418. r394 IS THE
+#   SATURDAY BRIEF ITSELF, the mechanism whose unreadable ledger produced a
+#   false alarm to the operator the same night.
+#   🔑 IT WORKS IN HOOK MODE, WHICH THE --rev CHECK CANNOT. A pre-commit hook
+#   never knows the revision it is about to create, so the row for THIS commit
+#   is genuinely uncheckable there — but every EARLIER revision is already in
+#   the log, so COMPLETENESS is answerable at any time with no --rev. That is
+#   why it is retrospective rather than one more assertion about the commit in
+#   hand. Bounded by the ledger's own floor so revisions predating the ledger
+#   are not flagged (the CV.1 wolf-cry this file exists to avoid).
 # v1.2 (2026-09-11) — dtp r360 / LAND.8. ONE EXEMPTION TO THE NO-SOURCE RULE:
 #   an index-only untrack of an ignored path. `git rm --cached <f>` diffs as
 #   nothing but deletions, so the rule refused it, and the only way through was
@@ -242,8 +263,53 @@ def check(repo, rev, ref, problems, notes, hook=False):
                 "as an ELEMENT and nests every later row inside it — %s. Wrap "
                 "the placeholder in backticks."
                 % (len(_bad), ", ".join("%s: <%s>" % (r, t) for r, t in _bad[:6])))
+    # ── A2. LEDGER COMPLETENESS — THE SHARED SEQUENCE, THE SINGLE LEDGER ──
+    # 🔴 THIS IS THE CHECK THAT WAS MISSING, AND ITS ABSENCE COST THREE ROWS.
+    # v1.1's capability detection is right in principle — "absent artifact =>
+    # SKIP, and say so by name" is what keeps this from crying wolf on dtp.
+    # ⚠️ BUT IT ASSUMED THE LEDGER IS A PER-REPO ARTEFACT AND IT IS NOT. The
+    # revision sequence is SHARED across both trees — dtp r431 and otv4 r430
+    # are the same counter — while GENESIS.md lives only in otv4. So dtp's
+    # GENESIS check SKIPPED on every run, structurally, and on 2026-09-26
+    # r431, r432 and r433 were committed in dtp with NO LEDGER ROW AT ALL and
+    # nothing could notice. The operator found it by asking "how did you commit
+    # them without adding to the Genesis? Don't you use a checker?"
+    # 🔑 AND IT WORKS IN HOOK MODE, WHICH THE --rev CHECK CANNOT. A pre-commit
+    # hook never knows the revision it is about to create, so the row for THIS
+    # commit is genuinely uncheckable there. But every EARLIER revision is
+    # already in the log, so completeness is answerable at any time, with no
+    # --rev, in either tree. That is why this is retrospective rather than
+    # another assertion about the current commit.
+    _shared = os.path.expanduser("~/options-trader-v4/docs/GENESIS.md")
+    if os.path.exists(_shared):
+        _rows = set(re.findall(r"^\|\s*\*\*(r\d+)\*\*", 
+                               open(_shared, encoding="utf-8").read(), re.M))
+        if _rows:
+            _floor = min(int(x[1:]) for x in _rows)
+            _subj = subprocess.run(
+                ["git", "-C", repo, "log", "--format=%s", "-400"],
+                capture_output=True, text=True).stdout
+            _used = {m for m in re.findall(r"^(r\d+):", _subj, re.M)}
+            # ⚠️ BOUNDED BY THE LEDGER'S OWN FLOOR. Revisions older than the
+            # first row predate the ledger and are not defects; flagging them
+            # would be the CV.1 wolf-cry this file exists to avoid.
+            _miss = sorted({r for r in _used if int(r[1:]) >= _floor} - _rows,
+                           key=lambda r: int(r[1:]))
+            if _miss:
+                problems.append(
+                    "LEDGER: %d revision(s) in this repo's log have NO row in "
+                    "the shared ledger %s — %s. WA §35: a revision absent from "
+                    "the ledger did not happen. The sequence is shared across "
+                    "both trees; the ledger is not."
+                    % (len(_miss), _shared, " ".join(_miss)))
+            else:
+                notes.append("LEDGER    PASS  — every revision in this log "
+                             "(>= %s) has a row in the shared ledger" % ("r%d" % _floor))
+
     if not os.path.exists(gpath):
-        notes.append("GENESIS   SKIP  — docs/GENESIS.md not present in this repo")
+        notes.append("GENESIS   SKIP  — docs/GENESIS.md not present in this "
+                     "repo (the shared ledger is checked separately — see "
+                     "LEDGER)")
     elif not rev:
         if hook:
             # ⚠️ NOT A PASS, AND IT MUST NOT READ AS ONE. A pre-commit hook has
