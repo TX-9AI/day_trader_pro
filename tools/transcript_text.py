@@ -1,5 +1,18 @@
 #!/usr/bin/env python3
-# day_trader_pro/tools/transcript_text.py — v1.0
+# day_trader_pro/tools/transcript_text.py — v1.1
+# v1.1 (2026-09-26) — r446 / OPS.58. `--pick` SKIPPED THE THREAD IT EXISTS TO
+#   FIND. It identified the caller from CLAUDE_SESSION_ID, which the harness
+#   does not export — the harness exports CLAUDE_CODE_SESSION_ID (measured on
+#   control: set, equal to the caller's transcript id; CLAUDE_SESSION_ID
+#   unset). So every run fell through to "written in the last 120s is me", and
+#   a handoff launches the next thread SECONDS after the previous one's last
+#   write: on 2026-09-26 it skipped 32460a16 (1.0 MB of text) as "almost
+#   certainly THIS session" and handed the new thread an 11 KB Saturday-brief
+#   session as its history. The stderr line was loud and WRONG — §0.5 kept, the
+#   claim false. FIX: read CLAUDE_CODE_SESSION_ID first (CLAUDE_SESSION_ID
+#   still honoured), and when an id is known the mtime guess is NOT applied at
+#   all; it remains only for a caller with no id. Gate check_transcript_pick
+#   P1-P5, born red at P1-P3.
 # v1.0 (2026-09-20) — r410 / OPS.35. THE HANDOFF TOLD EVERY THREAD TO "EXTRACT
 #   THE MESSAGE TEXT" AND GAVE IT NO MEANS, SO EVERY THREAD WROTE THIS AGAIN.
 #   WORKING_AGREEMENT §25 entry 5 and the handoff both require the last
@@ -117,7 +130,11 @@ def main():
         # identified by the live session id when the harness exports it, and
         # otherwise by BEING ACTIVELY WRITTEN — a file touched seconds ago is
         # almost certainly the caller's.
-        me = os.environ.get("CLAUDE_SESSION_ID", "")
+        # v1.1: the harness exports CLAUDE_CODE_SESSION_ID. Reading only the
+        # legacy name meant this was always "" and the guess below always ran.
+        me_var = next((v for v in ("CLAUDE_CODE_SESSION_ID", "CLAUDE_SESSION_ID")
+                       if os.environ.get(v)), "")
+        me = os.environ.get(me_var, "") if me_var else ""
         now = time.time()
         cand = []
         for path, raw, txt in rows:
@@ -126,8 +143,10 @@ def main():
             if me and me in path:
                 sys.stderr.write(
                     f"transcript_text: SKIPPING {os.path.basename(path)} — it "
-                    "is this session (CLAUDE_SESSION_ID).\n")
+                    f"is this session ({me_var}).\n")
                 continue
+            # The guess runs ONLY when no id is known: with an id, a file
+            # written seconds ago is the PREDECESSOR a handoff just ended.
             if not me and (now - os.path.getmtime(path)) < LIVE_SECS:
                 # 🔴 SAID OUT LOUD, NEVER SKIPPED IN SILENCE (§0.5). Handing a
                 # thread its own transcript is a MIRROR that reads exactly like
