@@ -1,5 +1,26 @@
 #!/usr/bin/env bash
-# day_trader_pro/tools/saturday_brief.sh — v1.2
+# day_trader_pro/tools/saturday_brief.sh — v1.3
+# v1.3 (2026-09-26) — r440. THE PROMPT MAY NOW WAKE THE FLEET, AND MUST CLOSE
+#   IT. Operator: *"The automated session should invoke the wake command
+#   through the instance map if it needs to check anything."*
+#   🔴 r394 TOLD THIS SESSION "DO NOT START THEM" AND THE OPERATOR HAD NEVER
+#   ASKED FOR THAT. His own spec (handoffs/SATURDAY_BRIEF.md) says the
+#   opposite in as many words: *"If you start at midnight, I have no problem
+#   with that & you can bring up the fleet to check things."* The constraint
+#   was mine, invented at r394, and on 2026-09-26 it cost an entire item —
+#   the brief reported DISK 0/17 with AAL and SOFI never measured at all,
+#   while the session had `Bash` in its tool list the whole time and could
+#   have woken them. A session that obeys a wrong instruction correctly looks
+#   exactly like one that hit a real limit.
+#   ⚠️ THE CLOSE IS MANDATORY AND MUST SURVIVE A FAILURE. Seventeen boxes left
+#   up bill all weekend; the prompt now requires the CLOSE even when a
+#   measurement raises, and requires the `17/17 reached stopped` line to be
+#   quoted rather than assumed.
+#   ⚠️ AND THE COMMANDS ARE EXPLICIT, NOT `$PY`. The prompt is text handed to a
+#   session, not a shell script — a `$PY` would not expand, and it appeared
+#   nowhere else in the file. `./venv/bin/python` is named because dtp's venv
+#   carries numpy and the system interpreter does not; the peer session had a
+#   land refused by exactly that on the same day.
 # v1.2 (2026-09-26) — r432. LOG and LEDGER are OVERRIDABLE, because the gate
 #   was writing into them. check_saturday_brief runs THIS script for real with
 #   SATURDAY_BRIEF_CLAUDE=/bin/false and a `touch -d "5 hours ago"` in-flight

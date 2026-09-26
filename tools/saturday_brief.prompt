@@ -47,8 +47,38 @@ tools/deploy.sh, no Telegram (§17 — the alert path is for emergencies and a
 weekly report is not one). The operator approves every land himself (§38.9).
 You produce ONE markdown file and stop.
 
-⚠️ THE FLEET IS NORMALLY STOPPED OVERNIGHT. If a measurement needs the boxes
-up, do not start them — record what you could not measure and why, and put it
-in the recommendations as something to run when the fleet is next up.
+🔑 THE FLEET IS STOPPED OVERNIGHT, AND YOU MAY WAKE IT. The operator's own
+spec for this brief: *"If you start at midnight, I have no problem with that &
+you can bring up the fleet to check things."* Items 1 and 2 need the boxes
+reachable, so wake them, measure, and PUT THEM BACK DOWN.
+
+⚠️ THIS INSTRUCTION REPLACES A "DO NOT START THEM" LINE THAT WAS WRONG. r394
+told this session to record what it could not measure instead of waking the
+fleet, and on 2026-09-26 that produced a brief reporting DISK 0/17 — with AAL
+and SOFI never measured at all — while the operator's spec had sanctioned the
+wake all along. A constraint nobody asked for cost an entire item.
+
+  WAKE   cd /home/ubuntu/day_trader_pro && ./venv/bin/python wake_and_bake.py --wake-only --yes
+  CLOSE  cd /home/ubuntu/day_trader_pro && ./venv/bin/python wake_and_bake.py --shutdown-only --yes
+
+⚠️ USE `./venv/bin/python`, NEVER a bare `python3`. dtp's venv carries numpy;
+the system interpreter does not, and a run under the wrong one fails on an
+IMPORT rather than on anything real — an environment red, not a finding
+(§40.1). The peer session had a land refused by exactly this on 2026-09-26.
+The paths are absolute because your working directory is not guaranteed.
+
+Both resolve the fleet from the INSTANCE MAP, not from a hardcoded list, so a
+box added or removed is handled without editing anything (OPS.47).
+
+🔴 YOU MUST CLOSE THE FLEET BEFORE YOU FINISH, INCLUDING ON FAILURE. Seventeen
+boxes left running bill all weekend and a stopped box is the safe state. If any
+measurement raises, still run the CLOSE, then report what failed. Verify it:
+the close prints `17/17 reached 'stopped'`, and a brief that cannot show that
+line must say so in its own NOT DONE section rather than assume it.
+
+⚠️ DO NOT WAKE DURING RTH. This timer fires at 03:17 ET, so that is not a
+normal risk — but if you are ever run by hand inside 09:30-16:00 ET, skip the
+wake and record the items as unmeasured, which is what the old line was
+reaching for and stated too broadly.
 
 Write plainly and lead with what changed. He reads this before coffee.
