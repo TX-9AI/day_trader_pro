@@ -1,6 +1,20 @@
 #!/usr/bin/env python3
 """
-tests/check_fleet_power_log.py  v1.2
+tests/check_fleet_power_log.py  v1.3
+v1.3  2026-09-26  r439 / OPS.49 — P7 READ THE OPERATOR'S LIVE ACK FILE.
+      `fleet_power_audit` defaults `--ack-file` to `logs/power_ack.txt`, and P7
+      never overrode it. That file holds a REAL, DATED ack for AAL on
+      2026-09-24 — the exact box and the exact date this fixture flags as
+      unexplained — so the live ack suppressed it, `bad` fell from 2 to 1, and
+      P7's assertion of "2 box(es)" failed. 🔴 THE CHECK WAS MEASURING THE
+      OPERATOR'S STATE, NOT THE CODE'S: it went red on a Saturday because of
+      something he did on Thursday, and nothing in the failure said so.
+      ⚠️ SAME FAMILY AS r431-r433, WHERE A CHECKER WROTE INTO AN ARTEFACT A
+      HUMAN READS. This one READ one, which is the quieter half — a writer
+      leaves evidence, a reader just reports the wrong answer. Diagnosed in the
+      2026-09-26 Saturday brief; I first blamed it on the ack file, tested that
+      and found the fix had not applied, and only the second attempt (with the
+      replace asserted) landed it.
 v1.2  2026-09-25  r425 / OPS.49 — ADD A1-A3 for self-expiring acknowledgements.
       🔑 A2 IS THE ONE THAT MATTERS: an ack must DIE ON ITS OWN. A suppression
       that outlives its day is indistinguishable from a muted alert, and the
@@ -205,7 +219,20 @@ def main():
                 "AAL": {"instance_id": "i-zzz999", "state": "running"}}
             before = len(notify.captured())
             try:
-                fpa.main(["--log", led, "--notify"])
+                # 🔴 r437 — `--ack-file` INTO SCRATCH. Without it the audit
+                # read the operator's LIVE logs/power_ack.txt, which holds a
+                # real dated ack for AAL on 2026-09-24 — the exact box and the
+                # exact date this FIXTURE flags as unexplained. The live ack
+                # suppressed it, `bad` fell from 2 to 1, and P7's assertion of
+                # "2 box(es)" failed. The check was measuring the OPERATOR'S
+                # STATE, not the code's.
+                # ⚠️ Same family as r431/r432/r433, where a checker WROTE into
+                # an artefact a human reads. This one READ one, which is the
+                # quieter half: it goes red on a Saturday because of something
+                # the operator did on Thursday, and nothing in the failure
+                # says so.
+                fpa.main(["--log", led, "--notify",
+                          "--ack-file", os.path.join(tmp3, "ack.txt")])
             finally:
                 fpa._now_et, fpa.ec2ops.describe_by_tag = rn, rd
             msgs = notify.captured()[before:]
