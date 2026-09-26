@@ -1,5 +1,21 @@
 #!/usr/bin/env bash
-# day_trader_pro/tools/saturday_brief.sh — v1.3
+# day_trader_pro/tools/saturday_brief.sh — v1.4
+# v1.4 (2026-09-26) — r445 / S1. THE MINIMUM-STOP VETO IS REPORTED WEEKLY AND
+#   NEVER ENFORCED. Operator approved a REPORT in place of the live recorder I
+#   had originally proposed. 🔑 THE RECORDER WAS REDUNDANT AND MEASURING IT IS
+#   WHAT SHOWED THAT: `underlying_entry` and `underlying_stop` are present on
+#   294 of 294 ORB trades, so what a `stop < 0.05% of spot` veto WOULD have
+#   refused is computable RETROACTIVELY over the entire corpus — no box-side
+#   code, no deploy, no risk to the trading path, and it works on history from
+#   the first run rather than accumulating from today.
+#   ⚠️ THE COMPUTATION IS SPELLED OUT IN THE PROMPT so every week's number is
+#   the same number; a section that re-derives its own method each Saturday
+#   produces a trend out of its own drift.
+#   ⚠️ AND IT REPORTS THE KEPT SIDE TOO. A veto is only worth taking if what it
+#   refuses is worse than what it keeps, and a refused-only figure cannot show
+#   that. It is item 5, BEFORE recommendations — my first cut put it after, so
+#   the brief would have reported a finding its own recommendations could not
+#   reference.
 # v1.3 (2026-09-26) — r440. THE PROMPT MAY NOW WAKE THE FLEET, AND MUST CLOSE
 #   IT. Operator: *"The automated session should invoke the wake command
 #   through the instance map if it needs to check anything."*

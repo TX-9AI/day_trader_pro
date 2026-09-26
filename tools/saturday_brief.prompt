@@ -25,8 +25,41 @@ THEN PRODUCE THE BRIEF THE SPEC DESCRIBES. Its standing sections, in order:
      paragraph of the whole suite.
   4  Losses, and — the operator's addition — BIG MOVES ON THE TAPE WE FAILED
      TO CAPITALISE ON, whether we traded them wrong or SAT OUT entirely.
-  5  Recommendations, with any previously-reached recommendation restated and
+  5  THE MINIMUM-STOP VETO, REPORTED AND NEVER ENFORCED. Each week, compute
+     from banked trades what a `stop < 0.05% of spot` veto WOULD have refused.
+     Report it; change nothing; recommend nothing on it until the sample is
+     large enough to carry a conclusion.
+
+     THE COMPUTATION, so every week's number is the same number:
+       · source   every ORB trade in reports/warehouse/fleet_trades_*.json,
+                  deduped by trade_id keeping the latest pushed_at_utc
+       · measure  stop_pct = abs(underlying_entry - underlying_stop)
+                             / underlying_entry * 100
+       · refused  stop_pct < 0.05
+       · report   n, net $, win %, and the same three per symbol — for the
+                  week AND cumulatively since 2026-08-31
+     ⚠️ Report the KEPT side too. A veto is only worth taking if what it
+     refuses is worse than what it keeps, and a refused-only figure cannot
+     show that.
+
+     🔑 THIS IS A REPORT, NOT A RECORDER, AND THAT IS THE WHOLE DESIGN.
+     `underlying_entry` and `underlying_stop` are present on 294 of 294 ORB
+     trades, so this is computable RETROACTIVELY over the entire corpus with
+     NO box-side code, no deploy, and no risk to the trading path. An earlier
+     proposal of mine was a live recorder on the boxes; it was redundant, and
+     measuring the field coverage is what showed that.
+
+     ⚠️ DO NOT TURN IT INTO A GATE ON THIS EVIDENCE. As of 2026-09-26 the
+     finding is n=45 refused across 12 symbols at -$8,238, against 192 kept
+     at +$4,912 — broad and consistent. But the two RANGE-based filters tested
+     alongside it both collapsed onto two lucky boxes (MU and META supplied
+     more than 100% of one filter's profit), and four weeks is roughly 17
+     trades per symbol. Say n every time (§12). The veto earns a gate by
+     surviving weeks it was not fitted to, and this section exists to
+     accumulate exactly that.
+  6  Recommendations, with any previously-reached recommendation restated and
      marked as still-holding or superseded.
+
 
 HOW TO WORK — these are not style notes, they are the standard you are held to:
   · §0   Never state as fact anything you have not verified. No invented
