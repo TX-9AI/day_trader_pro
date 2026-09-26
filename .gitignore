@@ -34,6 +34,13 @@ data/selection_log.jsonl
 # `*` covers the atomic-write .tmp. Tracked, it would be dirty after every close
 # and exactly what a discard recipe restores away (dtp r360).
 data/purge_debt.json*
+
+# r442 (2026-09-26) — the crashloop sentinel's rolling window + ET-session tally.
+# Written by dtp-crashloop.timer every poll; runtime state, never source.
+# ⚠️ ENUMERATED, NOT BLANKET-IGNORED. `data/` as a whole is deliberately NOT in
+# this file: a new runtime artefact must appear in `git status` and get a
+# decision. A blanket rule would have hidden this one too, and the next one.
+data/crashloop_state.json
 # r401 / OPS.26 — the boot raiser's status stamp. Runtime state, per-box,
 # never shipped. Listed by NAME because this file ignores data/ per file
 # rather than wholesale, and [[LVL.19]] is what forgetting the line costs:
