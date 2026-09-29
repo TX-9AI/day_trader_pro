@@ -1,4 +1,7 @@
-# day_trader_pro/strategy_registry.py — v1.0
+# day_trader_pro/strategy_registry.py — v1.1
+# v1.1 (2026-09-29) — r455 / OPS.62. COMMENT ONLY: a retired box STAYS in
+#   MAIN_BOXES. MU and PLTR were terminated 09-29; dropping them would turn
+#   every post-epoch row they wrote UNKN in the Saturday MAIN vs TEST.
 # v1.0 (2026-09-25) — r426 / OPS.50. ONE REGISTRY FOR TWO ENGINES.
 #   Operator, 2026-09-24, on inheriting the TEST boxes: *"we also have
 #   different trading strategies that you're going to have to enumerate in the
@@ -83,6 +86,8 @@ TEST_EPOCH = "2026-09-25"
 # ⚠️ A BOX THAT IS IN NEITHER LIST RESOLVES TO UNKN AND IS REPORTED. A new box
 # nobody declared must not be silently counted as production (§0.5).
 TEST_BOXES = ("SOFI", "AAL")
+# ⚠️ A RETIRED BOX STAYS HERE. MU and PLTR were terminated 2026-09-29, but their
+# history is MAIN; removing them would turn every post-epoch row they wrote UNKN.
 MAIN_BOXES = ("SPX", "QQQ", "NVDA", "TSLA", "META", "AMZN", "GOOGL", "AMD",
               "AVGO", "MU", "PLTR", "NFLX", "CRM", "UNH", "CVX", "SMH")
 

@@ -1,4 +1,9 @@
-# day_trader_pro/config.py — v0.1.7
+# day_trader_pro/config.py — v0.1.8
+# v0.1.8 (2026-09-29) — r455 / OPS.62. UNIVERSE 17 -> 15: MU and PLTR RETIRED
+#   by operator ruling (the two worst performers, to preserve feed integrity)
+#   and TERMINATED 09-29. Reporting-only as since r423; the wake and the close
+#   already read the instance map. Their history is KEPT (s3_sweep
+#   ALWAYS_KEEP, strategy_registry MAIN_BOXES). Pinned by test_panel_mirror.
 # v0.1.7 (2026-09-24) — r423 / OPS.47. THE FLEET IS DISCOVERED, NOT RECITED —
 #   AND `UNIVERSE` NOW MEANS THE MORNING REPORT, NOT THE WAKE. Operator:
 #   *"I want that number to be based on however many are in the current
@@ -81,10 +86,13 @@ REGION = os.environ.get("DTP_REGION", "us-east-2")
 # a wider universe here AND provisioning the boxes to go with it — the list is
 # not a preference, it is an inventory.
 UNIVERSE = [
-    "NVDA", "SPX", "PLTR", "MU", "QQQ", "GOOGL", "AMZN", "AVGO",
+    "NVDA", "SPX", "QQQ", "GOOGL", "AMZN", "AVGO",
     "TSLA", "META", "NFLX", "CRM", "UNH", "CVX", "AMD",
     "AAL", "SOFI",
-]  # 17 — the REPORTING universe. r423: this no longer decides what wakes.
+]  # 15 — the REPORTING universe. r423: this no longer decides what wakes.
+# 2026-09-29 — MU and PLTR RETIRED (operator: the two worst performers, to
+# preserve feed integrity) and TERMINATED. Their S3 history is KEPT — see
+# s3_sweep.ALWAYS_KEEP and strategy_registry.MAIN_BOXES.
 # SPY intentionally excluded: SPX runs daily and tracks the same underlying,
 # so a SPY box would be redundant and is never woken.
 

@@ -1,4 +1,6 @@
-# day_trader_pro/selector.py  v0.4.2
+# day_trader_pro/selector.py  v0.4.3
+# v0.4.3 (2026-09-29)  r455 / OPS.62. PANEL 17 -> 15, MU and PLTR retired and
+#   terminated. Mirrors config.UNIVERSE; pinned by test_panel_mirror C1.
 # v0.4.2 (2026-09-24)  r423 / OPS.47. PANEL 15 -> 17 (AAL, SOFI), mirroring
 #   config.UNIVERSE. Pinned by tests/test_panel_mirror.py C1, which exists
 #   precisely so these two lists cannot drift apart in three repositories.
@@ -220,7 +222,7 @@ def _validate(raw):
 # for the GEX butterfly is fleet-wide and is NOT interrupted by this change.
 # **A box that stopped collecting because it stopped trading would be a box
 # whose pitchfork and ADX depth quietly dies** - WA §30.
-PANEL = ["NVDA", "SPX", "PLTR", "MU", "QQQ", "GOOGL", "AMZN", "AVGO",
+PANEL = ["NVDA", "SPX", "QQQ", "GOOGL", "AMZN", "AVGO",
          "TSLA", "META", "NFLX", "CRM", "UNH", "CVX", "AMD",
          "AAL", "SOFI"]
 

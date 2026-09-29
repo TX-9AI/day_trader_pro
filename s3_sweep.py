@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/s3_sweep.py  v1.2
+day_trader_pro/s3_sweep.py  v1.3
+
+v1.3  2026-09-29  r455 / OPS.62 — fallback 17 -> 15 (MU, PLTR retired), and
+      MU and PLTR join ALWAYS_KEEP. They left the panel but not the record:
+      their trades are the current engine's, so unlike the 08-20 cull the
+      culled-symbol job must refuse them. Pinned by test_panel_mirror C5.
 
 v1.2  2026-09-24  r423 / OPS.47 — the hardcoded fallback fleet size 15 -> 17,
       tracking config.UNIVERSE (AAL, SOFI). Fallback only; the live path reads
@@ -97,7 +102,7 @@ try:
 except Exception as _exc:                                       # noqa: BLE001
     print(f"  ⚠️ selector.PANEL unavailable ({_exc}) — using the built-in "
           f"fallback list. Do NOT --apply a culled sweep in this state.")
-    PANEL = {"NVDA", "SPX", "PLTR", "MU", "QQQ", "GOOGL", "AMZN", "AVGO",
+    PANEL = {"NVDA", "SPX", "QQQ", "GOOGL", "AMZN", "AVGO",
              "TSLA", "META", "NFLX", "CRM", "UNH", "CVX", "AMD",
              "AAL", "SOFI"}
 
@@ -111,7 +116,10 @@ RECORD_HASHED_DATATYPES = {"chain_snapshots", "trades", "circuit_breaker",
 # not a panel symbol — but the session guard and the condor READ IT, so its
 # tape is live input to live behaviour. The first version of this tool listed
 # VIX and VIX_EXT for deletion.
-ALWAYS_KEEP = {"VIX"}
+# 2026-09-29 — MU and PLTR left the panel but NOT the record: their trades are
+# the current engine's and the Saturday brief's R reads them. Unlike the 08-20
+# cull, nothing here may delete them. Pinned by test_panel_mirror C5.
+ALWAYS_KEEP = {"VIX", "MU", "PLTR"}
 
 
 def _base_symbol(sym: str) -> str:

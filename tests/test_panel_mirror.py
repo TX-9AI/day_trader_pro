@@ -1,6 +1,14 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/test_panel_mirror.py — v1.1
+day_trader_pro/tests/test_panel_mirror.py — v1.2
+
+v1.2  2026-09-29  r455 / OPS.62 — 17 -> 15. MU and PLTR retired by operator ruling (feed
+      integrity: the two worst performers), instances TERMINATED 09-29. They
+      join TERMINATED, so C1 and C3 now pin that neither is listed or woken.
+      C5 NEW: their S3 HISTORY IS KEPT. Unlike the 08-20 cull, these trades
+      came from the CURRENT engine and belong to the R record the Saturday
+      brief reads, so s3_sweep must refuse them even though they left the
+      panel. strategy_registry.MAIN_BOXES keeps them for the same reason.
 
 v1.1  2026-09-24  r423 / OPS.47 — 15 -> 17. AAL and SOFI join the REPORTING
       universe. This gate's subject is unchanged and deliberately so: it pins
@@ -49,7 +57,9 @@ import selector        # noqa: E402
 
 # Terminated 2026-08-20. Not "deprioritised" — the instances are gone from EC2.
 TERMINATED = ["AAPL", "COST", "DIA", "GLD", "GS", "IWM", "JPM", "LLY",
-              "MSFT", "ORCL", "SMCI", "SMH", "TLT", "XOM"]
+              "MSFT", "ORCL", "SMCI", "SMH", "TLT", "XOM",
+              "MU", "PLTR"]          # v1.2 — retired 2026-09-29, history KEPT
+RETIRED_KEPT = ["MU", "PLTR"]         # terminated, but their S3 history stays
 
 PROBLEMS: list[str] = []
 
@@ -69,11 +79,12 @@ def main() -> int:
     panel = list(selector.PANEL)
 
     # ── C1/C2 the mirror ─────────────────────────────────────────────────
+    # v1.2 — 15: MU and PLTR retired 2026-09-29.
     # r423 — 17: AAL and SOFI joined the REPORTING universe. The wake no
     # longer reads this list at all (it discovers by tag), so this number is
     # now about the brief's coverage and nothing else.
-    check("C1 UNIVERSE size", len(uni) == 17,
-          f"UNIVERSE has {len(uni)} names, expected 17")
+    check("C1 UNIVERSE size", len(uni) == 15,
+          f"UNIVERSE has {len(uni)} names, expected 15")
     check("C1 UNIVERSE == selector.PANEL", set(uni) == set(panel),
           f"only in UNIVERSE={sorted(set(uni) - set(panel))} "
           f"only in PANEL={sorted(set(panel) - set(uni))}")
@@ -111,6 +122,14 @@ def main() -> int:
           f"an empty tape directory should leave every panel box short; got "
           f"{len(missing_all)} of {len(uni)} — the phase can no longer see a "
           f"failed harvest")
+
+    # ── C5 v1.2 — a retired box's HISTORY is kept ─────────────────────────
+    # These left the panel, so nothing else stops `s3_sweep --culled --apply`
+    # from treating them like the 08-20 cull. They are not that: current engine.
+    import s3_sweep
+    exposed = [s for s in RETIRED_KEPT if not s3_sweep._is_protected(s)]
+    check("C5 s3_sweep refuses a retired box whose history is kept",
+          not exposed, f"s3_sweep would cull: {exposed}")
 
     print("=" * 68)
     if PROBLEMS:
