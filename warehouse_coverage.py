@@ -1,5 +1,17 @@
 #!/usr/bin/env python3
-# day_trader_pro/warehouse_coverage.py — v1.6
+# day_trader_pro/warehouse_coverage.py — v1.7
+# v1.7 (2026-09-29) — r453 / OPS.60. A STREAM ONE ENGINE DOES NOT PRODUCE IS
+#   "NOT USED" ON THAT ENGINE'S BOXES, NOT A GAP. `eod` and `liquidity_ledger`
+#   were EVERY, so AAL and SOFI (OTV4TEST) read MISS on both every night with 0
+#   objects ever: liquidity_ledger's writer was retired at OTV4TEST r122 and
+#   derived_level_ledger replaced it; `eod` is a per-box file the close no longer
+#   needs, since the conductor's P&L headline reads every box's trades from S3
+#   (pnl_s3) and reported AAL/SOFI on 2026-09-28. Operator: "Instead of a
+#   failure, have it report as not used." New expectation EVERY_LINEAGE:<L>:
+#   graded against boxes of lineage L; every other live box is listed NOT USED,
+#   printed each run with the reason. Lineage comes from strategy_registry, so a
+#   new test box needs no policy edit. derived_level_event (the TEST level event
+#   log, OTV4TEST r128) declared CONDITIONAL — it is silent on a quiet tape.
 # v1.6 (2026-09-21) — r413 / OPS.38. `shadow` IS RETIRED ON THE BOARD,
 #   BECAUSE THE SILENCE WAS ORDERED RATHER THAN OBSERVED. Operator,
 #   2026-09-21: *"I would like the ones that are definitely never gonna
@@ -253,8 +265,12 @@ STREAM_POLICY = {
     "signal_journal":    ("EVERY", "record", "one object per journal line"),
     "candles":           ("EVERY", "batch",  "high-water per symbol+interval"),
     "ohlc":              ("EVERY", "file",   "one CSV per day"),
-    "liquidity_ledger":  ("EVERY", "file",   "one JSON per sampled bar"),
-    "eod":               ("EVERY", "file",   "pnl_today / trades_today"),
+    "liquidity_ledger":  ("EVERY_LINEAGE:MAIN", "file",
+                          "one JSON per sampled bar. TEST: not used — writer "
+                          "retired OTV4TEST r122; derived_level_ledger replaces it"),
+    "eod":               ("EVERY_LINEAGE:MAIN", "file",
+                          "pnl_today / trades_today. TEST: not used — the close's "
+                          "P&L headline reads every box's trades from S3 (pnl_s3)"),
     "greeks_series":     ("EVERY", "batch",  "per-contract greeks"),
     "quote_series":      ("EVERY", "batch",  "per-contract bid/ask"),
     # r280 — SPX is a cash index and publishes no TimeAndSale (r95).
@@ -281,6 +297,9 @@ STREAM_POLICY = {
     "derived_strategy_note":    ("EVERY", "pusher", "one row per strategy EVALUATION"),
     "derived_gate_disposition": ("EVERY", "pusher", "which rung refused, edge-triggered"),
     "derived_level_ledger":     ("EVERY", "pusher", "levels, operator lifecycle"),
+    # r453 — the TEST engine's per-bar level EVENT log (OTV4TEST r128, 09-24).
+    # CONDITIONAL: a quiet tape writes none; derived_level_ledger is the EVERY check.
+    "derived_level_event":      ("CONDITIONAL", "pusher", "TEST level events — silent on a quiet tape"),
     "derived_plan_ledger":      ("CONDITIONAL", "pusher", "a plan must have been declared"),
     "derived_fire_snapshot":    ("CONDITIONAL", "pusher", "written only on a FILL"),
     "derived_character_ledger": ("CONDITIONAL", "pusher", "BANDS_SET=False since r85 — emits no state"),
@@ -390,6 +409,17 @@ def _base(sym):
     return sym[:-4] if sym.endswith("_EXT") else sym
 
 
+def _lineage_of(box):
+    """r453 — MAIN unless strategy_registry declares the box TEST. ⚠️ If the
+    registry cannot be read, every box grades as MAIN, so a TEST box shows as a
+    GAP — loud, never a silently shrunk expectation."""
+    try:
+        import strategy_registry as sr
+        return sr.TEST if _base(box) in sr.TEST_BOXES else sr.MAIN
+    except Exception:                                           # noqa: BLE001
+        return "MAIN"
+
+
 def check_streams(s3, day, want, counts=False):
     """One day's per-stream verdict. Pure lookup — no writes, no box access."""
     if not _is_session(day):
@@ -420,14 +450,25 @@ def check_streams(s3, day, want, counts=False):
             continue
         expect, grain, note = pol
         missing = []
+        row_not_used = []
         # ⚠️ RESET PER ROW. A first draft read this out of `locals()`, which
         # persists across loop iterations — one accepted stream would have
         # stamped its exemption onto every stream after it.
         accepted_boxes = []
         if partial:
             verdict = "PARTIAL_BY_DESIGN"
-        elif expect == "EVERY":
-            missing = [b for b in live if b not in boxes]
+        elif expect == "EVERY" or expect.startswith("EVERY_LINEAGE:"):
+            # r453 — EVERY_LINEAGE:<L> is EVERY graded only against boxes of
+            # lineage L; every other live box is NOT USED, printed by name with
+            # the policy's reason. ⚠️ ONE BRANCH, NOT TWO: a separate branch
+            # first dropped the ACCEPTED_LOSS handling below (eod carries a real
+            # one, QQQ 2026-09-03) and test_stream_coverage A1-A4c caught it.
+            graded = live
+            if expect.startswith("EVERY_LINEAGE:"):
+                lin = expect.split(":", 1)[1]
+                graded = [b for b in live if _lineage_of(b) == lin]
+                row_not_used = [b for b in live if _lineage_of(b) != lin]
+            missing = [b for b in graded if b not in boxes]
             # r284 — an absence that was investigated and closed is not a gap.
             excused = [b for b in missing if (dtp_, day, b) in ACCEPTED_LOSS]
             missing = [b for b in missing if b not in excused]
@@ -464,7 +505,8 @@ def check_streams(s3, day, want, counts=False):
                "n": len(boxes), "missing": missing, "verdict": verdict,
                "note": note,
                "accepted": [(b, ACCEPTED_LOSS[(dtp_, day, b)])
-                            for b in accepted_boxes]}
+                            for b in accepted_boxes],
+               "not_used": row_not_used}
         if counts:
             row["objects"] = sum(
                 _count(s3, f"{PREFIX}/{dtp_}/dt={day}/sym={b}/") for b in boxes)
@@ -546,6 +588,12 @@ def report_streams(s3, days, counts=False):
             # ⚠️ AN ACCEPTED LOSS PRINTS EVERY RUN, WITH ITS REASON. An absence
             # silently removed from the board is as bad as one that cries wolf:
             # nobody would ever learn the fleet had a hole.
+            # r453 — NOT USED is printed every run, with its reason: a box
+            # dropped from a stream's expectation must stay visible.
+            if r.get("not_used"):
+                _log("STREAMS", f"       not used: {','.join(r['not_used'])}")
+                for chunk in textwrap.wrap(r["note"], 54):
+                    _log("STREAMS", f"         {chunk}")
             for b, why in r.get("accepted", []):
                 head = ("❗ RESOLVED — data is present; DELETE the entry"
                         if r["verdict"] == "RESOLVED"
