@@ -1,5 +1,16 @@
 #!/usr/bin/env bash
-# day_trader_pro/tools/saturday_brief.sh — v1.4
+# day_trader_pro/tools/saturday_brief.sh — v1.5
+# v1.5 (2026-09-29) — r454 / OPS.61. TWO STANDING SECTIONS IN THE PROMPT, the
+#   operator's weekly apples-to-apples read of the two populations. §6 MAIN vs
+#   TEST: R per (lineage, strategy) from trade_report.modified_r, MATCHED DAYS
+#   ONLY, GROSS OF FEES by his ruling (minuscule test sizes make fees measure the
+#   sizing, not the strategy), n<10 flagged, and mean R with the best trade
+#   removed. §7 THE TAPE: SOFI/AAL vs QQQ 5-minute return correlation from the
+#   warehouse's own candles — "a meaningful proxy for QQQ on the mainline side,
+#   not a replacement for QQQ-TEST" — with no conclusion drawn until weeks have
+#   accumulated, his caution about one day. Recommendations moved to §8. Also:
+#   the prompt's bare "(§40.1)" now names OTV4TEST's WA and quotes it, the same
+#   dangling citation r447 fixed in WORKING_AGREEMENT.
 # v1.4 (2026-09-26) — r445 / S1. THE MINIMUM-STOP VETO IS REPORTED WEEKLY AND
 #   NEVER ENFORCED. Operator approved a REPORT in place of the live recorder I
 #   had originally proposed. 🔑 THE RECORDER WAS REDUNDANT AND MEASURING IT IS
