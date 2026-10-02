@@ -1,5 +1,12 @@
 #!/usr/bin/env bash
-# day_trader_pro/tools/saturday_brief.sh — v1.5
+# day_trader_pro/tools/saturday_brief.sh — v1.6
+# v1.6 (2026-10-02) — r456 / OPS.63. THE SELF-CALLS GO THROUGH bash, NOT THE
+#   EXECUTE BIT. The 09-30 canary logged `saturday_brief.sh: Permission denied`
+#   and marked the chain broken: git tracks this file 100644, and r454's land
+#   rewrote it on disk without the +x it had been hand-given, so `"$0" --smoke`
+#   (canary) and `"$0"` (the watchdog's retry) could not run. The brief itself
+#   is unaffected — cron calls it via /bin/bash — and --smoke passed when run
+#   directly 10-02. Now `bash "$0"`, so no land can break it this way again.
 # v1.5 (2026-09-29) — r454 / OPS.61. TWO STANDING SECTIONS IN THE PROMPT, the
 #   operator's weekly apples-to-apples read of the two populations. §6 MAIN vs
 #   TEST: R per (lineage, strategy) from trade_report.modified_r, MATCHED DAYS
@@ -220,7 +227,7 @@ if [ "${1:-}" = "--watchdog" ]; then
   fi
   echo "$(date -u +%FT%TZ) WATCHDOG DEGRADED no brief for $STAMP — retrying once" >> "$LEDGER"
   echo "  🔴 watchdog: NO BRIEF for $STAMP. Retrying once."
-  "$0" >> "$LOG" 2>&1
+  bash "$0" >> "$LOG" 2>&1
   if [ -f "$OUT" ]; then
     echo "$(date -u +%FT%TZ) WATCHDOG recovered $OUT" >> "$LEDGER"; exit 0
   fi
@@ -253,7 +260,7 @@ fi
 # rejected. Discovering that at 08:00 Saturday is discovering it too late, so
 # this runs a --smoke midweek and records the verdict in the ledger.
 if [ "${1:-}" = "--canary" ]; then
-  if "$0" --smoke >> "$LOG" 2>&1; then
+  if bash "$0" --smoke >> "$LOG" 2>&1; then
     echo "$(date -u +%FT%TZ) CANARY pass" >> "$LEDGER"; echo "  canary: pass"; exit 0
   fi
   echo "$(date -u +%FT%TZ) CANARY FAIL the brief chain is broken" >> "$LEDGER"
