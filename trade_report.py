@@ -1,4 +1,8 @@
-# day_trader_pro/trade_report.py — v1.22
+# day_trader_pro/trade_report.py — v1.23
+# v1.23 (2026-10-03) — r458. The printed caveat no longer says the TEST boxes
+#   run "~10% nominal size": their units were rewritten 2026-09-29 17:46 ET to
+#   $1,500 risk / $3,000 budget, above mainline QQQ/NVDA. The reason to rank
+#   within a lineage is unchanged — the lineages are sized by different rules.
 # v1.22 (2026-10-03) — r457 / OPS.64. The provenance line names the production
 #   engine by strategy_registry.MAIN ("OTV4" since r457) instead of a literal.
 # v1.21 (2026-09-26) — r451 / RPT.33. R WAS READING A WINNER'S P&L AS ITS STOP.
@@ -1142,7 +1146,8 @@ def main(argv: List[str]) -> int:
         findings[f"best_{label}"] = rank(d, args.min_n)
         findings[f"worst_{label}"] = rank(d, args.min_n, worst=True)
         # 🔴 r428 — THE STRATEGY DIMENSION IS RANKED WITHIN EACH LINEAGE, NEVER
-        # ACROSS. The TEST boxes run ~10% nominal size, so a TEST bucket can
+        # ACROSS. The TEST boxes ran ~10% nominal size until 2026-09-29 and
+        # 10x that from 09-30 (r458), so a TEST bucket can
         # never be best or worst in DOLLARS: it sits near zero and reads as
         # "nothing happening", which is the opposite of the truth. Ranking two
         # engines against each other by net $ compares position sizes, not
@@ -1273,8 +1278,8 @@ def main(argv: List[str]) -> int:
             print(f"  worst strategy [{_lin}] {w['key'][:24]:<24} "
                   f"net {w['net']:>+10.2f} (n={w['n']})")
     if len(_lins) > 1:
-        print("  \u26a0\ufe0f  ranked WITHIN each lineage — the TEST boxes run ~10% "
-              "nominal size, so")
+        print("  \u26a0\ufe0f  ranked WITHIN each lineage — the lineages are sized by "
+              "different rules, so")
         print("      cross-lineage dollar comparison measures position size, "
               "not strategy. Use R.")
     for lab in (() if _lins else ("strategy",)) + ("symbol", "session_phase", "day_of_week"):
