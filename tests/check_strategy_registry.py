@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """
-tests/check_strategy_registry.py  v1.0
+tests/check_strategy_registry.py  v1.1
+v1.1  2026-10-03  r460 / OPS.65 — TEST_DECLARED gains OpeningRangeCreditSpread (OTV4TEST
+      r203). BORN RED at R2 (UNREGISTERED) before strategy_registry v1.3.
 v1.0  2026-09-25  r426 / OPS.50 — TWO ENGINES, ONE CORPUS, ONE REGISTRY.
 
   🔑 R6 IS THE SHIP-BLOCKER. An untagged trade dated on or after TEST_EPOCH
@@ -45,7 +47,10 @@ OTV4 = os.environ.get("OT_OTV4_ROOT", os.path.expanduser("~/options-trader-v4"))
 # producer emits, which would have shown every VOLT trade as unregistered.
 TEST_DECLARED = ("ORBStrategy", "RunawayContinuation", "GEXPinButterfly",
                  "SweepCreditSpread", "TrendCreditSpread", "IronCondorStrategy",
-                 "LiquidityHunt", "VOLT", "ATPButterfly", "Breakout")
+                 "LiquidityHunt", "VOLT", "ATPButterfly", "Breakout",
+                 # r460 — OTV4TEST r203 (PREM.1): the opening range credit spread,
+                 # written as strategy="OpeningRangeCreditSpread" from 2026-10-05.
+                 "OpeningRangeCreditSpread")
 
 _fails = []
 

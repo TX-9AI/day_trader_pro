@@ -1,4 +1,8 @@
-# day_trader_pro/strategy_registry.py — v1.2
+# day_trader_pro/strategy_registry.py — v1.3
+# v1.3 (2026-10-03) — r460 / OPS.65. REGISTERS OpeningRangeCreditSpread (ORCS),
+#   TEST-only: OTV4TEST r203 writes it from 2026-10-05. Operator: "It will be a
+#   part of the corpus, if it's running the repo code." Unregistered, its rows
+#   would read as a visible ?ORC tag rather than as its own strategy.
 # v1.2 (2026-10-03) — r457 / OPS.64. THE PRODUCTION ENGINE IS NAMED "OTV4".
 #   Operator: *"Instead of 'MAIN' I would prefer 'OTV4'"*. The value of `MAIN`
 #   (the Python name is unchanged so no reader moves) is now "OTV4", which is
@@ -112,6 +116,9 @@ REGISTRY = {
     "VOLT":                 ("VOLT", LIVE,    (TEST,),      None),
     "ATPButterfly":         ("ATPB", LIVE,    (TEST,),      None),
     "Breakout":             ("BRKO", LIVE,    (TEST,),      None),
+    # r460 — OTV4TEST r203 (PREM.1): opening range credit spread, paper, QQQ-TEST
+    # from 2026-10-05; part of the corpus wherever the fork's code runs it.
+    "OpeningRangeCreditSpread": ("ORCS", LIVE, (TEST,),     None),
     # ⚠️ RETIRED, NOT DELETED (r240). Both still carry P&L in the corpus —
     # ContinuationStrategy 9 trades, SweepReversal 1 — and both were SUPERSEDED
     # by a live strategy rather than abandoned, which is the fact a reader
