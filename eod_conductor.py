@@ -1,4 +1,5 @@
-# day_trader_pro/eod_conductor.py — v1.16.1
+# day_trader_pro/eod_conductor.py — v1.16.2
+# v1.16.2 (2026-10-03) — dtp r457 / OPS.64 — asks the INSTANCE MAP for which boxes exist (instance_registry.discover()/fleet_members()), not config.UNIVERSE, so a retired (untagged) box needs no list edit. The list is the printed fallback.
 # v1.16.1 (2026-09-08) — dtp r322 / CND.1 — `AUTO_LABEL_PY` WAS NEVER ASSIGNED.
 #   The label phase referenced it four times and would have raised NameError.
 #   ⚠️ THIS FILE IS THE ROLLBACK TARGET: `install_eod_v2.sh` seds the unit back
@@ -737,7 +738,7 @@ def phase_coverage(date, dry, warns):
 
 def run(date=None, batch=5, dry=False, do_recover=True, do_coverage=True):
     date = date or _today_et()
-    mapping, _ = instance_registry.discover(config.UNIVERSE)
+    mapping, _ = instance_registry.discover()   # r457: the instance map
     running = {s: r.get("private_ip", "") for s, r in mapping.items()
               if r.get("state") == "running"}
     warns = []

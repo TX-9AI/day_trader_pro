@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/s3_sweep.py  v1.3
+day_trader_pro/s3_sweep.py  v1.4
+
+v1.4  2026-10-03  r457 / OPS.64 — A RETIRED BOX'S HISTORY NEEDS NO LIST EDIT.
+      The guard protected only the panel and ALWAYS_KEEP, so retiring a box
+      exposed its trades to --culled --apply unless someone added it here
+      (r455 did, for MU/PLTR). It now ALSO protects every box strategy_registry
+      has ever attributed to an engine and every box in the live instance map.
 
 v1.3  2026-09-29  r455 / OPS.62 — fallback 17 -> 15 (MU, PLTR retired), and
       MU and PLTR join ALWAYS_KEEP. They left the panel but not the record:
@@ -137,9 +143,33 @@ def _base_symbol(sym: str) -> str:
     return s[:-4] if s.endswith("_EXT") else s
 
 
+_ENGINE_BOXES = None
+
+
+def _engine_boxes() -> set:
+    """r457 — every box that ever traded an engine, plus the live map.
+    Computed ONCE per run: _is_protected is called per key."""
+    global _ENGINE_BOXES
+    if _ENGINE_BOXES is not None:
+        return _ENGINE_BOXES
+    out = set()
+    try:
+        import strategy_registry as _sr
+        out |= set(_sr.MAIN_BOXES) | set(_sr.TEST_BOXES)
+    except Exception:                                           # noqa: BLE001
+        pass
+    try:
+        import instance_registry as _ir
+        out |= set(_ir.discover_fleet() or {})
+    except Exception:                                           # noqa: BLE001
+        pass
+    _ENGINE_BOXES = {s.upper() for s in out}
+    return _ENGINE_BOXES
+
+
 def _is_protected(sym: str) -> bool:
     b = _base_symbol(sym)
-    return b in PANEL or b in ALWAYS_KEEP
+    return b in PANEL or b in ALWAYS_KEEP or b in _engine_boxes()
 
 
 def _client():

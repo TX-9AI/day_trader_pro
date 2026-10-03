@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""day_trader_pro/tests/test_stream_coverage.py — v1.2
+"""day_trader_pro/tests/test_stream_coverage.py — v1.3
+v1.3  2026-10-03 — dtp r457 / OPS.64. panel() READS THE INSTANCE MAP. This test
+      simulates the map as selector.PANEL (so every fixture that sets the panel
+      still sets the expected boxes) and S9 is RE-POINTED BY THE RULING: the
+      map wins; an empty or unreadable map falls back to selector.PANEL; both
+      empty still refuses.
 v1.2  2026-09-05 — dtp r284. A1-A4 pin ACCEPTED_LOSS: a closed absence renders
 as explained rather than as a gap, prints its reason EVERY run, and — the case
 that matters most — a stale entry whose data turned up renders RESOLVED and
@@ -89,6 +94,9 @@ class FakeS3:
 def main():
     try:
         import warehouse_coverage as wc
+        import selector as _map_src
+        # r457 — the instance map, simulated as the panel the fixture sets
+        wc._members = lambda: list(_map_src.PANEL)
     except Exception as exc:                                    # noqa: BLE001
         check("S0 warehouse_coverage is importable", False,
               f"{type(exc).__name__}: {exc}")
@@ -207,21 +215,35 @@ def main():
     check("S8 NVDA_EXT normalises to NVDA rather than counting as a box",
           wc._base("NVDA_EXT") == "NVDA" and wc._base("NVDA") == "NVDA")
 
-    # ══ S9 — THE PANEL IS THE AUTHORITY'S, AND AN EMPTY ONE REFUSES ═══════
+    # ══ S9 — r457: THE INSTANCE MAP WINS, THE PANEL IS THE FALLBACK ══════
     import selector
-    check("S9 panel() returns selector.PANEL, not a copy",
-          wc.panel() == list(selector.PANEL), str(wc.panel()[:3]))
-    saved = selector.PANEL
-    selector.PANEL = []
+    _real_members = wc._members
     try:
-        wc.panel()
-        check("S9b an empty PANEL refuses rather than grading against a guess",
-              False, "returned without raising")
-    except Exception:
-        check("S9b an empty PANEL refuses rather than grading against a guess",
-              True)
+        wc._members = lambda: ["MAPA", "MAPB"]
+        check("S9 panel() returns the INSTANCE MAP's boxes, not selector.PANEL",
+              wc.panel() == ["MAPA", "MAPB"], str(wc.panel()[:3]))
+        wc._members = lambda: []
+        check("S9a an EMPTY map falls back to selector.PANEL",
+              wc.panel() == list(selector.PANEL), str(wc.panel()[:3]))
+        def _boom():
+            raise RuntimeError("EC2 unavailable")
+        wc._members = _boom
+        check("S9c an UNREADABLE map falls back to selector.PANEL",
+              wc.panel() == list(selector.PANEL), str(wc.panel()[:3]))
+        wc._members = lambda: []
+        saved = selector.PANEL
+        selector.PANEL = []
+        try:
+            wc.panel()
+            check("S9b map AND panel empty refuses rather than grading a guess",
+                  False, "returned without raising")
+        except Exception:
+            check("S9b map AND panel empty refuses rather than grading a guess",
+                  True)
+        finally:
+            selector.PANEL = saved
     finally:
-        selector.PANEL = saved
+        wc._members = _real_members
 
     # ══ S10 — THE COST CLAIM, COUNTED RATHER THAN ASSERTED ════════════════
     # dtp r253: the way to pin a fetch cost is to count fetches.

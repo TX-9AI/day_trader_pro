@@ -1,4 +1,13 @@
-# day_trader_pro/fleet.py — v0.10.0
+# day_trader_pro/fleet.py — v0.11.0
+# v0.11.0 (2026-10-03) — r457 / OPS.64. THE SAFETY NET NO LONGER NEEDS THE LIST.
+#   r427 scoped the close as tagged UNION UNIVERSE so a listed box that lost its
+#   tag would still be stopped. That kept every RETIRED box in scope until a
+#   list edit removed it (MU/PLTR reported no-answer at the 09-29 close). The
+#   net is now: tagged, UNION any box that was in the last saved instance map or
+#   the list AND IS RUNNING RIGHT NOW. An untagged box that is stopped or gone
+#   drops out with no edit; one that is somehow still running is still closed.
+#   ⚠️ The asymmetry r427 named is kept: if discovery fails, scope is the whole
+#   list, never nothing. Operator: "so it truly is completely automatic".
 # v0.10.0 (2026-09-25) — r427 / OPS.51. THE CLOSE IS SCOPED BY THE INSTANCE MAP,
 #   NOT BY config.UNIVERSE. Operator: *"I want the conductor to do the close
 #   using the instance map."*
@@ -180,14 +189,14 @@ def _today_et():
 
 
 def default_scope():
-    """Every box the INSTANCE MAP or UNIVERSE knows — the union (r427).
+    """Every box the close must cover — the INSTANCE MAP, plus a safety net.
 
-    🔑 Returns a sorted list of symbols. Discovery first, because the instance
-    map is the ground truth about what exists; UNIVERSE folded in because a box
-    that is listed but momentarily untagged must still be closed.
+    🔑 r457 — tagged boxes, UNION any box the last saved map or config.UNIVERSE
+    knows that is RUNNING right now (an untagged box that is still up must still
+    be stopped). A known box that is untagged and stopped/terminated is NOT in
+    scope: that is a retirement, and it needs no list edit.
     ⚠️ NEVER RETURNS EMPTY. If discovery raises or comes back with nothing, the
-    result is UNIVERSE and the reason is printed. A shutdown path that silently
-    scopes to nothing is strictly worse than one that over-covers.
+    result is UNIVERSE and the reason is printed (r427's asymmetry, kept).
     """
     universe = list(getattr(config, "UNIVERSE", ()) or ())
     try:
@@ -200,13 +209,30 @@ def default_scope():
         print(f"  [scope] discovery returned NOTHING; falling back to "
               f"UNIVERSE ({len(universe)})")
         return sorted(universe)
+    try:
+        cached = list((instance_registry.load_map() or {}).get("instances", {}))
+    except Exception:                                          # noqa: BLE001
+        cached = []
+    known = sorted((set(cached) | set(universe)) - set(discovered))
+    running_untagged = []
+    if known:
+        try:
+            states = ec2ops.describe_by_names(known)
+            states.pop("_ambiguous", None)
+            running_untagged = sorted(s for s, r in states.items()
+                                      if (r or {}).get("state") in ("running", "pending"))
+        except Exception as exc:                               # noqa: BLE001
+            # Cannot see their state: keep them all, as r427 did. Over-cover.
+            print(f"  [scope] could not read state of {len(known)} known but "
+                  f"untagged box(es) ({type(exc).__name__}); kept in scope")
+            running_untagged = known
     extra = sorted(set(discovered) - set(universe))
-    missing = sorted(set(universe) - set(discovered))
     if extra:
-        print(f"  [scope] tagged but NOT in UNIVERSE, included anyway: {extra}")
-    if missing:
-        print(f"  [scope] in UNIVERSE but not discovered, kept in scope: {missing}")
-    return sorted(set(discovered) | set(universe))
+        print(f"  [scope] tagged but NOT in UNIVERSE, included: {extra}")
+    if running_untagged:
+        print(f"  [scope] UNTAGGED but RUNNING, included so they are stopped: "
+              f"{running_untagged}")
+    return sorted(set(discovered) | set(running_untagged))
 
 
 def get_fleet_ext(only=None):

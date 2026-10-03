@@ -1,4 +1,14 @@
-# day_trader_pro/instance_registry.py — v0.1.1
+# day_trader_pro/instance_registry.py — v0.2.0
+# v0.2.0 (2026-10-03) — r457 / OPS.64. THE FLEET IS THE INSTANCE MAP, FOR EVERY
+#   READER. Operator: *"How can we reroute all those non-automatic tasks to also
+#   consult the instance map so it truly is completely automatic?"* `discover()`
+#   with NO symbol list now means the tagged fleet (discover_fleet), and
+#   `fleet_members()` is the one answer to "which boxes exist". config.UNIVERSE
+#   is the FALLBACK, used only when the map cannot be read or reads empty, and
+#   that fallback is PRINTED every time — never silent. Every caller that passed
+#   config.UNIVERSE now passes nothing, so untagging a box removes it from the
+#   backfill, harvest, standings, the shutdown sweep and wake_and_bake's count
+#   with no list edit. Pinned by tests/check_fleet_from_map.py.
 # v0.1.1 (2026-09-24) — r423 / OPS.47. ADD `discover_fleet()`: the map with no
 #   symbol list handed in. `discover(symbols)` survives for callers that want a
 #   named subset; the morning wake and the close both use the new one so they
@@ -77,7 +87,11 @@ def discover(symbols=None):
     fresh {symbol: {"instance_id","state"}} dict. Pinned entries from the
     cache are preserved and take precedence over discovery.
     """
-    symbols = symbols or config.UNIVERSE
+    if not symbols:
+        fleet = _fleet_or_none()
+        if fleet:
+            return fleet, {}
+        symbols = list(config.UNIVERSE)
     cache = load_map()
     pinned = {s: r for s, r in cache["instances"].items() if r.get("pinned")}
 
@@ -98,6 +112,29 @@ def discover(symbols=None):
     return result, ambiguous
 
 
+def _fleet_or_none():
+    """The tagged fleet, or None (with the reason printed) when it cannot be
+    used — the caller then falls back to config.UNIVERSE BY NAME."""
+    try:
+        fleet = discover_fleet()
+    except Exception as exc:                                     # noqa: BLE001
+        print(f"  [fleet] instance map unavailable ({type(exc).__name__}); "
+              f"falling back to config.UNIVERSE ({len(config.UNIVERSE)})")
+        return None
+    if not fleet:
+        print(f"  [fleet] instance map returned NO tagged boxes; falling back "
+              f"to config.UNIVERSE ({len(config.UNIVERSE)})")
+        return None
+    return fleet
+
+
+def fleet_members():
+    """Which boxes exist — the tagged fleet, sorted. Never empty unless
+    config.UNIVERSE is (the fallback, printed when used)."""
+    fleet = _fleet_or_none()
+    return sorted(fleet) if fleet else sorted(config.UNIVERSE)
+
+
 def resolve(symbols):
     """
     Return {symbol: instance_id} for symbols we can map, plus a list of any
@@ -116,7 +153,7 @@ def reconcile():
     """
     cache = load_map()
     old = cache["instances"]
-    fresh, ambiguous = discover(config.UNIVERSE)
+    fresh, ambiguous = discover()        # r457: the map, not the list
 
     added, changed, removed = [], [], []
     for s, rec in fresh.items():

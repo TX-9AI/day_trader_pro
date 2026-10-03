@@ -1,4 +1,5 @@
-# day_trader_pro/standings.py — v1.9
+# day_trader_pro/standings.py — v1.10
+# v1.10 (2026-10-03) — dtp r457 / OPS.64 — asks the INSTANCE MAP for which boxes exist (instance_registry.discover()/fleet_members()), not config.UNIVERSE, so a retired (untagged) box needs no list edit. The list is the printed fallback.
 # v1.9 (2026-09-10) — dtp r345 / RPT.27. THE ACCOUNTING GUARD. r342 fixed the
 #   `.strip()` that ate rows; this makes the class of failure impossible to
 #   hide. r331 dropped exactly ONE ROW PER BOX PER RUN for a whole session —
@@ -476,7 +477,7 @@ def _money(v):
 
 
 def run(send=False):
-    mapping, _ = instance_registry.discover(config.UNIVERSE)
+    mapping, _ = instance_registry.discover()   # r457: the instance map
     running = {s: r for s, r in mapping.items() if r.get("state") == "running"}
     now_lbl = datetime.now(_ET).strftime("%H:%M ET")
 

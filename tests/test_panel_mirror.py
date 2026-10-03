@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/test_panel_mirror.py — v1.2
+day_trader_pro/tests/test_panel_mirror.py — v1.3
+
+v1.3  2026-10-03  r457 / OPS.64 — C3/C4 SIMULATE THE INSTANCE MAP. _missing()
+      reads the map since r457; the fixture now hands it a map equal to the
+      list, so these checks test _missing's rule and make no AWS call. The
+      lists are the printed FALLBACK now — retiring a box needs no edit here.
 
 v1.2  2026-09-29  r455 / OPS.62 — 17 -> 15. MU and PLTR retired by operator ruling (feed
       integrity: the two worst performers), instances TERMINATED 09-29. They
@@ -102,7 +107,13 @@ def main() -> int:
 
     # ── C3/C4 the sat-out wake, driven for real ──────────────────────────
     import eod_backfill
+    import instance_registry as _ir
 
+    # r457 — _missing() now reads the INSTANCE MAP. Simulate a map that holds
+    # exactly the listed boxes, so C3/C4 keep testing _missing's own rule and
+    # make no AWS call (the map-vs-list contract is check_fleet_from_map's).
+    _real_disc = _ir.discover_fleet
+    _ir.discover_fleet = lambda *a, **k: {s: {"state": "stopped"} for s in uni}
     with tempfile.TemporaryDirectory() as tmp:
         real_ohlc = config.OHLC_DIR
         try:
@@ -112,6 +123,7 @@ def main() -> int:
         finally:
             config.OHLC_DIR = real_ohlc
             eod_backfill.config.OHLC_DIR = real_ohlc
+            _ir.discover_fleet = _real_disc
 
     ghost_wakes = sorted(set(missing_all) & set(TERMINATED))
     check("C3 _missing() never returns a terminated box", not ghost_wakes,

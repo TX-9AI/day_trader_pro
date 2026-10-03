@@ -1,4 +1,5 @@
-# day_trader_pro/wake_and_bake.py — v1.7
+# day_trader_pro/wake_and_bake.py — v1.8
+# v1.8 (2026-10-03) — dtp r457 / OPS.64 — asks the INSTANCE MAP for which boxes exist (instance_registry.discover()/fleet_members()), not config.UNIVERSE, so a retired (untagged) box needs no list edit. The list is the printed fallback. The expected count is len(fleet_members()).
 # v1.7 (2026-09-21) — r406 / DEV.14. DISPLAY ONLY — NO BEHAVIOUR CHANGE.
 #   The argparse help for `--bake-only` said "PING + git sync + restart". IT
 #   DOES NOT RESTART, and that is why the mode is exempt from the RTH guard.
@@ -229,7 +230,7 @@ def _exec(ip, cmd):
 
 
 def _discover(only):
-    mapping, _ = instance_registry.discover(only or config.UNIVERSE)
+    mapping, _ = instance_registry.discover(only or None)   # r457: the instance map
     return mapping
 
 
@@ -469,7 +470,7 @@ _MODE_DESC = {
 
 def run(only=None, assume_yes=False, dry=False, leave_running=False,
         strict=False, force=False, mode="full"):
-    expected = len(only or config.UNIVERSE)
+    expected = len(only or instance_registry.fleet_members())   # r457
     now = datetime.now(_ET)
     mode_label = "full-leave-on" if (mode == "full" and leave_running) else mode
     tags = (" [DRY-RUN]" if dry else "") + (" [MOCK]" if config.MOCK_AWS else "")

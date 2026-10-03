@@ -1,4 +1,10 @@
-# day_trader_pro/strategy_registry.py — v1.1
+# day_trader_pro/strategy_registry.py — v1.2
+# v1.2 (2026-10-03) — r457 / OPS.64. THE PRODUCTION ENGINE IS NAMED "OTV4".
+#   Operator: *"Instead of 'MAIN' I would prefer 'OTV4'"*. The value of `MAIN`
+#   (the Python name is unchanged so no reader moves) is now "OTV4", which is
+#   what otv4's trade_logger stamps on every new row from r457. A row tagged
+#   with the legacy literal "MAIN" still resolves to it. MAIN_BOXES/TEST_BOXES
+#   remain ONLY for rows written before the producers tagged.
 # v1.1 (2026-09-29) — r455 / OPS.62. COMMENT ONLY: a retired box STAYS in
 #   MAIN_BOXES. MU and PLTR were terminated 09-29; dropping them would turn
 #   every post-epoch row they wrote UNKN in the Saturday MAIN vs TEST.
@@ -51,7 +57,7 @@
 # WATCH: if a TEST box goes live, do NOT retag its history — the tag records
 # WHICH ENGINE produced the trade, and that never changes. Add a new lineage
 # instead.
-MAIN = "MAIN"          # options-trader-v4 — the production engine
+MAIN = "OTV4"          # options-trader-v4 — the production engine (r457: was "MAIN")
 TEST = "TEST"          # options-trader    — the second engine (SOFI, AAL)
 # 🔴 "TEST" IS NOT A LICENCE TO FILTER. The TEST tree is intended to
 # SUPERSEDE mainline in place, at which point this tag will label REAL
@@ -188,6 +194,8 @@ def resolve_lineage(rec, entry_day=None) -> str:
     lin = str(rec.get("lineage") or "").strip().upper()
     if lin in LINEAGES:
         return lin
+    if lin == "MAIN":                     # r457 — the pre-rename literal
+        return MAIN
     box = str(rec.get("symbol") or rec.get("box") or "").strip().upper()
     if box in TEST_BOXES:
         return TEST

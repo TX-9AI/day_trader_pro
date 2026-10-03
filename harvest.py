@@ -1,4 +1,5 @@
-# day_trader_pro/harvest.py — v0.7.3
+# day_trader_pro/harvest.py — v0.7.4
+# v0.7.4 (2026-10-03) — dtp r457 / OPS.64 — asks the INSTANCE MAP for which boxes exist (instance_registry.discover()/fleet_members()), not config.UNIVERSE, so a retired (untagged) box needs no list edit. The list is the printed fallback.
 # v0.7.3 (2026-09-05) — dtp r287 / TZ.1 — the naive `today` here asked a UTC box and rolled at 20:00 ET
 #   (19:00 in winter), so anything run after that silently asked for TOMORROW and came
 #   back empty. It now goes through `ettime`, the one ET/UTC boundary.
@@ -299,7 +300,7 @@ def _stats(all_trades):
 
 
 def run(quiet=False):
-    mapping, _ = instance_registry.discover(config.UNIVERSE)
+    mapping, _ = instance_registry.discover()   # r457: the instance map
     running = {s: r for s, r in mapping.items() if r.get("state") == "running"}
     today = _today_et()
     ohlc_dir = os.path.join(config.OHLC_DIR, today)
@@ -480,7 +481,7 @@ def backharvest(date, quiet=False, artifacts=("ohlc", "journal", "chains")):
     daily_trades report survives, its by_symbol keys give the set that DID trade,
     which is the only honest yardstick for what we should have got.
     """
-    mapping, _ = instance_registry.discover(config.UNIVERSE)
+    mapping, _ = instance_registry.discover()   # r457: the instance map
     running = {s: r for s, r in mapping.items() if r.get("state") == "running"}
     if not running:
         print("no boxes are running — wake them first (a stopped box's disk is "

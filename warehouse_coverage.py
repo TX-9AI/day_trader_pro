@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-# day_trader_pro/warehouse_coverage.py — v1.7
+# day_trader_pro/warehouse_coverage.py — v1.8
+# v1.8 (2026-10-03) — r457 / OPS.64. THE EXPECTED BOXES ARE THE INSTANCE MAP.
+#   panel() read selector.PANEL, so a box untagged and retired showed as a GAP
+#   every night until a list edit. It now reads instance_registry's tagged
+#   fleet (`_members`, injectable for tests), falling back to selector.PANEL —
+#   printed — only when the map cannot be read. The lineage-graded streams
+#   name the production engine "OTV4" (strategy_registry v1.2).
 # v1.7 (2026-09-29) — r453 / OPS.60. A STREAM ONE ENGINE DOES NOT PRODUCE IS
 #   "NOT USED" ON THAT ENGINE'S BOXES, NOT A GAP. `eod` and `liquidity_ledger`
 #   were EVERY, so AAL and SOFI (OTV4TEST) read MISS on both every night with 0
@@ -265,10 +271,10 @@ STREAM_POLICY = {
     "signal_journal":    ("EVERY", "record", "one object per journal line"),
     "candles":           ("EVERY", "batch",  "high-water per symbol+interval"),
     "ohlc":              ("EVERY", "file",   "one CSV per day"),
-    "liquidity_ledger":  ("EVERY_LINEAGE:MAIN", "file",
+    "liquidity_ledger":  ("EVERY_LINEAGE:OTV4", "file",
                           "one JSON per sampled bar. TEST: not used — writer "
                           "retired OTV4TEST r122; derived_level_ledger replaces it"),
-    "eod":               ("EVERY_LINEAGE:MAIN", "file",
+    "eod":               ("EVERY_LINEAGE:OTV4", "file",
                           "pnl_today / trades_today. TEST: not used — the close's "
                           "P&L headline reads every box's trades from S3 (pnl_s3)"),
     "greeks_series":     ("EVERY", "batch",  "per-contract greeks"),
@@ -349,6 +355,13 @@ ACCEPTED_LOSS = {
 }
 
 
+def _members():
+    """r457 — the tagged fleet, sorted, or [] (never the fallback list: panel()
+    decides that, so the fallback is reported in one place)."""
+    import instance_registry
+    return sorted(instance_registry.discover_fleet() or {})
+
+
 def panel():
     """The trading panel, from its ONE authority.
 
@@ -358,6 +371,13 @@ def panel():
     Raises rather than defaulting: a coverage report that silently invents its
     own expected set reports success it did not measure (dtp r250).
     """
+    try:
+        p = list(_members() or [])
+        if p:
+            return p
+    except Exception as exc:                                    # noqa: BLE001
+        _log("STREAMS", f"instance map unavailable ({type(exc).__name__}); "
+                        f"falling back to selector.PANEL")
     import selector
     p = list(getattr(selector, "PANEL", []) or [])
     if not p:
@@ -417,7 +437,7 @@ def _lineage_of(box):
         import strategy_registry as sr
         return sr.TEST if _base(box) in sr.TEST_BOXES else sr.MAIN
     except Exception:                                           # noqa: BLE001
-        return "MAIN"
+        return "OTV4"
 
 
 def check_streams(s3, day, want, counts=False):
@@ -524,7 +544,7 @@ def report_streams(s3, days, counts=False):
         _log("STREAMS", "   refusing to grade coverage against a guessed panel")
         return 2
 
-    _log("STREAMS", f"expected boxes ({len(want)}, from selector.PANEL): "
+    _log("STREAMS", f"expected boxes ({len(want)}, from the instance map): "
                     f"{', '.join(want)}")
     # ⚠️ THREE LINES, NOT ONE. This is read over Termius on a phone, where a
     # soft-wrapped sentence is a sentence nobody finishes (r210's 60-character

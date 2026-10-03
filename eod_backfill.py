@@ -1,4 +1,5 @@
-# day_trader_pro/eod_backfill.py — v1.5
+# day_trader_pro/eod_backfill.py — v1.6
+# v1.6  2026-10-03  dtp r457 / OPS.64 — asks the INSTANCE MAP for which boxes exist (instance_registry.discover()/fleet_members()), not config.UNIVERSE, so a retired (untagged) box needs no list edit. The list is the printed fallback.
 # v1.5  2026-09-05  dtp r283. THE STREAM CAP WAS 29-BOX ARITHMETIC AND IT HARD
 #         STOPS. A ONE-box backfill against a 15-box fleet was refused outright:
 #         `10 stream cap`, 15 running, `return 2` — not the warn-never-stop this
@@ -156,7 +157,8 @@ def _csv_bars(path):
 
 def _missing(date, only=None):
     day_dir = os.path.join(config.OHLC_DIR, date)
-    uni = config.UNIVERSE if not only else [s for s in config.UNIVERSE if s in only]
+    _fleet = instance_registry.fleet_members()   # r457: the instance map, not the list
+    uni = _fleet if not only else [s for s in _fleet if s in only]
     def _bars(s):
         lo = _csv_bars(os.path.join(day_dir, f"{s}_ohlc_{date}.csv"))
         up = _csv_bars(os.path.join(day_dir, f"{s}_OHLC_{date}.csv"))
@@ -189,7 +191,7 @@ def _wake(group, mapping, dry):
     _log("WAKE", f"starting {len(ids)} box(es): {', '.join(group)}")
     ec2ops.start(ids)
     ec2ops.wait_state(ids, "running")
-    fresh, _ = instance_registry.discover(config.UNIVERSE)
+    fresh, _ = instance_registry.discover()   # r457: the instance map
     mapping.update(fresh)
     # wait for SSH on each
     deadline = time.time() + SSH_READY_TIMEOUT
@@ -382,12 +384,12 @@ def run(date=None, batch=5, stream_cap=10, only=None, dry=False):
     only_set = set(only) if only else None
 
     missing = _missing(date, only_set)
-    total = len(config.UNIVERSE if not only_set else only_set)
+    total = len(instance_registry.fleet_members() if not only_set else only_set)   # r457
     if not missing:
         print(f"✅ {date}: nothing to backfill — all targeted symbols already have candles.")
         return 0
 
-    mapping, _err = instance_registry.discover(config.UNIVERSE)
+    mapping, _err = instance_registry.discover()   # r457: the instance map
 
     # Pre-flight capacity check: bot boxes already running must leave room for a batch.
     baseline = sum(1 for r in mapping.values() if r.get("state") == "running")
@@ -493,7 +495,7 @@ def run(date=None, batch=5, stream_cap=10, only=None, dry=False):
                 short.append((s, b))
             else:
                 still.append(s)
-        mapping, _ = instance_registry.discover(config.UNIVERSE)   # refresh states
+        mapping, _ = instance_registry.discover()   # r457: the instance map   # refresh states
 
     print("\n──────── backfill summary ────────")
     print(f"date {date}: {len(fetched)} full, {len(short)} short, {len(still)} still missing")

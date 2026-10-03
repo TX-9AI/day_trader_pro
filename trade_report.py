@@ -1,4 +1,6 @@
-# day_trader_pro/trade_report.py — v1.21
+# day_trader_pro/trade_report.py — v1.22
+# v1.22 (2026-10-03) — r457 / OPS.64. The provenance line names the production
+#   engine by strategy_registry.MAIN ("OTV4" since r457) instead of a literal.
 # v1.21 (2026-09-26) — r451 / RPT.33. R WAS READING A WINNER'S P&L AS ITS STOP.
 #   `_STOP_PCT_RE` matched ANY "NN%" in exit_reason, and every real reason
 #   carries a `pnl=N%` suffix, so `orb_trail_stop pnl=55.0%` was read as a 55%
@@ -822,7 +824,7 @@ def lineage_block(trades) -> None:
         print(f"  \u26a0\ufe0f  {lin[SR.UNKNOWN]} trade(s) carry NO lineage tag and are dated on "
               f"or after {SR.TEST_EPOCH},")
         print("      so which engine made them cannot be inferred. They are NOT "
-              "counted as MAIN.")
+              f"counted as {SR.MAIN}.")
     if retired:
         for n, c in sorted(retired.items()):
             print(f"  \u2022 {SR.code(n)} {n} is RETIRED ({c} trade(s)) \u2014 superseded by "

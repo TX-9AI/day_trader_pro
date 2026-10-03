@@ -1,4 +1,5 @@
-# day_trader_pro/shutdown_manager.py — v0.1.0
+# day_trader_pro/shutdown_manager.py — v0.1.1
+# v0.1.1 (2026-10-03) — dtp r457 / OPS.64 — asks the INSTANCE MAP for which boxes exist (instance_registry.discover()/fleet_members()), not config.UNIVERSE, so a retired (untagged) box needs no list edit. The list is the printed fallback.
 """
 End-of-day sweep, run FROM the control server on its own systemd timer
 (~16:00 ET, after the trading boxes have closed positions at 15:45 and each
@@ -29,7 +30,7 @@ import notify
 
 def run(dry_run=False):
     # Discover the full trading universe (not the reporter) and find what's up.
-    mapping, _ = instance_registry.discover(config.UNIVERSE)
+    mapping, _ = instance_registry.discover()   # r457: the instance map
     running = {s: r["instance_id"] for s, r in mapping.items()
                if r.get("state") == "running"}
 

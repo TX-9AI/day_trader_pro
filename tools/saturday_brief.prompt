@@ -57,8 +57,9 @@ THEN PRODUCE THE BRIEF THE SPEC DESCRIBES. Its standing sections, in order:
      trades per symbol. Say n every time (§12). The veto earns a gate by
      surviving weeks it was not fitted to, and this section exists to
      accumulate exactly that.
-  6  MAIN vs TEST, APPLES TO APPLES — the operator's weekly EV comparison of the
-     two populations (mainline engine vs the OTV4TEST engine on AAL/SOFI). He
+  6  OTV4 vs TEST, APPLES TO APPLES — the operator's weekly EV comparison of the
+     two populations (the OTV4 mainline engine vs the OTV4TEST engine on its
+     control-side boxes; the label is strategy_registry's, r457). He
      "might" run more test boxes; this is the evidence that decides it.
 
      THE COMPUTATION, so every week's number is the same number:

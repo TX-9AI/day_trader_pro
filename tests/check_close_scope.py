@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """
-tests/check_close_scope.py  v1.0
+tests/check_close_scope.py  v1.1
+v1.1  2026-10-03  r457 / OPS.64 — C2 RE-POINTED BY THE RULING, NOT DELETED. The
+      operator asked that retiring a box be completely automatic, so a box the
+      list knows but the instance map does not is in scope ONLY WHILE IT IS
+      RUNNING (C2a); untagged and stopped is a retirement and drops out (C2b).
+      The asymmetry this gate exists for survives as C2c: if the state of those
+      boxes cannot be read, they ALL stay in scope. C3/C4 unchanged.
 v1.0  2026-09-25  r427 / OPS.51 — THE CLOSE IS NEVER NARROWER THAN THE WAKE.
 
   🔑 C2 AND C3 ARE THE SHIP-BLOCKERS, AND BOTH GUARD THE SAME ASYMMETRY. For a
@@ -37,6 +43,7 @@ def main():
         import config
         import fleet
         import instance_registry
+        import ec2ops
     except Exception as exc:                                   # noqa: BLE001
         for t in ("C1", "C2", "C3", "C4", "C5"):
             ck(t, False, f"import failed ({exc})")
@@ -49,6 +56,7 @@ def main():
                          "scopes by config.UNIVERSE alone")
     else:
         real_disc, real_uni = instance_registry.discover_fleet, config.UNIVERSE
+        real_map, real_names = instance_registry.load_map, ec2ops.describe_by_names
         try:
             # ── C1 — a TAGGED box absent from UNIVERSE is still closed ──────
             config.UNIVERSE = ["SPX", "QQQ"]
@@ -59,14 +67,27 @@ def main():
                f"a tagged box missing from UNIVERSE is IN SCOPE — got {sorted(sc)}. "
                f"Without this it wakes at 09:15 and is never stopped")
 
-            # ── C2 — SHIP-BLOCKER: discovery must never SHRINK the close ────
+            # ── C2 — SHIP-BLOCKER, re-pointed at r457 ───────────────────────
             config.UNIVERSE = ["SPX", "QQQ", "LISTED"]
             instance_registry.discover_fleet = lambda *a, **k: {"SPX": {}}
+            instance_registry.load_map = lambda: {"instances": {"CACHED": {}}}
+            ec2ops.describe_by_names = lambda names: {
+                "QQQ": {"state": "running"}, "LISTED": {"state": "stopped"},
+                "CACHED": {"state": "running"}}
             sc = fleet.default_scope()
-            ck("C2", {"SPX", "QQQ", "LISTED"} <= set(sc),
-               f"a UNIVERSE box missing from discovery STAYS in scope — got "
-               f"{sorted(sc)}. Over-covering costs a no-op; under-covering "
-               f"strands a running box")
+            ck("C2a", {"SPX", "QQQ", "CACHED"} <= set(sc),
+               f"an UNTAGGED box that is RUNNING stays in scope, whether the list "
+               f"or the saved map knows it — got {sorted(sc)}")
+            ck("C2b", "LISTED" not in sc,
+               f"an UNTAGGED box that is STOPPED drops out (a retirement needs no "
+               f"list edit) — got {sorted(sc)}")
+            def _blind(names):
+                raise RuntimeError("cannot describe")
+            ec2ops.describe_by_names = _blind
+            sc = fleet.default_scope()
+            ck("C2c", {"SPX", "QQQ", "LISTED", "CACHED"} <= set(sc),
+               f"if their state cannot be read, every known box STAYS in scope "
+               f"(over-cover, never strand) — got {sorted(sc)}")
 
             # ── C3 — SHIP-BLOCKER: a discovery FAILURE falls back, not empty ─
             config.UNIVERSE = ["SPX", "QQQ"]
@@ -86,6 +107,7 @@ def main():
                f"{sorted(sc2)} (a close that scopes to nothing stops nothing)")
         finally:
             instance_registry.discover_fleet, config.UNIVERSE = real_disc, real_uni
+            instance_registry.load_map, ec2ops.describe_by_names = real_map, real_names
 
     # ── C5 — DECLARED CONTROL: an explicit scope still wins ────────────────
     src = open(os.path.join(ROOT, "fleet.py"), encoding="utf-8").read()
