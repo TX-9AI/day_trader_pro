@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """
-tools/claude_boot.py  v1.1
+tools/claude_boot.py  v1.2
+v1.2  2026-10-04  r469 / OPS.66 — THE BOOT SESSION IS NAMED ✨1-REPORTER. Operator:
+      "I want to make your OT_RC_NAME sticky. It should be ✨1-REPORTER."
+      launch_cmd now passes `--remote-control '<RC_NAME>'` (OTV4TEST's launch
+      form); RC_NAME defaults to ✨1-REPORTER and OT_RC_NAME overrides it, the
+      same default menu_functions.sh carries. Pinned by tests/check_rc_name.py.
 v1.1  2026-09-20  r404 / OPS.31 — THE BOOT ALERT STAMPED UTC AND LABELLED IT
       `ET`, AND THIS HEADER DESCRIBED THREE THINGS THE CODE DOES NOT DO.
       🔴 THE CODE DEFECT, FOUND BY THE OPERATOR ON HIS PHONE: the first real
@@ -178,6 +183,10 @@ STATUS = os.environ.get("CLAUDE_BOOT_STATUS",
 # and nowhere on the machine. Override with CLAUDE_BOOT_BOX if it is ever
 # renamed; there is nothing to derive it from.
 BOX = os.environ.get("CLAUDE_BOOT_BOX", "1-REPORTER")
+# r469 / OPS.66 — the Remote Control name every launch on this box carries
+# (operator: "It should be ✨1-REPORTER"). menu_functions.sh RC_NAME holds the
+# same default; check_rc_name R4 fails if the two drift.
+RC_NAME = os.environ.get("OT_RC_NAME") or "✨1-REPORTER"
 # 🔑 A PRIVATE tmux SOCKET, SO THE DESTRUCTIVE PATH IS TESTABLE.
 # This tool KILLS every tmux session. Driving that against the real server
 # would kill the operator's own thread, so a gate could not exercise it — and
@@ -315,9 +324,9 @@ def launch_cmd(claude: str, mode: str, guarded: bool = False) -> str:
     `claude_sessions()` walks the process tree.
     """
     guard = "export VERTIGO_UNATTENDED=1; " if guarded else ""
-    return ("%senv -u ANTHROPIC_API_KEY %s %s || echo '  RESUME FAILED — no "
-            "prior conversation for %s, or claude exited non-zero. Nothing was "
-            "resumed.'; exec bash -l" % (guard, claude, mode, WORKDIR))
+    return ("%senv -u ANTHROPIC_API_KEY %s --remote-control '%s' %s || echo '  RESUME "
+            "FAILED — no prior conversation for %s, or claude exited non-zero. "
+            "Nothing was resumed.'; exec bash -l" % (guard, claude, RC_NAME, mode, WORKDIR))
 
 
 def public_ip():

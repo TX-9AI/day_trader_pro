@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """
-tests/check_resume_item.py  v1.3
+tests/check_resume_item.py  v1.4
+v1.4  2026-10-04  dtp r469 / OPS.66 — R6 and R11 accept the session name between
+      `$CLAUDE` and the flag. r469 made every launch `$CLAUDE --remote-control
+      '$RC_NAME' --continue`, so the adjacent-text form went red on a correct
+      line; the assertion is still that THE LAUNCH carries the flag.
 v1.3  2026-09-13  r381 / OPS.17 — THE SECTION IS `CLAUDE CODE`, IT HOLDS AN
       ITEM THAT LAUNCHES NOTHING, AND THE LAUNCH RULES STILL CANNOT BE DODGED.
       Operator, 2026-09-13: rename the section, shorten 38 so it stops wrapping
@@ -260,9 +264,9 @@ def main():
     cont = body_of(fn, "mi_resume_claude_tmux")
     pick = body_of(fn, "mi_resume_pick_claude_tmux")
     check("R6 the RESUME item passes --continue (the most recent thread)",
-          "$CLAUDE --continue" in cont)
+          bool(re.search(r"\$CLAUDE (--remote-control '\$RC_NAME' )?--continue\b", cont)))
     check("R11 the RESUME [other] item passes --resume (the picker)",
-          "$CLAUDE --resume" in pick)
+          bool(re.search(r"\$CLAUDE (--remote-control '\$RC_NAME' )?--resume\b", pick)))
     # ⚠️ AND THEY MUST NOT BE THE SAME ITEM WEARING TWO LABELS. Two menu
     # entries that do the identical thing is the failure DEV.4 found when
     # RETIRE ran the byte-identical command to EMERGENCY STOP.

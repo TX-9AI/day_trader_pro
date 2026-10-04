@@ -1,4 +1,13 @@
-# day_trader_pro/menu_functions.sh — v1.73
+# day_trader_pro/menu_functions.sh — v1.74
+# v1.74 (2026-10-04) - dtp r469 / OPS.66. EVERY CLAUDE LAUNCH IS NAMED ✨1-REPORTER.
+#   Operator: "I want to make your OT_RC_NAME sticky. It should be ✨1-REPORTER."
+#   HAND OFF, RESUME and RESUME [other] (six launch lines) started claude with
+#   no name, so Remote Control titled the session from its first prompt
+#   ("Handoff file Fwvgnz") and the peer could not find it by name. Each line
+#   now passes `--remote-control '$RC_NAME'`, the form OTV4TEST's boxes launch
+#   with (their claude_boot.py, OT_RC_NAME). RC_NAME defaults to ✨1-REPORTER,
+#   OT_RC_NAME overrides it, and tools/claude_boot.py carries the SAME default
+#   for the boot service. Pinned by tests/check_rc_name.py.
 # v1.73 (2026-09-20) - dtp r401 / OPS.27. HAND OFF now runs
 #   `tools/scratch_purge.py --wait 20` as the FIRST step of the new pane's
 #   command, before `claude`. Claude Code writes every Bash result under
@@ -420,6 +429,11 @@
 # thread in whatever directory the menu happened to be in.
 CLAUDE_SESSION_DIR="${CLAUDE_SESSION_DIR:-$HOME/options-trader-v4}"
 
+# r469 / OPS.66 — THE ONE NAME EVERY LAUNCH ON THIS BOX CARRIES. Operator:
+# "It should be ✨1-REPORTER." tools/claude_boot.py RC_NAME holds the same
+# default for the boot service; check_rc_name R4 fails if the two drift.
+RC_NAME="${OT_RC_NAME:-✨1-REPORTER}"
+
 mi_dry_run_spool_up_real_reads() {
     echo; $PY orchestrator.py --dry-run --no-gate; pause
 }
@@ -597,11 +611,11 @@ mi_handoff_fresh_claude() {
         # Not inside tmux: kill any strays first, then attach directly.
         tmux kill-server 2>/dev/null
         exec tmux new-session -s "$NEW" -c "$CLAUDE_SESSION_DIR" \
-            "python3 /home/ubuntu/day_trader_pro/tools/scratch_purge.py --wait 20; env -u ANTHROPIC_API_KEY $CLAUDE 'Read $HO and follow it.' || echo '  CLAUDE DID NOT START — the handoff is still at the path above; recover with: claude --resume'; exec bash -l"
+            "python3 /home/ubuntu/day_trader_pro/tools/scratch_purge.py --wait 20; env -u ANTHROPIC_API_KEY $CLAUDE --remote-control '$RC_NAME' 'Read $HO and follow it.' || echo '  CLAUDE DID NOT START — the handoff is still at the path above; recover with: claude --resume'; exec bash -l"
     fi
     OLD="$(tmux display-message -p '#S')"
     tmux new-session -d -s "$NEW" -c "$CLAUDE_SESSION_DIR" \
-        "python3 /home/ubuntu/day_trader_pro/tools/scratch_purge.py --wait 20; env -u ANTHROPIC_API_KEY $CLAUDE 'Read $HO and follow it.' || echo '  CLAUDE DID NOT START — the handoff is still at the path above; recover with: claude --resume'; exec bash -l"
+        "python3 /home/ubuntu/day_trader_pro/tools/scratch_purge.py --wait 20; env -u ANTHROPIC_API_KEY $CLAUDE --remote-control '$RC_NAME' 'Read $HO and follow it.' || echo '  CLAUDE DID NOT START — the handoff is still at the path above; recover with: claude --resume'; exec bash -l"
     tmux switch-client -t "$NEW" || {
         echo "  switch-client failed — the new session '$NEW' EXISTS and is detached."
         echo "  Attach with: tmux attach -t $NEW"; pause; return 1; }
@@ -732,11 +746,11 @@ mi_resume_claude_tmux() {
     if [ -z "${TMUX:-}" ]; then
         tmux kill-server 2>/dev/null
         exec tmux new-session -s "$NEW" -c "$CLAUDE_SESSION_DIR" \
-            "env -u ANTHROPIC_API_KEY $CLAUDE --continue || echo '  RESUME FAILED — no prior conversation for $CLAUDE_SESSION_DIR, or claude exited non-zero. Nothing was resumed.'; exec bash -l"
+            "env -u ANTHROPIC_API_KEY $CLAUDE --remote-control '$RC_NAME' --continue || echo '  RESUME FAILED — no prior conversation for $CLAUDE_SESSION_DIR, or claude exited non-zero. Nothing was resumed.'; exec bash -l"
     fi
     OLD="$(tmux display-message -p '#S')"
     tmux new-session -d -s "$NEW" -c "$CLAUDE_SESSION_DIR" \
-        "env -u ANTHROPIC_API_KEY $CLAUDE --continue || echo '  RESUME FAILED — no prior conversation for $CLAUDE_SESSION_DIR, or claude exited non-zero. Nothing was resumed.'; exec bash -l"
+        "env -u ANTHROPIC_API_KEY $CLAUDE --remote-control '$RC_NAME' --continue || echo '  RESUME FAILED — no prior conversation for $CLAUDE_SESSION_DIR, or claude exited non-zero. Nothing was resumed.'; exec bash -l"
     tmux switch-client -t "$NEW" || {
         echo "  switch-client failed — the new session '$NEW' EXISTS and is detached."
         echo "  Attach with: tmux attach -t $NEW"; pause; return 1; }
@@ -784,11 +798,11 @@ mi_resume_pick_claude_tmux() {
     if [ -z "${TMUX:-}" ]; then
         tmux kill-server 2>/dev/null
         exec tmux new-session -s "$NEW" -c "$CLAUDE_SESSION_DIR" \
-            "env -u ANTHROPIC_API_KEY $CLAUDE --resume || echo '  EXITED WITHOUT RESUMING — picker cancelled, or no conversation for $CLAUDE_SESSION_DIR.'; exec bash -l"
+            "env -u ANTHROPIC_API_KEY $CLAUDE --remote-control '$RC_NAME' --resume || echo '  EXITED WITHOUT RESUMING — picker cancelled, or no conversation for $CLAUDE_SESSION_DIR.'; exec bash -l"
     fi
     OLD="$(tmux display-message -p '#S')"
     tmux new-session -d -s "$NEW" -c "$CLAUDE_SESSION_DIR" \
-        "env -u ANTHROPIC_API_KEY $CLAUDE --resume || echo '  EXITED WITHOUT RESUMING — picker cancelled, or no conversation for $CLAUDE_SESSION_DIR.'; exec bash -l"
+        "env -u ANTHROPIC_API_KEY $CLAUDE --remote-control '$RC_NAME' --resume || echo '  EXITED WITHOUT RESUMING — picker cancelled, or no conversation for $CLAUDE_SESSION_DIR.'; exec bash -l"
     tmux switch-client -t "$NEW" || {
         echo "  switch-client failed — the new session '$NEW' EXISTS and is detached."
         echo "  Attach with: tmux attach -t $NEW"; pause; return 1; }
