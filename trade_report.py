@@ -1,4 +1,15 @@
-# day_trader_pro/trade_report.py — v1.23
+# day_trader_pro/trade_report.py — v1.24
+# v1.24 (2026-10-04) — r472 / RPT.34. FITS A PHONE: NO LINE WIDER THAN 74.
+#   Operator: "can you fix the text wrapping in report 47?" 133 of 258 lines
+#   ran past the report's own 74-wide rule (85-character table rows, 94/95
+#   character R lines) and Termius wrapped them mid-column, so FEES $ landed
+#   under the next row's label. Tables: NET $ and FEES $ print whole dollars
+#   (cents carried no decision) and the columns narrow, so a row is exactly
+#   REPORT_WIDTH with a 24-character label. The roll-up and R lines split in
+#   two; best/worst keys are 28 wide. Prose notes go through _WidthWrap (CLI
+#   only), a word-boundary wrap that keeps the line's indent, as the backstop.
+#   No number changes: same rows, same R, same rounding of R. Pinned by
+#   tests/check_report_width.py.
 # v1.23 (2026-10-03) — r458. The printed caveat no longer says the TEST boxes
 #   run "~10% nominal size": their units were rewritten 2026-09-29 17:46 ET to
 #   $1,500 risk / $3,000 budget, above mainline QQQ/NVDA. The reason to rank
@@ -746,14 +757,21 @@ def _r_cell(a) -> str:
     return f"{('~' if thin else '') + f'{r:+.3f}':>8}"
 
 
-def show(title: str, d: Dict[str, dict], min_n: int, width: int = 26) -> None:
+REPORT_WIDTH = 74   # r472 — the report's own `=` rule; one Termius line on a phone
+
+
+def show(title: str, d: Dict[str, dict], min_n: int, width: int = 24) -> None:
     if not d:
         return
     print(f"\n{title}")
-    print(f"  {'':<{width}}{'N':>5}{'WIN%':>7}{'NET $':>11}{'R':>8}{'AVG $':>9}"
-          f"{'HOLD m':>7}{'FEES $':>10}")
+    # r472 — 2 + 24 + 5+5+8+8+8+6+7+1 = 74. NET $ and FEES $ in whole dollars,
+    # AVG $ to one decimal. EVERY number cell carries its own leading space, so a
+    # value wider than its column widens the line (the gate catches that) but can
+    # never fuse with its neighbour into one unreadable token.
+    print(f"  {'':<{width}}{'N':>5}{'WIN%':>5}{'NET $':>8}{'R':>8}{'AVG $':>8}"
+          f"{'HOLD':>6}{'FEES':>7}")
     for k, a in sorted(d.items(), key=lambda kv: -kv[1]["net"]):
-        h = f"{a['median_hold_min']:>7.1f}" if a["median_hold_min"] is not None else "      -"
+        h = f" {a['median_hold_min']:>5.1f}" if a["median_hold_min"] is not None else "     -"
         # 🔴 r294 — THE `<- thin` MARKER IS GONE AND THE FEES COLUMN TAKES ITS
         # PLACE. Operator, 2026-09-07: *"the thin remark is useless. No shit
         # it's thin — it's a week of trades."* He is right: at this sample size
@@ -766,16 +784,16 @@ def show(title: str, d: Dict[str, dict], min_n: int, width: int = 26) -> None:
         # gate disappears inside a cosmetic change.
         f = a.get("fees")
         if f is None:
-            fee_s = f"{'n/a':>10}"
+            fee_s = f" {'n/a':>6}"
         else:
             # NEGATIVE, because it is a deduction. NET $ stays GROSS on
             # purpose: it is the number every prior screenshot and every
             # banked report carries, and changing its meaning under the same
             # header would make this delivery's before/after incomparable.
-            fee_s = f"{-f:>10.2f}"
+            fee_s = f" {-f:>6.0f}"
         star = "*" if a.get("fees_unpriced") else " "
-        print(f"  {k[:width]:<{width}}{a['n']:>5}{a['win_rate']:>7.0%}"
-              f"{a['net']:>11.2f}{_r_cell(a)}{a['avg']:>9.2f}{h}{fee_s}{star}")
+        print(f"  {k[:width]:<{width}} {a['n']:>4} {a['win_rate']:>4.0%}"
+              f" {a['net']:>7.0f} {_r_cell(a).strip():>7} {a['avg']:>7.1f}{h}{fee_s}{star}")
 
 
 # ── r202 — THE TRADES THEMSELVES ──────────────────────────────────────────
@@ -1167,10 +1185,10 @@ def main(argv: List[str]) -> int:
     print(f"TRADE BREAKDOWN — {overall['n']} closed trades [{mode.upper()}]")
     print("=" * 74)
     print(f"  net {overall['net']:+.2f}   win rate {overall['win_rate']:.0%}   "
-          f"avg {overall['avg']:+.2f}   best {overall['best']:+.2f}   "
-          f"worst {overall['worst']:+.2f}")
-    if overall["median_hold_min"] is not None:
-        print(f"  median hold {overall['median_hold_min']} min")
+          f"avg {overall['avg']:+.2f}")
+    _mh = (f"   median hold {overall['median_hold_min']} min"
+           if overall["median_hold_min"] is not None else "")
+    print(f"  best {overall['best']:+.2f}   worst {overall['worst']:+.2f}{_mh}")
     # 🔴 dtp-r268 — R IN THE ROLL-UP. Net dollars alone cannot say whether the
     # book was efficient with the capital it committed: SPX's +12,453 came off
     # 21 trades that risked ~$35k apiece, and the runaway's +15,721 came off
@@ -1194,21 +1212,22 @@ def main(argv: List[str]) -> int:
         _bas = {}
         for _t in trades:
             _bas[_r_basis(_t)] = _bas.get(_r_basis(_t), 0) + 1
-        print(f"  R {_pnl/sum(_rt):+.3f} aggregate on the stop actually taken   "
-              f"median trade {statistics.median(_mrs):+.3f}   "
-              f"risked {_money(sum(_rt)).strip()}   n={len(_mrs)}")
+        print(f"  R {_pnl/sum(_rt):+.3f} aggregate, on the stop actually taken"
+              f"   n={len(_mrs)}")
+        print(f"    median trade {statistics.median(_mrs):+.3f}   "
+              f"risked {_money(sum(_rt)).strip()}")
         # ⚠️ THE BASIS MIX IS PART OF THE NUMBER. An aggregate built mostly on
         # max-loss fallbacks is not the same measurement as one built on real
         # stops, and printing it without saying so is how the last version of
         # this line misled.
         print(f"    basis: {_bas.get('x',0)} exit stop / {_bas.get('s',0)} entry "
-              f"floor / {_bas.get('m',0)} max loss (no stop recorded)")
+              f"floor / {_bas.get('m',0)} max loss (no stop)")
     _rs = [r for r in (r_value(t) for t in trades) if r is not None]
     _car = [c for c in (capital_at_risk(t) for t in trades) if c]
     if _rs and _car:
-        print(f"  R {_pnl/sum(_car):+.3f} against MAX LOSS   "
-              f"median trade {statistics.median(_rs):+.3f}   "
-              f"risked {_money(sum(_car)).strip()}   (worst case, not the stop)")
+        print(f"  R {_pnl/sum(_car):+.3f} against MAX LOSS (worst case, not the stop)")
+        print(f"    median trade {statistics.median(_rs):+.3f}   "
+              f"risked {_money(sum(_car)).strip()}")
 
     # r202 — the rows come FIRST. The aggregates answer "how did the
     # strategies do"; the list answers "what did it actually take", which is
@@ -1285,7 +1304,7 @@ def main(argv: List[str]) -> int:
     for lab in (() if _lins else ("strategy",)) + ("symbol", "session_phase", "day_of_week"):
         b, w = findings.get(f"best_{lab}"), findings.get(f"worst_{lab}")
         if b:
-            print(f"  best {lab:<14} {b['key'][:30]:<30} net {b['net']:>+10.2f} (n={b['n']})")
+            print(f"  best {lab:<14} {b['key'][:28]:<28} net {b['net']:>+10.2f} (n={b['n']})")
         # v1.5 — "worst" is only a word worth printing when there is something
         # to be worst THAN, and when it is not simply the lowest of several
         # winners. One eligible bucket prints itself as both; all-positive
@@ -1298,7 +1317,7 @@ def main(argv: List[str]) -> int:
             else:
                 lowest = w["net"] < 0
                 tag = "" if lowest else f"  <- LOWEST of {n_elig}, not a loss"
-                print(f"  worst {lab:<13} {w['key'][:30]:<30} "
+                print(f"  worst {lab:<13} {w['key'][:28]:<28} "
                       f"net {w['net']:>+10.2f} (n={w['n']}){tag}")
 
     if not args.no_json:
@@ -1338,5 +1357,43 @@ def main(argv: List[str]) -> int:
     return 0
 
 
+class _WidthWrap:
+    """r472 — the CLI's stdout, wrapped so no line passes REPORT_WIDTH.
+
+    The tables and roll-up fit by construction; this is the backstop for the
+    prose notes printed from a dozen sites. A long line breaks at a word and its
+    continuation keeps the line's own indent plus two, so a note stays a note.
+    ⚠️ CLI ONLY: callers that import this module get plain stdout."""
+
+    def __init__(self, out, width: int = REPORT_WIDTH):
+        self._out, self._w, self._buf = out, width, ""
+
+    def write(self, s):
+        import textwrap
+        self._buf += s
+        while "\n" in self._buf:
+            line, self._buf = self._buf.split("\n", 1)
+            if len(line) <= self._w:
+                self._out.write(line + "\n")
+                continue
+            ind = " " * (len(line) - len(line.lstrip(" ")))
+            for part in textwrap.wrap(line.strip(), self._w, initial_indent=ind,
+                                      subsequent_indent=ind + "  ",
+                                      break_on_hyphens=False) or [line]:
+                self._out.write(part + "\n")
+        return len(s)
+
+    def flush(self):
+        if self._buf:
+            self._out.write(self._buf)
+            self._buf = ""
+        self._out.flush()
+
+
 if __name__ == "__main__":
-    sys.exit(main(sys.argv))
+    sys.stdout = _WidthWrap(sys.stdout)
+    try:
+        _rc = main(sys.argv)
+    finally:
+        sys.stdout.flush()
+    sys.exit(_rc)
