@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""day_trader_pro/tests/screen_reach.py — v1.1
+"""day_trader_pro/tests/screen_reach.py — v1.2
+v1.2  2026-10-11  r479 / OPS.22 — zone "US/Eastern" -> "America/New_York": the legacy link tzdata 2026c moved out of the default install. Same rules; no behaviour change.
 v1.1  2026-09-03 — dtp r261. 🔴 v1.0 MEASURED REACH ENTRY-TO-EXIT AND THE MEDIAN
       RUNAWAY HOLD IS THREE MINUTES, so "the underlying travelled 0.99 ATR"
       measured three minutes of tape rather than the tape's capacity — a
@@ -65,7 +66,7 @@ import report_prompt as RP                                    # noqa: E402
 import warehouse_cache as WCACHE                              # noqa: E402
 from progress import Bar                                      # noqa: E402
 
-ET = ZoneInfo("US/Eastern")
+ET = ZoneInfo("America/New_York")
 UTC = ZoneInfo("UTC")
 
 _CANDS = [os.path.expanduser("~/options-trader-v4"),

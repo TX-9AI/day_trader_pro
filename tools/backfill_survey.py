@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-# day_trader_pro/tools/backfill_survey.py — v1.1
+# day_trader_pro/tools/backfill_survey.py — v1.3
+# v1.3 (2026-10-11) — r479 / OPS.22 — zone "US/Eastern" -> "America/New_York": the legacy link tzdata 2026c moved out of the default install. Same rules; no behaviour change.
 # v1.1 (2026-08-16) — `--streams`: the same question for the OTHER streams.
 #      The trades survey found the warehouse is the sole copy of 33 closed
 #      trades on 2026-07-15. Trades are the one stream that is at least PARTLY
@@ -67,7 +68,7 @@ import config  # noqa: E402
 TRADES_DIR = os.path.join(ROOT, "trades")
 BUCKET = os.environ.get("OT_S3_BUCKET", "vertigo-warehouse-tx9ai")
 REGION = os.environ.get("OT_S3_REGION", "us-east-2")
-_ET = ZoneInfo("US/Eastern")
+_ET = ZoneInfo("America/New_York")
 _UTC = ZoneInfo("UTC")
 _DATE_DIR = __import__("re").compile(r"^\d{4}-\d{2}-\d{2}$")
 

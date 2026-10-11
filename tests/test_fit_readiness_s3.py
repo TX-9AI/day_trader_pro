@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/test_fit_readiness_s3.py — v1.1
+# day_trader_pro/tests/test_fit_readiness_s3.py — v1.2
+# v1.2 (2026-10-11) — r479 / OPS.22 — zone "US/Eastern" -> "America/New_York": the legacy link tzdata 2026c moved out of the default install. Same rules; no behaviour change.
 # v1.1 (2026-09-05) — dtp r294 / RPT.14. 🔴 THIS FILE HAS BEEN DEAD, NOT
 #   PASSING. It raised a TypeError before its first assertion — verified at
 #   HEAD, not inferred — and had done since the streaming rewrite. TWO
@@ -53,7 +54,7 @@ sys.path.insert(0, ROOT)
 import warehouse_reader as wr          # noqa: E402
 import fit_readiness as fr             # noqa: E402
 
-ET = ZoneInfo("US/Eastern")
+ET = ZoneInfo("America/New_York")
 DAY = "2026-08-25"
 NEXT = "2026-08-27"
 

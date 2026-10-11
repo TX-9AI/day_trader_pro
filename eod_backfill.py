@@ -1,4 +1,5 @@
-# day_trader_pro/eod_backfill.py — v1.6
+# day_trader_pro/eod_backfill.py — v1.7
+# v1.7 (2026-10-11) — r479 / OPS.22 — zone "US/Eastern" -> "America/New_York": the legacy link tzdata 2026c moved out of the default install. Same rules; no behaviour change.
 # v1.6  2026-10-03  dtp r457 / OPS.64 — asks the INSTANCE MAP for which boxes exist (instance_registry.discover()/fleet_members()), not config.UNIVERSE, so a retired (untagged) box needs no list edit. The list is the printed fallback.
 # v1.5  2026-09-05  dtp r283. THE STREAM CAP WAS 29-BOX ARITHMETIC AND IT HARD
 #         STOPS. A ONE-box backfill against a 15-box fleet was refused outright:
@@ -110,7 +111,7 @@ import instance_registry
 import notify
 import ssh_util
 
-_ET = ZoneInfo("US/Eastern")
+_ET = ZoneInfo("America/New_York")
 REMOTE_REPO = "options-trader"
 PRODUCE_CMD = f"bash ~/{REMOTE_REPO}/pull_today_ohlc.sh"
 CHECK_CMD   = f"bash ~/{REMOTE_REPO}/pull_today_ohlc.sh --check"

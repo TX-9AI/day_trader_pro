@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
-tests/check_ssh_budget.py  v1.0
+tests/check_ssh_budget.py  v1.1
+v1.1  2026-10-11  r479 / OPS.22 — S5's VACUOUS-GREEN for the US/Eastern import failure
+      is GONE: fleet resolves America/New_York now, so the excuse was dead code
+      that could only ever pass for the wrong reason. Any import failure is RED.
 v1.0  2026-09-21  r406 / OPS.32, S3.19 — A COMMAND BUDGET MUST NOT BE A
       CONNECT TIMEOUT WEARING A DIFFERENT HAT.
 
@@ -152,34 +155,14 @@ if ssh_util is not None:
         seen["timeout"] = timeout
         return 0, "ok", ""
 
-    # 🔴 THE IMPORT IS GUARDED SEPARATELY FROM THE CHECK, AND THE REASON IS
-    # [[OPS.22]] REACHING A NEW VICTIM. `import fleet` pulls in a module that
-    # resolves the zone `US/Eastern`, a LEGACY LINK tzdata 2026c moved into an
-    # uninstalled package — so under `/usr/bin/python3` this raises
-    # `ZoneInfoNotFoundError` while the venv (which carries the `tzdata` pip
-    # package) imports it fine. Measured here: 7/7 under the venv, 6/7 under
-    # the system interpreter, failing ONLY on this import.
-    # ⚠️ SO AN ENVIRONMENT FAULT REPORTS **GREEN (VACUOUS) AND SAYS SO**,
-    # rather than red. [[CHK.9]]/CV.1: a gate that fails for the machine
-    # instead of the content is one the operator learns to skip, and the land
-    # gate runs every CHECK under bare `python3`. ⚠️ ANY OTHER IMPORT FAILURE
-    # IS STILL RED — this excuses the tz link and nothing else.
-    _fleet_mod, _env_skip = None, None
+    # r479 / OPS.22: the vacuous-green for the legacy zone link is removed;
+    # fleet resolves America/New_York, so an import failure is simply RED.
+    _fleet_mod = None
     try:
         import fleet as _fleet_mod
     except Exception as _imp:                                   # noqa: BLE001
-        if "ZoneInfoNotFound" in type(_imp).__name__ or "US/Eastern" in str(_imp):
-            _env_skip = ("%s — OPS.22's legacy tz link, not a defect in this "
-                         "delivery" % (_imp,))
-        else:
-            _env_skip = False
-            ck("S5", False, f"importing fleet raised: {_imp!r}")
-    if _env_skip:
-        ck("S5", True, "")
-        print(f"  [S5] GREEN (VACUOUS) — {_env_skip}. The --timeout wiring was "
-              f"NOT exercised under this interpreter; it is under the venv, "
-              f"which is what a login-shell land uses.")
-    elif _fleet_mod is None:
+        ck("S5", False, f"importing fleet raised: {_imp!r}")
+    if _fleet_mod is None:
         pass                                   # already reported red above
     else:
       try:

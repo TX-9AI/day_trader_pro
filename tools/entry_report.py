@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-# day_trader_pro/tools/entry_report.py — v1.1
+# day_trader_pro/tools/entry_report.py — v1.2
+# v1.2 (2026-10-11) — r479 / OPS.22 — zone "US/Eastern" -> "America/New_York": the legacy link tzdata 2026c moved out of the default install. Same rules; no behaviour change.
 # v1.1 (2026-09-02) — dtp r247. The menu LOOPS off one pull, and 🔴 PANEL 3 IS
 #   REMOVED as near-tautological: it reported 0% win rate for fav-first and
 #   56% for heat-first on RunawayContinuation, which is mostly definitional
@@ -53,7 +54,7 @@ import report_prompt as RP                                    # noqa: E402
 import warehouse_cache as WCACHE                              # noqa: E402
 from progress import Bar                                      # noqa: E402
 
-ET = ZoneInfo("US/Eastern")
+ET = ZoneInfo("America/New_York")
 
 def main(argv):
     ap = argparse.ArgumentParser(description="entry quality by excursion")

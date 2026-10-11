@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/check_fleet_public_ip.py — v1.0
+# day_trader_pro/tests/check_fleet_public_ip.py — v1.1
+# v1.1 (2026-10-11) — r479 / OPS.22 — the US/Eastern VACUOUS-GREEN excuse is GONE. It
+#   existed only because fleet.py resolved the legacy zone link; r479 moved every
+#   zone to America/New_York, so the branch was dead — and a dead excuse is a gate
+#   that would silently go green for the wrong reason. Any import failure is RED.
 # v1.0 (2026-09-21) — r412 / OPS.37. THE PING BOARD CARRIES THE PUBLIC IP, AND
 #   THE 3-TUPLE EVERY OTHER CALLER DEPENDS ON IS PINNED SO IT CANNOT FOLLOW.
 #   🔴 P2 IS THE REASON THIS FILE EXISTS. `fleet.get_fleet` is unpacked as
@@ -47,16 +51,9 @@ def main():
         import fleet
         import instance_registry
     except Exception as e:                                      # noqa: BLE001
-        # ⚠️ SCOPED VACUOUS-GREEN, NOT A BLANKET ONE. `fleet` resolves
-        # `US/Eastern`, which bare python3 on control cannot ([[OPS.22]],
-        # [[CHK.9]]) — and the land gate runs every CHECK under bare python3.
-        # Excused for THAT cause only; any other import failure stays RED.
-        if "US/Eastern" in str(e) or "ZoneInfoNotFound" in e.__class__.__name__:
-            print(f"  GREEN (VACUOUS) — {e.__class__.__name__}: {e}")
-            print("  OPS.22: the legacy zone link is unresolvable under this "
-                  "interpreter. Scoped to that cause; nothing else is excused.")
-            return 0
-        ck("P1", False, f"import failed for an UNEXCUSED reason: {e}")
+        # r479 / OPS.22: the legacy-zone excuse that stood here is removed —
+        # fleet resolves America/New_York now, so nothing is excused.
+        ck("P1", False, f"import failed: {e}")
         print(f"\nFAILED {len(_fails)}: {', '.join(_fails)}")
         return 1
 

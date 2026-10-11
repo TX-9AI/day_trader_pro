@@ -1,4 +1,5 @@
-# day_trader_pro/fleet.py — v0.11.0
+# day_trader_pro/fleet.py — v0.11.1
+# v0.11.1 (2026-10-11) — r479 / OPS.22 — zone "US/Eastern" -> "America/New_York": the legacy link tzdata 2026c moved out of the default install. Same rules; no behaviour change.
 # v0.11.0 (2026-10-03) — r457 / OPS.64. THE SAFETY NET NO LONGER NEEDS THE LIST.
 #   r427 scoped the close as tagged UNION UNIVERSE so a listed box that lost its
 #   tag would still be stopped. That kept every RETIRED box in scope until a
@@ -179,7 +180,7 @@ SERVICE     = "optionsbot"
 # Ad-hoc pulls land in the SAME dated layout harvest uses, so a hand-pulled file
 # is indistinguishable from a harvested one:
 #   trades/<date>/<SYM>_<date>_trades.db  and  ohlc/<date>/<SYM>_ohlc_<date>.csv
-_ET         = ZoneInfo("US/Eastern")
+_ET         = ZoneInfo("America/New_York")
 # Remote paths for scp are relative to the box's home dir (no leading ~/).
 REMOTE_HOME_REL = "options-trader"
 

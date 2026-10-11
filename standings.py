@@ -1,4 +1,5 @@
-# day_trader_pro/standings.py — v1.10
+# day_trader_pro/standings.py — v1.11
+# v1.11 (2026-10-11) — r479 / OPS.22 — zone "US/Eastern" -> "America/New_York": the legacy link tzdata 2026c moved out of the default install. Same rules; no behaviour change.
 # v1.10 (2026-10-03) — dtp r457 / OPS.64 — asks the INSTANCE MAP for which boxes exist (instance_registry.discover()/fleet_members()), not config.UNIVERSE, so a retired (untagged) box needs no list edit. The list is the printed fallback.
 # v1.9 (2026-09-10) — dtp r345 / RPT.27. THE ACCOUNTING GUARD. r342 fixed the
 #   `.strip()` that ate rows; this makes the class of failure impossible to
@@ -159,7 +160,7 @@ import notify
 import ssh_util
 import ettime                                            # noqa: E402
 
-_ET = ZoneInfo("US/Eastern")
+_ET = ZoneInfo("America/New_York")
 
 REMOTE_DB = "~/options-trader/trades.db"
 

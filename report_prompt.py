@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-# day_trader_pro/report_prompt.py — v1.2
+# day_trader_pro/report_prompt.py — v1.3
+# v1.3 (2026-10-11) — r479 / OPS.22 — zone "US/Eastern" -> "America/New_York": the legacy link tzdata 2026c moved out of the default install. Same rules; no behaviour change.
 # v1.2  2026-09-04 — dtp r269. `stop_premium` JOINS THE TRADES PROJECTION.
 #       It is trade_logger's "immutable entry-time floor" and is the denominator
 #       `trade_report.risk_taken` falls back to for a winner, which has no stop
@@ -35,7 +36,7 @@ import sys
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-ET = ZoneInfo("US/Eastern")
+ET = ZoneInfo("America/New_York")
 
 
 def ask_dates(argv_from=None, argv_to=None):

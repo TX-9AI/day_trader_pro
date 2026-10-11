@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/test_standings_rows.py — v1.4
+# day_trader_pro/tests/test_standings_rows.py — v1.5
+# v1.5 (2026-10-11) — r479 / OPS.22 — zone "US/Eastern" -> "America/New_York": the legacy link tzdata 2026c moved out of the default install. Same rules; no behaviour change.
 # v1.4 (2026-09-02) — dtp r250. 🔴 THE FIXTURE WAS BUILT FROM MY OWN QUERY'S
 #   ASSUMPTIONS and therefore agreed with its mistakes: the CREATE TABLE here
 #   declared `exit_price REAL` because the SQL asked for it, and `exit_price`
@@ -148,7 +149,7 @@ def main():
     # year and silently wrong for four, and the failure is a report filtering
     # on the wrong day rather than one that errors. r125 caught the identical
     # bug in the otv4 sensor reports.
-    _ET = ZoneInfo("US/Eastern")
+    _ET = ZoneInfo("America/New_York")
     real = S.datetime
     try:
         class _Sept:
@@ -227,7 +228,7 @@ def main():
         ]
         return 0, "\n".join(rows) + "\n", ""
 
-    _today = datetime.now(ZoneInfo("US/Eastern")).strftime("%Y-%m-%d")
+    _today = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
     _real_mock, _real_ssh = config.MOCK_AWS, _ssh.ssh_run
     try:
         config.MOCK_AWS = False

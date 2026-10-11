@@ -1,4 +1,5 @@
-# day_trader_pro/eod_report.py — v0.4
+# day_trader_pro/eod_report.py — v0.5
+# v0.5 (2026-10-11) — r479 / OPS.22 — zone "US/Eastern" -> "America/New_York": the legacy link tzdata 2026c moved out of the default install. Same rules; no behaviour change.
 # v0.4 (2026-09-24) — r423 / OPS.47. THE CLOSE STOPS WHAT THE OPEN WOKE.
 #   🔴 THIS IS THE HALF THAT WOULD HAVE BITTEN. Once the wake discovered by
 #   tag while the close still resolved config.UNIVERSE, any box that carried
@@ -55,7 +56,7 @@ import notify
 import ssh_util
 import ettime                                            # noqa: E402
 
-_ET = ZoneInfo("US/Eastern")
+_ET = ZoneInfo("America/New_York")
 
 
 def _today_et():

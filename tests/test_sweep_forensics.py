@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/test_sweep_forensics.py — v1.2
+# day_trader_pro/tests/test_sweep_forensics.py — v1.3
+# v1.3 (2026-10-11) — r479 / OPS.22 — zone "US/Eastern" -> "America/New_York": the legacy link tzdata 2026c moved out of the default install. Same rules; no behaviour change.
 # v1.2 (2026-09-02) — dtp r256. The fixture built candle epochs in ET while
 #   `entry_time` is stored UTC — the same error the code had, so the tests
 #   agreed with the bug and passed. Correcting the parser turned them red,
@@ -26,7 +27,7 @@ from zoneinfo import ZoneInfo
 
 _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _root)
-ET = ZoneInfo("US/Eastern")
+ET = ZoneInfo("America/New_York")
 _fails = []
 
 

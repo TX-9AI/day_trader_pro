@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-# day_trader_pro/tools/bfly_pin_study.py — v1.2
+# day_trader_pro/tools/bfly_pin_study.py — v1.3
+# v1.3 (2026-10-11) — r479 / OPS.22 — zone "US/Eastern" -> "America/New_York": the legacy link tzdata 2026c moved out of the default install. Same rules; no behaviour change.
 # v1.2 (2026-09-01) — r243. 🔴 PANEL 2's med/p90 WERE POOLED ACROSS THE RANGE.
 #   The panel is titled "within each day" and its n/min/max/in-band came from
 #   GROUP BY d,b — but `_pct` filtered by BUCKET ONLY, so both days printed
@@ -70,7 +71,7 @@ sys.path.insert(0, _root)
 
 import warehouse_cache as WCACHE                              # noqa: E402
 
-ET = ZoneInfo("US/Eastern")
+ET = ZoneInfo("America/New_York")
 STRAT = "GEXPinButterfly"
 EM_MIN, EM_MAX = 0.30, 1.00          # r208 bounds — carried, never fitted
 BUCKETS = ("09:30", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00")

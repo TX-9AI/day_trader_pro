@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-# day_trader_pro/warehouse_cache.py — v1.7
+# day_trader_pro/warehouse_cache.py — v1.8
+# v1.8 (2026-10-11) — r479 / OPS.22 — zone "US/Eastern" -> "America/New_York": the legacy link tzdata 2026c moved out of the default install. Same rules; no behaviour change.
 # v1.7 (2026-09-23) — dtp r417 / WH.20. 🔴 v1.6 BUILT THE FORWARD SCAN AND THEN
 #   GATED IT AWAY FROM THE STREAMS THAT NEEDED IT MOST. The window was armed
 #   only for `dt.startswith("derived_")`, justified by "a raw stream is
@@ -145,7 +146,7 @@ import tempfile
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-_ET = ZoneInfo("US/Eastern")
+_ET = ZoneInfo("America/New_York")
 
 import config
 import ettime                                            # noqa: E402

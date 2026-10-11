@@ -1,4 +1,5 @@
-# day_trader_pro/consolidate_trades.py — v1.5
+# day_trader_pro/consolidate_trades.py — v1.6
+# v1.6 (2026-10-11) — r479 / OPS.22 — zone "US/Eastern" -> "America/New_York": the legacy link tzdata 2026c moved out of the default install. Same rules; no behaviour change.
 # v1.5 (2026-09-08) — dtp r322 / CND.1 — 🔴 `for r in rrows:` — A LOOP OVER A
 #   NAME THAT WAS NEVER DEFINED. Its producer (`_read_table(... rejections ...)`)
 #   had been removed and the loop tagging its rows was left behind, doing nothing
@@ -80,7 +81,7 @@ from zoneinfo import ZoneInfo
 import config
 import ettime                                            # noqa: E402
 
-_ET = ZoneInfo("US/Eastern")
+_ET = ZoneInfo("America/New_York")
 SELECTION_LOG = os.path.join(config.DATA_DIR, "selection_log.jsonl")
 
 _DB_RE = re.compile(r"^(?P<sym>.+)_trades_(?P<date>\d{4}-\d{2}-\d{2})\.db$")

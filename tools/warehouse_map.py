@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-# day_trader_pro/tools/warehouse_map.py — v1.2
+# day_trader_pro/tools/warehouse_map.py — v1.3
+# v1.3 (2026-10-11) — r479 / OPS.22 — zone "US/Eastern" -> "America/New_York": the legacy link tzdata 2026c moved out of the default install. Same rules; no behaviour change.
 # v1.2 (2026-09-01) — r242. CLI ONLY; the menu item is removed. Operator:
 #   "don't keep adding more shit to devtools. We run those as separate
 #   studies from the CLI." The menu is the operating loop, not a tool drawer.
@@ -51,7 +52,7 @@ sys.path.insert(0, _root)
 import config                                            # noqa: E402
 import warehouse_cost as WC                              # noqa: E402
 
-ET = ZoneInfo("US/Eastern")
+ET = ZoneInfo("America/New_York")
 DOC = os.path.join(_root, "docs", "WAREHOUSE_MAP.md")
 GB = 1024 ** 3
 

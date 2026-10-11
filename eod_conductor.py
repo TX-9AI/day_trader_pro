@@ -1,4 +1,5 @@
-# day_trader_pro/eod_conductor.py — v1.16.2
+# day_trader_pro/eod_conductor.py — v1.16.3
+# v1.16.3 (2026-10-11) — r479 / OPS.22 — zone "US/Eastern" -> "America/New_York": the legacy link tzdata 2026c moved out of the default install. Same rules; no behaviour change.
 # v1.16.2 (2026-10-03) — dtp r457 / OPS.64 — asks the INSTANCE MAP for which boxes exist (instance_registry.discover()/fleet_members()), not config.UNIVERSE, so a retired (untagged) box needs no list edit. The list is the printed fallback.
 # v1.16.1 (2026-09-08) — dtp r322 / CND.1 — `AUTO_LABEL_PY` WAS NEVER ASSIGNED.
 #   The label phase referenced it four times and would have raised NameError.
@@ -241,7 +242,7 @@ import instance_registry
 import notify
 import ssh_util
 
-_ET = ZoneInfo("US/Eastern")
+_ET = ZoneInfo("America/New_York")
 REMOTE_REPO = "options-trader"
 
 GATE_TIMEOUT = 420

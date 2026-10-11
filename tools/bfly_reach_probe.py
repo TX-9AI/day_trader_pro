@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-# day_trader_pro/tools/bfly_reach_probe.py — v1.1
+# day_trader_pro/tools/bfly_reach_probe.py — v1.2
+# v1.2 (2026-10-11) — r479 / OPS.22 — zone "US/Eastern" -> "America/New_York": the legacy link tzdata 2026c moved out of the default install. Same rules; no behaviour change.
 # v1.1 (2026-09-01) — r242. CLI only; the menu item is removed.
 # v1.0 (2026-09-01) — dtp r238. THE SMALL ONE, TO TEST THE THEORY.
 #
@@ -40,7 +41,7 @@ sys.path.insert(0, _root)
 
 import warehouse_cache as WCACHE                          # noqa: E402
 
-ET = ZoneInfo("US/Eastern")
+ET = ZoneInfo("America/New_York")
 # The r208 bound. Recorded here as what it IS — a carried constant, not a fit.
 EM_MAX = 1.00
 EM_MIN = 0.30

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-# day_trader_pro/warehouse_reader.py — v2.1
+# day_trader_pro/warehouse_reader.py — v2.2
+# v2.2 (2026-10-11) — r479 / OPS.22 — zone "US/Eastern" -> "America/New_York": the legacy link tzdata 2026c moved out of the default install. Same rules; no behaviour change.
 # v2.1 (2026-09-05) — dtp r287 / TZ.1. `et_day` and `et_bounds` MOVED TO
 #   `ettime` and are re-exported here. They are the ET/UTC boundary, and this
 #   module cannot own it: `warehouse_reader` imports `market_calendar`, which
@@ -186,7 +187,7 @@ BUCKET = os.environ.get("OT_S3_BUCKET", "vertigo-warehouse-tx9ai")
 REGION = os.environ.get("OT_S3_REGION", "us-east-2")
 PREFIX = os.environ.get("OT_S3_PREFIX", "raw")
 
-_ET = ZoneInfo("US/Eastern")
+_ET = ZoneInfo("America/New_York")
 
 # The date the warehouse began COLLECTING, which is not the same as the earliest
 # dt= partition it holds: the first push shipped whatever history each box still

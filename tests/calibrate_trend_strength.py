@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""day_trader_pro/tests/calibrate_trend_strength.py — v1.2
+"""day_trader_pro/tests/calibrate_trend_strength.py — v1.3
+v1.3  2026-10-11  r479 / OPS.22 — zone "US/Eastern" -> "America/New_York": the legacy link tzdata 2026c moved out of the default install. Same rules; no behaviour change.
 v1.2  2026-09-03 — dtp r259. 🔴 THE OUTCOME IS A SAMPLE QUANTILE — "DID IT
       RUN" — NOT A FIXED PERCENTAGE. The first calibration came back negative
       (best AUC 0.63 under a 0.65 floor, 183 trades) and the diagnosis is the
@@ -74,7 +75,7 @@ import report_prompt as RP                                    # noqa: E402
 import warehouse_cache as WCACHE                              # noqa: E402
 from progress import Bar                                      # noqa: E402
 
-ET = ZoneInfo("US/Eastern")
+ET = ZoneInfo("America/New_York")
 UTC = ZoneInfo("UTC")
 
 # ⚠️ THE METER LIVES IN otv4. Located rather than reimplemented; if it cannot

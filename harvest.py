@@ -1,4 +1,5 @@
-# day_trader_pro/harvest.py — v0.7.4
+# day_trader_pro/harvest.py — v0.7.5
+# v0.7.5 (2026-10-11) — r479 / OPS.22 — zone "US/Eastern" -> "America/New_York": the legacy link tzdata 2026c moved out of the default install. Same rules; no behaviour change.
 # v0.7.4 (2026-10-03) — dtp r457 / OPS.64 — asks the INSTANCE MAP for which boxes exist (instance_registry.discover()/fleet_members()), not config.UNIVERSE, so a retired (untagged) box needs no list edit. The list is the printed fallback.
 # v0.7.3 (2026-09-05) — dtp r287 / TZ.1 — the naive `today` here asked a UTC box and rolled at 20:00 ET
 #   (19:00 in winter), so anything run after that silently asked for TOMORROW and came
@@ -110,7 +111,7 @@ import notify
 import ssh_util
 import ettime                                            # noqa: E402
 
-_ET = ZoneInfo("US/Eastern")
+_ET = ZoneInfo("America/New_York")
 SELECTION_LOG = os.path.join(config.DATA_DIR, "selection_log.jsonl")
 
 # Repo dir on each bot box (relative to the box's home — resolves under scp too).

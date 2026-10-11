@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""day_trader_pro/tests/screen_entry_vectors.py — v1.0
+"""day_trader_pro/tests/screen_entry_vectors.py — v1.1
+v1.1  2026-10-11  r479 / OPS.22 — zone "US/Eastern" -> "America/New_York": the legacy link tzdata 2026c moved out of the default install. Same rules; no behaviour change.
 WHICH DERIVED VECTORS COINCIDE WITH A DIRECTIONALLY CORRECT ENTRY? (RPT.A)
 
 v1.0  2026-09-02 — dtp r251. Candidate hunt, per strategy. Read-only.
@@ -72,7 +73,7 @@ import report_prompt as RP                                    # noqa: E402
 import warehouse_cache as WCACHE                              # noqa: E402
 from progress import Bar                                      # noqa: E402
 
-ET = ZoneInfo("US/Eastern")
+ET = ZoneInfo("America/New_York")
 
 # ⚠️ NOT A COLUMN LIST FOR fire_snapshot — these ARE its columns
 # (data/derived_store.py:169). `payload` is TEXT holding JSON.

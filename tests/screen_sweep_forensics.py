@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""day_trader_pro/tests/screen_sweep_forensics.py — v1.6
+"""day_trader_pro/tests/screen_sweep_forensics.py — v1.7
+v1.7  2026-10-11  r479 / OPS.22 — zone "US/Eastern" -> "America/New_York": the legacy link tzdata 2026c moved out of the default install. Same rules; no behaviour change.
 v1.6  2026-09-03 — dtp r265. PANEL 8: DOES A LEVEL'S DEFENDED COUNT PREDICT
       WHETHER IT HOLDS? Operator, 2026-09-03: *"I'd rather have a handful of
       rare firing high quality reversals than a stack of lottery tickets"*,
@@ -152,7 +153,7 @@ import report_prompt as RP                                    # noqa: E402
 import warehouse_cache as WCACHE                              # noqa: E402
 from progress import Bar                                      # noqa: E402
 
-ET = ZoneInfo("US/Eastern")
+ET = ZoneInfo("America/New_York")
 STRAT = "SweepCreditSpread"
 
 # ⚠️ The checks this study needs, by the names the strategy actually writes.

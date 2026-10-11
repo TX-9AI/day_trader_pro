@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-# day_trader_pro/tools/stop_report.py — v1.1
+# day_trader_pro/tools/stop_report.py — v1.2
+# v1.2 (2026-10-11) — r479 / OPS.22 — zone "US/Eastern" -> "America/New_York": the legacy link tzdata 2026c moved out of the default install. Same rules; no behaviour change.
 # v1.1 (2026-09-02) — dtp r247. The menu LOOPS off one pull: several cuts from
 #   one S3 read, `q` to quit.
 # v1.0 (2026-09-01) — dtp r244. WAS THE STOP IN THE RIGHT PLACE?
@@ -47,7 +48,7 @@ import report_prompt as RP                                    # noqa: E402
 import warehouse_cache as WCACHE                              # noqa: E402
 from progress import Bar                                      # noqa: E402
 
-ET = ZoneInfo("US/Eastern")
+ET = ZoneInfo("America/New_York")
 
 
 def main(argv):

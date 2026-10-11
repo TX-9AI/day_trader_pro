@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/test_pin_strength.py — v1.0
+# day_trader_pro/tests/test_pin_strength.py — v1.1
+# v1.1 (2026-10-11) — r479 / OPS.22 — zone "US/Eastern" -> "America/New_York": the legacy link tzdata 2026c moved out of the default install. Same rules; no behaviour change.
 # v1.0 (2026-09-01) — dtp r243. THE STUDY RECOVERS A PLANTED ANSWER.
 #
 # 🔴 P1 IS A REGRESSION GUARD ON A FANOUT THAT MANUFACTURED ITS OWN RESULT.
@@ -19,7 +20,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _root)
-ET = ZoneInfo("US/Eastern")
+ET = ZoneInfo("America/New_York")
 _fails = []
 
 

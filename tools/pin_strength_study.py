@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-# day_trader_pro/tools/pin_strength_study.py — v1.0
+# day_trader_pro/tools/pin_strength_study.py — v1.1
+# v1.1 (2026-10-11) — r479 / OPS.22 — zone "US/Eastern" -> "America/New_York": the legacy link tzdata 2026c moved out of the default install. Same rules; no behaviour change.
 # v1.0 (2026-09-01) — dtp r243. DOES THE STRENGTH WE CAN SEE PREDICT THE
 #   PULLING WE CANNOT?
 #
@@ -61,7 +62,7 @@ sys.path.insert(0, _root)
 
 import warehouse_cache as WCACHE                              # noqa: E402
 
-ET = ZoneInfo("US/Eastern")
+ET = ZoneInfo("America/New_York")
 STRAT = "GEXPinButterfly"
 FORK_INTERVAL = "1h"          # operator's choice, 2026-09-01
 

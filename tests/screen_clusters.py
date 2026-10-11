@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""day_trader_pro/tests/screen_clusters.py — v1.0
+"""day_trader_pro/tests/screen_clusters.py — v1.1
+v1.1  2026-10-11  r479 / OPS.22 — zone "US/Eastern" -> "America/New_York": the legacy link tzdata 2026c moved out of the default install. Same rules; no behaviour change.
 183 TRADES ARE NOT 183 OBSERVATIONS. THEY ARE A HANDFUL OF MOVES.
 
 v1.0  2026-09-03 — dtp r262. Read-only. Trades pull only — no candles, so it
@@ -52,7 +53,7 @@ sys.path.insert(0, _root)
 import report_prompt as RP                                    # noqa: E402
 import warehouse_cache as WCACHE                              # noqa: E402
 
-ET = ZoneInfo("US/Eastern")
+ET = ZoneInfo("America/New_York")
 UTC = ZoneInfo("UTC")
 
 GAPS = (5, 10, 20)          # minutes of quiet that end a move

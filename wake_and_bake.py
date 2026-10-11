@@ -1,4 +1,5 @@
-# day_trader_pro/wake_and_bake.py — v1.8
+# day_trader_pro/wake_and_bake.py — v1.9
+# v1.9 (2026-10-11) — r479 / OPS.22 — zone "US/Eastern" -> "America/New_York": the legacy link tzdata 2026c moved out of the default install. Same rules; no behaviour change.
 # v1.8 (2026-10-03) — dtp r457 / OPS.64 — asks the INSTANCE MAP for which boxes exist (instance_registry.discover()/fleet_members()), not config.UNIVERSE, so a retired (untagged) box needs no list edit. The list is the printed fallback. The expected count is len(fleet_members()).
 # v1.7 (2026-09-21) — r406 / DEV.14. DISPLAY ONLY — NO BEHAVIOUR CHANGE.
 #   The argparse help for `--bake-only` said "PING + git sync + restart". IT
@@ -171,7 +172,7 @@ import instance_registry
 import notify
 import ssh_util
 
-_ET = ZoneInfo("US/Eastern")
+_ET = ZoneInfo("America/New_York")
 INSTALL_DIR = "~/options-trader"
 SERVICE = "optionsbot"
 

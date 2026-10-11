@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""day_trader_pro/tests/screen_hold.py — v1.0
+"""day_trader_pro/tests/screen_hold.py — v1.1
+v1.1  2026-10-11  r479 / OPS.22 — zone "US/Eastern" -> "America/New_York": the legacy link tzdata 2026c moved out of the default install. Same rules; no behaviour change.
 DID THE MOVE WARRANT HOLDING THROUGH THE WHOLE CLUSTER?
 
 v1.0  2026-09-03 — dtp r263. Read-only.
@@ -54,7 +55,7 @@ import report_prompt as RP                                    # noqa: E402
 import warehouse_cache as WCACHE                              # noqa: E402
 from progress import Bar                                      # noqa: E402
 
-ET = ZoneInfo("US/Eastern")
+ET = ZoneInfo("America/New_York")
 UTC = ZoneInfo("UTC")
 
 GAP_MIN = 10            # matches screen_clusters' primary gap
