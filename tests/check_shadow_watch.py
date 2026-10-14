@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_shadow_watch.py  v1.0
+day_trader_pro/tests/check_shadow_watch.py  v1.1
+v1.1  2026-10-14  dtp r489 / OPS.67 — shadow_watch v1.2 skips a box whose tree has
+      no shadow/ (a box repointed to OTV4TEST). The fixture is a MAINLINE box, so
+      it now carries options-trader/shadow/ as every real one does; W1-W5
+      unchanged. W6 added: the same fixture without shadow/ answers
+      `shadow=absent`, which the main loop skips and never pages.
 v1.0  2026-09-10  dtp r329 / SHD.3 — the land gate for the shadow guard.
 
 🔴 WHAT IT CATCHES. v1.0's remote line interpolated `$OT_INSTRUMENT` into the
@@ -21,6 +26,7 @@ against v1.0 too.
   W4  an EMPTY day directory yields `file=none`, distinct from `rows=0`
   W5  it exits 0 even when nothing matches — a non-zero exit discards stdout
       across the whole fan-out (the `grep -c` lesson, 29 boxes marked failed)
+  W6  v1.1 — a tree with no shadow/ answers exactly `shadow=absent`, exit 0
 """
 import os
 import re
@@ -71,6 +77,7 @@ def main():
     try:
         d = os.path.join(root, "options-trader", "data", "shadow", day)
         os.makedirs(d)
+        os.makedirs(os.path.join(root, "options-trader", "shadow"))   # v1.1
         with open(os.path.join(d, "NVDA.jsonl"), "w") as f:
             f.write('{"ts":"a","scores": []}\n')
             f.write('{"ts":"b","scores": [{"k":1}]}\n')
@@ -99,6 +106,12 @@ def main():
               "empty dir -> {!r}".format((p2.stdout or "").strip()))
         check("W5", p.returncode == 0 and p2.returncode == 0,
               "exit codes {} / {}".format(p.returncode, p2.returncode))
+
+        # W6 — v1.1: no shadow/ in the tree is its own answer
+        shutil.rmtree(os.path.join(root, "options-trader", "shadow"))
+        p3 = _run(remote, root)
+        check("W6", p3.returncode == 0 and (p3.stdout or "").strip() == "shadow=absent",
+              "no shadow/ -> {!r} rc={}".format((p3.stdout or "").strip(), p3.returncode))
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
@@ -106,7 +119,7 @@ def main():
     if FAILS:
         print("FAILED: {}".format(", ".join(FAILS)))
         return 1
-    print("ALL PASS (5)")
+    print("ALL PASS (6)")
     return 0
 
 

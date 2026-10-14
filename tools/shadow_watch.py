@@ -1,5 +1,14 @@
 #!/usr/bin/env python3
-# day_trader_pro/tools/shadow_watch.py — v1.1
+# day_trader_pro/tools/shadow_watch.py — v1.2
+# v1.2 (2026-10-14) — dtp r489 / OPS.67. A BOX THAT DOES NOT RUN SHADOW IS NOT DARK.
+#   The fleet moves to OTV4TEST (fleet.py repoint --sha), whose tree has no shadow/
+#   and whose repoint disables the shadow units. v1.1 would have paged every
+#   repointed box "NO SHADOW FILE AT ALL" on the first trading morning - a
+#   fleet-wide false page on the emergency channel (§17). Found by OTV4TEST
+#   (MSG-QQQ-1014-02). The remote line now answers `shadow=absent` when the box's
+#   tree carries no shadow/; such a box is SKIPPED and COUNTED, never paged. The
+#   signal is the tree, the same one the repoint keys on, so a rollback (shadow/
+#   comes back) puts the box under watch again with no edit here.
 # v1.1 (2026-09-10) — dtp r329 / SHD.3. 🔴 THE GUARD PAGED ON ITS OWN BUG.
 #   Its remote line built the filename from `$OT_INSTRUMENT`, a systemd
 #   `Environment=` value that does not exist in the non-login shell `_exec`
@@ -85,6 +94,8 @@ REMOTE = (
     # A dark box and a broken watcher both say `rows=0 scored=0`; that is the
     # same plausible-silence class the guard was written to close, arriving
     # inside the guard itself.
+    # v1.2 — a tree with no shadow/ runs no observer: say so, distinctly
+    r'[ -d $HOME/options-trader/shadow ] || { echo "shadow=absent"; exit 0; }; '
     r'd=$HOME/options-trader/data/shadow/$(TZ=America/New_York date +%F); '
     r'f=$(ls $d/*.jsonl 2>/dev/null | head -1); '
     r'echo "file=$(basename ${f:-none}) '
@@ -145,9 +156,14 @@ def main(argv=None) -> int:
     # is not running is skipped, not paged. An expected condition must never
     # reach the emergency channel (§17).
     running, skipped = fleet._targets(fleet.get_fleet(None), False)
-    dark, silent_boxes, missing, seen = [], [], [], 0
+    dark, silent_boxes, missing, seen, no_shadow = [], [], [], 0, []
     for sym, ip, _st in running:
         rc, out, err = fleet._exec(sym, ip, REMOTE)
+        if "shadow=absent" in (out or ""):
+            # v1.2 — this box's tree runs no shadow (a repointed box): an
+            # expected condition, never a page (§17)
+            no_shadow.append(sym)
+            continue
         m = _PAT.search(out or "")
         if not m:
             # ⚠️ UNPARSEABLE IS NOT GREEN. A box that did not answer is a box
@@ -166,7 +182,8 @@ def main(argv=None) -> int:
 
     print(f"shadow_watch {day}: {seen} box(es) answered, {len(dark)} dark, "
           f"{len(silent_boxes)} no answer, {len(missing)} no file, "
-          f"{len(skipped)} not running (skipped)")
+          f"{len(skipped)} not running (skipped), "
+          f"{len(no_shadow)} run no shadow (skipped)")
     if not dark and not silent_boxes and not missing:
         return 0
 

@@ -1,4 +1,21 @@
-# day_trader_pro/fleet.py — v0.11.1
+# day_trader_pro/fleet.py — v0.12.0
+# v0.12.0 (2026-10-14) — r489 / OPS.67 — `repoint --sha` IS THE MANAGED REPOINT. Operator 10-13:
+#   the fleet moves to OTV4TEST on Saturday, keeping its symbols, "with a script that addresses the
+#   services, the stores, the git, and the env defaults". The two trees share their units byte for
+#   byte, their stores adopt in place, TEST stamps its lineage in code and every box's symbol is
+#   already in its unit, so this is the EXISTING repoint plus four things. A pinned SHA (not
+#   origin/main). Phase 1 also refuses a box with an open trade or one whose fetch lacks the SHA,
+#   and the whole run aborts, as for a collision. Phase 2 stops optionsbot and candle-feed, and the
+#   timer-launched writers (s3-push, candle-logger, self-close, watchdog; a running push finishes,
+#   it is not killed) BEFORE the reset, starts the timers that were on again only after the import
+#   check, records then disables the shadow units on a tree without shadow/ (re-enables the
+#   recorded ones on a tree with it, so the same command at otv4's SHA is the rollback), installs
+#   the new tree's requirements (requirements.lock on 3.14 when present), import-checks the entry
+#   points (venv and system python, as each unit runs them) with OT_LOG_FILE off the live log, and NEVER starts the bot or feed: start is the bake's start step,
+#   one box first. NO BACKUPS (operator: "We have s3 & the GitHub repository"): s3_push pushes
+#   trades SELECT *, and both trees are on GitHub. tools/shadow_watch.py v1.2 skips a box with no
+#   shadow/ in its tree instead of paging it dark. Critiqued by OTV4TEST (MSG-QQQ-1014-02).
+#   Gate: tests/check_repoint_pinned.py.
 # v0.11.1 (2026-10-11) — r479 / OPS.22 — zone "US/Eastern" -> "America/New_York": the legacy link tzdata 2026c moved out of the default install. Same rules; no behaviour change.
 # v0.11.0 (2026-10-03) — r457 / OPS.64. THE SAFETY NET NO LONGER NEEDS THE LIST.
 #   r427 scoped the close as tagged UNION UNIVERSE so a listed box that lost its
@@ -495,6 +512,18 @@ import re
 
 _SENTINEL_FETCH_FAIL = "__REPOINT_FETCH_FAILED__"
 _SENTINEL_OK = "__REPOINT_OK__"
+# v0.12.0 — pinned (managed) repoint
+_SENTINEL_NO_SHA = "__REPOINT_NO_SHA__"
+_SENTINEL_OPEN = "__REPOINT_OPEN_TRADES__"
+_SHA_RE = re.compile(r"^[0-9a-f]{7,40}$")
+_SHADOW_UNITS = ("shadow-observer.service", "shadow-start.timer", "shadow-stop.timer")
+_SHADOW_RECORD = "~/.repoint_shadow_units"
+# timer-launched writers: one firing during the reset would import a
+# half-swapped tree (s3-push WRITES to S3). Stopped first, the ones that were
+# active are started again only after the import check passes.
+_TIMERS = ("s3-push.timer", "candle-logger.timer", "optbot-self-close.timer",
+           "optbot-emergency-watchdog.timer")
+_TIMER_JOBS = "s3-push.service candle-logger.service optbot-self-close.service"
 
 
 def _repo_name_from_url(url):
@@ -503,10 +532,13 @@ def _repo_name_from_url(url):
     return m.group(1) if m else None
 
 
-def _phase1_check_cmd(new_url, repo):
+def _phase1_check_cmd(new_url, repo, sha=None):
     """Non-mutating: fetch the new repo into FETCH_HEAD (origin untouched) and
     print any untracked file on this box that the new repo TRACKS. Prints the
-    fetch-fail sentinel if the new repo can't be reached."""
+    fetch-fail sentinel if the new repo can't be reached.
+    v0.12.0 — with `sha`: collisions are read against the PIN, and the box
+    also prints the no-sha sentinel if the fetch lacks it and the open-trades
+    sentinel unless trades.db reads exactly 0 open rows (unreadable = refused)."""
     repo_clause = (
         f'if [ -n "$TOKEN" ]; then '
         f'URL="https://TX-9AI:${{TOKEN}}@github.com/TX-9AI/{repo}.git"; '
@@ -518,14 +550,28 @@ def _phase1_check_cmd(new_url, repo):
         f"| grep -o 'GITHUB_TOKEN=[^ ]*' | cut -d= -f2); "
         f"{repo_clause}"
         f'git fetch "$URL" main -q 2>/dev/null || {{ echo {_SENTINEL_FETCH_FAIL}; exit 3; }}; '
-        f"comm -12 <(git ls-tree -r --name-only FETCH_HEAD | sort) "
+        + (_pin_preflight(sha) if sha else "") +
+        f"comm -12 <(git ls-tree -r --name-only {sha or 'FETCH_HEAD'} | sort) "
         f"<(git ls-files --others --exclude-standard | sort)"
     )
 
 
-def _phase2_commit_cmd(new_url, repo, restart):
+def _pin_preflight(sha):
+    """v0.12.0 — phase 1's two extra refusals for a pinned repoint."""
+    return (
+        f'git cat-file -e "{sha}^{{commit}}" 2>/dev/null '
+        f"|| {{ echo {_SENTINEL_NO_SHA}; exit 0; }}; "
+        f"""O=$(sqlite3 trades.db "SELECT count(*) FROM trades WHERE status='open'" 2>/dev/null); """
+        f'[ "$O" = "0" ] || echo "{_SENTINEL_OPEN} ${{O:-unreadable}}"; '
+    )
+
+
+def _phase2_commit_cmd(new_url, repo, restart, sha=None):
     """Mutating: point origin at the new repo, hard-reset to it, repair *.sh
-    +x, optionally restart + verify. Leaves origin on a token-free new URL."""
+    +x, optionally restart + verify. Leaves origin on a token-free new URL.
+    v0.12.0 — with `sha`, see _pinned_commit_cmd."""
+    if sha:
+        return _pinned_commit_cmd(new_url, repo, sha)
     clean_url = f"https://github.com/TX-9AI/{repo}.git" if repo else new_url
     fetch_clause = (
         f'if [ -n "$TOKEN" ]; then '
@@ -551,6 +597,91 @@ def _phase2_commit_cmd(new_url, repo, restart):
         f'echo "{_SENTINEL_OK} $OLD -> $NEW"; '
         f"{restart_clause}"
     )
+
+
+# v0.12.0 — the managed repoint, one box, as ONE shell template. @NAME@ slots
+# are filled by _pinned_commit_cmd; nothing else in it is interpolated.
+# Order matters: the writers stop before the tree changes under them, and
+# nothing restarts (start is the bake's start step, one box first).
+_PINNED_SCRIPT = r"""
+cd @DIR@ || exit 9
+sudo systemctl stop @SERVICE@ candle-feed || exit 10
+[ "$(systemctl is-active @SERVICE@)" != active ] && [ "$(systemctl is-active candle-feed)" != active ] || exit 10
+TIMERS_ON=$(for t in @TIMERS@; do systemctl is-active "$t" >/dev/null 2>&1 && echo "$t"; done | tr "\n" " ")
+for t in @TIMERS@; do sudo systemctl stop "$t" >/dev/null 2>&1; done
+# a push or a logger already running finishes; it is not killed mid-upload
+n=0; while systemctl is-active -q @JOBS@ 2>/dev/null; do
+  n=$((n+1)); [ $n -gt 60 ] && { echo "a timer job is still running after 120 s"; exit 13; }; sleep 2; done
+TOKEN=$(sudo systemctl show @SERVICE@ --property=Environment 2>/dev/null | grep -o 'GITHUB_TOKEN=[^ ]*' | cut -d= -f2)
+SYM=$(sudo systemctl show @SERVICE@ --property=Environment 2>/dev/null | grep -oP 'OT_INSTRUMENT=\K[A-Z0-9_]+')
+@FETCH@
+git remote set-url origin "$FURL" || exit 4
+git fetch origin main -q || exit 5
+git cat-file -e "@SHA@^{commit}" || exit 7
+OLD=$(git rev-parse --short HEAD 2>/dev/null)
+git reset --hard "@SHA@" -q || exit 6
+git remote set-url origin "@CLEAN@"
+git ls-files '*.sh' | xargs -r chmod +x 2>/dev/null
+find . -name __pycache__ -type d -prune -exec rm -rf {} + 2>/dev/null
+# shadow: a tree without shadow/ runs none (what was enabled is recorded first);
+# a tree with shadow/ gets back exactly what was recorded - so the same command
+# pinned at the old tree is the rollback
+if [ -d shadow ]; then
+  if [ -f @REC@ ]; then xargs -r sudo systemctl enable --now < @REC@ && rm -f @REC@; fi
+else
+  if [ ! -f @REC@ ]; then
+    for u in @UNITS@; do systemctl is-enabled "$u" >/dev/null 2>&1 && echo "$u"; done > @REC@
+  fi
+  for u in @UNITS@; do sudo systemctl disable --now "$u" >/dev/null 2>&1; done
+fi
+echo "shadow: $(for u in @UNITS@; do printf '%s=%s ' "$u" "$(systemctl is-enabled "$u" 2>/dev/null || echo absent)"; done)"
+# deps: the frozen lock on its reference interpreter, else the floors
+REQ=requirements.txt
+if [ -f requirements.lock ] && venv/bin/python -c 'import sys; sys.exit(sys.version_info[:2] != (3, 14))'; then REQ=requirements.lock; fi
+venv/bin/pip install -q -r "$REQ" > /tmp/repoint_pip.log 2>&1 || { echo "pip FAILED ($REQ), see /tmp/repoint_pip.log"; exit 11; }
+echo "deps: $REQ, tastytrade $(venv/bin/python -c 'import importlib.metadata as m; print(m.version("tastytrade"))')"
+# import check: every entry point a unit or the conductor launches, under the
+# interpreter that launches it; OT_LOG_FILE keeps main's handler off bot.log;
+# a module the tree does not carry is skipped by name
+for spec in @IMPORTS@; do
+  py=${spec%%:*}; m=${spec#*:}; f=$(echo "$m" | tr . /).py
+  [ -f "$f" ] || { echo "import skip: $m (not in this tree)"; continue; }
+  [ "$py" = sys ] && PY=/usr/bin/python3 || PY=venv/bin/python
+  env OT_LOG_FILE=/tmp/repoint_import.log OT_INSTRUMENT="$SYM" $PY -c "import sys; sys.path.insert(0, '.'); import $m" > /tmp/repoint_import.out 2>&1 \
+    || { echo "import check FAILED: $m ($PY)"; tail -3 /tmp/repoint_import.out; exit 12; }
+done
+for t in $TIMERS_ON; do sudo systemctl start "$t" || { echo "timer $t did not start"; exit 14; }; done
+echo "timers back: ${TIMERS_ON:-none}"
+NEW=$(git rev-parse --short HEAD 2>/dev/null)
+echo "@OK@ $OLD -> $NEW"
+echo "(bot and feed not started - start is the bake start step, one box first)"
+"""
+
+# venv: the bot, the feed, the logger, the watchdog; sys: s3-push and the
+# conductor's purge and self-close run under the SYSTEM interpreter
+_IMPORT_SPECS = ("venv:main", "venv:data.candle_feed", "venv:data.candle_logger",
+                 "venv:tools.emergency_watchdog", "venv:tools.eod_summary",
+                 "sys:warehouse.s3_push", "sys:warehouse.retention_purge",
+                 "sys:warehouse.self_close")
+
+
+def _pinned_commit_cmd(new_url, repo, sha):
+    """v0.12.0 — fill _PINNED_SCRIPT for one pinned repoint."""
+    clean_url = f"https://github.com/TX-9AI/{repo}.git" if repo else new_url
+    fetch = (
+        f'if [ -n "$TOKEN" ]; then '
+        f'FURL="https://TX-9AI:${{TOKEN}}@github.com/TX-9AI/{repo}.git"; '
+        f'else FURL="{new_url}"; fi'
+    ) if repo else f'FURL="{new_url}"'
+    slots = {"@DIR@": INSTALL_DIR, "@SERVICE@": SERVICE, "@FETCH@": fetch,
+             "@SHA@": sha, "@CLEAN@": clean_url, "@REC@": _SHADOW_RECORD,
+             "@UNITS@": " ".join(_SHADOW_UNITS), "@TIMERS@": " ".join(_TIMERS),
+             "@JOBS@": _TIMER_JOBS,
+             "@IMPORTS@": " ".join(_IMPORT_SPECS), "@OK@": _SENTINEL_OK}
+    script = _PINNED_SCRIPT
+    for k, v in slots.items():
+        script = script.replace(k, v)
+    return script.strip("\n")
 
 
 _REMOTE_PROBE = (f"cd {INSTALL_DIR} 2>/dev/null && "
@@ -616,11 +747,17 @@ def repoint_refusal(remote_map, target_repo, only, all_repos):
 
 
 def cmd_repoint(new_url, only=None, restart=True, wake=False,
-                check_only=False, assume_yes=False, all_repos=False):
+                check_only=False, assume_yes=False, all_repos=False, sha=None):
     if not new_url or "github.com" not in new_url:
         print(f"repoint needs a GitHub repo URL, e.g.:\n"
               f"  python fleet.py repoint https://github.com/TX-9AI/options_trader_v3.git")
         return 2
+    if sha is not None:
+        sha = sha.strip().lower()
+        if not _SHA_RE.match(sha):
+            print(f"--sha must be 7-40 hex characters, got {sha!r}")
+            return 2
+        restart = False          # v0.12.0 — a pinned repoint never starts anything
     repo = _repo_name_from_url(new_url)
 
     fleet = get_fleet(only)
@@ -646,17 +783,26 @@ def cmd_repoint(new_url, only=None, restart=True, wake=False,
 
     print(f"\nRepoint target: {new_url}")
     print(f"Detected repo:  {repo or '(could not parse — using URL verbatim)'}")
+    if sha:
+        print(f"Pinned SHA:     {sha}  (managed: stop, reset, deps, import check; no start)")
     print(f"Fleet:          {len(running)} running box(es)"
           + (f", {len(stopped)} stopped (skipped)" if stopped and not wake else ""))
 
     # ── PHASE 1 — collision check against the NEW repo (non-mutating) ──────────
     print(f"\n{'='*58}\nPHASE 1 — collision check vs new repo (nothing is changed)\n{'='*58}")
-    check_cmd = _phase1_check_cmd(new_url, repo)
-    collisions, unreachable = {}, []
+    check_cmd = _phase1_check_cmd(new_url, repo, sha)
+    collisions, unreachable, refused = {}, [], {}
     for s, ip, _ in running:
         rc, out, err = _exec(s, ip, check_cmd)
         lines = [l for l in out.splitlines() if l.strip()]
-        if _SENTINEL_FETCH_FAIL in out or rc == 3:
+        stops = [l for l in lines if l.startswith((_SENTINEL_NO_SHA, _SENTINEL_OPEN))]
+        lines = [l for l in lines if l not in stops]
+        if stops and not config.MOCK_AWS:
+            refused[s] = stops
+            why = "; ".join("pin not in the fetched repo" if l.startswith(_SENTINEL_NO_SHA)
+                            else "open trade(s): " + l.split(" ", 1)[-1] for l in stops)
+            print(f"{s:<8}{ip:<18}🚨 refused — {why}")
+        elif _SENTINEL_FETCH_FAIL in out or rc == 3:
             unreachable.append(s)
             print(f"{s:<8}{ip:<18}🚨 could not fetch new repo (token/network?)")
         elif rc != 0:
@@ -668,9 +814,12 @@ def cmd_repoint(new_url, only=None, restart=True, wake=False,
         else:
             print(f"{s:<8}{ip:<18}✅ clean")
 
-    if collisions or unreachable:
+    if collisions or unreachable or refused:
         print(f"\n{'='*58}")
         print("🚨 ABORT — phase 2 will NOT run. No box was repointed.")
+        if refused:
+            print("\nBoxes refused by the pinned-repoint preflight: "
+                  + ", ".join(sorted(refused)))
         if collisions:
             print("\nBoxes with untracked files the new repo would OVERWRITE:")
             for s, files in collisions.items():
@@ -703,7 +852,7 @@ def cmd_repoint(new_url, only=None, restart=True, wake=False,
     # ── PHASE 2 — commit the repoint (only reached if fully clean) ────────────
     print(f"\n{'='*58}\nPHASE 2 — repoint + sync"
           f"{' + restart' if restart else ''}\n{'='*58}")
-    commit_cmd = _phase2_commit_cmd(new_url, repo, restart)
+    commit_cmd = _phase2_commit_cmd(new_url, repo, restart, sha)
     fails = 0
     for s, ip, _ in running:
         head = f"── {s} ({ip}) "
@@ -811,6 +960,10 @@ def main(argv):
     p.add_argument("--all-repos", action="store_true",
                    help="repoint a fleet that holds MORE THAN ONE repo "
                         "(required for an unscoped run once a fork exists)")
+    p.add_argument("--sha", default=None,
+                   help="repoint: MANAGED repoint to this exact commit — stops the bot "
+                        "and feed first, refuses open trades, handles shadow units, "
+                        "installs deps, import-checks, and never restarts")
     p.add_argument("--mock", action="store_true", help="offline preview")
     args = p.parse_args(argv[1:])
 
@@ -837,7 +990,8 @@ def main(argv):
             return 2
         return cmd_repoint(args.command, only=only, restart=not args.no_restart,
                            wake=args.wake, check_only=args.check_only,
-                           assume_yes=args.yes, all_repos=args.all_repos)
+                           assume_yes=args.yes, all_repos=args.all_repos,
+                           sha=args.sha)
     if args.action == "pull":
         what = (args.command or "").lower()
         if what not in ("db", "ohlc"):
