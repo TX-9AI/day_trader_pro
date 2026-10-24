@@ -1,5 +1,18 @@
 #!/usr/bin/env bash
-# day_trader_pro/tools/land.sh — v1.17
+# day_trader_pro/tools/land.sh — v1.18
+# v1.18 (2026-10-24) — dtp r502 / OPS.19. THE RESOLVER NAMES EVERY CHECKOUT THAT
+#   MATCHES AND REFUSES AN AMBIGUOUS ONE. It took the FIRST `$HOME/*/` checkout
+#   carrying all the REPO markers, in glob order, so a second clone of a tree
+#   with the same files (OTV5 is seeded from such a tree; a scratch clone under
+#   $HOME would do it) silently captured every land for the first (OPS.19; OPS.11
+#   saw BASE alone stop one). Now every match is collected; two or more REFUSE
+#   with both named - unless the spec says which repository it means: a new
+#   `ORIGIN <owner/repo>` directive picks the candidate whose `git remote get-url
+#   origin` ends in it, and a lone candidate whose origin DISAGREES with a declared
+#   ORIGIN is refused too (a marker match on the wrong repository is the whole
+#   hazard). ORIGIN is optional for a spec with exactly one match, so every
+#   archive cut before today still lands. The operator, 2026-10-24: "this seems
+#   like a quick fix".
 # v1.17 (2026-09-20) — dtp r402 / LAND.6. `STAGE` honours `LAND_STAGE`, which
 #   `deploy.sh` now exports. Before this the documented repo-copy fallback
 #   resolved halves against `day_trader_pro/tools/` and could never land —
@@ -309,6 +322,8 @@
 #
 # Spec format (one directive per line, `|` separates fields):
 #   REPO   <marker-file> <marker-file>     files that identify the target repo
+#   ORIGIN <owner/repo>                     (v1.18) the repository those files belong to - required when two
+#                                           checkouts under $HOME carry the markers; checked whenever present
 #   BASE   <sha>                            commit the payload was built against (v1.8)
 #   REV    r207                             revision id, for GENESIS + the gate
 #   DESC   <one line>                       GENESIS row AND commit subject
@@ -356,6 +371,16 @@ _spec_rest() {
   # Strip the directive keyword and ANY following whitespace.
   local r="${1#$2}"
   printf '%s' "${r#"${r%%[![:space:]]*}"}"
+}
+_origin_matches() {
+  # v1.18 — does remote url $2 name repository $1 (owner/repo, or any path suffix)? Scheme, user@, ':' and a
+  # trailing .git are ignored; the match is on a whole path component boundary.
+  local want="${1%/}" url="$2"
+  want="${want%.git}"
+  url="${url%/}"; url="${url%.git}"
+  url="${url#*://}"; url="${url#*@}"; url="${url//:/\/}"
+  case "/$url" in */"$want") return 0 ;; esac
+  return 1
 }
 _spec_path() {
   # Trim whitespace around a PATH field only.
@@ -537,15 +562,35 @@ land_one() {
   [ -n "$markers" ] || { die "spec carries no REPO markers"; return 1; }
 
   # ── find the repo rather than guess the path (WORKING_AGREEMENT §3) ──────
-  local cand ok
+  # v1.18 / OPS.19 — EVERY match is collected, never the first in glob order.
+  local cand ok origin_declared matches=() url
+  origin_declared="$(_spec_rest "$(grep '^ORIGIN' "$spec" | head -1)" "ORIGIN")"
   for cand in "$HOME"/*/; do
     [ -d "${cand}.git" ] || continue
     ok=1
     for m in $markers; do [ -f "${cand}${m}" ] || ok=0; done
-    [ "$ok" = "1" ] && { repo="${cand%/}"; break; }
+    [ "$ok" = "1" ] && matches+=("${cand%/}")
   done
-  if [ -z "$repo" ]; then
+  if [ "${#matches[@]}" = "0" ]; then
     die "no checkout under $HOME carries all of: $markers"; return 1
+  fi
+  if [ -n "$origin_declared" ]; then
+    # the spec names its repository: the candidate whose origin ends in it, and only that one
+    local picked=() c
+    for c in "${matches[@]}"; do
+      url="$(git -C "$c" remote get-url origin 2>/dev/null)"
+      _origin_matches "$origin_declared" "$url" && picked+=("$c")
+    done
+    if [ "${#picked[@]}" != "1" ]; then
+      die "ORIGIN $origin_declared matches ${#picked[@]} of the ${#matches[@]} checkout(s) carrying the markers (${matches[*]}) — refusing to guess."
+      return 1
+    fi
+    repo="${picked[0]}"
+  elif [ "${#matches[@]}" != "1" ]; then
+    die "AMBIGUOUS: ${#matches[@]} checkouts under $HOME carry all of [$markers]: ${matches[*]}. Add 'ORIGIN <owner/repo>' to the spec to say which (OPS.19)."
+    return 1
+  else
+    repo="${matches[0]}"
   fi
   echo "  repo: $repo"
   echo "  rev:  $rev"

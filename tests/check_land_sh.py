@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/check_land_sh.py — v1.11
+# day_trader_pro/tests/check_land_sh.py — v1.12
+# v1.12 (2026-10-24) — dtp r502 / OPS.19. O1-O4 DRIVE THE RESOLVER WITH TWO
+#   CHECKOUTS UNDER $HOME THAT BOTH CARRY THE MARKERS (a world the lander had
+#   never been shown): O1 no ORIGIN -> REFUSED, both named, neither tree touched;
+#   O2 ORIGIN naming the second repo's remote -> lands THERE and the first is
+#   untouched, although glob order would have picked the first; O3 one checkout
+#   whose origin DISAGREES with a declared ORIGIN -> refused; O4 one checkout and
+#   no ORIGIN -> lands as before (every archive cut before v1.18 still works).
+#   Born red on land.sh v1.17 at O1 (it landed into the first match) and O3.
 # v1.11 (2026-09-20) — dtp r402 / LAND.6. D6/D6b DRIVE the repo-copy fallback
 #   with an archive that carries no land.sh — the path deploy.sh has documented
 #   since r278 and which could never work, observed failing at otv4 r293_r2
@@ -990,6 +998,70 @@ def main():
         check("F5b ...and it says which file still carries it",
               "STILL PRESENT in dash.sh" in out, out[-90:])
         check("F5c ...and nothing was committed", _head(repo) == before)
+
+    # ══ O1-O4 — THE RESOLVER WITH TWO MARKER-MATCHING CHECKOUTS (v1.18 / OPS.19) ═══════════
+    def _twin(home, name):
+        """A second checkout under `home` carrying the same marker, with its own bare remote."""
+        repo2 = os.path.join(home, name)
+        bare2 = os.path.join(home, f"{name}-remote.git")
+        os.makedirs(os.path.join(repo2, "docs"))
+        with open(os.path.join(repo2, "MARKER"), "w") as f:
+            f.write("marker\n")
+        with open(os.path.join(repo2, "thing.py"), "w") as f:
+            f.write("# thing.py — v1.0\n# v1.0 (2026-08-01) — base.\nOLD_LINE = 1\n")
+        _run("git init -q -b main .", cwd=repo2)
+        _run("git config user.email t@t; git config user.name t", cwd=repo2)
+        _run("git add -A; git commit -q -m base", cwd=repo2)
+        _run(f'git init -q --bare "{bare2}"')
+        _run(f'git remote add origin "{bare2}"; git push -q origin main; '
+             f"git branch -q --set-upstream-to=origin/main main", cwd=repo2)
+        return repo2, bare2
+
+    with tempfile.TemporaryDirectory() as tmp:
+        home, repo, stage = _world(tmp, GOOD, extra=PASS_CHK)
+        # "aaa" sorts BEFORE "myrepo": the old resolver would have landed into it
+        twin, _ = _twin(home, "aaa-clone")
+        b1, b2 = _head(repo), _head(twin)
+        r = _land(home, stage)
+        out = r.stdout + r.stderr
+        check("O1 two checkouts carry the markers and the spec names no ORIGIN -> REFUSED",
+              r.returncode != 0 and "AMBIGUOUS" in out, f"rc={r.returncode} {out[-160:]}")
+        check("O1b ...both checkouts are named", "aaa-clone" in out and "myrepo" in out, out[-200:])
+        check("O1c ...and neither tree moved or is dirty",
+              _head(repo) == b1 and _head(twin) == b2 and not _dirty(repo) and not _dirty(twin))
+
+    with tempfile.TemporaryDirectory() as tmp:
+        home, repo, stage = _world(tmp, GOOD, extra=PASS_CHK)
+        twin, bare2 = _twin(home, "aaa-clone")
+        # a BASE for the twin, since the land is meant to go there
+        spec_p = os.path.join(stage, "half", "land.spec")
+        lines = [l for l in open(spec_p).read().splitlines() if not l.startswith("BASE ")]
+        lines.insert(1, f"BASE {_head_sha(twin)}")
+        lines.insert(1, f"ORIGIN {os.path.basename(bare2)[:-4]}")      # the twin's remote, by its path suffix
+        with open(spec_p, "w") as f:
+            f.write("\n".join(lines) + "\n")
+        b1 = _head(repo)
+        r = _land(home, stage)
+        out = r.stdout + r.stderr
+        check("O2 with ORIGIN naming the second checkout's remote, the land goes THERE",
+              r.returncode == 0 and "r999" in _head(twin), f"rc={r.returncode} twin={_head(twin)} {out[-160:]}")
+        check("O2b ...and the first checkout (glob order's pick) is untouched",
+              _head(repo) == b1 and not _dirty(repo))
+
+    with tempfile.TemporaryDirectory() as tmp:
+        home, repo, stage = _world(tmp, ["ORIGIN TX-9AI/some-other-repo"] + GOOD, extra=PASS_CHK)
+        b1 = _head(repo)
+        r = _land(home, stage)
+        out = r.stdout + r.stderr
+        check("O3 one checkout, but its origin disagrees with the declared ORIGIN -> REFUSED",
+              r.returncode != 0 and "ORIGIN" in out and _head(repo) == b1 and not _dirty(repo),
+              f"rc={r.returncode} {out[-160:]}")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        home, repo, stage = _world(tmp, GOOD, extra=PASS_CHK)
+        r = _land(home, stage)
+        check("O4 one checkout and no ORIGIN -> lands as before (pre-v1.18 archives still land)",
+              r.returncode == 0 and "r999" in _head(repo), f"rc={r.returncode} {_head(repo)}")
 
     print()
     if _fails:
