@@ -1,4 +1,14 @@
-# day_trader_pro/fleet.py — v0.15.0
+# day_trader_pro/fleet.py — v0.16.0
+# v0.16.0 (2026-10-25) — r507 / OPS.72 — `repoint --sha` (MENU 43) IS THE FLEET REPOINT TO OTV5: THE MANAGED REPOINT, THEN
+#   THE FULL INSTALL ON EVERY BOX. The operator, 2026-10-25: "Option 43 ... We've done it once before from otv3 to otv4";
+#   "If 43 can't do it, we should fix it. This is the use-case for it". A pinned repoint whose pinned tree's
+#   bootstrap.example.sh carries OT_INSTALL_MODE (OTV5 r17 on) now runs PHASE 3 after phase 2: reinstall's own box
+#   script (_reinstall_cmd: drain, the box's own credentials into the controller-mode bootstrap, run detached, judged
+#   by INSTALL OK <pin>) on every box that repointed cleanly, INSTALL_WORKERS at a time (ssh_util.ssh_map), each box's
+#   result printed as it lands; a box that fails is named and the others go on. --no-install keeps the git-only
+#   managed repoint; a pin whose tree predates the mode does the git-only repoint and SAYS so; a pin whose template
+#   cannot be read (no local checkout of the repo holding it) is REFUSED unless --no-install. `reinstall` is now this
+#   with one box. Gate: tests/check_repoint_install.py.
 # v0.15.0 (2026-10-25) — r506 / OPS.71 — `flash` INSTALLS OTV5 ON A BLANK, TAGGED INSTANCE FROM CONTROL. The operator,
 #   2026-10-25, after the proof of concept: control kickstarting a blank box is preferred over a hand-edited bootstrap;
 #   "Should we add 'Flash a new instance' to devtools under the repoint header?"; "Great, send it". ONE instance per run:
@@ -685,25 +695,8 @@ def cmd_reinstall(new_url, only=None, sha=None, wake=False, assume_yes=False):
         print("reinstall needs --sha <7-40 hex>: the pin the box is repointed to and installed from")
         return 2
     sha = sha.strip().lower()
-    rc = cmd_repoint(new_url, only=only, wake=wake, assume_yes=assume_yes, sha=sha)
-    if rc != 0:
-        print(f"\n🚨 the repoint did not complete (rc {rc}) - the install did NOT run.")
-        return rc
-    fleet = [(s, ip, st) for s, ip, st in get_fleet(only) if st == "running" and ip]
-    if not fleet:
-        print("the box is not running after the repoint - the install did NOT run.")
-        return 1
-    s, ip, _ = fleet[0]
-    print(f"\n{'='*58}\nPHASE 3 — the bootstrap install, in place, on {s}\n{'='*58}")
-    rc, out, err = _exec(s, ip, _reinstall_cmd(sha), timeout=3600)
-    print(out.rstrip() or err.rstrip() or "(no output)")
-    ok = rc == 0 and (_SENTINEL_REINSTALL_OK in out or config.MOCK_AWS)
-    if not ok:
-        print(f"\n🚨 {s}: the install did not complete (rc {rc}). The tree is on {sha}; nothing was started.")
-        return 1
-    print(f"\n✅ {s} reinstalled at {sha}: services installed and STOPPED, push standalone.\n"
-          f"   Next (the operator): ./configure.sh - symbol, risk, switches, item 14 managed - then Done.")
-    return 0
+    # v0.16.0: the fleet repoint with one box - phase 3 (the install) runs inside cmd_repoint
+    return cmd_repoint(new_url, only=only, wake=wake, assume_yes=assume_yes, sha=sha, install=True)
 
 
 # v0.15.0 — flash: the blank-instance install. Reuses reinstall's bootstrap builder (its input is Environment= lines)
@@ -1078,8 +1071,25 @@ def repoint_refusal(remote_map, target_repo, only, all_repos):
     return "\n".join(lines)
 
 
+INSTALL_WORKERS = 4      # v0.16.0: boxes installing at once (apt, pip and the suite run ON the boxes; control waits)
+
+
+def _pin_supports_controller(repo, sha):
+    """v0.16.0 — True/False: does the pinned tree's bootstrap.example.sh carry OT_INSTALL_MODE (OTV5 r17 on)?
+    None when it cannot be read (no local checkout ~/<repo> holding the pin)."""
+    import subprocess
+    path = os.path.expanduser(f"~/{repo}") if repo else ""
+    if not path or not os.path.isdir(os.path.join(path, ".git")):
+        return None
+    subprocess.run(["git", "-C", path, "fetch", "-q", "origin"], capture_output=True)
+    r = subprocess.run(["git", "-C", path, "show", f"{sha}:bootstrap.example.sh"], capture_output=True, text=True)
+    if r.returncode != 0:
+        return None
+    return re.search(r"^export OT_INSTALL_MODE=", r.stdout, re.M) is not None
+
+
 def cmd_repoint(new_url, only=None, restart=True, wake=False,
-                check_only=False, assume_yes=False, all_repos=False, sha=None):
+                check_only=False, assume_yes=False, all_repos=False, sha=None, install=None):
     if not new_url or "github.com" not in new_url:
         print(f"repoint needs a GitHub repo URL, e.g.:\n"
               f"  python fleet.py repoint https://github.com/TX-9AI/options_trader_v3.git")
@@ -1091,6 +1101,20 @@ def cmd_repoint(new_url, only=None, restart=True, wake=False,
             return 2
         restart = False          # v0.12.0 — a pinned repoint never starts anything
     repo = _repo_name_from_url(new_url)
+    # v0.16.0 — does this pinned repoint also install? (install=None: when the pinned tree supports it)
+    do_install = False
+    if sha is not None and install is not False:
+        sup = True if config.MOCK_AWS else _pin_supports_controller(repo, sha)
+        if sup is None:
+            print(f"cannot read the pin's bootstrap template (no local checkout ~/{repo} holding {sha}). "
+                  f"Fetch it there, or pass --no-install for a git-only repoint.")
+            return 2
+        if sup is False and install is True:
+            print(f"the pinned tree {sha} predates the controller install (no OT_INSTALL_MODE) - refused")
+            return 2
+        do_install = bool(sup)
+        if not sup:
+            print(f"note: the pinned tree {sha} predates the controller install - a git-only managed repoint.")
 
     fleet = get_fleet(only)
     stopped = [(s, ip, st) for s, ip, st in fleet if st != "running"]
@@ -1117,6 +1141,9 @@ def cmd_repoint(new_url, only=None, restart=True, wake=False,
     print(f"Detected repo:  {repo or '(could not parse — using URL verbatim)'}")
     if sha:
         print(f"Pinned SHA:     {sha}  (managed: stop, reset, deps, import check; no start)")
+        print(f"Install:        " + ("THE FULL INSTALL on every box after its repoint (controller mode; the box's own "
+                                     "credentials; services stay STOPPED for configure.sh)" if do_install
+                                     else "none (git-only)"))
     print(f"Fleet:          {len(running)} running box(es)"
           + (f", {len(stopped)} stopped (skipped)" if stopped and not wake else ""))
 
@@ -1186,6 +1213,7 @@ def cmd_repoint(new_url, only=None, restart=True, wake=False,
           f"{' + restart' if restart else ''}\n{'='*58}")
     commit_cmd = _phase2_commit_cmd(new_url, repo, restart, sha)
     fails = 0
+    repointed = []
     for s, ip, _ in running:
         head = f"── {s} ({ip}) "
         print(head + "─" * max(0, 50 - len(head)))
@@ -1198,9 +1226,32 @@ def cmd_repoint(new_url, only=None, restart=True, wake=False,
         if not ok:
             fails += 1
             print(f"  🚨 rc={rc} — box may be partially migrated; inspect before retry")
+        else:
+            repointed.append((s, ip))
 
     print(f"\nDone. {len(running) - fails}/{len(running)} repointed cleanly to "
           f"{repo or new_url}.")
+    if do_install:
+        # ── PHASE 3 (v0.16.0) — the full install, in place, on every box that repointed cleanly ──
+        print(f"\n{'='*58}\nPHASE 3 — the full install on {len(repointed)} box(es), "
+              f"{INSTALL_WORKERS} at a time\n{'='*58}")
+        if fails:
+            print(f"  (not installed: the {fails} box(es) whose repoint failed above)")
+        ifails = []
+
+        def _landed(key, res, done, total):
+            rc_, out_, err_ = res
+            good = rc_ == 0 and (_SENTINEL_REINSTALL_OK in (out_ or "") or config.MOCK_AWS)
+            head_ = f"── {key}: {'INSTALLED' if good else 'INSTALL FAILED rc=%s' % rc_} ({done}/{total}) "
+            print(head_ + "─" * max(0, 58 - len(head_)))
+            print((out_ or err_ or "(no output)").rstrip())
+            if not good:
+                ifails.append(key)
+        ssh_util.ssh_map(repointed, _reinstall_cmd(sha), timeout=3600, workers=INSTALL_WORKERS, on_result=_landed)
+        print(f"\nInstalled: {len(repointed) - len(ifails)}/{len(repointed)}"
+              + (f"; FAILED: {', '.join(sorted(ifails))} (the tree is on {sha}; nothing was started)" if ifails else ""))
+        print("Next (the operator), box by box: ./configure.sh - symbol, risk, switches, item 14 managed - then Done.")
+        return 0 if not fails and not ifails else 1
     if fails == 0:
         print("Ongoing deploys: ensure the new repo's push.sh targets it, then "
               "`fleet.py update` works as before.")
@@ -1300,6 +1351,8 @@ def main(argv):
                    help="flash: the running fleet box whose unit seeds the shared credentials")
     p.add_argument("--symbol", default=None,
                    help="flash: the symbol to install (default: the new instance's Name tag)")
+    p.add_argument("--no-install", action="store_true",
+                   help="repoint --sha: the git-only managed repoint, no install phase")
     p.add_argument("--mock", action="store_true", help="offline preview")
     args = p.parse_args(argv[1:])
 
@@ -1327,7 +1380,7 @@ def main(argv):
         return cmd_repoint(args.command, only=only, restart=not args.no_restart,
                            wake=args.wake, check_only=args.check_only,
                            assume_yes=args.yes, all_repos=args.all_repos,
-                           sha=args.sha)
+                           sha=args.sha, install=False if args.no_install else None)
     if args.action == "reinstall":
         if not args.command:
             print("reinstall needs the repo URL, e.g.:\n"

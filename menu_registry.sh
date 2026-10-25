@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# day_trader_pro/menu_registry.sh — v1.23
+# day_trader_pro/menu_registry.sh — v1.24
+# v1.24 (2026-10-25) — dtp r507 / OPS.72. REPOINT the fleet's label says it asks for a pin and installs.
 # v1.23 (2026-10-25) — dtp r506 / OPS.71. THE REPOINT SECTION INSTALLS TOO: `REPOINT / INSTALL`. Two items after REPOINT
 #   the fleet: REINSTALL one box (fleet.py reinstall - the managed repoint plus the full OTV5 install in place) and
 #   FLASH a new instance (fleet.py flash - OTV5 onto a blank tagged instance, credentials streamed from a seed box).
@@ -291,7 +292,7 @@ MENU=(
   "SECTION|REPOINT / INSTALL (migrate fleet -> new repo; install from control)"
   "ITEM|Snapshot dir -> tarball (the held state before a repoint)|mi_snapshot_dir_repo_ready_tarball"
   "ITEM|Check only|mi_check_only"
-  "ITEM|REPOINT the fleet (asks scope, wake, restart)|mi_repoint"
+  "ITEM|REPOINT the fleet (scope, wake, pin -> full install)|mi_repoint"
   "ITEM|REINSTALL one box (repoint + full install in place)|mi_reinstall_one"
   "ITEM|FLASH a new instance (blank tagged box -> OTV5)|mi_flash_new"
 

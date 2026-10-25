@@ -1,4 +1,9 @@
-# day_trader_pro/menu_functions.sh — v1.75
+# day_trader_pro/menu_functions.sh — v1.76
+# v1.76 (2026-10-25) - dtp r507 / OPS.72. REPOINT the fleet (43) ASKS FOR A PIN. With a pin it is the managed repoint
+#   (fleet.py repoint --sha: open trades refused, deps, import check, nothing started) and, when the pinned tree supports
+#   it, the FULL INSTALL on every box (asked, default yes; n = --no-install). ENTER at the pin keeps the old unpinned
+#   git-only repoint and its restart question. The operator: "If 43 can't do it, we should fix it. This is the use-case
+#   for it."
 # v1.75 (2026-10-25) - dtp r506 / OPS.71. REINSTALL one box and FLASH a new instance (menu_registry v1.23): each asks
 #   its inputs (the URL is typed, never defaulted, as REPOINT's is) and hands them to fleet.py, which shows the plan
 #   and asks for its own typed confirmation. ENTER at any required prompt aborts with nothing done.
@@ -873,6 +878,18 @@ mi_repoint() {
     [ -n "$SY" ] && ARGS="$ARGS --only $SY"
     read -rp "  Wake stopped boxes first? [y/N]: " WK
     _yes "$WK" && ARGS="$ARGS --wake"
+    # r507 — a PIN makes this the managed repoint and, where the pinned tree supports it, the full install
+    local PIN IN
+    read -rp "  Pin (commit SHA; ENTER = unpinned git-only repoint): " PIN
+    PIN="$(echo "$PIN" | tr -d '[:space:]')"
+    if [ -n "$PIN" ]; then
+        ARGS="$ARGS --sha $PIN"
+        read -rp "  Full install on every box after its repoint (services stay stopped)? [Y/n]: " IN
+        case "$IN" in [nN]*) ARGS="$ARGS --no-install" ;; esac
+        $PY fleet.py repoint "$U" $ARGS
+        pause
+        return 0
+    fi
     read -rp "  Restart services after repointing? [Y/n]: " NR
     # ⚠️ DEFAULT YES. The old menu had a dedicated "No restart" item, so the
     # SAFE-LOOKING choice was the explicit one; here the default matches what a

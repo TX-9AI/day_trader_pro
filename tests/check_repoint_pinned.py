@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
-tests/check_repoint_pinned.py  v1.0
+tests/check_repoint_pinned.py  v1.1
+v1.1  2026-10-25  dtp r507 / OPS.72 — P8a/P8c pass install=False: they pin the managed (git-only) repoint's phases 1-2,
+      and since r507 a pinned repoint also installs when the pinned tree supports it (gate: check_repoint_install.py).
+      No expectation changed.
 v1.0  2026-10-14  dtp r489 / OPS.67 — THE MANAGED REPOINT, RUN FOR REAL ON A FAKE BOX.
 
   fleet.py v0.12.0 `repoint --sha`. The generated per-box scripts are executed
@@ -331,7 +334,7 @@ def _main(fleet, tmp, url, A, B, C):
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             rc = fleet.cmd_repoint("https://github.com/TX-9AI/OTV4TEST.git",
-                                   only=["QQQ", "SPX"], assume_yes=True, sha="cbad05a")
+                                   only=["QQQ", "SPX"], assume_yes=True, sha="cbad05a", install=False)
         p2 = [c for _, c in sent if "reset --hard" in c]
         check("P8a a refused box aborts the run before phase 2",
               rc == 1 and not p2 and "refused" in buf.getvalue(), buf.getvalue())
@@ -344,7 +347,7 @@ def _main(fleet, tmp, url, A, B, C):
             (0, f"{fleet._SENTINEL_OK} a -> b\n", "") if "reset --hard" in cmd else (0, "", "")))
         with contextlib.redirect_stdout(io.StringIO()):
             rc = fleet.cmd_repoint("https://github.com/TX-9AI/OTV4TEST.git",
-                                   only=["QQQ"], assume_yes=True, sha="cbad05a", restart=True)
+                                   only=["QQQ"], assume_yes=True, sha="cbad05a", restart=True, install=False)
         p2 = [c for c in sent if "reset --hard" in c]
         check("P8c --sha forces no restart even when restart was asked",
               rc == 0 and len(p2) == 2 and all("restart" not in c and "start optionsbot" not in c
