@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
-tests/check_strategy_registry.py  v1.1
+tests/check_strategy_registry.py  v1.2
+v1.2  2026-10-25  r503 / OPS.68 — R9: a row tagged "OTV5" resolves to OTV5 on a MAIN box, a TEST box and an
+      undeclared one, before and after TEST_EPOCH; the old tags still resolve as before. BORN RED on
+      strategy_registry v1.3 (a tagged OTV5 row on QQQ resolved to OTV4 by the box map).
 v1.1  2026-10-03  r460 / OPS.65 — TEST_DECLARED gains OpeningRangeCreditSpread (OTV4TEST
       r203). BORN RED at R2 (UNREGISTERED) before strategy_registry v1.3.
 v1.0  2026-09-25  r426 / OPS.50 — TWO ENGINES, ONE CORPUS, ONE REGISTRY.
@@ -173,6 +176,20 @@ def main():
                 f"would read UNKN")
     except Exception as exc:                                   # noqa: BLE001
         ck("R8", False, f"cannot compare against config.UNIVERSE ({exc})")
+
+    # ── R9 (v1.2) — the OTV5 tag is its own engine, wherever the box is ──────
+    try:
+        _o5 = getattr(SR, "OTV5", "OTV5")
+        got = {(sym, day): SR.resolve_lineage({"strategy": "Breakout", "lineage": "OTV5", "symbol": sym}, day)
+               for sym in ("QQQ", "SOFI", "ZZZZ") for day in ("2026-09-10", "2026-10-26")}
+        bad = {k: v for k, v in got.items() if v != _o5}
+        old = (SR.resolve_lineage({"lineage": "OTV4", "symbol": "SOFI"}, "2026-10-26") == SR.MAIN
+               and SR.resolve_lineage({"lineage": "TEST", "symbol": "QQQ"}, "2026-10-26") == SR.TEST)
+        ck("R9", _o5 == "OTV5" and _o5 in SR.LINEAGES and not bad and old,
+           "a tagged OTV5 row is OTV5 on every box and date; OTV4 and TEST tags unchanged"
+           if (not bad and old and _o5 in SR.LINEAGES) else f"misresolved={bad} old_tags_ok={old}")
+    except Exception as exc:                                   # noqa: BLE001
+        ck("R9", False, f"{type(exc).__name__}: {exc}")
 
     if _fails:
         print(f"\nRED — {len(_fails)} check(s) failed: {' '.join(_fails)}")

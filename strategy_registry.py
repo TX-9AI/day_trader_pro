@@ -1,4 +1,14 @@
-# day_trader_pro/strategy_registry.py — v1.3
+# day_trader_pro/strategy_registry.py — v1.4
+# v1.4 (2026-10-25) — r503 / OPS.68. THE THIRD ENGINE IS "OTV5". The OTV5 tree stamps every new trade row
+#   lineage "OTV5" from OTV5 r8 on (the operator, 2026-10-25: scrub the test identity "to avoid confusion
+#   between where the lineage separates"; on this change: "just send it"). This module's own rule, written
+#   for exactly this day: "if a TEST box goes live, do NOT retag its history ... Add a new lineage instead."
+#   OTV5 joins LINEAGES, so a tagged OTV5 row resolves to OTV5 at step 1. Without it, step 1 misses and the
+#   box map (step 2) labels every legacy-fleet OTV5 row as OTV4 - the contamination resolve_lineage exists
+#   to prevent. Rows already tagged OTV4 or TEST keep their tags. ⚠️ THE BOX MAP IS NOT MOVED HERE: it serves
+#   only untagged rows and warehouse_coverage's per-box stream grading, and a box changes engine at the
+#   managed repoint, not before; moving MAIN_BOXES then is the repoint's follow-up. Gate:
+#   tests/check_strategy_registry.py R9.
 # v1.3 (2026-10-03) — r460 / OPS.65. REGISTERS OpeningRangeCreditSpread (ORCS),
 #   TEST-only: OTV4TEST r203 writes it from 2026-10-05. Operator: "It will be a
 #   part of the corpus, if it's running the repo code." Unregistered, its rows
@@ -63,6 +73,7 @@
 # instead.
 MAIN = "OTV4"          # options-trader-v4 — the production engine (r457: was "MAIN")
 TEST = "TEST"          # options-trader    — the second engine (SOFI, AAL)
+OTV5 = "OTV5"          # OTV5              — the third engine, stamped from OTV5 r8 (v1.4)
 # 🔴 "TEST" IS NOT A LICENCE TO FILTER. The TEST tree is intended to
 # SUPERSEDE mainline in place, at which point this tag will label REAL
 # PRODUCTION TRADES — correct by this module's own definition, since the tag
@@ -73,7 +84,7 @@ TEST = "TEST"          # options-trader    — the second engine (SOFI, AAL)
 # operator saying so explicitly — a silently dropped lineage is a silently
 # wrong P&L.
 UNKNOWN = "UNKN"
-LINEAGES = (MAIN, TEST)
+LINEAGES = (MAIN, TEST, OTV5)
 
 # 🔴 THE TEST BOXES FIRST EXISTED ON THIS ET DAY. Before it, every trade in the
 # corpus came from MAIN by construction, so an untagged old row is provably
