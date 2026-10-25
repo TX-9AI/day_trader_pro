@@ -1,4 +1,10 @@
-# day_trader_pro/strategy_registry.py — v1.4
+# day_trader_pro/strategy_registry.py — v1.5
+# v1.5 (2026-10-25) — r508 / OPS.73. A BOX THAT IS REPOINTED TO OTV5 IS DECLARED OTV5 FROM ITS REPOINT DAY. The
+#   operator, 2026-10-25 (on moving the box map at the repoint): "Yes, that all sounds good". OTV5_SINCE names each box
+#   repointed to OTV5 and the first ET day it ran OTV5; box_lineage(box, day) is THE one reader of the box map: OTV5
+#   on/after that day, else TEST_BOXES / MAIN_BOXES as before. So an untagged row a box wrote BEFORE its repoint keeps
+#   its old engine and one written after it is OTV5 - history is never relabelled. A row with no day keeps the old map.
+#   resolve_lineage and warehouse_coverage._lineage_of read it. A tagged row still wins (step 1, unchanged).
 # v1.4 (2026-10-25) — r503 / OPS.68. THE THIRD ENGINE IS "OTV5". The OTV5 tree stamps every new trade row
 #   lineage "OTV5" from OTV5 r8 on (the operator, 2026-10-25: scrub the test identity "to avoid confusion
 #   between where the lineage separates"; on this change: "just send it"). This module's own rule, written
@@ -112,6 +118,43 @@ TEST_BOXES = ("SOFI", "AAL")
 MAIN_BOXES = ("SPX", "QQQ", "NVDA", "TSLA", "META", "AMZN", "GOOGL", "AMD",
               "AVGO", "MU", "PLTR", "NFLX", "CRM", "UNH", "CVX", "SMH")
 
+# r508 — box -> the first ET day it ran OTV5 (its managed repoint and install). A DECLARATION, like the two lists
+# above: a box is added here when it is repointed, not before.
+# 2026-10-25: SOFI (fleet.py repoint --sha), NVDA (reinstall), and the other twelve through menu 43 (repoint --sha +
+# the full install), all at OTV5 r19 6dc63e2 or earlier OTV5 pins; their first OTV5 session is 2026-10-26.
+OTV5_SINCE = {
+    "SOFI": "2026-10-25",
+    "NVDA": "2026-10-25",
+    "AMD": "2026-10-25",
+    "AMZN": "2026-10-25",
+    "AVGO": "2026-10-25",
+    "CRM": "2026-10-25",
+    "CVX": "2026-10-25",
+    "GOOGL": "2026-10-25",
+    "META": "2026-10-25",
+    "NFLX": "2026-10-25",
+    "QQQ": "2026-10-25",
+    "SPX": "2026-10-25",
+    "TSLA": "2026-10-25",
+    "UNH": "2026-10-25",
+}
+
+
+def box_lineage(box, day=None):
+    """The engine a BOX ran on `day` (ET, YYYY-MM-DD), or None for an undeclared box. OTV5 on/after the box's
+    OTV5_SINCE day; otherwise the TEST / MAIN declaration. A missing day keeps the older declaration."""
+    b = str(box or "").strip().upper()
+    since = OTV5_SINCE.get(b)
+    d = str(day or "").strip()[:10]
+    if since and d and d >= since:
+        return OTV5
+    if b in TEST_BOXES:
+        return TEST
+    if b in MAIN_BOXES:
+        return MAIN
+    return None
+
+
 LIVE, RETIRED = "live", "retired"
 
 # ── the registry ────────────────────────────────────────────────────────────
@@ -215,11 +258,10 @@ def resolve_lineage(rec, entry_day=None) -> str:
     if lin == "MAIN":                     # r457 — the pre-rename literal
         return MAIN
     box = str(rec.get("symbol") or rec.get("box") or "").strip().upper()
-    if box in TEST_BOXES:
-        return TEST
-    if box in MAIN_BOXES:
-        return MAIN
     day = str(entry_day or rec.get("_date") or "").strip()[:10]
+    by_box = box_lineage(box, day)          # r508: date-aware (OTV5 from the box's repoint day)
+    if by_box:
+        return by_box
     if day and day < TEST_EPOCH:
         return MAIN
     return UNKNOWN

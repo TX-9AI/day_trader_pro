@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-# day_trader_pro/warehouse_coverage.py — v1.8
+# day_trader_pro/warehouse_coverage.py — v1.9
+# v1.9 (2026-10-25) — r508 / OPS.73. A STREAM IS GRADED BY THE ENGINE THE BOX RAN THAT DAY. _lineage_of(box, day) reads
+#   strategy_registry.box_lineage: a box repointed to OTV5 grades as OTV5 from its repoint day (so the OTV4-only
+#   streams, eod and liquidity_ledger, are NOT USED for it, as for TEST) and as its old engine before it.
 # v1.8 (2026-10-03) — r457 / OPS.64. THE EXPECTED BOXES ARE THE INSTANCE MAP.
 #   panel() read selector.PANEL, so a box untagged and retired showed as a GAP
 #   every night until a list edit. It now reads instance_registry's tagged
@@ -429,13 +432,14 @@ def _base(sym):
     return sym[:-4] if sym.endswith("_EXT") else sym
 
 
-def _lineage_of(box):
+def _lineage_of(box, day=None):
     """r453 — MAIN unless strategy_registry declares the box TEST. ⚠️ If the
     registry cannot be read, every box grades as MAIN, so a TEST box shows as a
-    GAP — loud, never a silently shrunk expectation."""
+    GAP — loud, never a silently shrunk expectation.
+    r508 — `day`: the engine the box ran THAT day (OTV5 from its repoint day)."""
     try:
         import strategy_registry as sr
-        return sr.TEST if _base(box) in sr.TEST_BOXES else sr.MAIN
+        return sr.box_lineage(_base(box), day) or sr.MAIN
     except Exception:                                           # noqa: BLE001
         return "OTV4"
 
@@ -486,8 +490,8 @@ def check_streams(s3, day, want, counts=False):
             graded = live
             if expect.startswith("EVERY_LINEAGE:"):
                 lin = expect.split(":", 1)[1]
-                graded = [b for b in live if _lineage_of(b) == lin]
-                row_not_used = [b for b in live if _lineage_of(b) != lin]
+                graded = [b for b in live if _lineage_of(b, day) == lin]
+                row_not_used = [b for b in live if _lineage_of(b, day) != lin]
             missing = [b for b in graded if b not in boxes]
             # r284 — an absence that was investigated and closed is not a gap.
             excused = [b for b in missing if (dtp_, day, b) in ACCEPTED_LOSS]

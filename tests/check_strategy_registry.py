@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """
-tests/check_strategy_registry.py  v1.2
+tests/check_strategy_registry.py  v1.3
+v1.3  2026-10-25  r508 / OPS.73 — R10: a box repointed to OTV5 is OTV5 from its OTV5_SINCE day and its old engine
+      before it - an UNTAGGED row on SOFI dated before 10-25 is TEST, on/after OTV5; on NVDA OTV4 then OTV5; a box not
+      repointed (QQQ until declared) keeps its declaration; an undated row keeps the old map; a tag still wins; and
+      warehouse_coverage._lineage_of grades by the day (OTV5 boxes are NOT USED on eod / liquidity_ledger from
+      their repoint day). BORN RED on strategy_registry v1.4 (no box_lineage; SOFI resolved TEST on 10-26).
 v1.2  2026-10-25  r503 / OPS.68 — R9: a row tagged "OTV5" resolves to OTV5 on a MAIN box, a TEST box and an
       undeclared one, before and after TEST_EPOCH; the old tags still resolve as before. BORN RED on
       strategy_registry v1.3 (a tagged OTV5 row on QQQ resolved to OTV4 by the box map).
@@ -190,6 +195,30 @@ def main():
            if (not bad and old and _o5 in SR.LINEAGES) else f"misresolved={bad} old_tags_ok={old}")
     except Exception as exc:                                   # noqa: BLE001
         ck("R9", False, f"{type(exc).__name__}: {exc}")
+
+    # ── R10 (v1.3) — a repointed box is OTV5 from its repoint day, its old engine before it ──
+    try:
+        bl = SR.box_lineage
+        since = SR.OTV5_SINCE
+        cases = {("SOFI", "2026-10-24"): SR.TEST, ("SOFI", since["SOFI"]): SR.OTV5, ("SOFI", "2026-11-02"): SR.OTV5,
+                 ("NVDA", "2026-10-23"): SR.MAIN, ("NVDA", "2026-10-26"): SR.OTV5, ("SOFI", None): SR.TEST,
+                 ("NVDA", None): SR.MAIN, ("ZZZZ", "2026-10-26"): None}
+        undeclared = [b for b in SR.MAIN_BOXES if b not in since][:1]
+        if undeclared:
+            cases[(undeclared[0], "2026-10-26")] = SR.MAIN
+        bad = {k: (bl(*k), v) for k, v in cases.items() if bl(*k) != v}
+        rows = {("SOFI", "2026-10-24"): SR.TEST, ("SOFI", "2026-10-26"): SR.OTV5, ("NVDA", "2026-10-26"): SR.OTV5}
+        bad_rows = {k: SR.resolve_lineage({"strategy": "Breakout", "symbol": k[0]}, k[1]) for k in rows
+                    if SR.resolve_lineage({"strategy": "Breakout", "symbol": k[0]}, k[1]) != rows[k]}
+        tag_wins = SR.resolve_lineage({"lineage": "OTV4", "symbol": "NVDA"}, "2026-10-26") == SR.MAIN
+        import warehouse_coverage as WC
+        cov = (WC._lineage_of("NVDA", "2026-10-26") == SR.OTV5 and WC._lineage_of("NVDA", "2026-10-23") == SR.MAIN
+               and WC._lineage_of("SOFI", "2026-10-24") == SR.TEST)
+        ck("R10", not bad and not bad_rows and tag_wins and cov,
+           "repointed boxes are OTV5 from their day, old engine before; tags win; coverage grades by day"
+           if not (bad or bad_rows) and tag_wins and cov else f"box={bad} rows={bad_rows} tag={tag_wins} cov={cov}")
+    except Exception as exc:                                   # noqa: BLE001
+        ck("R10", False, f"{type(exc).__name__}: {exc}")
 
     if _fails:
         print(f"\nRED — {len(_fails)} check(s) failed: {' '.join(_fails)}")
