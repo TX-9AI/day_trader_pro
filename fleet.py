@@ -1,4 +1,24 @@
-# day_trader_pro/fleet.py — v0.12.0
+# day_trader_pro/fleet.py — v0.13.0
+# v0.13.0 (2026-10-25) — r504 / OPS.69 — `reinstall --sha` IS A REPOINT PLUS THE FULL BOOTSTRAP INSTALL, IN PLACE.
+#   The operator, 2026-10-25: "Shouldn't the repoint consist of a full bootstrap install and then I just go in to make
+#   the env changes, clear cache & restart services?"; "That's how it was done in the past"; "Yes, before we do NVDA".
+#   NVDA (a mainline-built box) repointed to OTV5 had none of what an OTV5 install adds (boot sweep, open scan, Claude,
+#   the candle logger) and its units were the mainline template's. ONE box per run (--only SYM):
+#     1. the managed repoint (cmd_repoint --sha: refuses open trades, stops the bot, the feed and the timer writers,
+#        resets to the pin, deps, import check, never starts anything);
+#     2. ON THE BOX: refuses a running bot/feed or an open trade again; DRAINS the box's rows under its own label if its
+#        push is installed (a drain that is not OK stops here: the install would switch the push to standalone);
+#     3. ON THE BOX: builds ~/bootstrap.sh (umask 077) from the tree's own bootstrap.example.sh with OT_GIT_REF = the
+#        full pinned SHA and, from the box's OWN optionsbot unit, OT_INSTRUMENT and the five credentials
+#        (TT_CLIENT_SECRET, TT_REFRESH_TOKEN, TT_ACCOUNT_NUMBER, TELEGRAM_TOKEN, TELEGRAM_CHAT_ID). Nothing secret
+#        leaves the box, is printed, or passes through control; a missing TastyTrade credential refuses (rc 17);
+#     4. runs it unattended (install.sh -> setup_ec2.sh: venv from the lock, units from OTV5's template installed
+#        DISABLED and STOPPED, the suite, Claude with the observe-only settings NOT raised at boot, push standalone,
+#        ~/.optbot); the bootstrap is shredded on exit, the log keeps the account number redacted;
+#     5. reports HEAD, the units' state and the log's last lines. Every store (trades.db, data/*.db) is kept: setup_ec2
+#        copies the tree over without deleting and never copies trades.db or bot.log.
+#   The operator then runs configure.sh (symbol, risk, switches, item 14 managed) and Done. Gate:
+#   tests/check_fleet_reinstall.py.
 # v0.12.0 (2026-10-14) — r489 / OPS.67 — `repoint --sha` IS THE MANAGED REPOINT. Operator 10-13:
 #   the fleet moves to OTV4TEST on Saturday, keeping its symbols, "with a script that addresses the
 #   services, the stores, the git, and the env defaults". The two trees share their units byte for
@@ -526,6 +546,131 @@ _TIMERS = ("s3-push.timer", "candle-logger.timer", "optbot-self-close.timer",
 _TIMER_JOBS = "s3-push.service candle-logger.service optbot-self-close.service"
 
 
+# v0.13.0 — the in-place bootstrap install, one box, as ONE shell template (@NAME@ slots, nothing else interpolated).
+_SENTINEL_REINSTALL_OK = "__REINSTALL_OK__"
+_REINSTALL_KEYS = ("OT_INSTRUMENT", "TT_CLIENT_SECRET", "TT_REFRESH_TOKEN", "TT_ACCOUNT_NUMBER",
+                   "TELEGRAM_TOKEN", "TELEGRAM_CHAT_ID")
+_BOOTSTRAP_PY = r"""
+import os, re, shlex, sys
+env = {}
+for line in sys.stdin:
+    m = re.match(r'^Environment="?([A-Z0-9_]+)=(.*?)"?\s*$', line.rstrip("\n"))
+    if m:
+        env[m.group(1)] = m.group(2)
+need = ("TT_CLIENT_SECRET", "TT_REFRESH_TOKEN", "TT_ACCOUNT_NUMBER")
+if not all(env.get(k) for k in need) or not env.get("OT_INSTRUMENT"):
+    sys.exit(17)
+keys = set(os.environ["KEYS"].split())
+tpl = open(os.environ["TPL"]).read().splitlines()
+out = []
+for l in tpl:
+    m = re.match(r'^export ([A-Z0-9_]+)=', l)
+    if m and m.group(1) in keys:
+        l = "export %s=%s" % (m.group(1), shlex.quote(env.get(m.group(1), "")))
+    elif m and m.group(1) == "OT_GIT_REF":
+        l = "export OT_GIT_REF=%s" % shlex.quote(os.environ["SHA"])
+    elif m and m.group(1) == "OT_CLAUDE_AT_BOOT":
+        l = 'export OT_CLAUDE_AT_BOOT="0"'
+    elif m and m.group(1) == "OT_CLAUDE_SETTINGS":
+        l = 'export OT_CLAUDE_SETTINGS="pull-only"'
+    out.append(l)
+sys.stdout.write("\n".join(out) + "\n")
+"""
+_REINSTALL_SCRIPT = r"""
+cd @DIR@ || exit 9
+[ "$(systemctl is-active @SERVICE@)" != active ] && [ "$(systemctl is-active candle-feed)" != active ] \
+  || { echo "the bot or the feed is running - refused"; exit 10; }
+O=$(sqlite3 trades.db "SELECT count(*) FROM trades WHERE status='open'" 2>/dev/null)
+[ "$O" = "0" ] || { echo "open trade(s): ${O:-unreadable} - refused"; exit 10; }
+SHA=$(git rev-parse HEAD)
+case "$SHA" in @SHA@*) ;; *) echo "HEAD $SHA is not the pin @SHA@ - refused"; exit 7 ;; esac
+[ -f bootstrap.example.sh ] || { echo "no bootstrap.example.sh in this tree - refused"; exit 8; }
+SYM=$(sudo grep -oP '^Environment="?OT_INSTRUMENT=\K[A-Z0-9_]+' /etc/systemd/system/@SERVICE@.service | head -1)
+if systemctl is-enabled -q s3-push.timer 2>/dev/null; then
+  D=$(env OT_INSTRUMENT="$SYM" /usr/bin/python3 warehouse/s3_push.py --verify 2>&1 | grep -E "^DRAIN ")
+  echo "$D" | grep -qE "^DRAIN .* OK$" || { echo "drain of $SYM did not report OK - refused: $D"; exit 15; }
+  echo "drained $SYM: $D"
+fi
+umask 077
+rm -f ~/bootstrap.sh
+PYF=$(mktemp)
+cat > "$PYF" <<'__REINSTALL_PY__'
+@PY@
+__REINSTALL_PY__
+sudo cat /etc/systemd/system/@SERVICE@.service | SHA="$SHA" TPL="$HOME/options-trader/bootstrap.example.sh" KEYS="@KEYS@" \
+  python3 "$PYF" > ~/bootstrap.sh
+rc=$?
+rm -f "$PYF"
+if [ $rc -ne 0 ]; then shred -u ~/bootstrap.sh 2>/dev/null; rm -f ~/bootstrap.sh
+  [ $rc -eq 17 ] && echo "the unit lacks OT_INSTRUMENT or a TastyTrade credential - refused" \
+                 || echo "bootstrap build failed rc=$rc"; exit 16; fi
+echo "bootstrap built for $SYM at $SHA (credentials from this box's own unit; never printed)"
+# detached in tmux: a dropped SSH connection cannot kill the install halfway (and tmux sets $TMUX, so the template
+# does not re-exec itself into an attached session); stdin is /dev/null, so setup_ec2's closing login shell exits
+rm -f ~/reinstall.rc
+cat > ~/reinstall_run.sh <<'__REINSTALL_RUN__'
+cd ~ && bash ~/bootstrap.sh < /dev/null 2>&1 | sed -E 's/(TT Account: *).*/\1<redacted>/' > ~/reinstall.log
+echo "${PIPESTATUS[0]}" > ~/reinstall.rc
+shred -u ~/bootstrap.sh 2>/dev/null; rm -f ~/bootstrap.sh ~/install.sh ~/reinstall_run.sh
+__REINSTALL_RUN__
+tmux kill-session -t reinstall 2>/dev/null
+if command -v tmux >/dev/null 2>&1; then tmux new-session -d -s reinstall "bash $HOME/reinstall_run.sh"
+else TMUX=none bash ~/reinstall_run.sh; fi
+n=0; while [ ! -f ~/reinstall.rc ]; do n=$((n+1))
+  [ $n -gt 600 ] && { echo "the install is still running after 50 min: tmux attach -t reinstall on the box"; exit 19; }
+  sleep 5; done
+shred -u ~/bootstrap.sh 2>/dev/null; rm -f ~/bootstrap.sh
+chmod 600 ~/reinstall.log
+RC=$(cat ~/reinstall.rc 2>/dev/null)
+tail -n 25 ~/reinstall.log | grep -vE "TT_|TELEGRAM_|SECRET|TOKEN"
+echo "units: @SERVICE@=$(systemctl is-enabled @SERVICE@)/$(systemctl is-active @SERVICE@) candle-feed=$(systemctl is-enabled candle-feed)/$(systemctl is-active candle-feed) claude-boot=$(systemctl is-enabled optbot-claude-boot.service 2>/dev/null || echo absent)"
+echo "head: $(git -C @DIR@ rev-parse --short HEAD)"
+grep -q "Every step completed" ~/reinstall.log && [ "${RC:-1}" = 0 ] && echo "@OK@ $SHA" || { echo "install rc=${RC:-?} - see ~/reinstall.log on the box"; exit 18; }
+"""
+
+
+def _reinstall_cmd(sha):
+    """v0.13.0 — fill _REINSTALL_SCRIPT for one box."""
+    py = _BOOTSTRAP_PY.strip("\n")
+    assert "__REINSTALL_PY__" not in py
+    slots = {"@DIR@": INSTALL_DIR, "@SERVICE@": SERVICE, "@SHA@": sha, "@KEYS@": " ".join(_REINSTALL_KEYS),
+             "@OK@": _SENTINEL_REINSTALL_OK, "@PY@": py}
+    script = _REINSTALL_SCRIPT
+    for k, v in slots.items():
+        script = script.replace(k, v)
+    return script.strip("\n")
+
+
+def cmd_reinstall(new_url, only=None, sha=None, wake=False, assume_yes=False):
+    """v0.13.0 — the managed repoint, then the full bootstrap install in place, for ONE box."""
+    if not only or len(only) != 1:
+        print("reinstall takes exactly one box: --only SYM")
+        return 2
+    if not sha or not _SHA_RE.match(sha.strip().lower()):
+        print("reinstall needs --sha <7-40 hex>: the pin the box is repointed to and installed from")
+        return 2
+    sha = sha.strip().lower()
+    rc = cmd_repoint(new_url, only=only, wake=wake, assume_yes=assume_yes, sha=sha)
+    if rc != 0:
+        print(f"\n🚨 the repoint did not complete (rc {rc}) - the install did NOT run.")
+        return rc
+    fleet = [(s, ip, st) for s, ip, st in get_fleet(only) if st == "running" and ip]
+    if not fleet:
+        print("the box is not running after the repoint - the install did NOT run.")
+        return 1
+    s, ip, _ = fleet[0]
+    print(f"\n{'='*58}\nPHASE 3 — the bootstrap install, in place, on {s}\n{'='*58}")
+    rc, out, err = _exec(s, ip, _reinstall_cmd(sha), timeout=3600)
+    print(out.rstrip() or err.rstrip() or "(no output)")
+    ok = rc == 0 and (_SENTINEL_REINSTALL_OK in out or config.MOCK_AWS)
+    if not ok:
+        print(f"\n🚨 {s}: the install did not complete (rc {rc}). The tree is on {sha}; nothing was started.")
+        return 1
+    print(f"\n✅ {s} reinstalled at {sha}: services installed and STOPPED, push standalone.\n"
+          f"   Next (the operator): ./configure.sh - symbol, risk, switches, item 14 managed - then Done.")
+    return 0
+
+
 def _repo_name_from_url(url):
     """https://github.com/OWNER/options_trader_v3.git -> options_trader_v3."""
     m = re.search(r"github\.com[:/]+[^/]+/([^/]+?)(?:\.git)?/?$", url)
@@ -934,7 +1079,7 @@ def cmd_pull(what, only=None, day=None):
 
 def main(argv):
     p = argparse.ArgumentParser(description="day_trader_pro fleet SSH fan-out")
-    p.add_argument("action", choices=["list", "ping", "run", "update", "repoint", "pull"])
+    p.add_argument("action", choices=["list", "ping", "run", "update", "repoint", "reinstall", "pull"])
     p.add_argument("command", nargs="?", default=None,
                    help="command string (for 'run'), new repo URL (for 'repoint'), "
                         "or 'db'/'ohlc' (for 'pull')")
@@ -992,6 +1137,12 @@ def main(argv):
                            wake=args.wake, check_only=args.check_only,
                            assume_yes=args.yes, all_repos=args.all_repos,
                            sha=args.sha)
+    if args.action == "reinstall":
+        if not args.command:
+            print("reinstall needs the repo URL, e.g.:\n"
+                  "  python fleet.py reinstall https://github.com/TX-9AI/OTV5.git --sha <sha> --only NVDA")
+            return 2
+        return cmd_reinstall(args.command, only=only, sha=args.sha, wake=args.wake, assume_yes=args.yes)
     if args.action == "pull":
         what = (args.command or "").lower()
         if what not in ("db", "ohlc"):
