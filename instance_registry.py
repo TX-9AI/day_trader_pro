@@ -1,4 +1,17 @@
-# day_trader_pro/instance_registry.py — v0.2.0
+# day_trader_pro/instance_registry.py — v0.3.0
+# v0.3.0 (2026-10-25) — dtp r509 / OPS.74. "Instance map" (devtools 1) READS EC2
+#   LIVE. It printed data/instance_map.json - the cache only Reconcile (2) and
+#   Swap (3) write - so its STATE column was whatever AWS said at the last
+#   Reconcile: on 2026-10-25 it showed all fourteen boxes "stopped" (saved
+#   10-04) while Fleet ping (8) reached 14/14. The operator: "why would option 1
+#   give a status if it isn't actually checking if they're up or not?"; "I
+#   always assumed it was checking live, anything other than that makes no
+#   sense". show now asks EC2 (describe_by_tag, read-only) and prints the live
+#   state; it compares the live IDs with the cache and FLAGS drift (+ not in
+#   the map, ~ ID changed, - not in EC2) without writing it - Reconcile still
+#   accepts; a pin's state is read live by its instance ID. Only when EC2
+#   cannot be read does it print the cache, headed CACHED with its age, never
+#   as if live. Pinned by tests/check_instance_map_live.py.
 # v0.2.0 (2026-10-03) — r457 / OPS.64. THE FLEET IS THE INSTANCE MAP, FOR EVERY
 #   READER. Operator: *"How can we reroute all those non-automatic tasks to also
 #   consult the instance map so it truly is completely automatic?"* `discover()`
@@ -191,19 +204,78 @@ def swap(symbol, new_instance_id, pin=True):
 # --------------------------------------------------------------------------
 # CLI
 # --------------------------------------------------------------------------
+def _age(iso):
+    """'3d 4h' / '2h 5m' / '7m' since an ISO time, or 'unknown age'."""
+    try:
+        then = datetime.fromisoformat(iso)
+    except (TypeError, ValueError):
+        return "unknown age"
+    if then.tzinfo is None:
+        then = then.replace(tzinfo=timezone.utc)
+    mins = max(0, int((datetime.now(timezone.utc) - then).total_seconds() // 60))
+    d, h, m = mins // 1440, (mins % 1440) // 60, mins % 60
+    if d:
+        return f"{d}d {h}h"
+    return f"{h}h {m}m" if h else f"{m}m"
+
+
 def _cmd_show():
+    """The fleet AS EC2 HOLDS IT NOW (r509). The cache is consulted for pins
+    and for drift; its saved state is printed only when EC2 cannot be read,
+    and then headed CACHED with its age."""
     cache = load_map()
-    insts = cache.get("instances", {})
-    if not insts:
-        print("Instance map is empty. Run 'reconcile' to populate it.")
+    saved = cache.get("instances", {})
+    try:
+        live = ec2ops.describe_by_tag()
+    except Exception as exc:                                     # noqa: BLE001
+        live, why = None, type(exc).__name__
+    if live is None:
+        print(f"⚠️ EC2 could not be read ({why}) — showing the CACHED map, "
+              f"saved {_age(cache.get('updated_at'))} ago; its STATE is NOT "
+              f"live (8 pings the boxes)")
+        if not saved:
+            print("Instance map is empty. Run 'reconcile' to populate it.")
+            return
+        print(f"{'SYMBOL':<8}{'INSTANCE ID':<26}{'CACHED':<10}PINNED")
+        for s in sorted(saved):
+            r = saved[s]
+            pin = "yes" if r.get("pinned") else ""
+            print(f"{s:<8}{r.get('instance_id',''):<26}"
+                  f"{r.get('state','?'):<10}{pin}")
         return
-    print(f"Instance map  (updated_at={cache.get('updated_at')})")
+
+    by_id = {r.get("instance_id"): r for r in live.values()}
+    rows, drift = {}, []
+    for s, r in live.items():
+        rows[s] = (r.get("instance_id", ""), r.get("state", "?"), "")
+    for s, r in saved.items():
+        if r.get("pinned"):
+            iid = r.get("instance_id", "")
+            st = by_id.get(iid, {}).get("state", "untagged?")
+            rows[s] = (iid, st, "yes")
+    for s in sorted(rows):
+        old = saved.get(s)
+        if old is None:
+            drift.append(f"  + {s:<8} in EC2, not in the map")
+        elif not old.get("pinned") and old.get("instance_id") != rows[s][0]:
+            drift.append(f"  ~ {s:<8} map has {old.get('instance_id')}, "
+                         f"EC2 has {rows[s][0]}")
+    for s in sorted(saved):
+        if s not in rows:
+            drift.append(f"  - {s:<8} in the map ({saved[s].get('instance_id')}), "
+                         f"not in EC2")
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    print(f"Instance map  (LIVE from EC2 at {now})")
     print(f"{'SYMBOL':<8}{'INSTANCE ID':<26}{'STATE':<10}PINNED")
-    for s in sorted(insts):
-        r = insts[s]
-        pin = "yes" if r.get("pinned") else ""
-        print(f"{s:<8}{r.get('instance_id',''):<26}"
-              f"{r.get('state','?'):<10}{pin}")
+    for s in sorted(rows):
+        iid, st, pin = rows[s]
+        print(f"{s:<8}{iid:<26}{st:<10}{pin}")
+    up = sum(1 for r in rows.values() if r[1] == "running")
+    print(f"\n{up}/{len(rows)} running")
+    if drift:
+        print("Map drift (run 2, Reconcile, to accept):")
+        for line in drift:
+            print(line)
 
 
 def _cmd_reconcile():

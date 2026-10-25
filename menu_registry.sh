@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# day_trader_pro/menu_registry.sh — v1.24
+# day_trader_pro/menu_registry.sh — v1.25
+# v1.25 (2026-10-25) — dtp r509 / OPS.74. Instance map's label says it reads EC2 live.
 # v1.24 (2026-10-25) — dtp r507 / OPS.72. REPOINT the fleet's label says it asks for a pin and installs.
 # v1.23 (2026-10-25) — dtp r506 / OPS.71. THE REPOINT SECTION INSTALLS TOO: `REPOINT / INSTALL`. Two items after REPOINT
 #   the fleet: REINSTALL one box (fleet.py reinstall - the managed repoint plus the full OTV5 install in place) and
@@ -238,7 +239,7 @@
 MENU=(
 
   "SECTION|REGISTRY & MASTER SWITCH"
-  "ITEM|Instance map|mi_instance_map"
+  "ITEM|Instance map (live from EC2)|mi_instance_map"
   "ITEM|Reconcile map|mi_reconcile_map"
   "ITEM|Swap / pin instance ID|mi_swap_pin_instance_id"
   "ITEM|Control status|mi_control_status"
