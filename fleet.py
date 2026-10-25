@@ -1,4 +1,20 @@
-# day_trader_pro/fleet.py — v0.14.0
+# day_trader_pro/fleet.py — v0.15.0
+# v0.15.0 (2026-10-25) — r506 / OPS.71 — `flash` INSTALLS OTV5 ON A BLANK, TAGGED INSTANCE FROM CONTROL. The operator,
+#   2026-10-25, after the proof of concept: control kickstarting a blank box is preferred over a hand-edited bootstrap;
+#   "Should we add 'Flash a new instance' to devtools under the repoint header?"; "Great, send it". ONE instance per run:
+#   `flash <url> --sha <pin> --only NAME --seed SYM [--symbol SYM] [--wake] [--yes]`.
+#     1. NAME is the new instance's Name tag (Project=day_trader); it must be running (--wake starts it) and BLANK: a
+#        box that already has ~/options-trader is refused (rc 20) - flash never overwrites an install.
+#     2. The pin is resolved to its full SHA (it must be a commit the local checkout of that repo holds).
+#     3. CREDENTIALS: the five (TT_CLIENT_SECRET, TT_REFRESH_TOKEN, TT_ACCOUNT_NUMBER, TELEGRAM_TOKEN, TELEGRAM_CHAT_ID)
+#        stream from the SEED box's own optionsbot unit through an ssh pipe straight into ~/.flash_creds (umask 077)
+#        on the new box: control's Python never reads them, nothing is printed, nothing lands on control's disk; only a
+#        line count comes back. Every fleet box shares one login, so any running box seeds.
+#     4. On the new box: the pinned bootstrap.example.sh (raw GitHub at the full SHA) is filled with those credentials,
+#        OT_INSTRUMENT (--symbol, default NAME), OT_INSTALL_MODE=controller, Claude installed NOT raised at boot,
+#        pull-only settings; the credentials file is shredded at once; the install runs exactly as reinstall's does
+#        (detached in tmux, judged by "INSTALL OK <pin>", bootstrap shredded after it exits).
+#   The operator then runs configure.sh and Done. Gate: tests/check_fleet_flash.py.
 # v0.14.0 (2026-10-25) — r505 / OPS.70 — `reinstall` RUNS THE INSTALLER IN ITS CONTROLLER MODE (OTV5 r17, BOOT.14) AND
 #   JUDGES IT BY ITS RESULT LINE. r504's first run (NVDA) completed the install and exited 2: setup_ec2 reattached
 #   control's tmux terminal, its closing login shell waited for input (closed by hand), and it shredded bootstrap.sh
@@ -690,6 +706,158 @@ def cmd_reinstall(new_url, only=None, sha=None, wake=False, assume_yes=False):
     return 0
 
 
+# v0.15.0 — flash: the blank-instance install. Reuses reinstall's bootstrap builder (its input is Environment= lines)
+# and its run-and-judge tail, so the two installs from control cannot drift apart.
+_CRED_KEYS = ("TT_CLIENT_SECRET", "TT_REFRESH_TOKEN", "TT_ACCOUNT_NUMBER", "TELEGRAM_TOKEN", "TELEGRAM_CHAT_ID")
+_SEED_EXTRACT = ("sudo grep -E '^Environment=\"?(%s)=' /etc/systemd/system/%s.service"
+                 % ("|".join(_CRED_KEYS), SERVICE))
+_FLASH_RECEIVE = "umask 077; cat > ~/.flash_creds; wc -l < ~/.flash_creds"
+_SYM_RE = re.compile(r"^[A-Z0-9_]{1,12}$")
+_FLASH_HEAD = r"""
+[ -e ~/options-trader ] && { echo "~/options-trader exists - not a blank instance - refused"; shred -u ~/.flash_creds 2>/dev/null; rm -f ~/.flash_creds; exit 20; }
+[ -s ~/.flash_creds ] || { echo "no credentials arrived from the seed - refused"; rm -f ~/.flash_creds; exit 21; }
+SHA=@FULLSHA@
+umask 077
+TPL=$(mktemp)
+curl -fsSL "https://raw.githubusercontent.com/@REPO@/$SHA/bootstrap.example.sh" -o "$TPL" \
+  || { echo "the pinned bootstrap template could not be fetched - refused"; shred -u ~/.flash_creds; rm -f "$TPL"; exit 22; }
+PYF=$(mktemp)
+cat > "$PYF" <<'__REINSTALL_PY__'
+@PY@
+__REINSTALL_PY__
+{ cat ~/.flash_creds; echo "Environment=OT_INSTRUMENT=@SYM@"; } | SHA="$SHA" TPL="$TPL" KEYS="@KEYS@" python3 "$PYF" > ~/bootstrap.sh
+rc=$?
+shred -u ~/.flash_creds 2>/dev/null; rm -f ~/.flash_creds "$TPL" "$PYF"
+if [ $rc -ne 0 ]; then shred -u ~/bootstrap.sh 2>/dev/null; rm -f ~/bootstrap.sh
+  [ $rc -eq 17 ] && { echo "the seed's unit lacks a TastyTrade credential - refused"; exit 16; }
+  [ $rc -eq 18 ] && { echo "the pinned bootstrap.example.sh has no OT_INSTALL_MODE (it predates OTV5 r17) - refused"; exit 8; }
+  echo "bootstrap build failed rc=$rc"; exit 16; fi
+echo "bootstrap built for @SYM@ at $SHA (credentials from the seed box; never printed)"
+"""
+
+
+def _run_judge_tail():
+    """reinstall's run-and-judge tail (detached tmux, INSTALL OK <pin>, shred after exit), shared by flash."""
+    return _REINSTALL_SCRIPT[_REINSTALL_SCRIPT.index("# detached in tmux"):]
+
+
+def _flash_cmd(full_sha, repo_slug, symbol):
+    """v0.15.0 — the new box's script: build the bootstrap from ~/.flash_creds, then reinstall's tail."""
+    py = _BOOTSTRAP_PY.strip("\n")
+    script = _FLASH_HEAD + _run_judge_tail()
+    slots = {"@FULLSHA@": full_sha, "@REPO@": repo_slug, "@SYM@": symbol, "@PY@": py, "@DIR@": INSTALL_DIR,
+             "@SERVICE@": SERVICE, "@SHA@": full_sha, "@KEYS@": " ".join(_REINSTALL_KEYS),
+             "@OK@": _SENTINEL_REINSTALL_OK}
+    for k, v in slots.items():
+        script = script.replace(k, v)
+    return script.strip("\n")
+
+
+def _ssh_argv(ip, command):
+    return ["ssh", "-i", config.SSH_KEY_PATH, "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new",
+            "-o", f"ConnectTimeout={config.SSH_CONNECT_TIMEOUT}", f"{config.SSH_USER}@{ip}", command]
+
+
+def _pipe_creds(seed_ip, new_ip, timeout=120):
+    """Seed unit -> new box, through an ssh pipe. Control's Python NEVER reads the seed's stdout; only the receiving
+    side's line count comes back. -> (rc, lines)."""
+    import subprocess
+    p1 = subprocess.Popen(_ssh_argv(seed_ip, _SEED_EXTRACT), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    p2 = subprocess.Popen(_ssh_argv(new_ip, _FLASH_RECEIVE), stdin=p1.stdout, stdout=subprocess.PIPE,
+                          stderr=subprocess.DEVNULL, text=True)
+    p1.stdout.close()
+    try:
+        out, _ = p2.communicate(timeout=timeout)
+        p1.wait(timeout=timeout)
+    except Exception:                                          # noqa: BLE001
+        p1.kill()
+        p2.kill()
+        return 255, 0
+    try:
+        n = int((out or "0").strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        n = 0
+    return (0 if p2.returncode == 0 else p2.returncode), n
+
+
+def _full_sha(repo, sha):
+    """The pin's full SHA from the local checkout of `repo` under $HOME (fetched first), or None."""
+    import subprocess
+    path = os.path.expanduser(f"~/{repo}") if repo else ""
+    if not path or not os.path.isdir(os.path.join(path, ".git")):
+        return sha if re.match(r"^[0-9a-f]{40}$", sha) else None
+    subprocess.run(["git", "-C", path, "fetch", "-q", "origin"], capture_output=True)
+    r = subprocess.run(["git", "-C", path, "rev-parse", "--verify", "-q", f"{sha}^{{commit}}"],
+                       capture_output=True, text=True)
+    return r.stdout.strip() if r.returncode == 0 and r.stdout.strip() else None
+
+
+def cmd_flash(new_url, only=None, sha=None, seed=None, symbol=None, wake=False, assume_yes=False):
+    """v0.15.0 — install the pinned OTV5 on ONE blank, tagged instance, credentials streamed from a seed box."""
+    if not only or len(only) != 1:
+        print("flash takes exactly one new instance: --only NAME (its Name tag)")
+        return 2
+    name = only[0]
+    if not seed:
+        print("flash needs --seed SYM: a running fleet box whose unit holds the shared credentials")
+        return 2
+    seed = seed.strip().upper()
+    if seed == name:
+        print("the seed must be another box, not the instance being flashed")
+        return 2
+    symbol = (symbol or name).strip().upper()
+    if not _SYM_RE.match(symbol):
+        print(f"--symbol {symbol!r} is not a symbol")
+        return 2
+    if not sha or not _SHA_RE.match(sha.strip().lower()):
+        print("flash needs --sha <7-40 hex>: the pin to install")
+        return 2
+    repo = _repo_name_from_url(new_url)
+    m = re.search(r"github\.com[:/]+([^/]+/[^/]+?)(?:\.git)?/?$", new_url or "")
+    if not repo or not m:
+        print("flash needs a GitHub repo URL, e.g. https://github.com/TX-9AI/OTV5.git")
+        return 2
+    full = _full_sha(repo, sha.strip().lower())
+    if not full:
+        print(f"the pin {sha} could not be resolved to a full commit (no local checkout ~/{repo} holding it) - give all 40 hex")
+        return 2
+    boxes = get_fleet([name, seed])
+    stopped = [(s, ip, st) for s, ip, st in boxes if st != "running"]
+    if stopped and wake:
+        _wake(stopped)
+        boxes = _wait_running_and_ssh([name, seed])
+    by = {s: (ip, st) for s, ip, st in boxes}
+    for who in (name, seed):
+        if who not in by or by[who][1] != "running" or not by[who][0]:
+            print(f"{who} is not a running, reachable tagged instance (use --wake to start it) - nothing was done")
+            return 1
+    print(f"\nFlash target:  {name} ({by[name][0]}) as {symbol}\nRepo / pin:    {m.group(1)} {full}\n"
+          f"Seed:          {seed} ({by[seed][0]}) - credentials stream box to box, never printed\n"
+          f"Mode:          controller install; Claude installed, NOT raised at boot; every service STOPPED")
+    if not assume_yes and not config.MOCK_AWS:
+        if input(f"\nType the instance name ({name}) to flash it: ").strip().upper() != name:
+            print("Confirmation did not match; nothing changed.")
+            return 2
+    if config.MOCK_AWS:
+        print("[mock] flash previewed; nothing sent.")
+        return 0
+    rc, lines = _pipe_creds(by[seed][0], by[name][0])
+    if rc != 0 or lines < 3:
+        print(f"🚨 the credentials did not arrive (rc {rc}, {lines} line(s)) - nothing was installed.")
+        _exec(name, by[name][0], "shred -u ~/.flash_creds 2>/dev/null; rm -f ~/.flash_creds")
+        return 1
+    print(f"credentials: {lines} line(s) streamed from {seed} to {name}")
+    print(f"\n{'='*58}\nINSTALL — controller mode, on {name}\n{'='*58}")
+    rc, out, err = _exec(name, by[name][0], _flash_cmd(full, m.group(1), symbol), timeout=3600)
+    print(out.rstrip() or err.rstrip() or "(no output)")
+    if rc != 0 or _SENTINEL_REINSTALL_OK not in out:
+        print(f"\n🚨 {name}: the flash did not complete (rc {rc}). Nothing was started.")
+        return 1
+    print(f"\n✅ {name} flashed at {full}: every service installed and STOPPED.\n"
+          f"   Next (the operator): ./configure.sh - symbol, risk, switches, item 14 - then Done.")
+    return 0
+
+
 def _repo_name_from_url(url):
     """https://github.com/OWNER/options_trader_v3.git -> options_trader_v3."""
     m = re.search(r"github\.com[:/]+[^/]+/([^/]+?)(?:\.git)?/?$", url)
@@ -1098,7 +1266,7 @@ def cmd_pull(what, only=None, day=None):
 
 def main(argv):
     p = argparse.ArgumentParser(description="day_trader_pro fleet SSH fan-out")
-    p.add_argument("action", choices=["list", "ping", "run", "update", "repoint", "reinstall", "pull"])
+    p.add_argument("action", choices=["list", "ping", "run", "update", "repoint", "reinstall", "flash", "pull"])
     p.add_argument("command", nargs="?", default=None,
                    help="command string (for 'run'), new repo URL (for 'repoint'), "
                         "or 'db'/'ohlc' (for 'pull')")
@@ -1128,6 +1296,10 @@ def main(argv):
                    help="repoint: MANAGED repoint to this exact commit — stops the bot "
                         "and feed first, refuses open trades, handles shadow units, "
                         "installs deps, import-checks, and never restarts")
+    p.add_argument("--seed", default=None,
+                   help="flash: the running fleet box whose unit seeds the shared credentials")
+    p.add_argument("--symbol", default=None,
+                   help="flash: the symbol to install (default: the new instance's Name tag)")
     p.add_argument("--mock", action="store_true", help="offline preview")
     args = p.parse_args(argv[1:])
 
@@ -1162,6 +1334,13 @@ def main(argv):
                   "  python fleet.py reinstall https://github.com/TX-9AI/OTV5.git --sha <sha> --only NVDA")
             return 2
         return cmd_reinstall(args.command, only=only, sha=args.sha, wake=args.wake, assume_yes=args.yes)
+    if args.action == "flash":
+        if not args.command:
+            print("flash needs the repo URL, e.g.:\n"
+                  "  python fleet.py flash https://github.com/TX-9AI/OTV5.git --sha <sha> --only NEWBOX --seed SOFI")
+            return 2
+        return cmd_flash(args.command, only=only, sha=args.sha, seed=args.seed, symbol=args.symbol,
+                         wake=args.wake, assume_yes=args.yes)
     if args.action == "pull":
         what = (args.command or "").lower()
         if what not in ("db", "ohlc"):

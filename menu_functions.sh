@@ -1,4 +1,7 @@
-# day_trader_pro/menu_functions.sh — v1.74
+# day_trader_pro/menu_functions.sh — v1.75
+# v1.75 (2026-10-25) - dtp r506 / OPS.71. REINSTALL one box and FLASH a new instance (menu_registry v1.23): each asks
+#   its inputs (the URL is typed, never defaulted, as REPOINT's is) and hands them to fleet.py, which shows the plan
+#   and asks for its own typed confirmation. ENTER at any required prompt aborts with nothing done.
 # v1.74 (2026-10-04) - dtp r469 / OPS.66. EVERY CLAUDE LAUNCH IS NAMED ✨1-REPORTER.
 #   Operator: "I want to make your OT_RC_NAME sticky. It should be ✨1-REPORTER."
 #   HAND OFF, RESUME and RESUME [other] (six launch lines) started claude with
@@ -876,6 +879,42 @@ mi_repoint() {
     # repoint is FOR — boxes running the new repo's code.
     case "$NR" in [nN]*) ARGS="$ARGS --no-restart" ;; esac
     $PY fleet.py repoint "$U" $ARGS
+    pause
+}
+
+# REINSTALL one box (r506)
+mi_reinstall_one() {
+    echo
+    U=$(ask_url) || { pause; return 0; }
+    local SY SHA
+    read -rp "  Box (its symbol, e.g. NVDA; empty aborts): " SY
+    SY="$(echo "$SY" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')"
+    [ -n "$SY" ] || { echo "  aborted - no box given."; pause; return 0; }
+    read -rp "  Pin (commit SHA to install; empty aborts): " SHA
+    SHA="$(echo "$SHA" | tr -d '[:space:]')"
+    [ -n "$SHA" ] || { echo "  aborted - no pin given."; pause; return 0; }
+    $PY fleet.py reinstall "$U" --sha "$SHA" --only "$SY" --wake
+    pause
+}
+
+# FLASH a new instance (r506)
+mi_flash_new() {
+    echo
+    U=$(ask_url) || { pause; return 0; }
+    local NM SEED SYM SHA ARGS=""
+    read -rp "  New instance (its Name tag; empty aborts): " NM
+    NM="$(echo "$NM" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')"
+    [ -n "$NM" ] || { echo "  aborted - no instance given."; pause; return 0; }
+    read -rp "  Seed box for the shared credentials (e.g. SOFI; empty aborts): " SEED
+    SEED="$(echo "$SEED" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')"
+    [ -n "$SEED" ] || { echo "  aborted - no seed given."; pause; return 0; }
+    read -rp "  Symbol to install (ENTER = ${NM}): " SYM
+    SYM="$(echo "$SYM" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')"
+    [ -n "$SYM" ] && ARGS="$ARGS --symbol $SYM"
+    read -rp "  Pin (commit SHA to install; empty aborts): " SHA
+    SHA="$(echo "$SHA" | tr -d '[:space:]')"
+    [ -n "$SHA" ] || { echo "  aborted - no pin given."; pause; return 0; }
+    $PY fleet.py flash "$U" --sha "$SHA" --only "$NM" --seed "$SEED" --wake $ARGS
     pause
 }
 

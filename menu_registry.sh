@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
-# day_trader_pro/menu_registry.sh — v1.22
+# day_trader_pro/menu_registry.sh — v1.23
+# v1.23 (2026-10-25) — dtp r506 / OPS.71. THE REPOINT SECTION INSTALLS TOO: `REPOINT / INSTALL`. Two items after REPOINT
+#   the fleet: REINSTALL one box (fleet.py reinstall - the managed repoint plus the full OTV5 install in place) and
+#   FLASH a new instance (fleet.py flash - OTV5 onto a blank tagged instance, credentials streamed from a seed box).
+#   The operator, 2026-10-25: "Should we add 'Flash a new instance' to devtools under the repoint header?" - "send it".
 # v1.22 (2026-09-13) — dtp r381 / OPS.17. THE SECTION IS `CLAUDE CODE`, 38 STOPS
 #   WRAPPING, AND A REATTACH ITEM SITS AFTER THE HANDOFF. Operator, 2026-09-13,
 #   from a phone screenshot: 38's label was 74 chars and ran onto a second line
@@ -284,10 +288,12 @@ MENU=(
   "ITEM|RESUME -> the last Claude thread (kills this menu and every tmux)|mi_resume_claude_tmux"
   "ITEM|RESUME [other] -> pick a Claude thread (kills this menu and every tmux)|mi_resume_pick_claude_tmux"
 
-  "SECTION|REPOINT (migrate fleet -> new repo)"
+  "SECTION|REPOINT / INSTALL (migrate fleet -> new repo; install from control)"
   "ITEM|Snapshot dir -> tarball (the held state before a repoint)|mi_snapshot_dir_repo_ready_tarball"
   "ITEM|Check only|mi_check_only"
   "ITEM|REPOINT the fleet (asks scope, wake, restart)|mi_repoint"
+  "ITEM|REINSTALL one box (repoint + full install in place)|mi_reinstall_one"
+  "ITEM|FLASH a new instance (blank tagged box -> OTV5)|mi_flash_new"
 
   "SECTION|CONTROL REPO (this checkout <-> GitHub, force sync)"
   "ITEM|PUSH -> GitHub  (FORCE; this server is source of truth)|mi_push_github_force_this_server_is_source_of_t"
