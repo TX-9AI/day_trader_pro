@@ -1,4 +1,13 @@
-# day_trader_pro/fleet.py — v0.13.0
+# day_trader_pro/fleet.py — v0.14.0
+# v0.14.0 (2026-10-25) — r505 / OPS.70 — `reinstall` RUNS THE INSTALLER IN ITS CONTROLLER MODE (OTV5 r17, BOOT.14) AND
+#   JUDGES IT BY ITS RESULT LINE. r504's first run (NVDA) completed the install and exited 2: setup_ec2 reattached
+#   control's tmux terminal, its closing login shell waited for input (closed by hand), and it shredded bootstrap.sh
+#   while bash was still reading it. The operator: "Yes, that way each one is clean and intentional". The bootstrap now
+#   carries OT_INSTALL_MODE=controller (a tree whose template has no such line predates the mode and is REFUSED, rc 8),
+#   so setup_ec2 attaches no terminal, prints no account number, leaves the shred to control and ends with exactly
+#   "INSTALL OK <sha>"; the box script requires that line naming the pin, and the install's exit 0, and shreds the
+#   bootstrap itself once the install has exited. The log is written line by line (sed -u). Gate:
+#   tests/check_fleet_reinstall.py v1.1.
 # v0.13.0 (2026-10-25) — r504 / OPS.69 — `reinstall --sha` IS A REPOINT PLUS THE FULL BOOTSTRAP INSTALL, IN PLACE.
 #   The operator, 2026-10-25: "Shouldn't the repoint consist of a full bootstrap install and then I just go in to make
 #   the env changes, clear cache & restart services?"; "That's how it was done in the past"; "Yes, before we do NVDA".
@@ -563,6 +572,7 @@ if not all(env.get(k) for k in need) or not env.get("OT_INSTRUMENT"):
 keys = set(os.environ["KEYS"].split())
 tpl = open(os.environ["TPL"]).read().splitlines()
 out = []
+mode_set = False
 for l in tpl:
     m = re.match(r'^export ([A-Z0-9_]+)=', l)
     if m and m.group(1) in keys:
@@ -573,7 +583,12 @@ for l in tpl:
         l = 'export OT_CLAUDE_AT_BOOT="0"'
     elif m and m.group(1) == "OT_CLAUDE_SETTINGS":
         l = 'export OT_CLAUDE_SETTINGS="pull-only"'
+    elif m and m.group(1) == "OT_INSTALL_MODE":
+        l = 'export OT_INSTALL_MODE="controller"'
+        mode_set = True
     out.append(l)
+if not mode_set:
+    sys.exit(18)
 sys.stdout.write("\n".join(out) + "\n")
 """
 _REINSTALL_SCRIPT = r"""
@@ -602,14 +617,15 @@ sudo cat /etc/systemd/system/@SERVICE@.service | SHA="$SHA" TPL="$HOME/options-t
 rc=$?
 rm -f "$PYF"
 if [ $rc -ne 0 ]; then shred -u ~/bootstrap.sh 2>/dev/null; rm -f ~/bootstrap.sh
-  [ $rc -eq 17 ] && echo "the unit lacks OT_INSTRUMENT or a TastyTrade credential - refused" \
-                 || echo "bootstrap build failed rc=$rc"; exit 16; fi
+  [ $rc -eq 17 ] && { echo "the unit lacks OT_INSTRUMENT or a TastyTrade credential - refused"; exit 16; }
+  [ $rc -eq 18 ] && { echo "this tree's bootstrap.example.sh has no OT_INSTALL_MODE (it predates OTV5 r17) - refused"; exit 8; }
+  echo "bootstrap build failed rc=$rc"; exit 16; fi
 echo "bootstrap built for $SYM at $SHA (credentials from this box's own unit; never printed)"
 # detached in tmux: a dropped SSH connection cannot kill the install halfway (and tmux sets $TMUX, so the template
 # does not re-exec itself into an attached session); stdin is /dev/null, so setup_ec2's closing login shell exits
 rm -f ~/reinstall.rc
 cat > ~/reinstall_run.sh <<'__REINSTALL_RUN__'
-cd ~ && bash ~/bootstrap.sh < /dev/null 2>&1 | sed -E 's/(TT Account: *).*/\1<redacted>/' > ~/reinstall.log
+cd ~ && bash ~/bootstrap.sh < /dev/null 2>&1 | sed -u -E 's/(TT Account: *).*/\1<redacted>/' > ~/reinstall.log
 echo "${PIPESTATUS[0]}" > ~/reinstall.rc
 shred -u ~/bootstrap.sh 2>/dev/null; rm -f ~/bootstrap.sh ~/install.sh ~/reinstall_run.sh
 __REINSTALL_RUN__
@@ -625,7 +641,10 @@ RC=$(cat ~/reinstall.rc 2>/dev/null)
 tail -n 25 ~/reinstall.log | grep -vE "TT_|TELEGRAM_|SECRET|TOKEN"
 echo "units: @SERVICE@=$(systemctl is-enabled @SERVICE@)/$(systemctl is-active @SERVICE@) candle-feed=$(systemctl is-enabled candle-feed)/$(systemctl is-active candle-feed) claude-boot=$(systemctl is-enabled optbot-claude-boot.service 2>/dev/null || echo absent)"
 echo "head: $(git -C @DIR@ rev-parse --short HEAD)"
-grep -q "Every step completed" ~/reinstall.log && [ "${RC:-1}" = 0 ] && echo "@OK@ $SHA" || { echo "install rc=${RC:-?} - see ~/reinstall.log on the box"; exit 18; }
+LAST=$(grep -E "^INSTALL (OK|FAILED)" ~/reinstall.log | tail -1)
+echo "result: ${LAST:-none}"
+[ "$LAST" = "INSTALL OK $SHA" ] && [ "${RC:-1}" = 0 ] && echo "@OK@ $SHA" \
+  || { echo "install rc=${RC:-?}, result '${LAST:-none}' - see ~/reinstall.log on the box"; exit 18; }
 """
 
 

@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """
-tests/check_fleet_reinstall.py  v1.0
+tests/check_fleet_reinstall.py  v1.1
+v1.1  2026-10-25  dtp r505 / OPS.70 — THE CONTROLLER MODE. I4 now also requires OT_INSTALL_MODE=controller; the fake
+      install answers like setup_ec2 v5.2 (one "INSTALL OK <sha>" line in controller mode). I10: a tree whose template
+      has no OT_INSTALL_MODE (before OTV5 r17) is refused (rc 8) and nothing is installed. I11: an install that ends
+      "Every step completed" with no INSTALL OK line naming the pin is a FAILURE (rc 18) - r504 judged by that phrase.
+      BORN RED on dtp a8a34ec (r504) at I4, I10, I11.
 v1.0  2026-10-25  dtp r504 / OPS.69 — `fleet.py reinstall`: THE BOOTSTRAP INSTALL, IN PLACE, RUN FOR REAL ON A FAKE BOX.
       The generated box script (fleet._reinstall_cmd) is executed by bash in a scratch HOME: ~/options-trader is a git
       checkout at the pin holding a bootstrap template shaped like OTV5's; sudo maps /etc/systemd/system to a fixture
@@ -19,6 +24,8 @@ v1.0  2026-10-25  dtp r504 / OPS.69 — `fleet.py reinstall`: THE BOOTSTRAP INST
   I7  a box whose push is installed is DRAINED first; a drain that is not OK refuses (rc 15) before any bootstrap
   I8  cmd_reinstall refuses without exactly one --only box or without --sha (rc 2), and a repoint that fails stops it
       before the install (phase 3 never runs)
+  I10 a tree whose template has no OT_INSTALL_MODE is refused (rc 8)
+  I11 success is the 'INSTALL OK <pin>' line and exit 0, never the phrase 'Every step completed'
   I9  the install runs DETACHED in tmux session 'reinstall' (a dropped SSH cannot kill it) and the box waits for it
 Run:  python3 tests/check_fleet_reinstall.py   (OT_TPL=<path to an OTV5 bootstrap.example.sh>, default: a fixture)
 """
@@ -49,6 +56,7 @@ TEMPLATE = """#!/bin/bash
 export OT_INSTRUMENT="REPLACE_ME"
 export OT_RISK_USD="200"
 export OT_GIT_REF="main"
+export OT_INSTALL_MODE="unattended"
 export TT_CLIENT_SECRET="REPLACE_ME"
 export TT_REFRESH_TOKEN="REPLACE_ME"
 export TT_ACCOUNT_NUMBER="REPLACE_ME"
@@ -78,10 +86,12 @@ CURL = r'''#!/bin/bash
 out=""; while [ $# -gt 0 ]; do [ "$1" = -o ] && { out="$2"; shift; }; shift; done
 cat > "$out" <<'INST'
 #!/bin/bash
-env | grep -E '^(OT_INSTRUMENT|TT_CLIENT_SECRET|TT_REFRESH_TOKEN|TT_ACCOUNT_NUMBER|TELEGRAM_TOKEN|TELEGRAM_CHAT_ID|OT_GIT_REF|OT_CLAUDE_AT_BOOT|OT_CLAUDE_SETTINGS)=' | sort > "$FAKE/seen"
+env | grep -E '^(OT_INSTALL_MODE|OT_INSTRUMENT|TT_CLIENT_SECRET|TT_REFRESH_TOKEN|TT_ACCOUNT_NUMBER|TELEGRAM_TOKEN|TELEGRAM_CHAT_ID|OT_GIT_REF|OT_CLAUDE_AT_BOOT|OT_CLAUDE_SETTINGS)=' | sort > "$FAKE/seen"
 stat -c %a "$HOME/bootstrap.sh" > "$FAKE/mode"
 echo "  TT Account:  $TT_ACCOUNT_NUMBER"
 echo "  Every step completed"
+[ "$OT_INSTALL_MODE" = controller ] && [ -z "$NO_RESULT" ] && echo "INSTALL OK $OT_GIT_REF"
+exit 0
 INST
 exit 0
 '''
@@ -93,7 +103,7 @@ exit 0
 S3PUSH = 'import os\nprint("DRAIN sym=X " + ("OK" if os.environ.get("DRAIN_OK") else "SHORT 3"))\n'
 
 
-def box(unit_keys=None, open_trades=0, head_is_pin=True):
+def box(unit_keys=None, open_trades=0, head_is_pin=True, template=None):
     tmp = tempfile.mkdtemp(prefix="reinstall_")
     home, fake = os.path.join(tmp, "home"), os.path.join(tmp, "fake")
     tree = os.path.join(home, "options-trader")
@@ -101,7 +111,11 @@ def box(unit_keys=None, open_trades=0, head_is_pin=True):
     os.makedirs(os.path.join(fake, "etc"))
     os.makedirs(os.path.join(fake, "bin"))
     tpl = os.environ.get("OT_TPL")
-    shutil.copy(tpl, os.path.join(tree, "bootstrap.example.sh")) if tpl else \
+    if template is not None:
+        open(os.path.join(tree, "bootstrap.example.sh"), "w").write(template)
+    elif tpl:
+        shutil.copy(tpl, os.path.join(tree, "bootstrap.example.sh"))
+    else:
         open(os.path.join(tree, "bootstrap.example.sh"), "w").write(TEMPLATE)
     open(os.path.join(tree, "warehouse", "s3_push.py"), "w").write(S3PUSH)
     c = sqlite3.connect(os.path.join(tree, "trades.db"))
@@ -163,7 +177,8 @@ def main():
     rc, out = run_box(home, fake, pin)
     seen = open(os.path.join(fake, "seen")).read().splitlines() if os.path.exists(os.path.join(fake, "seen")) else []
     want = sorted(["%s=%s" % kv for kv in SECRETS.items()] + ["OT_INSTRUMENT=NVDA", "OT_GIT_REF=" + pin,
-                                                               "OT_CLAUDE_AT_BOOT=0", "OT_CLAUDE_SETTINGS=pull-only"])
+                                                               "OT_CLAUDE_AT_BOOT=0", "OT_CLAUDE_SETTINGS=pull-only",
+                                                               "OT_INSTALL_MODE=controller"])
     check("I4 the install gets exactly the unit's symbol and credentials, the full pin, Claude off at boot, pull-only",
           rc == 0 and seen == want and fleet._SENTINEL_REINSTALL_OK in out, f"rc {rc}\n{seen}\n{out[-400:]}")
     log = open(os.path.join(home, "reinstall.log")).read() if os.path.exists(os.path.join(home, "reinstall.log")) else ""
@@ -211,11 +226,24 @@ def main():
           (r_a, r_b, r_c) == (2, 2, 2) and r_d == 1 and not ran and calls and calls[-1].get("sha") == "054f431",
           f"{r_a} {r_b} {r_c} {r_d} ran={len(ran)}")
 
+    tmp, home, fake, pin = box(template=TEMPLATE.replace('export OT_INSTALL_MODE="unattended"\n', ""))
+    rc, out = run_box(home, fake, pin)
+    check("I10 a template without OT_INSTALL_MODE (before OTV5 r17) is refused (rc 8), nothing installed",
+          rc == 8 and not os.path.exists(os.path.join(fake, "seen")) and not os.path.exists(os.path.join(home, "bootstrap.sh")),
+          f"rc {rc} {out[-200:]}")
+    shutil.rmtree(tmp, True)
+
+    tmp, home, fake, pin = box()
+    rc, out = run_box(home, fake, pin, NO_RESULT=1)
+    check("I11 'Every step completed' with no 'INSTALL OK <pin>' line is a failure (rc 18)",
+          rc == 18 and fleet._SENTINEL_REINSTALL_OK not in out, f"rc {rc} {out[-200:]}")
+    shutil.rmtree(tmp, True)
+
     scr = fleet._reinstall_cmd("054f431")
     check("I9 the install runs detached in tmux session 'reinstall', and the box waits for its rc",
           'tmux new-session -d -s reinstall' in scr and "while [ ! -f ~/reinstall.rc ]" in scr)
 
-    print("\n%s" % ("GREEN — I1-I9" if not PROBLEMS else "RED — " + ", ".join(p.split()[0] for p in PROBLEMS)))
+    print("\n%s" % ("GREEN — I1-I11" if not PROBLEMS else "RED — " + ", ".join(p.split()[0] for p in PROBLEMS)))
     return 1 if PROBLEMS else 0
 
 
