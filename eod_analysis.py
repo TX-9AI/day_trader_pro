@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/eod_analysis.py  v1.4
+day_trader_pro/eod_analysis.py  v1.5
+v1.5  2026-10-26 — dtp r513 / STRM.1 — THE STREAMS WARNING COUNTS GAP ROWS, NOT THE SUMMARY LINE. warehouse_coverage ends its
+      board with "🔴 N stream-day(s) need an answer.", and the warning counted every 🔴 line, so one gap read "2 gap(s)"
+      (2026-10-26: one ohlc row) and two read "3". _stream_gaps() counts the 🔴 rows only. The rows still print as before.
 v1.4  2026-09-05 — dtp r287 / TZ.1 — the naive `today` here asked a UTC box and rolled at 20:00 ET (19:00 in winter), so a report run after that silently asked for
       TOMORROW and came back empty. It now goes through `ettime`, the one ET/UTC boundary.
 
@@ -147,6 +150,11 @@ def _phase(name, fn, warns, *a, **kw):
     except Exception as exc:                                    # noqa: BLE001
         _warn(warns, name, f"raised: {exc}")
         return None
+
+
+def _stream_gaps(flagged) -> int:
+    """r513 (STRM.1) — the 🔴 STREAM ROWS, not warehouse_coverage's own "🔴 N stream-day(s) need an answer." summary."""
+    return len([l for l in flagged if "🔴" in l and "need an answer" not in l])
 
 
 def run(date: str, dry: bool) -> int:
@@ -327,7 +335,7 @@ def run(date: str, dry: bool) -> int:
             _log("STREAMS", "✅ every stream had every box it owes")
         else:
             _warn(warns, "STREAMS",
-                  f"rc={r.returncode} — {len([l for l in flagged if '🔴' in l])} "
+                  f"rc={r.returncode} — {_stream_gaps(flagged)} "
                   f"gap(s), {len([l for l in flagged if '❗' in l])} stale "
                   f"exemption(s); see the rows above")
 
