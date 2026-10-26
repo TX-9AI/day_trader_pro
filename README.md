@@ -137,7 +137,8 @@ concurs/swaps on the reporter's own ranking, and the count is deterministic.
 | `excursion_report.py` | v3.1 — MFE/MAE excursion report from the per-symbol DB snapshots; `--since` cumulative; live variant via `DTP_EXCURSION_LIVE=1`; two-population never-favorable split, floor sweep, leash verdict (incl. `insurance_stop`), and an unreported-reasons audit |
 | `trade_report.py` / `standings.py` | trade and standings views over the consolidated data |
 | `shutdown_manager.py` | manual/backstop stop sweep (no P&L) |
-| `ssh_util.py` | shared SSH helper |
+| `ssh_util.py` | shared SSH helper (v0.7.0: `ssh_argv`, the one ssh invocation) |
+| `pager.py` | v0.1.0 — PAGE.1: follows every running box's `[page]` lines in bot.log over ssh (one stream per box, catch-up on reconnect) and prints `<SYM> <CODE> [ref] @HH:MM:SS ET`; `--once` prints today's |
 | `fleet.py` | v0.6.0 — fleet SSH fan-out: list / ping / run (uses `pull_today_ohlc.sh` on-box for long pulls) |
 | `notify.py` | control-server Telegram |
 | `market_calendar.py` | trading-day gate |

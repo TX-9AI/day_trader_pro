@@ -1,4 +1,4 @@
-# day_trader_pro/ssh_util.py — v0.6.0
+# day_trader_pro/ssh_util.py — v0.7.0
 """
 Shared SSH helper. One place for the exact ssh invocation so eod_report and
 fleet behave identically (same key, user, timeouts, host-key policy).
@@ -7,6 +7,13 @@ Keyed, non-interactive (BatchMode), auto-trusts new hosts on first contact.
 Returns (returncode, stdout, stderr); never raises.
 
 Changelog:
+  v0.7.0 (2026-10-26) — PAGE.1. ADD ssh_argv(): THE ssh INVOCATION ssh_run
+    ALWAYS BUILT, NAMED, SO A CALLER THAT HOLDS A STREAM RATHER THAN RUNNING A
+    COMMAND (pager.py follows bot.log on every box) gets the same key, user,
+    BatchMode, host-key policy and ConnectTimeout instead of a second copy.
+    ssh_run now builds its argv here; the argv is byte-identical (check_ssh_budget
+    S2 reads it).
+
   v0.6.0 (2026-09-20) — r406 / [[OPS.32]], [[S3.19]]. A COMMAND BUDGET THAT
     WAS A CONNECT TIMEOUT WEARING A DIFFERENT HAT.
     🔴 AND IT WAS THREE FUNCTIONS, NOT ONE. `ssh_run`, `scp_push` and
@@ -121,6 +128,23 @@ MAX_FANOUT_WORKERS = int(__import__('os').environ.get("DTP_FANOUT_WORKERS", "16"
 SCP_TRANSFER_GRACE_S = 60
 
 
+def ssh_argv(ip, command, extra_opts=()):
+    """The ONE ssh argv: key, BatchMode, accept-new host keys, ConnectTimeout.
+
+    v0.7.0 (PAGE.1). `extra_opts` are further `-o` settings (e.g.
+    ServerAliveInterval for a long-lived stream), placed before the target.
+    """
+    cmd = [
+        "ssh", "-i", config.SSH_KEY_PATH,
+        "-o", "BatchMode=yes",
+        "-o", "StrictHostKeyChecking=accept-new",
+        "-o", f"ConnectTimeout={config.SSH_CONNECT_TIMEOUT}",
+    ]
+    for opt in extra_opts:
+        cmd += ["-o", opt]
+    return cmd + [f"{config.SSH_USER}@{ip}", command]
+
+
 def ssh_run(ip, command, timeout=None):
     """-> (rc, stdout, stderr). NEVER raises.
 
@@ -130,13 +154,7 @@ def ssh_run(ip, command, timeout=None):
     CONNECT + COMMAND because the wall clock has to cover both.
     """
     budget = timeout or config.SSH_COMMAND_TIMEOUT
-    cmd = [
-        "ssh", "-i", config.SSH_KEY_PATH,
-        "-o", "BatchMode=yes",
-        "-o", "StrictHostKeyChecking=accept-new",
-        "-o", f"ConnectTimeout={config.SSH_CONNECT_TIMEOUT}",
-        f"{config.SSH_USER}@{ip}", command,
-    ]
+    cmd = ssh_argv(ip, command)
     try:
         # 🔴 DECODE AS UTF-8 EXPLICITLY, AND NEVER RAISE ON A SPLIT CHARACTER.
         # ⚠️ `text=True` with no encoding uses the CONTROL SERVER'S LOCALE. The

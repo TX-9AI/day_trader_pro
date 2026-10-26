@@ -1,8 +1,22 @@
 #!/usr/bin/env python3
 """
 verify_creds_remote.py — RUNS ON EACH TRADING BOX. Pushed + executed by the
-control-side rotate_tokens.py (--verify, or auto after a rotation). v1.0 —
-2026-07-18.
+control-side rotate_tokens.py (--verify, or auto after a rotation). v1.1 —
+2026-10-26 (VER.1).
+
+v1.1  2026-10-26  dtp (VER.1) — THE GITHUB CHECK KNOWS AN OTV5 BOX NEVER PUSHES. The
+      operator's run at 10:20 ET on the first OTV5 paper day: 13 of 14 boxes
+      "GITHUB: FAIL — GitHub vars missing" and the one SUCCESS (SOFI) was the box
+      still carrying a stale GITHUB_REPO=TX-9AI/OTV4TEST and a token. An OTV5 box
+      holds NO token by design (bootstrap: GITHUB_TOKEN empty unless OT_GIT_PUSH=1),
+      so the check now reads the box's own origin and grades:
+        no token, GITHUB_REPO absent or == origin, origin public + reachable  -> SUCCESS
+        GITHUB_REPO set and != origin                                     -> FAIL (stale)
+        a token on a box without OT_GIT_PUSH=1                            -> FAIL (a box never pushes)
+        token + push box -> the authenticated call, as v1.0.
+      Also: the Telegram probe names the box (it read only the ambient env and sent
+      "creds verify — ?"), and `_env` reads quoted Environment="VAR=..." unit lines.
+v1.0  2026-07-18.
 
 WHAT IT PROVES (functional, not just "landed"):
   Landing-verification (rotate_tokens --audit) shows a var is SET with the right
@@ -58,19 +72,33 @@ BOT_UNIT = "/etc/systemd/system/optionsbot.service"
 
 def _env(var):
     """Value from ambient env, falling back to the bot unit's Environment= line
-    (so this works whether or not systemd exported it to our process)."""
+    (so this works whether or not systemd exported it to our process).
+    v1.1: the unit writes both Environment=VAR=v and Environment="VAR=v"."""
     v = os.environ.get(var)
     if v:
         return v
     try:
         out = subprocess.run(
-            ["sudo", "grep", f"^Environment={var}=", BOT_UNIT],
+            ["sudo", "grep", "-E", f'^Environment="?{var}=', BOT_UNIT],
             capture_output=True, text=True, timeout=10).stdout.strip()
         if out:
-            return out.split("=", 2)[2]
+            line = out.splitlines()[0]
+            return line.split("=", 2)[2].rstrip('"') or None
     except Exception:
         pass
     return None
+
+
+def _origin_repo():
+    """owner/repo of the box's own checkout origin (credentials stripped), or None."""
+    try:
+        url = subprocess.run(["git", "-C", REPO_DIR, "remote", "get-url", "origin"],
+                             capture_output=True, text=True, timeout=10).stdout.strip()
+    except Exception:
+        return None
+    import re
+    m = re.search(r"github\.com[:/]+([^/]+/[^/]+?)(?:\.git)?/?$", url)
+    return m.group(1) if m else None
 
 
 def check_tastytrade():
@@ -127,7 +155,7 @@ def check_telegram():
     try:
         data = urllib.parse.urlencode({
             "chat_id": chat,
-            "text": f"✅ creds verify — {os.environ.get('OT_INSTRUMENT', '?')}",
+            "text": f"✅ creds verify — {_env('OT_INSTRUMENT') or '?'}",
         }).encode()
         with urllib.request.urlopen(
                 f"https://api.telegram.org/bot{token}/sendMessage",
@@ -144,24 +172,32 @@ def check_telegram():
 def check_github():
     token = _env("GITHUB_TOKEN")
     repo = _env("GITHUB_REPO")   # "owner/repo"
-    if not (token and repo):
-        return False, "GitHub vars missing"
-    req = urllib.request.Request(
-        f"https://api.github.com/repos/{repo}",
-        headers={"Authorization": f"Bearer {token}",
-                 "Accept": "application/vnd.github+json",
-                 "User-Agent": "vertigo-creds-verify"})
+    origin = _origin_repo()
+    if not origin:
+        return False, "origin is not a github.com repo (or unreadable)"
+    if repo and repo.lower() != origin.lower():
+        return False, f"GITHUB_REPO {repo} != origin {origin} (stale)"
+    if token and _env("OT_GIT_PUSH") != "1":
+        return False, f"a GitHub token is stored on a pull-only box (OT_GIT_PUSH != 1); origin {origin}"
+    headers = {"Accept": "application/vnd.github+json",
+               "User-Agent": "vertigo-creds-verify"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    req = urllib.request.Request(f"https://api.github.com/repos/{origin}", headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=15) as r:
             body = json.loads(r.read())
-            if body.get("full_name", "").lower() == repo.lower():
-                return True, f"repo {repo} reachable"
-            return True, "authenticated (repo name differs)"
+            if body.get("full_name", "").lower() != origin.lower():
+                return True, f"reachable (GitHub names it {body.get('full_name')})"
+            if token:
+                return True, f"repo {origin} reachable (push box, token valid)"
+            return True, f"pull-only, no token (by design); origin {origin} reachable"
     except urllib.error.HTTPError as e:
         if e.code == 401:
             return False, "401 — token invalid/expired"
         if e.code == 404:
-            return False, "404 — token lacks access or repo wrong"
+            return False, (f"404 — {origin} not reachable"
+                           + ("" if token else " without a token (private?)"))
         return False, f"HTTP {e.code}"
     except Exception as e:
         return False, f"request failed: {type(e).__name__}"
