@@ -1,4 +1,8 @@
-# day_trader_pro/ec2ops.py — v0.1.4
+# day_trader_pro/ec2ops.py — v0.1.5
+# v0.1.5 (2026-10-25) — (OPS.30) — RUN AS A SCRIPT, IT REFUSES. This is a library (describe_by_names, start, stop, ...)
+#   with no CLI, yet the handoff and settings.json name it as an entry point, and `python3 ec2ops.py start --only AMD`
+#   exited 0 with zero bytes on stdout and stderr - read as "started". A `__main__` now prints a usage line naming the
+#   real entry points (wake_and_bake.py, fleet.py) to stderr and exits 2. Nothing is called; importing is unchanged.
 # v0.1.4 (2026-09-24) — r424 / OPS.48. THE POWER LEDGER, WRITTEN AT THE
 #   CHOKEPOINT RATHER THAN AT THE ERGONOMIC PATH. Every start and stop now
 #   appends who/what/when/scope to logs/fleet_power.log.
@@ -347,3 +351,23 @@ def _name_tag(inst):
 def _rank(state):
     order = {"running": 3, "pending": 2, "stopping": 1, "stopped": 1}
     return order.get(state, 0)
+
+
+# --------------------------------------------------------------------------
+# OPS.30 — not a CLI. Run directly, refuse loudly instead of exiting 0 silent.
+# --------------------------------------------------------------------------
+USAGE = (
+    "ec2ops.py is a library (describe_by_names, describe_by_tag, start, stop), not a command.\n"
+    "Nothing was started or stopped. Use:\n"
+    "  python3 wake_and_bake.py --wake-only --only <SYM>   # wake boxes\n"
+    "  python3 fleet.py list | ping | update ...           # fleet operations\n"
+)
+
+
+def _main(argv=None):
+    sys.stderr.write(USAGE)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(_main(sys.argv[1:]))

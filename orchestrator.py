@@ -1,4 +1,9 @@
-# day_trader_pro/orchestrator.py — v0.8.0
+# day_trader_pro/orchestrator.py — v0.8.1
+# v0.8.1 (2026-10-25) — (CTL.1) — THE PARITY LINE'S CONTROL TWIN IS `~/OTV5`. CONTROL_REPO defaulted to
+#   `~/options-trader-v3`, which does not exist on control, so `_fleet_parity` never found a `.git`, never asked
+#   origin, and every wake's parity line read "vs consensus" - a fleet uniformly behind origin read as 14/14 in step.
+#   The fleet runs OTV5 (r508 OTV5_SINCE 2026-10-25) and control's checkout of it is ~/OTV5. DTP_CONTROL_REPO still
+#   overrides.
 # v0.8.0 (2026-09-26) — r431 / OPS.55. THE MORNING PATH STOPS CARRYING A PRIOR
 #   NOTHING READS. Operator, 2026-09-25: *"the market brief never actually
 #   correlated with the days Trading — it was Information, but there was no
@@ -400,7 +405,7 @@ def _load_selection():
 
 BOX_REPO = _os.environ.get("DTP_BOX_REPO", "options-trader")   # box-side checkout
 CONTROL_REPO = _os.environ.get("DTP_CONTROL_REPO",
-                               "~/options-trader-v3")            # control-side twin
+                               "~/OTV5")                         # control-side twin (CTL.1: was the absent v3)
 
 
 def _fleet_parity(resolved, reached):

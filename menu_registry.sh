@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# day_trader_pro/menu_registry.sh — v1.25
+# day_trader_pro/menu_registry.sh — v1.26
+# v1.26 (2026-10-25) — DEV.3. Service status's label names the OTV5 units: bot + feed + s3-push (no shadow-observer on OTV5).
 # v1.25 (2026-10-25) — dtp r509 / OPS.74. Instance map's label says it reads EC2 live.
 # v1.24 (2026-10-25) — dtp r507 / OPS.72. REPOINT the fleet's label says it asks for a pin and installs.
 # v1.23 (2026-10-25) — dtp r506 / OPS.71. THE REPOINT SECTION INSTALLS TOO: `REPOINT / INSTALL`. Two items after REPOINT
@@ -271,7 +272,7 @@ MENU=(
   "ITEM|Order flow            (aggression + depth)|mi_sensor_order_flow"
 
   "SECTION|DEBUG / LOGS (remote; one/all/some)"
-  "ITEM|Service status (bot + feed + shadow)|mi_service_status_bot_candle_feed"
+  "ITEM|Service status (bot + feed + s3-push)|mi_service_status_bot_candle_feed"
   "ITEM|Journal tail (last N)|mi_journal_tail_last_n"
   "ITEM|Feed health (store freshness)|mi_feed_health_store_freshness"
   "ITEM|Bot log tail (last 20)|mi_bot_log_tail_last_20"

@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-# day_trader_pro/warehouse_cache.py — v1.8
+# day_trader_pro/warehouse_cache.py — v1.9
+# v1.9 (2026-10-25) — (S3.29) — A STALE SCRATCH DIRECTORY IS RECLAIMED AT STARTUP. Cleanup ran from the context
+#   manager, atexit and SIGINT/SIGTERM, and none of them survives SIGKILL - the kill this box actually takes (the OOM
+#   reaper, systemd's TimeoutStartSec) - so a run that died for want of memory or time left its scratch behind
+#   (450 MB from one butterfly study, found 2026-09-11). The first WarehouseCache of a process now sweeps the scratch
+#   root: a directory is OURS only if it carries this module's `.warehouse_cache` marker (written at creation, with
+#   the pid) or holds nothing but `cache.db*` (the pre-v1.9 shape); it is removed only when its newest mtime is older
+#   than DTP_CACHE_STALE_H (default 12 h) AND its marker's pid is not alive AND this process does not own it. Anything
+#   else in the root (/var/tmp, $HOME) is never touched. Each removal is named on stderr. DTP_CACHE_SWEEP=0 disables.
 # v1.8 (2026-10-11) — r479 / OPS.22 — zone "US/Eastern" -> "America/New_York": the legacy link tzdata 2026c moved out of the default install. Same rules; no behaviour change.
 # v1.7 (2026-09-23) — dtp r417 / WH.20. 🔴 v1.6 BUILT THE FORWARD SCAN AND THEN
 #   GATED IT AWAY FROM THE STREAMS THAT NEEDED IT MOST. The window was armed
@@ -143,6 +151,7 @@ import signal
 import sqlite3
 import sys
 import tempfile
+import time
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -240,6 +249,67 @@ def _sweep(*_a):
 
 
 atexit.register(_sweep)
+
+
+# ── 🔴 v1.9 / S3.29 — SIGKILL LEAVES SCRATCH; THE NEXT RUN RECLAIMS IT ─────
+MARKER = ".warehouse_cache"
+_SWEPT = False
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except Exception:                                           # noqa: BLE001
+        return True              # EPERM etc: it exists, it is not ours to judge
+    return True
+
+
+def sweep_stale(root: str, stale_s: float | None = None, now: float | None = None) -> list:
+    """Remove this module's orphaned scratch directories under `root`.
+
+    Ours = a `.warehouse_cache` marker, or nothing but `cache.db*` (pre-v1.9).
+    Stale = newest mtime older than `stale_s`, no live marker pid, not ours now.
+    Returns the paths removed; never raises.
+    """
+    if stale_s is None:
+        stale_s = float(os.environ.get("DTP_CACHE_STALE_H", "12")) * 3600.0
+    now = time.time() if now is None else now
+    removed = []
+    try:
+        names = os.listdir(root)
+    except Exception:                                           # noqa: BLE001
+        return removed
+    for name in names:
+        p = os.path.join(root, name)
+        try:
+            if os.path.islink(p) or not os.path.isdir(p) or p in _ACTIVE:
+                continue
+            entries = os.listdir(p)
+            ours = MARKER in entries or (
+                "cache.db" in entries
+                and all(e == "cache.db" or e.startswith("cache.db-") for e in entries))
+            if not ours:
+                continue
+            if MARKER in entries:
+                try:
+                    pid = int(open(os.path.join(p, MARKER)).read().split()[0])
+                except Exception:                               # noqa: BLE001
+                    pid = 0
+                if pid and pid != os.getpid() and _pid_alive(pid):
+                    continue
+            newest = max([os.path.getmtime(p)]
+                         + [os.path.getmtime(os.path.join(p, e)) for e in entries])
+            if now - newest < stale_s:
+                continue
+            shutil.rmtree(p)
+            removed.append(p)
+        except Exception:                                       # noqa: BLE001
+            continue
+    for p in removed:
+        sys.stderr.write(f"warehouse_cache: removed stale scratch {p} (orphaned by a killed run; S3.29)\n")
+    return removed
 for _sig in (signal.SIGINT, signal.SIGTERM):
     try:
         _prev = signal.getsignal(_sig)
@@ -292,8 +362,18 @@ class WarehouseCache:
     """
 
     def __init__(self, label: str = "wh"):
-        self.root = tempfile.mkdtemp(prefix=f"{label}_", dir=choose_scratch())
+        global _SWEPT
+        scratch = choose_scratch()
+        if not _SWEPT and os.environ.get("DTP_CACHE_SWEEP", "1") != "0":
+            _SWEPT = True                     # v1.9 / S3.29: once per process
+            sweep_stale(scratch)
+        self.root = tempfile.mkdtemp(prefix=f"{label}_", dir=scratch)
         _ACTIVE.append(self.root)
+        try:
+            with open(os.path.join(self.root, MARKER), "w") as fh:
+                fh.write(f"{os.getpid()}\n")
+        except Exception:                                       # noqa: BLE001
+            pass
         self.path = os.path.join(self.root, "cache.db")
         self.conn = sqlite3.connect(self.path)
         self.conn.row_factory = sqlite3.Row

@@ -1,6 +1,16 @@
 #!/usr/bin/env python3
 """
-tests/check_scratch_purge.py  v1.2
+tests/check_scratch_purge.py  v1.3
+v1.3  2026-10-25  OPS.27 — P9/P10 RE-ANCHORED ON THE r469 LAUNCH LINES.
+      dtp r469 (OPS.66) put `--remote-control '$RC_NAME'` between `$CLAUDE` and
+      the prompt / `--continue` / `--resume` on all six launch lines, so both
+      regexes matched ZERO sites and P9/P10 went red on correct menus (20/23).
+      The anchors now allow any `--flag 'value'` pairs after `$CLAUDE`, and each
+      check also demands the exact site count it was written for (P9 two HAND OFF
+      lines, P10 four RESUME lines), so a future launch-line change reds as
+      "N sites" instead of passing or failing on the wrong set. P12 is OPS.29's
+      debt register and is untouched: it stays red while authored Saturday briefs
+      sit in handoffs/.
 v1.2  2026-09-23  r422 / OPS.46 — P19..P22 FOR BUILD-CLONE PRUNING.
       🔑 P20 DECIDES WHETHER THE FEATURE SHIPS, and it exists because of the
       operator's objection rather than my design: *"I don't want future agents
@@ -342,8 +352,10 @@ else:
 
 # ── P9 · HAND OFF calls it BEFORE claude, separated by `;` not `&&` ─────────
 menu = open(MENU).read() if os.path.exists(MENU) else ""
-sites = re.findall(r'"([^"]*\$CLAUDE \'Read \$HO and follow it\.\'[^"]*)"', menu)
-ok9 = bool(sites) and all(
+# v1.3 (OPS.27): `$CLAUDE` may carry `--flag 'value'` pairs (r469 --remote-control).
+_FLAGS = r"(?:--[\w-]+ '[^']*' )*"
+sites = re.findall(r'"([^"]*\$CLAUDE ' + _FLAGS + r'\'Read \$HO and follow it\.\'[^"]*)"', menu)
+ok9 = len(sites) == 2 and all(
     "scratch_purge.py" in s
     and s.index("scratch_purge.py") < s.index("$CLAUDE")
     and re.search(r"scratch_purge\.py[^;&]*;", s)
@@ -353,8 +365,8 @@ ck("P9", ok9, f"{len(sites)} HAND OFF launch site(s); each must run the purge "
               f"BEFORE claude and chain with `;` so a failure cannot stop it")
 
 # ── P10 · RESUME AND RESUME [other] DO NOT PURGE — the operator's spec ──────
-res_sites = re.findall(r'"(env -u ANTHROPIC_API_KEY \$CLAUDE --(?:continue|resume)[^"]*)"', menu)
-ck("P10", bool(res_sites) and not any("scratch_purge" in s for s in res_sites),
+res_sites = re.findall(r'"(env -u ANTHROPIC_API_KEY \$CLAUDE ' + _FLAGS + r'--(?:continue|resume)[^"]*)"', menu)
+ck("P10", len(res_sites) == 4 and not any("scratch_purge" in s for s in res_sites),
    f"{len(res_sites)} resume launch site(s) — a --continue session must NEVER "
    f"purge: it exists to preserve continuity, which is the worst moment to "
    f"remove working artifacts")

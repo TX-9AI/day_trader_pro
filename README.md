@@ -1,7 +1,10 @@
 # day_trader_pro
 
+_README updated 2026-10-25 (DOC.7): the fleet runs **OTV5**, not options_trader_v3._
+
 Autonomous control layer that unifies **market_brief_v1** (the morning research
-brief) and the **options_trader_v3** trading fleet into one supervised daily
+brief) and the **OTV5** trading fleet (`TX-9AI/OTV5`; every box since its
+2026-10-25 repoint — `strategy_registry.OTV5_SINCE`) into one supervised daily
 system. It runs on the always-on **reporter box (`1-REPORTER`)**, which doubles
 as the control server.
 
@@ -9,10 +12,12 @@ The repos stay independent. day_trader_pro ties them together at runtime through
 thin seams: a `report.json` file (produced by the brief, read by the
 orchestrator), EC2 instance tags (`Project=day_trader`), and the EOD
 harvest/replay chain that pulls each box's tape and trade DB back to control.
-Nothing is merged. The control checkout of the trading engine
-(`~/options-trader-v3`) is an **inert library** — no credentials, no live path —
-pulled fresh so the offline replay scores tape with the same engines the fleet
-runs (**the parity invariant**).
+Nothing is merged. The control checkout of the trading repo is **`~/OTV5`**
+(`orchestrator.CONTROL_REPO`, override `DTP_CONTROL_REPO`) — no credentials, no
+live path; the wake's parity line compares every box's HEAD with its origin
+(**the parity invariant**). The old `~/options-trader-v3` checkout no longer
+exists on control, and `~/options-trader-v4` is retired as trading code (some
+dtp tools still read it — `DTP_OTV4_DIR`).
 
 ---
 
@@ -71,9 +76,10 @@ aggregation. Protect it (see "Protect the EOD chain" below).
   Worst case is a 2-box day, never an over-exposed one.
 - **Keyless where it counts.** AWS actions use an IAM instance role. SSH pulls
   use one locked-down `.pem` on control.
-- **Parity invariant.** Fleet boxes (`~/options-trader`) and the control
-  checkout (`~/options-trader-v3`) must run the same engine commit — pull +
-  `check_versions.sh` on control right after any fleet deploy.
+- **Parity invariant.** Fleet boxes (`~/options-trader`, an OTV5 checkout) and
+  the control checkout (`~/OTV5`) must run the same commit — the morning wake
+  reports it (`orchestrator._fleet_parity`, vs origin), and OTV5's
+  `deploy/check_versions.sh` checks a checkout against origin.
 - **Protect the EOD chain.** It is finally flawless. The pending offline-replay
   **bookmark** (rolling HTF bar window, options_trader_v3 defect S) must be
   built and proven inert on the tester before it is grafted onto
@@ -145,13 +151,13 @@ concurs/swaps on the reporter's own ranking, and the count is deterministic.
 | `devtools.sh` | **v1.22** — the operator menu: mock spool-up, EOD, fleet ops, option 23 FULL wake→bake→restart→STOP deploy, 25 bake-only (RTH-safe sync, no restart), **27 EMERGENCY STOP**, 39 manual consolidation re-run, 40 excursion report, 41 trade breakdown, 42–46 regime replay/diary/backfill, 47 A2 co-occurrence + HTF drift, 48 live P&L, 49 backfill missing OHLC, 50 EOD conductor, 51 OHLC 21-day fetch, 52 rotate fleet tokens, 53 audit creds, 54 Verify. (Numbering is post-v1.18, which renumbered the whole menu sequentially — items had drifted as features were appended. Banner/header drift fixed 2026-07-23; v1.21's unbound-variable regression fixed in v1.22.) (Menu items run as child processes — they cannot `cd` your shell; use `alias otv3='cd ~/options-trader-v3 && source venv/bin/activate'`.) |
 | `tests/` | `backtest_harness.py` (21-day 1m tape harness), `ohlc_fetch.py` |
 
-Also control-side but living in the **options_trader_v3 repo**:
-`validate_regime.sh` (the Layer-1 regime replay the conductor calls — inert
-code library + read-only replay over the harvest tape; tape-only, never reads
-trades).
+Historically control-side in the **options_trader_v3 repo**:
+`validate_regime.sh` (the Layer-1 regime replay the v1 `eod_conductor.py`
+called). OTV5 carries no `validate_regime.sh`, and the live nightly is
+`eod_conductor_v2.py` (`dtp-eod-conductor.service`).
 
-On the **bot boxes** (options_trader_v3): `eod_summary.py` (writes the P&L
-file) and `notifications/alert_manager.py`. In **market_brief**:
+On the **bot boxes** (OTV5, `~/options-trader`): `tools/eod_summary.py` (writes
+the P&L file) and `notifications/alert_manager.py`. In **market_brief**:
 `report/emit.py` (writes `report.json`).
 
 ---
@@ -185,8 +191,8 @@ python notify.py --test               # Telegram works?
 ./devtools.sh                         # menu (23 deploy, 27 EMERGENCY STOP, 54 verify)
 
 # regime validation + Tier-B labeling (control-side, tape-only)
-~/options-trader-v3/validate_regime.sh              # replay TODAY's tape -> diary
-~/options-trader-v3/validate_regime.sh 2026-07-21   # a specific date
+# (validate_regime.sh lived in ~/options-trader-v3, which is gone from control;
+#  OTV5 has no counterpart)
 ./label_day.sh                        # EOD: tag trend/sweep/pin/breakout symbols
 ./label_day.sh --gaps                 # Tier-B shopping list
 ```
@@ -210,7 +216,9 @@ DTP_TELEGRAM_CHAT_ID=...
 DTP_REPORT_JSON=/home/ubuntu/day_trader_pro/data/report.json
 ANTHROPIC_API_KEY=...         # enables the concur/swap selection call
 DTP_EXCURSION_LIVE=1          # optional: add the live excursion report
-DTP_OTV3_DIR=...              # optional: options_trader_v3 checkout (default ~/options-trader-v3)
+DTP_CONTROL_REPO=...          # optional: control's trading checkout (default ~/OTV5)
+DTP_OTV4_DIR=...              # optional: otv4 checkout some R-suite tools still read (default ~/options-trader-v4)
+DTP_OTV3_DIR=...              # legacy: only the v1 eod_conductor.py reads it (default ~/options-trader-v3, absent)
 CT_FEES_RT_PER_CONTRACT=1.30  # optional: fee-adjust conditional-table expectancy
 DTP_CT_MIN_N=5                # optional: min sample before a cell is headline-eligible
 ```

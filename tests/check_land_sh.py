@@ -1,5 +1,14 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/check_land_sh.py — v1.12
+# day_trader_pro/tests/check_land_sh.py — v1.13
+# v1.13 (2026-10-25) — CHK.5. THE DEL SERIES IS DL1/DL1b/DL2/DL3, AND U1 PINS
+#   THAT EVERY ID IN THIS FILE IS UNIQUE. D1, D2 and D3 each named two
+#   assertions (the deploy.sh two-repo series and the r291 DEL series), so
+#   "D2 failed" was ambiguous. The deploy.sh series keeps D (it is the older
+#   reader of the letter, cited by A2's comment); the DEL series moves to DL.
+#   U1 reads this file's own AST — every `check("<ID> ...")` call, whether or
+#   not a fixture lets it run — and fails naming any id used twice: the
+#   mechanism check_backlog_ids D1 provides for the ledger. It runs FIRST, beside
+#   M1, so a crash later in the file cannot silence it. BORN RED on dtp 4fec59e: U1.
 # v1.12 (2026-10-24) — dtp r502 / OPS.19. O1-O4 DRIVE THE RESOLVER WITH TWO
 #   CHECKOUTS UNDER $HOME THAT BOTH CARRY THE MARKERS (a world the lander had
 #   never been shown): O1 no ORIGIN -> REFUSED, both named, neither tree touched;
@@ -321,7 +330,24 @@ def _head(repo):
     return _run("git log --format=%s -1", cwd=repo).stdout.strip()
 
 
+def _own_ids():
+    """CHK.5 — every literal id passed to check() in THIS file, by AST."""
+    import ast
+    ids = []
+    for node in ast.walk(ast.parse(open(os.path.abspath(__file__)).read())):
+        if (isinstance(node, ast.Call) and getattr(node.func, "id", None) == "check"
+                and node.args and isinstance(node.args[0], ast.Constant)
+                and isinstance(node.args[0].value, str)):
+            ids.append((node.args[0].value.split() or [""])[0])
+    return ids
+
+
 def main():
+    # 🔴 U1 (v1.13 / CHK.5) — this file's own check ids are unique.
+    _ids = _own_ids()
+    _dups = sorted({i for i in _ids if _ids.count(i) > 1})
+    check("U1 every check id in this file is unique",
+          len(_ids) > 50 and not _dups, f"{len(_ids)} ids; duplicated: {_dups}")
     # 🔴 M1 RUNS FIRST, AND ITS FIRST PLACEMENT WAS WRONG. It sat at the
     # END of this file, where the G2 traceback aborted the run before it
     # could speak — so in the exact state it exists to diagnose, it never
@@ -765,7 +791,7 @@ def main():
               r.returncode != 0 and _head(repo) == "base",
               f"rc={r.returncode}")
 
-    # ══ 🔴 D1-D3 — `DEL` (dtp r291) ══════════════════════════════════════
+    # ══ 🔴 DL1-DL3 — `DEL` (dtp r291; D1-D3 until v1.13 / CHK.5) ══════════════════════════════════════
     # A payload only ever ADDED or overwrote. Retiring a file meant the
     # operator deleting it by hand AFTER the land — outside the gate, outside
     # the commit, and outside the row that is supposed to say what changed.
@@ -773,33 +799,33 @@ def main():
         spec = GOOD + ["DEL MARKER"]
         home, repo, stage = _world(tmp, spec, extra=PASS_CHK)
         r = _land(home, stage)
-        check("D1 a DEL target is removed from the working tree",
+        check("DL1 a DEL target is removed from the working tree",
               r.returncode == 0 and not os.path.exists(os.path.join(repo, "MARKER")),
               f"rc={r.returncode}")
         # ⚠️ AND IT IS IN THE COMMIT, not merely gone from disk. A file deleted
         # but unstaged leaves the repo dirty and the removal unrecorded.
         tracked = _run("git ls-files MARKER", cwd=repo).stdout.strip()
-        check("D1b ...and the removal is committed, not left dirty",
+        check("DL1b ...and the removal is committed, not left dirty",
               tracked == "" and not _dirty(repo),
               f"tracked={tracked!r} dirty={_dirty(repo)!r}")
 
-    # 🔴 D2 — AN ALREADY-ABSENT TARGET IS A REFUSAL. The spec would be
+    # 🔴 DL2 — AN ALREADY-ABSENT TARGET IS A REFUSAL. The spec would be
     # describing a repo that does not exist, and landing it would record a
     # deletion that never happened.
     with tempfile.TemporaryDirectory() as tmp:
         spec = GOOD + ["DEL no_such_file.md"]
         home, repo, stage = _world(tmp, spec, extra=PASS_CHK)
         r = _land(home, stage)
-        check("D2 a DEL naming a file that is not there is REFUSED",
+        check("DL2 a DEL naming a file that is not there is REFUSED",
               r.returncode != 0 and _head(repo) == "base",
               f"rc={r.returncode} head={_head(repo)!r}")
 
-    # ⚠️ D3 — AND A SPEC WITH NO DEL IS UNAFFECTED. The directive is optional;
+    # ⚠️ DL3 — AND A SPEC WITH NO DEL IS UNAFFECTED. The directive is optional;
     # every existing delivery must behave exactly as before.
     with tempfile.TemporaryDirectory() as tmp:
         home, repo, stage = _world(tmp, GOOD, extra=PASS_CHK)
         r = _land(home, stage)
-        check("D3 a delivery with no DEL still lands and deletes nothing",
+        check("DL3 a delivery with no DEL still lands and deletes nothing",
               r.returncode == 0 and os.path.exists(os.path.join(repo, "MARKER")),
               f"rc={r.returncode}")
 

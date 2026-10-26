@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/fees_bridge.py  v1.0
+day_trader_pro/fees_bridge.py  v1.1
+v1.1  2026-10-25  (OTV5 paths) — THE FEE MODEL IS IMPORTED FROM ~/OTV5/tests, THE FLEET'S REPO. It read
+      ~/options-trader-v4/tests/fees.py, the retired tree; OTV5's tests/fees.py is the same code (diff: the v5.0
+      header line only), so every fee figure is unchanged. The checkout is `DTP_CONTROL_REPO` (default ~/OTV5),
+      the one name orchestrator's parity line already uses for it - DTP_OTV4_DIR no longer moves the fee model.
 v1.0  2026-09-07  dtp r312 / FEE.7 — ONE OWNER FOR THE otv4 FEE IMPORT.
 
 `fees.py` is control-only and lives in otv4/tests (WA §34); the reports that
@@ -26,8 +30,8 @@ import os
 import sys
 from typing import List
 
-_OTV4 = os.environ.get("DTP_OTV4_DIR", os.path.expanduser("~/options-trader-v4"))
-_TESTS = os.path.join(_OTV4, "tests")
+_REPO = os.path.expanduser(os.environ.get("DTP_CONTROL_REPO", "~/OTV5"))   # v1.1: was ~/options-trader-v4
+_TESTS = os.path.join(_REPO, "tests")
 if _TESTS not in sys.path:
     sys.path.insert(0, _TESTS)
 

@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""check_ssh_decode.py — v1.0
+"""check_ssh_decode.py — v1.1
+v1.1  2026-10-25 — DOC.8 — THE DATED CHANGELOG THIS GATE NEVER HAD. No check changes.
+v1.0  2026-08-28 — dtp 874bd66 (ssh_util v0.3.0) — remote output decoded as UTF-8 with errors="replace".
 
 🔴 REMOTE OUTPUT IS DECODED AS UTF-8, AND NEVER RAISES ON A SPLIT CHARACTER.
 

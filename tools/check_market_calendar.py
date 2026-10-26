@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/check_market_calendar.py  v1.1
+day_trader_pro/tools/check_market_calendar.py  v1.2
+v1.2  2026-10-25  (OTV5 paths) - D5 COMPARES WITH THE FLEET'S REPO, ~/OTV5. It read
+~/options-trader-v4/utils/market_calendar.py, the retired tree; the fleet runs OTV5,
+whose utils/market_calendar.py holds the same lists today (diff: header lines only).
+The checkout is `DTP_CONTROL_REPO` (default ~/OTV5), the name orchestrator already uses.
+The land-order note below now reads OTV5 for otv4.
 v1.1  2026-09-07  dtp r318 - records that D5 makes the LAND ORDER load-bearing:
 otv4 must land first, because this check reads otv4's list off disk during dtp's
 half. Not a code change - a constraint discovered by a refused land, written
@@ -142,20 +147,20 @@ def main() -> int:
           f"calls: {sorted(calls)}")
 
     # ── DEP.11 — the two repos must agree ───────────────────────────────────
-    otv4 = os.environ.get("DTP_OTV4_DIR", os.path.expanduser("~/options-trader-v4"))
+    otv4 = os.path.expanduser(os.environ.get("DTP_CONTROL_REPO", "~/OTV5"))   # v1.2: the fleet's repo
     other = os.path.join(otv4, "utils", "market_calendar.py")
     if not os.path.exists(other):
-        print(f"  SKIP  D5  otv4 not present at {otv4} — cross-repo diff NOT "
+        print(f"  SKIP  D5  OTV5 not present at {otv4} — cross-repo diff NOT "
               f"RUN (this is a skip, not a pass)")
     else:
         ns: dict = {}
         exec(compile(open(other).read(), other, "exec"), ns)      # noqa: S102
         theirs = set(ns["US_MARKET_HOLIDAYS"]) - set(ns["AD_HOC_CLOSURES"])
         mine = {x.isoformat() for x in listed}
-        check("D5  otv4 and dtp hold the SAME standard closures",
+        check("D5  OTV5 and dtp hold the SAME standard closures",
               mine == theirs,
               f"dtp-only: {sorted(mine - theirs)[:3]} "
-              f"otv4-only: {sorted(theirs - mine)[:3]}")
+              f"OTV5-only: {sorted(theirs - mine)[:3]}")
 
     print(f"  NOTE  AD_HOC_CLOSURES: {sorted(mc.AD_HOC_CLOSURES) or 'none'}")
     print()

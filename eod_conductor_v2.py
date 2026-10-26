@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/eod_conductor_v2.py — v2.11
+day_trader_pro/eod_conductor_v2.py — v2.12
+v2.12 2026-10-25 — S3.19 — THE REMOTE PURGE DIES WITH ITS BUDGET, NOT WITH NOBODY WATCHING. An ssh timeout kills the CLIENT; the box's `python3 warehouse/retention_purge.py` kept running with nobody reading it and held `feed_store` open into the next run (S3.17's collision). The remote command is now `timeout --kill-after=10 VERIFY_TIMEOUT_S python3 ...`: the SAME budget the ssh client is given (ssh_util adds only the connect allowance), so the purge is TERMed at the budget and KILLed 10s later even if the client is already gone. The exit code is still captured first (rc=124 TERM, 137 KILL) and a timed-out box is named in the log; retention_purge is resumable (a partial pass returns 4, r256), so a box cut short is purged at the next close. Gated by tests/check_purge_remote_timeout.py.
 v2.11 2026-09-19 — FU.2 SECOND HALF, OPERATOR'S CALL — THE DRAIN FANS OUT TOO. v2.10 deliberately left this serial, one change at a time on the file that takes the fleet down; the operator ruled to fold it in rather than wait a week. 🔴 THE DRAIN IS THE LARGER PRIZE: each box runs a full --verify, a walk of 600+ prefixes against S3 at up to VERIFY_TIMEOUT_S, and fifteen of those in SERIES is the longest wait in the close — CND.3's own words, and on 2026-09-10 the run was genuinely hung and looked identical to a slow one. Concurrent, the phase costs MAX(per-box) rather than SUM. 🔑 CND.3's PROPERTY IS PRESERVED AND SHARPENED, AND THAT IS THE ONLY REASON THIS IS SAFE TO DO. A BLOCKING gather would have reintroduced the exact defect CND.3 was written against, in a WORSE form: nothing printed at all until the slowest box returns, so a single hung box shows silence for its whole timeout, where the serial version at least showed fourteen answering and then stalling on the fifteenth. So ssh_map gained an on_result callback and reports each box AS IT LANDS; the header names every box up front; and each line says how many have answered AND WHICH ARE STILL OUTSTANDING. That is strictly more than the serial version could say. ⚠️ C8/D4 UNTOUCHED - every box still gets its FULL timeout, never a shrinking slice. ⚠️ AND RESULTS ARE RETURNED IN THE CALLER'S ORDER, not completion order, so a human diffing two nightly logs does not read scheduler noise as change. Gated by check_drain_progress D1-D5 updated WITH the ruling and check_fanout_parallel.
 v2.10 2026-09-19 — FU.2 — THE PURGE PHASE FANS OUT CONCURRENTLY: THE SAME BUDGET, SPENT ALL AT ONCE. 🔴 `PURGE_BUDGET_S` (600s, v2.6/CND.2) caps the whole phase and was spent SERIALLY on work that executes entirely ON the box — control only held an ssh session and waited. 📊 MEASURED over the seven closes to 2026-09-18 from this file's own log: the phase reached 7 → 7 → 3 → 2 → 2 → 3 → 4 boxes of FIFTEEN, and the trend is DOWNWARD because each box's store grows while the budget does not. A full rotation therefore takes 4–5 nights, which makes the 5-day `1m` retention policy ARITHMETICALLY UNREACHABLE: on 2026-09-19 PLTR and QQQ were both +14 days beyond policy on every interval, and PLTR sat at 93% disk with 661M free — past the DEV.7 guard, which fired for real 24s after a wake. 🔑 v2.9's DEBT ROTATION WAS NOT THE PROBLEM AND IS UNTOUCHED: it works, and the log shows the deferred set going first. THE BUDGET WAS THE PROBLEM. The work is per-box, independent and remote, so `ssh_util.ssh_map` (v0.5.0) dispatches all of them at once and THE PHASE NOW COSTS MAX(per-box) INSTEAD OF SUM(per-box). ⚠️ CND.2's PROTECTION IS TIGHTER, NOT LOOSER — that budget exists because the purge starved the halt and left the fleet up all night, and MAX is a smaller bound than SUM. ⚠️ AND C8 IS UNTOUCHED: every box still gets its FULL `VERIFY_TIMEOUT_S`, never a shrinking slice, which is the exact cut `check_conductor_purge` C8 refused once already — a 1.7M-row purge handed 30s fails at the ssh layer while its work continues on the far side. ⚠️ NOT MORE HEADROOM AND NOT A TRADE, which was the operator's explicit constraint: *"a smart way to solve this once and for all that does not involve adding more headroom and is not a painful trade-off of some sort."* ⚠️ THE DRAIN AND THE STATUS FAN-OUT ARE DELIBERATELY LEFT SERIAL in this revision — same defect, same fix, but one change at a time on the file that takes the fleet down. The drain is the larger prize (CND.3 calls it the longest unnarrated wait in the close) and it is filed, not folded in. Gated by tests/check_fanout_parallel.py P1-P6b, born red at 6e3c84a.
 v2.9  2026-09-11 — dtp r361 / CND.6 — THE BOXES THE BUDGET SKIPS GO FIRST AT THE NEXT CLOSE. `fleet.get_fleet` returns `sorted(mapping)`, so the purge walked AMD..UNH in the same order every night and r346's budget always cut the same tail: on 2026-09-11 it purged AMD..META and skipped MU, NFLX, NVDA, PLTR, QQQ, SPX, TSLA and UNH — MU carrying the fleet's largest store. v2.6's "a skipped box is purged tomorrow" was true of `retention_purge` (resumable, r256) and false of the ORDER: tomorrow the same seven boxes fit first and the same eight are skipped again. Now the skipped boxes are written to `data/purge_debt.json` — gitignored, because a tracked runtime file is one a discard recipe can rewrite (dtp r360) — and purged FIRST at the next close. A debt box that is HELD keeps its debt and is never purged: verified-only still outranks the debt. An unreadable debt file falls back to the sorted order and SAYS SO. Gated by tests/check_purge_budget.py B6-B11.
@@ -156,6 +157,7 @@ INSTALL_DIR = getattr(config, "INSTALL_DIR", "~/options-trader")
 # for a transport failure that looks exactly like a data failure.
 PURGE_BUDGET_S = int(os.environ.get("DTP_PURGE_BUDGET", "600"))
 VERIFY_TIMEOUT_S = int(os.environ.get("DTP_VERIFY_TIMEOUT", "900"))
+PURGE_KILL_AFTER_S = 10      # v2.12 / S3.19: SIGKILL this long after the remote purge's SIGTERM
 # 🔴 r361 / CND.6 — WHO THE BUDGET SKIPPED LAST CLOSE. Local runtime state,
 # gitignored: a tracked file here is one a discard recipe can rewrite.
 PURGE_DEBT_PATH = os.path.join(config.DATA_DIR, "purge_debt.json")
@@ -490,7 +492,11 @@ def purge_verified(ok: list, dry: bool) -> dict:
     # exit code, not the purge's, which is the swallowed-exit-code trap this
     # project already names for pytest. The full output also stays on the box
     # for a follow-up read, which is what `head -3` made impossible.
-    cmd = (f"cd {INSTALL_DIR} && python3 warehouse/retention_purge.py "
+    # 🔴 v2.12 / S3.19 — `timeout` ON THE BOX, SAME BUDGET AS THE ssh CLIENT.
+    # An ssh timeout kills the client only; without this the purge runs on,
+    # unread, holding feed_store open into the next run (S3.17).
+    cmd = (f"cd {INSTALL_DIR} && timeout --kill-after={PURGE_KILL_AFTER_S} {VERIFY_TIMEOUT_S} "
+           f"python3 warehouse/retention_purge.py "
            f"--apply > /tmp/retention_purge.out 2>&1; rc=$?; "
            f"tail -12 /tmp/retention_purge.out; echo rc=$rc")
     # 🔴 r346 — A BUDGET, BECAUSE THE PURGE CAN STARVE THE HALT. This function
@@ -584,6 +590,9 @@ def purge_verified(ok: list, dry: bool) -> dict:
         # that never changed; a per-box row count is the thing that would have
         # made "WOULD remove" visible on night one.
         _log("PURGE", f"  {sym}: {line[:120] or 'no output'}")
+        if re.search(r"\brc=(124|137)\b", line):
+            _log("PURGE", f"  ⏱️ {sym}: PURGE TIMED OUT ON THE BOX after {VERIFY_TIMEOUT_S}s and was "
+                          f"killed there (S3.19) — partial pass, resumed at the next close.")
         if "WOULD remove" in line:
             _log("PURGE", f"  ⚠️ {sym}: PURGE RAN DRY — nothing was deleted. "
                           f"The store will keep growing.")

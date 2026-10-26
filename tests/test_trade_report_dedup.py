@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/test_trade_report_dedup.py — v1.0
+# day_trader_pro/tests/test_trade_report_dedup.py — v1.1
+# v1.1 (2026-10-25) — S3.6. THE SANDBOX CARRIES trade_report's IMPORTS. It copied only trade_report.py
+#   and config.py; trade_report has since imported `ettime` (r287), `strategy_registry` and `fees_bridge`
+#   (r312), so every sandboxed run died with `ModuleNotFoundError: No module named 'ettime'` and cases A-C
+#   read "got []" - red on correct code. 🔴 NOT THE EPOCH: the runs pass --all-history ("WINDOW: NO EPOCH
+#   FLOOR"), and the 2026-08-26/27 fixture reads 3 unique trades once the modules are present - measured
+#   both ways; the fixture dates and ENGINE_EPOCH are unchanged. Case S now names a sandbox CRASH (its
+#   last stderr line) instead of letting it pass for "no trades". BORN RED on dtp 4fec59e: A B C S.
 # v1.0 (2026-08-29) — r190 / dtp r231. Proves S3.6.
 #
 # 🔴 THE CLAIM IS NOT "the shim was deleted". Deleting it would have been
@@ -44,7 +51,8 @@ def t(tid, day, pnl):
 
 
 def sandbox(d, cumulative):
-    for f in ("trade_report.py", "config.py"):
+    # v1.1: trade_report's own import closure, not just the file under test
+    for f in ("trade_report.py", "config.py", "ettime.py", "strategy_registry.py", "fees_bridge.py"):
         shutil.copy(os.path.join(ROOT, f), os.path.join(d, f))
     wh = os.path.join(d, "reports", "warehouse")
     os.makedirs(wh)
@@ -76,6 +84,9 @@ def main():
     with tempfile.TemporaryDirectory() as d:
         sandbox(d, cumulative=False)
         a = run(d)
+        if a.returncode != 0:
+            p.append("S: trade_report CRASHED in the sandbox (rc %d): %s" % (
+                a.returncode, (a.stderr.strip().splitlines() or ["(no stderr)"])[-1]))
         if "DUPLICATE" in a.stdout:
             p.append("A: a clean set of one-day bundles reported duplicates — "
                      "a detector that cries wolf is worse than none")

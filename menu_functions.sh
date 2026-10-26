@@ -1,4 +1,8 @@
-# day_trader_pro/menu_functions.sh — v1.76
+# day_trader_pro/menu_functions.sh — v1.77
+# v1.77 (2026-10-25) - DEV.3. SERVICE STATUS READS THE UNITS AN OTV5 BOX RUNS: `optionsbot`, `candle-feed` and
+#   `s3-push.timer` (OTV5 deploy/: setup_ec2.sh installs optionsbot + candle-feed, install_s3_push_timer.sh the push
+#   timer). `shadow-observer` is not an OTV5 unit, so every box read `shadow=inactive` - a fault that does not exist.
+#   s3-push.timer reads inactive until data capture is turned on (CD.1: S3 writing ships off), and that is the truth.
 # v1.76 (2026-10-25) - dtp r507 / OPS.72. REPOINT the fleet (43) ASKS FOR A PIN. With a pin it is the managed repoint
 #   (fleet.py repoint --sha: open trades refused, deps, import check, nothing started) and, when the pinned tree supports
 #   it, the FULL INSTALL on every box (asked, default yes; n = --no-install). ENTER at the pin keeps the old unpinned
@@ -534,7 +538,9 @@ mi_service_status_bot_candle_feed() {
     # dead service would have reported as a dead BOX, which is the wrong fault
     # entirely. 📊 Verified: `is-active` PRINTS `inactive` and exits 3, so the
     # word survives; only the exit code needed fixing.
-    echo; SC=$(ask_scope); $PY fleet.py run 'echo "optionsbot=$(systemctl is-active optionsbot || true) candle-feed=$(systemctl is-active candle-feed || true) shadow=$(systemctl is-active shadow-observer || true)"' $SC; pause
+    # 🔴 DEV.3 (v1.77) — OTV5 BOXES HAVE NO `shadow-observer`; the third unit is
+    # `s3-push.timer` (the warehouse push), which ships off until capture is on.
+    echo; SC=$(ask_scope); $PY fleet.py run 'echo "optionsbot=$(systemctl is-active optionsbot || true) candle-feed=$(systemctl is-active candle-feed || true) s3-push=$(systemctl is-active s3-push.timer || true)"' $SC; pause
 }
 
 # Journal tail (last N)

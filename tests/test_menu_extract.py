@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/test_menu_extract.py — v1.2
+# day_trader_pro/tests/test_menu_extract.py — v1.3
 """
 Pins tools/menu_extract.py v1.1.
 
 CHANGELOG
+    v1.3 — 2026-10-25 — DEV.13. The diff fixtures carry the `# source:` header a
+           real --inventory writes; menu_extract v1.4 refuses a side without it.
+           (The refusals themselves are gated in check_menu_diff_refuses.py.)
     v1.2 — 2026-08-16 — POST-CONVERSION. devtools.sh is now declarative, so the
            heredoc parser has no source and correctly returns empty. The suite
            therefore branches: pre-conversion it reconciles display vs handlers;
@@ -165,6 +168,7 @@ class _A:
 
 def _write(path, rows):
     with open(path, "w", encoding="utf-8") as fh:
+        fh.write("# source: registry\n")      # v1.3: as --inventory writes it
         for s_, l_, c_ in rows:
             fh.write(f"{s_}\t{l_}\t{c_}\n")
 

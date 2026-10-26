@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-# day_trader_pro/tools/menu_extract.py — v1.3
+# day_trader_pro/tools/menu_extract.py — v1.4
+# v1.4 (2026-10-25) — (DEV.13) — --diff REFUSES WHAT IS NOT AN INVENTORY. Given two menu_registry.sh files its loader
+#      kept zero 3-field rows from each and printed `✅ every label survives` - a diff of nothing against nothing read
+#      as a pure reorder. Each side must now carry the `# source:` header and at least one row, or --diff prints
+#      `❌ REFUSED`, names the file and the reason, and exits 2. --inventory now writes that header as its FIRST
+#      STDOUT line (it went to stderr, so no redirected inventory ever carried it); the loader skips it, so the rows
+#      are unchanged. ⚠️ docs/MENU_INVENTORY.tsv (r278) predates the header: regenerate it before diffing against it.
 # v1.3 (2026-08-16) — DEGRADES AFTER THE CONVERSION. Once devtools.sh became
 #      declarative the heredoc vanished, and `parse()` raised StopIteration —
 #      the parser THREW instead of reporting that its source was gone. Callers
@@ -280,7 +286,7 @@ def rows_for(source="auto"):
 
 def cmd_inventory(args):
     rows, src = rows_for(getattr(args, "source", "auto"))
-    sys.stderr.write(f"# source: {src}\n")
+    print(f"# source: {src}")            # v1.4 (DEV.13): the header --diff requires, ON STDOUT
     for section, label, cmd in rows:
         print(f"{section}\t{label}\t{cmd}")
     return 0
@@ -436,13 +442,24 @@ menu_dispatch() {
 
 def cmd_diff(args):
     def load(p):
-        out = {}
+        out, header = {}, False
         for ln in open(p, encoding="utf-8"):
+            if ln.startswith("# source:"):
+                header = True
+                continue
             parts = ln.rstrip("\n").split("\t")
             if len(parts) == 3:
                 out[parts[1]] = (parts[0], parts[2])
-        return out
-    a, b = load(args.old), load(args.new)
+        return out, header
+    # 🔴 v1.4 (DEV.13) — nothing-vs-nothing is not a pure reorder: refuse it.
+    (a, ha), (b, hb) = load(args.old), load(args.new)
+    why = [f"{p}: {r}" for p, rows, h in ((args.old, a, ha), (args.new, b, hb))
+           for r in (([] if h else ["no `# source:` header"]) + ([] if rows else ["0 inventory rows"]))]
+    if why:
+        print("  ❌ REFUSED — not a menu inventory (write one with --inventory > FILE):")
+        for w in why:
+            print(f"    {w}")
+        return 2
     gone = sorted(set(a) - set(b))
     added = sorted(set(b) - set(a))
     moved = sorted(l for l in set(a) & set(b) if a[l][0] != b[l][0])

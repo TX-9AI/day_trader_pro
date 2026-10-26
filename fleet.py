@@ -1,4 +1,10 @@
-# day_trader_pro/fleet.py — v0.16.0
+# day_trader_pro/fleet.py — v0.16.1
+# v0.16.1 (2026-10-25) — (OPS.16) — A FAILED `update --wake` FAILS: NAMED, AND EXIT 1. `_wake()` caught its own error,
+#   printed a warning and returned; the run then deployed to an EMPTY list and printed `Done. 0/0 deployed cleanly`
+#   with exit 0 - an explicitly requested wake that did not happen read as success. cmd_update now names every box
+#   that --wake was asked to bring up and that is not running and SSH-reachable afterwards (`🚨 WAKE FAILED: ...`),
+#   deploys to the ones that are, and returns 1. `_wake()` returns whether the start was issued. (The region half of
+#   OPS.16 was already closed by r424: `_wake` routes through ec2ops.start(), which reads config.REGION.)
 # v0.16.0 (2026-10-25) — r507 / OPS.72 — `repoint --sha` (MENU 43) IS THE FLEET REPOINT TO OTV5: THE MANAGED REPOINT, THEN
 #   THE FULL INSTALL ON EVERY BOX. The operator, 2026-10-25: "Option 43 ... We've done it once before from otv3 to otv4";
 #   "If 43 can't do it, we should fix it. This is the use-case for it". A pinned repoint whose pinned tree's
@@ -477,15 +483,17 @@ def _wake(stopped):
     ledger again. A hole that opens on an unrelated future edit is worse than
     one that is open now, because nothing will be looking.
 
-    Best-effort and non-fatal: a failed wake continues with running boxes.
+    A failed wake does not raise: it continues with running boxes and RETURNS
+    False, and cmd_update (OPS.16) fails the run for every requested box that
+    is still not running and reachable — never `0/0 deployed cleanly`, rc 0.
     """
     symbols = [s for s, _, _ in stopped]
     if not symbols:
-        return
+        return True
     print(f"Waking {len(symbols)} stopped box(es): {', '.join(symbols)}")
     if config.MOCK_AWS:
         print(f"  [mock] would start: {', '.join(symbols)}")
-        return
+        return True
 
     try:
         mapping, _ = instance_registry.discover(symbols)
@@ -496,12 +504,14 @@ def _wake(stopped):
             print("  ⚠️  no instance_id in the registry — can't wake automatically.\n"
                   "     Start these in the EC2 console (or add instance_id to the\n"
                   "     registry), then re-run `update` without --wake.")
-            return
+            return False
         ec2ops.start(ids)
         print(f"  ec2ops.start() issued for {len(ids)} instance(s) — logged to "
               f"{os.path.basename(ec2ops.POWER_LOG)}")
+        return True
     except Exception as e:
         print(f"  ⚠️  wake failed ({e}); continuing with already-running boxes.")
+        return False
 
 
 def _wait_running_and_ssh(only=None, timeout=180, interval=10):
@@ -558,6 +568,15 @@ def cmd_update(only=None, restart=True, wake=False):
             print(f"── {s} ({ip or '-'}) · skipped ({st}; use --wake to start)")
 
     print(f"\nDone. {len(running) - fails}/{len(running)} deployed cleanly.")
+    # 🔴 OPS.16 — --wake was ASKED FOR: a box it was to bring up that is still
+    # not running and reachable is a failure, named, whatever the tally says.
+    if wake and stopped:
+        up = {s for s, _, _ in running}
+        unwoken = [s for s, _, _ in stopped if s not in up]
+        if unwoken:
+            print(f"🚨 WAKE FAILED: {len(unwoken)} requested box(es) not running/reachable: "
+                  f"{', '.join(unwoken)} — they were NOT deployed.")
+            return 1
     return 0 if fails == 0 else 1
 
 
