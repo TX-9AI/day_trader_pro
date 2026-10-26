@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/eod_analysis.py  v1.5
+day_trader_pro/eod_analysis.py  v1.6
+v1.6  2026-10-26 — dtp r514 / LABEL.1 — A TAPE PHASE FIRST: THE DAY'S 1m TAPE IS MATERIALIZED FROM S3. This runs after TAKEDOWN,
+      and DAILY_BARS and LABEL read ohlc/<date>/, which only harvest (an scp from a running box) ever wrote - so LABEL had
+      been rc=1 "no tape" every night and DAILY_BARS rebuilt 0 symbols. ohlc_from_s3.materialize writes the day and the
+      prior session (auto_label's SWEEP reads it) from raw/candles; an existing harvest file is kept.
 v1.5  2026-10-26 — dtp r513 / STRM.1 — THE STREAMS WARNING COUNTS GAP ROWS, NOT THE SUMMARY LINE. warehouse_coverage ends its
       board with "🔴 N stream-day(s) need an answer.", and the warning counted every 🔴 line, so one gap read "2 gap(s)"
       (2026-10-26: one ohlc row) and two read "3". _stream_gaps() counts the 🔴 rows only. The rows still print as before.
@@ -236,6 +240,22 @@ def run(date: str, dry: bool) -> int:
     # neither exists — and THE DRY RUN PASSED ANYWAY, because dry mode prints
     # "would run" without ever touching the function. A dry run that never
     # calls the thing cannot tell you the call is wrong.
+    def _tape():
+        # r514 (LABEL.1): the boxes are DOWN here, so the tape comes from the warehouse, the stream the drain verified.
+        import ohlc_from_s3 as T
+        s3 = T._client()
+        days = [date] + [d for d in [T.prior_session(date, s3)] if d]
+        for d in days:
+            res = T.materialize(d, s3=s3)
+            wrote = sum(1 for v in res.values() if isinstance(v, int) and v > 0)
+            kept = sum(1 for v in res.values() if v == "kept")
+            empty = sorted(k for k, v in res.items() if v == 0)
+            if d == date and not wrote and not kept:
+                _warn(warns, "TAPE", f"no 1m tape for {d} in S3 (streams: {len(res)})")
+            else:
+                _log("TAPE", f"✅ {d}: {wrote} written, {kept} kept (harvest)"
+                             + (f", {len(empty)} empty: {','.join(empty)}" if empty else ""))
+
     def _daily_bars():
         import daily_bars
         # rebuild() returns a Dict[str, int] of symbol -> rows, not a count.
@@ -398,7 +418,8 @@ def run(date: str, dry: bool) -> int:
             # and a weekly NOT-YET page is how the real page gets ignored.
             _log("EDGE_SCAN", "✅ ran; nothing clears the bar (expected)")
 
-    for nm, fn, note in (("DAILY_BARS", _daily_bars, "daily bars rebuilt from the 1m tape"),
+    for nm, fn, note in (("TAPE", _tape, "the day's 1m tape from S3 (and the prior session's)"),
+                         ("DAILY_BARS", _daily_bars, "daily bars rebuilt from the 1m tape"),
                          ("LABEL", _label, "price-action session label"),
                          ("EXCURSION", _excursion, "MFE/MAE report"),
                          ("COVERAGE", _coverage, "warehouse coverage"),

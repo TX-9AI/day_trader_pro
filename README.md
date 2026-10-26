@@ -139,6 +139,7 @@ concurs/swaps on the reporter's own ranking, and the count is deterministic.
 | `shutdown_manager.py` | manual/backstop stop sweep (no P&L) |
 | `ssh_util.py` | shared SSH helper (v0.7.0: `ssh_argv`, the one ssh invocation) |
 | `pager.py` | v0.1.0 — PAGE.1: follows every running box's `[page]` lines in bot.log over ssh (one stream per box, catch-up on reconnect) and prints `<SYM> <CODE> [ref] @HH:MM:SS ET`; `--once` prints today's |
+| `ohlc_from_s3.py` | v0.1.0 — LABEL.1: writes `ohlc/<date>/<SYM>_ohlc_<date>.csv` from the S3 1m candle stream (engine boxes only; never `_EXT`, VIX or a TEST box; a harvested file is kept) so eod_analysis's TAPE phase feeds DAILY_BARS and LABEL after takedown; `--date D [--prior]` |
 | `fleet.py` | v0.6.0 — fleet SSH fan-out: list / ping / run (uses `pull_today_ohlc.sh` on-box for long pulls) |
 | `notify.py` | control-server Telegram |
 | `market_calendar.py` | trading-day gate |
