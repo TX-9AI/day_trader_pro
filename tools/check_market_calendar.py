@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/check_market_calendar.py  v1.2
+day_trader_pro/tools/check_market_calendar.py  v1.3
+v1.3  2026-10-27  (ETT.1) - D3's "five years ahead" reads the year through ettime.today_et(), the one ET boundary; its bare
+      date-dot-today was the naive clock call test_ettime T4 has flagged red since (found 2026-10-26). Same answer on any day
+      but the UTC/ET overnight of 31 December.
 v1.2  2026-10-25  (OTV5 paths) - D5 COMPARES WITH THE FLEET'S REPO, ~/OTV5. It read
 ~/options-trader-v4/utils/market_calendar.py, the retired tree; the fleet runs OTV5,
 whose utils/market_calendar.py holds the same lists today (diff: header lines only).
@@ -57,6 +60,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import market_calendar as mc                                     # noqa: E402
+import ettime                                                    # noqa: E402
 
 F: list = []
 
@@ -126,7 +130,7 @@ def main() -> int:
     check("D2  every rule-produced date is in the list",
           not (gen - inr), f"missing: {sorted(gen - inr)}")
     check("D3  coverage runs at least 5 years ahead",
-          hi >= d.date.today().year + 5, f"covers {lo}-{hi}")
+          hi >= int(ettime.today_et()[:4]) + 5, f"covers {lo}-{hi}")
     # 🔴 ANCHORED ON THE AST, NOT ON A STRING. The first cut searched the
     # source for "return lib" and went RED on r317's OWN CHANGELOG COMMENT,
     # which names it while explaining that it was removed — WA §20, and the
