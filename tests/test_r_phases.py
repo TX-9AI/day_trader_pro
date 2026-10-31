@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/test_r_phases.py  v1.0
+day_trader_pro/tests/test_r_phases.py  v1.1
 The R suite hangs off the conductor's analysis run — pinned by execution.
+
+v1.1  2026-10-31  dtp r518 (RPT.29) — D4 RE-POINTED, NOT DROPPED: the R suite runs the OTV5 checkout's tools, so the
+      named warning is "OTV5 checkout missing" with DTP_OTV5_DIR. The behaviour is executed in check_edge_runner R6.
 
 v1.0  2026-08-23  Born RED at r222 (eod_analysis had no R phases). Pins:
   D1  a FRIDAY dry-run lists both R_LEDGER and EDGE_SCAN         (executed)
@@ -10,7 +13,7 @@ v1.0  2026-08-23  Born RED at r222 (eod_analysis had no R phases). Pins:
   D3  the dry run says "would", never "✅", for the new phases —
       a dry run must not imply success (the conductor's own
       fabricated-verification lesson)                             (executed)
-  D4  the missing-checkout path warns BY NAME with DTP_OTV4_DIR —
+  D4  the missing-checkout path warns BY NAME with DTP_OTV5_DIR (v1.1; was DTP_OTV4_DIR) —
       source-level pin, stated as such: executing it would read
       production S3 for the sibling phases, which a test must not
       do on a schedule. The string checked is the warning text,
@@ -60,8 +63,8 @@ def main() -> int:
     check("D3 dry output for the R phases never claims success (no ✅)",
           new_lines and not any("✅" in l for l in new_lines))
     src = open(os.path.join(HERE, "eod_analysis.py"), encoding="utf-8").read()
-    check("D4 missing otv4 checkout warns BY NAME (DTP_OTV4_DIR in the warning)",
-          "otv4 checkout missing" in src and "DTP_OTV4_DIR" in src)
+    check("D4 missing OTV5 checkout warns BY NAME (DTP_OTV5_DIR in the warning)",
+          "OTV5 checkout missing" in src and "DTP_OTV5_DIR" in src)
     print("-" * 66)
     if PROBLEMS:
         print(f"FAIL  {len(PROBLEMS)} problem(s): {', '.join(PROBLEMS)}")
