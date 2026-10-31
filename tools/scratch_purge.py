@@ -1,6 +1,17 @@
 #!/usr/bin/env python3
 """
-tools/scratch_purge.py  v1.2
+tools/scratch_purge.py  v1.3
+v1.3  2026-10-31  OPS.75 — A BUILD CLONE'S UNCOMMITTED WORK IS SALVAGED BEFORE THE PRUNE, AND ITS AGE IS ITS
+      NEWEST FILE, NOT ITS TOP DIRECTORY. 2026-10-31 00:30-01:30 ET the timer pruned five OTV5 build clones in a live
+      session (b_ent, b_exh, b_orb, b_park, b_base) as "reconstructible"; three held approved, tested, UNCOMMITTED
+      fixes (PARK.4, BRK.18, ORB.10) edited in place, not copied from a stage/, and the tombstone said "NOTHING UNIQUE
+      WAS LOST". Two defects: (1) the age was os.lstat(clone).st_mtime, which moves only when an entry is added to or
+      removed from the clone's TOP directory, so a clone being edited and tested deep inside read "touched 119m ago";
+      (2) "no is-it-clean test" assumed every patched file also lives in a stage/. Now the age is the newest mtime in
+      the tree, and a dirty clone (git status --porcelain non-empty) is first salvaged to
+      $ARCHIVE/builds/<path>-<stamp>.tar.gz (every modified, staged and untracked file, plus git diff HEAD as
+      SALVAGE.patch and the HEAD sha); if the salvage fails the clone is SKIPPED, never deleted. A clean clone prunes
+      as before. The tombstone names the salvage. Operator, 2026-10-31: "Yes". GATE tests/check_scratch_purge.py P20, P23-P25.
 v1.2  2026-09-23  r422 / OPS.46 — `--prune-builds` AND `--if-over`, BECAUSE THE
       THING THAT FILLS THE QUOTA LIVES WHERE THIS TOOL CORRECTLY REFUSED TO GO.
       Operator, 2026-09-23: *"Your scratchpad has a limit. We've reached it
@@ -154,7 +165,7 @@ BUILD_GRACE_MIN = int(os.environ.get("CLAUDE_BUILD_GRACE_MIN", "120"))
 # a confident zero, which is the worst kind. Found by running it against the
 # live tree rather than reasoning about the path.
 BUILD_SCAN_DEPTH = int(os.environ.get("CLAUDE_BUILD_SCAN_DEPTH", "6"))
-_VERSION = "v1.2"
+_VERSION = "v1.3"
 HANDOFF_DIRS = [os.environ.get(
     "CLAUDE_HANDOFF_DIR", os.path.join(HOME, "options-trader-v4", "handoffs"))]
 # A directory younger than this is left alone even when nothing holds it open —
@@ -474,7 +485,57 @@ def sweep_retention(dry: bool) -> int:
     return dropped
 
 
-def _tombstone(path: str, size: int) -> None:
+def _newest_mtime(path: str) -> float:
+    """v1.3 (OPS.75) — the newest mtime anywhere in the tree. A directory's own
+    mtime moves only when ITS entries change, so a clone edited deep inside
+    looked idle while it was being worked on."""
+    newest = 0.0
+    for root, dirs, files in os.walk(path, onerror=lambda e: None):
+        for n in dirs + files:
+            try:
+                newest = max(newest, os.lstat(os.path.join(root, n)).st_mtime)
+            except OSError:
+                pass
+    try:
+        newest = max(newest, os.lstat(path).st_mtime)
+    except OSError:
+        pass
+    return newest
+
+
+def _salvage(path: str, rel: str):
+    """v1.3 (OPS.75) — save a DIRTY clone's own work before it is pruned.
+    -> None for a clean clone (nothing unique), else the archive path.
+    RAISES on any failure, and the caller then SKIPS the clone: a salvage that
+    did not happen must never be followed by a delete."""
+    def _git(*a):
+        return subprocess.run(["git", "-C", path] + list(a), capture_output=True,
+                              text=True, timeout=120, check=True).stdout
+    if not _git("status", "--porcelain", "--untracked-files=all").strip():
+        return None
+    names = set(_git("diff", "--name-only", "HEAD").split("\n"))
+    names |= set(_git("ls-files", "--others", "--exclude-standard").split("\n"))
+    names = sorted(n for n in names if n and os.path.lexists(os.path.join(path, n)))
+    head = _git("rev-parse", "HEAD").strip()
+    patch = _git("diff", "HEAD", "--binary")
+    import tarfile, io
+    dest_dir = os.path.join(ARCHIVE, "builds")
+    os.makedirs(dest_dir, exist_ok=True)
+    stamp = time.strftime("%Y%m%dT%H%M%S")
+    dest = os.path.join(dest_dir, rel.replace(os.sep, "__") + "-" + stamp + ".tar.gz")
+    with tarfile.open(dest + ".part", "w:gz") as tf:
+        for n in names:
+            tf.add(os.path.join(path, n), arcname=os.path.join("files", n), recursive=False)
+        for nm, body in (("SALVAGE.patch", patch), ("HEAD", head + "\n"),
+                         ("FILES", "\n".join(names) + "\n")):
+            data = body.encode("utf-8")
+            ti = tarfile.TarInfo(nm); ti.size = len(data); ti.mtime = int(time.time())
+            tf.addfile(ti, io.BytesIO(data))
+    os.replace(dest + ".part", dest)
+    return dest
+
+
+def _tombstone(path: str, size: int, salvaged: str = None) -> None:
     """Leave the explanation WHERE THE DIRECTORY WAS.
 
     🔴 THE OPERATOR'S OBJECTION, AND IT IS THE RIGHT ONE: *"I don't want future
@@ -500,10 +561,15 @@ def _tombstone(path: str, size: int) -> None:
                 "nothing can be written at all — no shell, no clone, no land\n"
                 "(observed 2026-09-23).\n"
                 "\n"
-                "NOTHING UNIQUE WAS LOST. A build clone's contents come either\n"
-                "from git or from the sibling stage/ directory, which is the\n"
-                "payload and is NEVER pruned. Recreate with:\n"
-                "    git clone --depth 1 file:///home/ubuntu/options-trader-v4 "
+                + ("ITS UNCOMMITTED WORK WAS SALVAGED FIRST (v1.3, OPS.75) to\n"
+                   "    " + salvaged + "\n"
+                   "  (files/ = every modified and untracked file; SALVAGE.patch =\n"
+                   "  git diff HEAD; HEAD = the base sha). Recreate the clone, then\n"
+                   "  `git apply SALVAGE.patch` or copy files/ back. Clone with:\n"
+                   if salvaged else
+                   "NOTHING UNIQUE WAS LOST: the clone was CLEAN (git status\n"
+                   "empty), so everything in it came from git. Recreate with:\n")
+                + "    git clone --depth 1 file:///home/ubuntu/options-trader-v4 "
                 + path + "\n"
                 "  (or .../day_trader_pro for the dtp half)\n"
                 "\n"
@@ -549,10 +615,7 @@ def prune_builds(dry: bool, grace_min: int = None) -> tuple:
         return 0, 0
     for d in sorted(found):
         rel = d[len(SCRATCH_ROOT):].lstrip(os.sep)
-        try:
-            age = now - os.lstat(d).st_mtime
-        except OSError:
-            continue
+        age = now - _newest_mtime(d)          # v1.3: the newest file, not the top dir
         if age < grace:
             _log(f"SKIP build {rel} — touched {int(age / 60)}m ago, inside the "
                  f"{grace // 60}m grace window (may be an in-flight build)")
@@ -562,14 +625,23 @@ def prune_builds(dry: bool, grace_min: int = None) -> tuple:
             _log(f"SKIP build {rel} — outside {SCRATCH_ROOT}, refusing")
             continue
         _log(f"{'WOULD PRUNE' if dry else 'PRUNE'} build {rel} {_sz(size)} "
-             f"(git clone — reconstructible)")
+             f"(git clone — reconstructible; uncommitted work salvaged first)")
+        salvaged = None
         if not dry:
+            # 🔴 v1.3 (OPS.75) — A DIRTY CLONE IS SALVAGED OR IT IS NOT DELETED.
+            try:
+                salvaged = _salvage(d, rel)
+            except Exception as exc:                            # noqa: BLE001
+                _log(f"  SKIP {rel} — dirty clone and the salvage FAILED ({exc}); NOT removed")
+                continue
+            if salvaged:
+                _log(f"  salvaged uncommitted work -> {salvaged}")
             try:
                 shutil.rmtree(d)
             except OSError as exc:
                 _log(f"  FAILED to remove {rel}: {exc}")
                 continue
-            _tombstone(d, size)
+            _tombstone(d, size, salvaged)
         removed += 1
         freed += size
     return removed, freed

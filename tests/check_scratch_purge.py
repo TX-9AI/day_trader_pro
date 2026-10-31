@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """
-tests/check_scratch_purge.py  v1.3
+tests/check_scratch_purge.py  v1.4
+v1.4  2026-10-31  OPS.75 — THE PRUNE FIXTURE IS A REAL GIT CLONE, AGED THROUGH ITS TREE. 2026-10-31 the timer pruned three OTV5 build clones holding approved,
+      uncommitted fixes. The P19/P20 fixture is now a REAL git clone (git init + commit) aged through its whole tree:
+      the bare `.git` directory was not a repository, and v1.3 refuses to delete what it cannot read. The new
+      behaviour's gate is tests/check_purge_salvage.py (S1-S3).
 v1.3  2026-10-25  OPS.27 — P9/P10 RE-ANCHORED ON THE r469 LAUNCH LINES.
       dtp r469 (OPS.66) put `--remote-control '$RC_NAME'` between `$CLAUDE` and
       the prompt / `--continue` / `--resume` on all six launch lines, so both
@@ -62,7 +66,7 @@ fail on import and P9 fails on the launch string. Verified by running this
 file against that commit before the fix — see the delivery notes.
 """
 from __future__ import annotations
-import os, re, shutil, subprocess, sys, tempfile, time
+import glob, os, re, shutil, subprocess, sys, tempfile, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -475,15 +479,24 @@ ck("P15", _HO_BEFORE == _HO_AFTER,
 # looks at the path that used to hold its build. So the tombstone must exist AT
 # THE PATH and must carry the recreate command.
 def _mk_clone(root, rel):
+    """v1.4 — a REAL git clone: v1.3 reads `git status` before it prunes."""
     d = os.path.join(root, rel)
-    os.makedirs(os.path.join(d, ".git"), exist_ok=True)
+    os.makedirs(d, exist_ok=True)
     with open(os.path.join(d, "payload.txt"), "w") as fh:
         fh.write("from git")
+    g = ["git", "-C", d, "-c", "user.name=t", "-c", "user.email=t@t"]
+    subprocess.run(g[:3] + ["init", "-q"], check=True)
+    subprocess.run(g + ["add", "-A"], check=True)
+    subprocess.run(g + ["commit", "-qm", "base"], check=True)
     return d
 
 
 def _age(path, minutes):
+    """v1.4 — ages the WHOLE tree: v1.3 reads the newest file, not the top dir."""
     old = time.time() - minutes * 60
+    for r, ds, fs in os.walk(path):
+        for n in ds + fs:
+            os.utime(os.path.join(r, n), (old, old), follow_symlinks=False)
     os.utime(path, (old, old))
 
 
