@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-# day_trader_pro/warehouse_coverage.py — v1.9
+# day_trader_pro/warehouse_coverage.py — v1.10
+# v1.10 (2026-10-31) — dtp r517 / SER.1. `--tail`: A STREAM THAT STOPPED EARLY IS NOT COVERED. --streams asks whether a box's
+#   partition EXISTS; on 2026-10-30 SPX's quote_series existed and ended at 13:53 ET (QQQ 14:38), because the box-side
+#   pusher shipped one 50,000-row object per 5-minute run and fell behind; 10-23 is still cut at 12:56 (SPX), 14:04
+#   (QQQ), 14:51 (AMD). check_tail() reads the newest key's top ts (the `<epoch_ms>-<sha>.json` name; LIST only, no
+#   bodies) per box per TAIL_STREAMS stream and grades it against the session close minus TAIL_MARGIN_MIN (15:45 ET; a
+#   half day's 13:00 close gives 12:45, from market_calendar.is_half_day). TRUNCATED and MISSING are failures, exit 1.
+#   Its own mode and exit code, like --streams. eod_analysis v1.7 runs it as the TAIL phase. Gate
+#   tests/check_series_tail.py T5-T8. Operator: "yes to all of the prepared solutions" (2026-10-31).
 # v1.9 (2026-10-25) — r508 / OPS.73. A STREAM IS GRADED BY THE ENGINE THE BOX RAN THAT DAY. _lineage_of(box, day) reads
 #   strategy_registry.box_lineage: a box repointed to OTV5 grades as OTV5 from its repoint day (so the OTV4-only
 #   streams, eod and liquidity_ledger, are NOT USED for it, as for TEST) and as its old engine before it.
@@ -639,6 +647,89 @@ def report_streams(s3, days, counts=False):
 
 
 
+# ── v1.10 (SER.1) — THE TAIL CHECK ──────────────────────────────────────────
+# The streams whose last object must reach the close. quote_series is the one that broke (the heaviest box-side
+# series); a tuple so another stream is one entry.
+TAIL_STREAMS = ("quote_series",)
+TAIL_MARGIN_MIN = 15          # the newest row must be within this many minutes of the close
+
+
+def _close_et(day):
+    """The session close for `day` as an aware ET datetime: 16:00, or 13:00 on a half day."""
+    from datetime import datetime as _dt, time as _tm
+    from zoneinfo import ZoneInfo
+    d = _date.fromisoformat(day)
+    hh = 13 if market_calendar.is_half_day(d) else 16
+    return _dt.combine(d, _tm(hh, 0), tzinfo=ZoneInfo("America/New_York"))
+
+
+def _last_key_ts(s3, datatype, day, sym):
+    """Epoch seconds of the newest object under one stream/day/box (the key's top ts), or None. LIST only."""
+    best = None
+    pg = s3.get_paginator("list_objects_v2")
+    for page in pg.paginate(Bucket=BUCKET, Prefix=f"{PREFIX}/{datatype}/dt={day}/sym={sym}/"):
+        for o in page.get("Contents", []) or []:
+            name = o["Key"].rsplit("/", 1)[-1]
+            try:
+                t = int(name.split("-", 1)[0]) / 1000.0
+            except ValueError:
+                continue
+            best = t if best is None or t > best else best
+    return best
+
+
+def check_tail(s3, day, want, streams=TAIL_STREAMS):
+    """-> {"date", "verdict", "need", "rows": [{stream, box, last, verdict}]}. Pure lookup."""
+    if not _is_session(day):
+        return {"date": day, "verdict": "NOT_A_SESSION", "rows": []}
+    from datetime import timedelta as _td
+    need = _close_et(day) - _td(minutes=TAIL_MARGIN_MIN)
+    rows = []
+    for st in streams:
+        for b in want:
+            t = _last_key_ts(s3, st, day, b)
+            if t is None:
+                v = "MISSING"
+            else:
+                v = "OK" if t >= need.timestamp() else "TRUNCATED"
+            rows.append({"stream": st, "box": b, "last": t, "verdict": v})
+    return {"date": day, "verdict": "JUDGED", "need": need, "rows": rows}
+
+
+def report_tail(s3, days, want=None):
+    """-> exit code: 1 when any box's TAIL_STREAMS stream ends before the close minus the margin, or is absent."""
+    from datetime import datetime as _dt
+    from zoneinfo import ZoneInfo
+    et = ZoneInfo("America/New_York")
+    if want is None:
+        try:
+            want = panel()
+        except Exception as exc:                               # noqa: BLE001
+            _log("TAIL", f"🔴 cannot establish the expected box set: {exc}")
+            return 2
+    bad = 0
+    for day in days:
+        d = check_tail(s3, day, want)
+        if d["verdict"] == "NOT_A_SESSION":
+            _log("TAIL", f"· {day}  market closed — no session")
+            continue
+        _log("TAIL", f"── {day}  newest object must reach {d['need'].strftime('%H:%M')} ET")
+        for r in d["rows"]:
+            last = ("-" if r["last"] is None
+                    else _dt.fromtimestamp(r["last"], et).strftime("%H:%M"))
+            if r["verdict"] == "OK":
+                continue
+            bad += 1
+            _log("TAIL", f"  🔴 {r['stream']:<14} {r['box']:<6} last {last}  {r['verdict']}")
+        ok_n = sum(1 for r in d["rows"] if r["verdict"] == "OK")
+        _log("TAIL", f"  {ok_n}/{len(d['rows'])} box-stream(s) reach the close")
+    if bad:
+        _log("TAIL", f"🔴 {bad} box-stream-day(s) end before the close.")
+    else:
+        _log("TAIL", "✅ every tail stream reaches the close on every judged session.")
+    return 1 if bad else 0
+
+
 def _log(tag, msg):
     print(f"[{tag:<9}] {msg}")
 
@@ -722,6 +813,9 @@ def main(argv=None):
                     help="with --streams: also count objects per stream-day. "
                          "This PAGES OVER OBJECTS and is much slower; presence "
                          "is the decisive check and counts are the extra.")
+    ap.add_argument("--tail", action="store_true",
+                    help="v1.10 — the newest object of each TAIL_STREAMS stream per box must reach the close "
+                         "minus 15 min (LIST only)")
     args = ap.parse_args(argv)
 
     try:
@@ -748,6 +842,8 @@ def main(argv=None):
     # second item.
     if args.streams:
         return report_streams(s3, days, counts=args.counts)
+    if args.tail:
+        return report_tail(s3, days)
 
     rows = [check_date(s3, d) for d in days]    # v1.1 — only two verdicts are failures. NOT_A_SESSION and
     # PARTIAL_BY_DESIGN are explanations, and treating an explanation as a

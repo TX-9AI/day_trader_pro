@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/eod_conductor_v2.py — v2.13
+day_trader_pro/eod_conductor_v2.py — v2.14
+v2.14 2026-10-31 — dtp r517 / SER.1 — A SERIES BACKLOG IS READ, SHOWN AND NEVER WAVED THROUGH AS DRIFT. OTV5 s3_push v5.4 drains each series table to the MAX(ts_epoch) it found at the start of --verify and prints `  SERIES_LAG <ns|table> series_lag_s=N` per table before the DRAIN line, grading SHORT while any lag is above 0. On 2026-10-30 SPX and QQQ quote_series stopped in S3 at 13:53 and 14:38 ET while their VERIFY lines read OK short=0. SERIES_LAG_RE / series_lag() parse those lines (none = an older pusher = "?"); the VERIFY line carries series_lag_s and names each table behind; takedown() HOLDS a lagging box before the COUNTER DRIFT pass, which would otherwise have taken it down. A held box's s3-push timer is re-armed by rearm() and keeps shipping. Gate tests/check_series_tail.py T1-T4. Operator: "yes to all of the prepared solutions" (2026-10-31).
 v2.13 2026-10-26 — dtp r513 / STRM.1 — THE DRAIN WRITES THE DAY'S OHLC FILE BEFORE IT VERIFIES. The box's candle-logger.timer
       fires at 16:05 ±30 s and QUIESCE stops it at about the same moment, so on 2026-10-26 nine of fourteen boxes never wrote
       data/OHLC/<date>/<SYM>.csv before the drain and STREAMS reported "ohlc MISS: 9/14". The conductor owns the close, so its
@@ -173,6 +174,17 @@ DRAIN_RE = re.compile(
     r"DRAIN host=(?P<host>\S+) sym=(?P<sym>\S+) drained=(?P<drained>\S+) "
     r"pushed=(?P<pushed>\d+) failed=(?P<failed>\d+) prefixes=(?P<prefixes>\d+) "
     r"local=(?P<local>\d+) s3=(?P<s3>\d+) short=(?P<short>\d+) (?P<verdict>\S+)")
+# v2.14 (SER.1) — s3_push v5.4 prints one `  SERIES_LAG <ns|table> series_lag_s=N` per series table BEFORE the
+# DRAIN line (whose shape is unchanged). An older pusher prints none, and that reads "?" — never 0.
+SERIES_LAG_RE = re.compile(r"^\s+SERIES_LAG (?P<table>\S+) series_lag_s=(?P<lag>\d+)", re.M)
+
+
+def series_lag(text):
+    """-> (max lag in seconds or None when the pusher printed no SERIES_LAG line, [(table, lag) behind])."""
+    rows = [(m.group("table"), int(m.group("lag"))) for m in SERIES_LAG_RE.finditer(text or "")]
+    if not rows:
+        return None, []
+    return max(l for _t, l in rows), [(t, l) for t, l in rows if l > 0]
 
 
 def _log(tag: str, msg: str) -> None:
@@ -358,6 +370,9 @@ def drain_and_verify(symbols, dry: bool) -> dict:
             continue
         d = m.groupdict()
         d["raw"] = text
+        _lag, _behind = series_lag(text)
+        d["series_lag_s"] = "?" if _lag is None else _lag
+        d["series_behind"] = _behind
         results[sym] = d
     return results
 
@@ -617,6 +632,14 @@ def purge_verified(ok: list, dry: bool) -> dict:
     return out
 
 
+def _lag_s(r) -> int:
+    """v2.14 (SER.1) — the box's parsed series lag; "?" (an older pusher) counts as 0, as it did before."""
+    try:
+        return int(r.get("series_lag_s") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def takedown(results: dict, dry: bool, enabled: bool) -> tuple:
     """Stop the instances that verified. Leave the rest UP, and say why.
 
@@ -639,6 +662,10 @@ def takedown(results: dict, dry: bool, enabled: bool) -> tuple:
         raw = r.get("raw") or ""
         if r.get("verdict") == "OK" and str(r.get("short")) == "0":
             ok.append(s)
+        elif _lag_s(r) > 0:
+            # v2.14 (SER.1) — a series table behind its drain target is rows still on the box, not an inflated
+            # counter. The drift pass below must never take such a box down.
+            held.append(s)
         elif "COUNTER DRIFT" in raw:
             # Verified-present objects, inflated counter. Safe to take down,
             # and SAID OUT LOUD so it cannot pass unnoticed.
@@ -754,7 +781,10 @@ def _run_close(running, date, dry, a) -> int:
                        f"local={r.get('local','?')} s3={r.get('s3','?')} "
                        f"drained={r.get('drained','?')} "
                        f"pushed={r.get('pushed','?')} "
-                       f"failed={r.get('failed','?')}")
+                       f"failed={r.get('failed','?')} "
+                       f"series_lag_s={r.get('series_lag_s','?')}")
+        for _t, _l in (r.get("series_behind") or [])[:4]:
+            _log("VERIFY", f"  {sym}: {_t} {_l}s behind — rows still on the box; HELD so its timer ships them")
 
     # 4 ─ take down what verified
     ok, held = takedown(results, dry, not a.no_takedown)

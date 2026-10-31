@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/eod_analysis.py  v1.6
+day_trader_pro/eod_analysis.py  v1.7
+v1.7  2026-10-31 — dtp r517 / SER.1 — A TAIL PHASE AFTER STREAMS: warehouse_coverage --tail grades each box's newest quote_series
+      object against the close minus 15 min (12:45 on a half day). On 2026-10-30 STREAMS was green on quote_series
+      while S3's SPX copy stopped at 13:53 ET and QQQ's at 14:38. Warns, never stops. Gate tests/check_series_tail.py
+      T8. Operator: "yes to all of the prepared solutions" (2026-10-31).
 v1.6  2026-10-26 — dtp r514 / LABEL.1 — A TAPE PHASE FIRST: THE DAY'S 1m TAPE IS MATERIALIZED FROM S3. This runs after TAKEDOWN,
       and DAILY_BARS and LABEL read ohlc/<date>/, which only harvest (an scp from a running box) ever wrote - so LABEL had
       been rc=1 "no tape" every night and DAILY_BARS rebuilt 0 symbols. ohlc_from_s3.materialize writes the day and the
@@ -359,6 +363,26 @@ def run(date: str, dry: bool) -> int:
                   f"gap(s), {len([l for l in flagged if '❗' in l])} stale "
                   f"exemption(s); see the rows above")
 
+    def _tail():
+        """v1.7 (SER.1) — the newest quote_series object per box must reach the close minus 15 min.
+
+        --streams only asks whether a partition EXISTS; on 2026-10-30 SPX's existed and stopped at 13:53 ET.
+        Warn, never stop, like STREAMS; the 🔴 rows print.
+        """
+        import subprocess
+        r = subprocess.run(
+            [sys.executable, "warehouse_coverage.py", "--tail", "--date", date],
+            cwd=_here, capture_output=True, text=True, timeout=900)
+        out = (r.stdout or "") + (r.stderr or "")
+        rows = [l for l in out.splitlines() if "🔴" in l and "end before the close" not in l]
+        for line in rows[:20]:
+            _log("TAIL", line.split("] ", 1)[-1].strip())
+        if r.returncode == 0:
+            _log("TAIL", "✅ every box's quote_series reaches the close")
+        else:
+            _warn(warns, "TAIL", f"rc={r.returncode} — {len(rows)} box-stream(s) end before the close; "
+                                 f"see the rows above")
+
     # ── the R suite (otv4 tools, S3-sourced, run HERE on control) ───────
     # ⚠️ CROSS-REPO BY SUBPROCESS, NEVER BY IMPORT — the modularity contract.
     # Precedent: the conductor has always shelled to validate_regime.sh in
@@ -424,6 +448,7 @@ def run(date: str, dry: bool) -> int:
                          ("EXCURSION", _excursion, "MFE/MAE report"),
                          ("COVERAGE", _coverage, "warehouse coverage"),
                          ("STREAMS", _streams, "per-stream, per-day, per-box coverage"),
+                         ("TAIL", _tail, "each box's quote_series reaches the close (SER.1)"),
                          ("R_LEDGER", _r_ledger, "R baseline from the warehouse (headline → Telegram)"),
                          ("EDGE_SCAN", _edge_scan, "weekly edge scan (Fridays; silent unless the bar clears)")):
         if nm == "EDGE_SCAN":
