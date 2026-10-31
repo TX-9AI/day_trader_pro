@@ -1,6 +1,15 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_saturday_brief.py  v1.2
+day_trader_pro/tests/check_saturday_brief.py  v1.3
+v1.3  2026-10-31  dtp r520 / SAT.4 — THE BRIEF IS THE OPERATOR'S SEVEN SECTIONS, FOR THE FLEET THAT EXISTS.
+      The operator, 2026-10-31: "Re-do the entire brief" and "don't list the retired strategies either".
+      S10/S10b the prompt and the tracked spec (docs/SATURDAY_BRIEF.md) name the same seven sections in order;
+      S11/S11b no retired strategy or retired section is named in the prompt, or in the spec's report sections
+      (the search list lives in the spec's RETIRED-SEARCH block, read from there); S12 the prompt follows the
+      tracked spec, not handoffs/; S13 the brief is written outside handoffs/ (check_scratch_purge P12);
+      S14 the standing rules are in the prompt; S15-S17 DRIVEN: a deadline is passed to timeout(1), and a real
+      run holds its own in-flight marker while the session runs, hands it BRIEF/WORK/DEADLINE, and clears it.
+      S7's abandoned marker is 6 h old (the expiry moved from 3 h to 5 h).
 v1.2  2026-09-26  r432 — writes to ITS OWN log and ledger, never the operator's.
       The ledger exists to answer "is the brief still happening?" by `tail`.
       This file was filling it with deliberate failures, and on 2026-09-26
@@ -248,12 +257,12 @@ ck("S6d", cn is not None and cnd not in (None, "6"),
 MARK = "/home/ubuntu/.saturday_brief_inflight"
 _pre = os.path.exists(MARK)
 try:
-    subprocess.run(["touch", "-d", "5 hours ago", MARK], check=True)
+    subprocess.run(["touch", "-d", "6 hours ago", MARK], check=True)
     r = subprocess.run(["bash", SH], capture_output=True, text=True, timeout=120,
                        env=dict(os.environ, **_SCRATCH, SATURDAY_BRIEF_CLAUDE="/bin/false",
                                 SATURDAY_BRIEF_OUT=_TMPOUT))
     ck("S7", "ABANDONED" in r.stdout,
-       "a 5-hour-old in-flight marker is treated as ABANDONED, not obeyed")
+       "a 6-hour-old in-flight marker is treated as ABANDONED, not obeyed")
     subprocess.run(["touch", MARK], check=True)
     r = subprocess.run(["bash", SH], capture_output=True, text=True, timeout=120,
                        env=dict(os.environ, **_SCRATCH, SATURDAY_BRIEF_CLAUDE="/bin/false",
@@ -269,6 +278,109 @@ ck("S8", "LEDGER" in src and "one line per run" in src.lower()
    or "ledger" in src.lower(),
    "every run appends to a ledger — 'is the brief still happening?' must be "
    "answerable without reading a megabyte of session output")
+
+# ------------------------------------------------------------------------ S10
+# 🔑 v1.3 — THE OPERATOR'S SEVEN SECTIONS (2026-10-31), IN THE PROMPT AND IN THE TRACKED SPEC, IN ORDER.
+SPEC = os.path.join(ROOT, "docs", "SATURDAY_BRIEF.md")
+spec = open(SPEC).read() if os.path.exists(SPEC) else ""
+SECTIONS = ["## 1. TRADING SUMMARY", "## 2. ISSUES FROM THE BOT LOGS", "## 3. FLEET HEALTH",
+            "## 4. DOCUMENTATION CORRECTIONS", "## 5. CODE HYGIENE", "## 6. PROPOSED STUDIES TO INCREASE P&L",
+            "## 7. RECOMMENDATIONS"]
+
+
+def _in_order(text, heads):
+    pos = [text.find(h) for h in heads]
+    return all(x >= 0 for x in pos) and pos == sorted(pos)
+
+
+ck("S10", _in_order(p, SECTIONS), "the prompt names all seven sections, in the operator's order")
+ck("S10b", _in_order(spec, SECTIONS), "the tracked spec has the same seven sections, in the same order")
+
+# ------------------------------------------------------------------------ S11
+# 🔴 "don't list the retired strategies either." The search list is the spec's own RETIRED-SEARCH block, so the
+# list exists once; the prompt may name none of it, and neither may the spec outside that block and its
+# retirement table.
+_blk = re.search(r"<!-- RETIRED-SEARCH.*?-->(.*?)<!-- /RETIRED-SEARCH -->", spec, re.S)
+RETIRED = [t for t in re.split(r"\s{2,}|\n", _blk.group(1)) if t.strip()] if _blk else []
+RETIRED = [t.strip() for t in RETIRED] + ["ORB", "AAL", "SEVENTEEN", "veto"]
+
+
+def _named(text):
+    hits = []
+    for t in RETIRED:
+        rx = r"(?<![\w-])" + re.escape(t) + r"(?![\w])"
+        if re.search(rx, text, 0 if any(c.isupper() for c in t) else re.I):
+            hits.append(t)
+    return hits
+
+
+ck("S11", len(RETIRED) >= 12 and not _named(p),
+   f"the prompt names no retired strategy or section ({len(RETIRED)} terms searched; named: {_named(p) or 'none'})")
+_report = spec
+if _blk:
+    _report = _report.replace(_blk.group(0), "")
+_report = _report.split("## WHAT THIS SPEC RETIRED")[0]
+_report = _report[_report.find("## 1. TRADING SUMMARY"):] if "## 1. TRADING SUMMARY" in _report else ""
+_named_spec = [t for t in _named(_report) if t not in ("ORB",)]   # 5. says the ORB *engine* stays
+ck("S11b", bool(_report) and not _named_spec,
+   f"the spec's seven sections name no retired strategy outside the search block (named: {_named_spec or 'none'})")
+
+# ------------------------------------------------------------------------ S12
+ck("S12", "/home/ubuntu/day_trader_pro/docs/SATURDAY_BRIEF.md" in p and "handoffs/SATURDAY" not in p,
+   "the prompt follows the tracked spec in dtp docs/, not the gitignored handoffs/ copy")
+_ign = subprocess.run(["git", "-C", ROOT, "check-ignore", "-q", "docs/SATURDAY_BRIEF.md"]).returncode
+ck("S12b", bool(spec) and _ign == 1, f"docs/SATURDAY_BRIEF.md exists and is not gitignored (check-ignore rc={_ign})")
+
+# ------------------------------------------------------------------------ S13
+_env13 = {k: v for k, v in os.environ.items() if k not in ("SATURDAY_BRIEF_OUT", "SATURDAY_BRIEF_WEEKLY")}
+_env13.update(_SCRATCH)
+r = subprocess.run(["bash", SH, "--dry"], env=_env13, capture_output=True, text=True, timeout=60)
+_out = re.search(r"output: (\S+)", r.stdout)
+_out = _out.group(1) if _out else ""
+ck("S13", _out.startswith("/home/ubuntu/reviews/weekly/saturday_") and "handoffs" not in _out
+   and "/options-trader-v4/" not in _out,
+   f"the default brief path is outside handoffs/ and outside every repo: {_out or '(none)'}")
+
+# ------------------------------------------------------------------------ S14
+_rules = {"wake": "--wake-only" in p and "--shutdown-only" in p and "wake_and_bake" in p,
+          "they/them": "they/them" in p,
+          "no env": "Never print an environment" in p and "is-active" in p,
+          "read-only": "mode=ro" in p and "Reads only" in p,
+          "fees": "never inside EV" in p,
+          "filter": "mainline()" in p,
+          "not measured": "NOT MEASURED" in p,
+          "otv5 r suite": "/home/ubuntu/OTV5/tests/" in p and "r_ledger" in p,
+          "non-events": "No non-events" in p and "Checked, nothing to report" in p,
+          "venv": "/home/ubuntu/day_trader_pro/venv/bin/python" in p}
+ck("S14", all(_rules.values()), f"the standing rules are in the prompt (missing: "
+   f"{[k for k, v in _rules.items() if not v] or 'none'})")
+
+# ------------------------------------------------------------------------ S15
+_pc = subprocess.run(["bash", SH, "--print-cmd"], env=dict(os.environ, **_SCRATCH), capture_output=True,
+                     text=True, timeout=60).stdout
+_t = re.search(r"timeout=(\d+)", _pc)
+ck("S15", bool(_t) and 0 < int(_t.group(1)) <= 18000,
+   f"the session is given a deadline: {(_t.group(0) if _t else 'none')} (≤ 5 h, ends by 07:30 ET on a timer run)")
+
+# ------------------------------------------------------------------------ S16
+# DRIVEN: a stub stands in for claude, records whether the in-flight marker exists while it runs, and keeps the
+# prompt it was handed. The wrapper used to write no marker of its own, so the watchdog's retry could start a
+# second brief beside a long-running first one.
+_d = tempfile.mkdtemp(prefix="chk_satbrief_")
+_stub = os.path.join(_d, "claude_stub.sh")
+_mk = os.path.join(_d, "inflight")
+open(_stub, "w").write(f'#!/bin/bash\n[ -f "{_mk}" ] && echo yes > "{_d}/seen"\nprintf "%s\\n" "$@" > "{_d}/prompt"\nexit 0\n')
+os.chmod(_stub, 0o755)
+_o16 = os.path.join(_d, "weekly", "saturday_TEST.md")
+r = subprocess.run(["bash", SH], capture_output=True, text=True, timeout=120,
+                   env=dict(os.environ, **_SCRATCH, SATURDAY_BRIEF_CLAUDE=_stub, SATURDAY_BRIEF_MARKER=_mk,
+                            SATURDAY_BRIEF_WEEKLY=os.path.join(_d, "weekly"), SATURDAY_BRIEF_OUT=_o16))
+ck("S16", os.path.exists(os.path.join(_d, "seen")) and not os.path.exists(_mk),
+   "a real run holds its own in-flight marker while the session runs, and clears it after")
+_hp = open(os.path.join(_d, "prompt")).read() if os.path.exists(os.path.join(_d, "prompt")) else ""
+ck("S17", f"exactly this path: {_o16}" in _hp and "WORK" in _hp and "DEADLINE" in _hp
+   and os.path.isdir(_o16[:-3] + "_work") and "## 1. TRADING SUMMARY" in _hp,
+   "the session is handed the prompt, its BRIEF path, its WORK folder (created) and its DEADLINE")
 
 print()
 if FAILS:

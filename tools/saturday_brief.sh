@@ -1,5 +1,18 @@
 #!/usr/bin/env bash
-# day_trader_pro/tools/saturday_brief.sh — v1.6
+# day_trader_pro/tools/saturday_brief.sh — v1.7
+# v1.7 (2026-10-31) — dtp r520 / SAT.4. THE BRIEF IS REWRITTEN FOR THE FLEET THAT EXISTS, AND IT
+#   LEAVES THE GITIGNORED FOLDER. The operator, 2026-10-31: "Re-do the entire brief".
+#   · OUT defaults to ~/reviews/weekly/saturday_<date>.md (beside the daily reviews), not
+#     options-trader-v4/handoffs/, which is gitignored and which check_scratch_purge P12
+#     flags for every authored file. Its working files (sweep.json, botlog.json, disk.json)
+#     go to ~/reviews/weekly/saturday_<date>_work/, so next week can diff against them.
+#   · The spec it follows is the tracked docs/SATURDAY_BRIEF.md in this repo.
+#   · A DEADLINE: the session is killed at 07:30 ET (SATURDAY_BRIEF_DEADLINE_ET), at most
+#     SATURDAY_BRIEF_MAX_S (5 h) after it starts; the prompt is told the same time.
+#   · THE REAL RUN WRITES ITS OWN IN-FLIGHT MARKER and removes it on exit. Until now only the
+#     standing session wrote one, so a long fallback run had nothing stopping the watchdog's
+#     retry from starting a second brief beside it. The marker expires after 5 h (was 3 h),
+#     longer than the deadline allows a run to live.
 # v1.6 (2026-10-02) — r456 / OPS.63. THE SELF-CALLS GO THROUGH bash, NOT THE
 #   EXECUTE BIT. The 09-30 canary logged `saturday_brief.sh: Permission denied`
 #   and marked the chain broken: git tracks this file 100644, and r454's land
@@ -152,7 +165,23 @@ STAMP="$(date +%Y-%m-%d)"
 # first cut ran against the live path, so once a genuine brief existed the
 # wrapper correctly stood down and three checks failed for a reason that had
 # nothing to do with what they assert.
-OUT="${SATURDAY_BRIEF_OUT:-$OTV4/handoffs/saturday_${STAMP}.md}"
+WEEKLY="${SATURDAY_BRIEF_WEEKLY:-/home/ubuntu/reviews/weekly}"
+OUT="${SATURDAY_BRIEF_OUT:-$WEEKLY/saturday_${STAMP}.md}"
+WORK="${OUT%.md}_work"
+MARKER="${SATURDAY_BRIEF_MARKER:-/home/ubuntu/.saturday_brief_inflight}"
+# 🔑 THE PRIOR BRIEF, FOR THE WEEK-ON-WEEK DIFF: the newest saturday_*.md before today in
+# the weekly folder, else (the first week after the move) the newest in handoffs/.
+PRIOR="$(ls -1 "$WEEKLY"/saturday_20*.md 2>/dev/null | grep -v "saturday_${STAMP}.md" | sort | tail -1)"
+[ -z "$PRIOR" ] && PRIOR="$(ls -1 "$OTV4"/handoffs/saturday_20*.md 2>/dev/null | grep -v "saturday_${STAMP}.md" | sort | tail -1)"
+PRIOR_WORK="${PRIOR%.md}_work"
+# ⏱ THE DEADLINE. The operator reads it after 07:30 ET; a session still running then is
+# killed by timeout(1) and the wrapper records FAILED, rather than racing the reader.
+DEADLINE_ET="${SATURDAY_BRIEF_DEADLINE_ET:-07:30}"
+MAX_S="${SATURDAY_BRIEF_MAX_S:-18000}"
+_dl=$(TZ=America/New_York date -d "today $DEADLINE_ET" +%s 2>/dev/null || echo 0)
+BUDGET_S=$(( _dl - $(date +%s) ))
+# Run by hand after the deadline: the ceiling alone applies.
+if [ "$BUDGET_S" -le 0 ] || [ "$BUDGET_S" -gt "$MAX_S" ]; then BUDGET_S="$MAX_S"; fi
 # 🔴 OVERRIDABLE SO THE GATE STOPS WRITING INTO THE OPERATOR'S EVIDENCE.
 # check_saturday_brief runs THIS script for real with SATURDAY_BRIEF_CLAUDE
 # set to /bin/false and a 5-hour-old in-flight marker. Both are correct tests.
@@ -169,7 +198,9 @@ LOG="${SATURDAY_BRIEF_LOG:-/home/ubuntu/saturday_brief.log}"
 # one line saying what it did. `tail` on this answers "is the brief still
 # happening?" without reading a megabyte of session output.
 LEDGER="${SATURDAY_BRIEF_LEDGER:-/home/ubuntu/saturday_brief.ledger}"
-PROMPT_FILE="/home/ubuntu/day_trader_pro/tools/saturday_brief.prompt"
+# The prompt beside this script (v1.7), so a gate run from a build clone tests the clone's
+# prompt, not the live one; the landed path is the same file it always was.
+PROMPT_FILE="${SATURDAY_BRIEF_PROMPT:-$(dirname "$(readlink -f "$0")")/saturday_brief.prompt}"
 
 # 🔑 READ AND MEASURE ONLY. Bash is needed because every measurement in this
 # brief is a shell or python invocation, but the lander is reached only
@@ -252,6 +283,7 @@ fi
 # Saturday that is cron writing into an agent the operator is attached to.
 if [ "${1:-}" = "--print-cmd" ]; then
   printf '%s\n' "$ISOLATE"
+  printf 'timeout=%s\n' "$BUDGET_S"
   exit 0
 fi
 
@@ -293,6 +325,9 @@ if [ "${1:-}" = "--dry" ]; then
   echo "  --dry: would run claude -p with tools [$TOOLS]"
   echo "  prompt: $PROMPT_FILE"
   echo "  output: $OUT"
+  echo "  work:   $WORK"
+  echo "  prior:  ${PRIOR:-(none)}"
+  echo "  budget: ${BUDGET_S}s (deadline $DEADLINE_ET ET)"
   [ -f "$PROMPT_FILE" ] && echo "  prompt file present ($(wc -l < "$PROMPT_FILE") lines)" \
                         || echo "  ⚠️ PROMPT FILE MISSING"
   exit 0
@@ -311,21 +346,21 @@ if [ -f "$OUT" ]; then
   echo "$(date -u +%FT%TZ) STOOD_DOWN brief_exists $OUT" >> "$LEDGER"
   exit 0
 fi
-if [ -f /home/ubuntu/.saturday_brief_inflight ]; then
+if [ -f "$MARKER" ]; then
   # ⚠️ AN IN-FLIGHT MARKER THAT NEVER CLEARS WOULD SILENCE THIS FALLBACK
   # FOREVER. A session that crashed mid-brief leaves one behind, and the
   # fallback would then stand down every week while nothing was produced —
   # the exact silent failure this whole arrangement exists to prevent. So the
   # marker EXPIRES: older than 3 hours and it is treated as abandoned.
-  _age=$(( $(date +%s) - $(stat -c %Y /home/ubuntu/.saturday_brief_inflight 2>/dev/null || echo 0) ))
-  if [ "$_age" -lt 10800 ]; then
+  _age=$(( $(date +%s) - $(stat -c %Y "$MARKER" 2>/dev/null || echo 0) ))
+  if [ "$_age" -lt 18000 ]; then
     echo "  standing session IN FLIGHT (${_age}s) on $STAMP — not starting a second one."
     echo "$(date -u +%FT%TZ) STOOD_DOWN inflight age=${_age}s" >> "$LEDGER"
     exit 0
   fi
   echo "  ⚠️ stale in-flight marker (${_age}s old) — treating as ABANDONED and proceeding."
   echo "$(date -u +%FT%TZ) STALE_MARKER age=${_age}s proceeding" >> "$LEDGER"
-  rm -f /home/ubuntu/.saturday_brief_inflight
+  rm -f "$MARKER"
 fi
 
 if [ ! -f "$PROMPT_FILE" ]; then
@@ -337,18 +372,28 @@ cd "$OTV4" || { echo "  ⚠️ cannot cd $OTV4" | tee -a "$LOG"; exit 1; }
 
 # ⚠️ THE OUTPUT PATH IS PASSED IN, NOT GUESSED BY THE SESSION. A brief that
 # writes to a name nobody predicted is a brief nobody finds.
-"$CLAUDE_BIN" -p $ISOLATE "$(cat "$PROMPT_FILE")
+mkdir -p "$WEEKLY" "$WORK" || { echo "  ⚠️ cannot create $WORK" | tee -a "$LOG"; exit 1; }
+touch "$MARKER"
+trap 'rm -f "$MARKER"' EXIT
+_deadline_hm="$(TZ=America/New_York date -d "@$(( $(date +%s) + BUDGET_S ))" +%H:%M)"
+timeout "$BUDGET_S" "$CLAUDE_BIN" -p $ISOLATE "$(cat "$PROMPT_FILE")
 
-Write your finished brief to exactly this path: $OUT" \
+RUN PARAMETERS (from the wrapper; use them exactly):
+  BRIEF   write the finished brief to exactly this path: $OUT
+  WORK    your working files (sweep.json, botlog.json, disk.json, tool outputs): $WORK
+  PRIOR   last week's brief: ${PRIOR:-NONE - say so; nothing can be called new}
+  PRIOR_WORK  last week's working files: $PRIOR_WORK
+  DEADLINE    you are stopped at $_deadline_hm ET; have the file written well before it" \
   --allowedTools "$TOOLS" >> "$LOG" 2>&1
 rc=$?
 
-rm -f /home/ubuntu/.saturday_brief_inflight
+rm -f "$MARKER"
 if [ -f "$OUT" ]; then
   echo "  ✅ brief written: $OUT ($(wc -l < "$OUT") lines)" | tee -a "$LOG"
   echo "$(date -u +%FT%TZ) PRODUCED fallback lines=$(wc -l < "$OUT") $OUT" >> "$LEDGER"
   exit 0
 fi
+[ "$rc" = "124" ] && echo "  🔴 the session hit the $DEADLINE_ET ET deadline (timeout rc=124)" | tee -a "$LOG"
 echo "  🔴 NO BRIEF WRITTEN (claude rc=$rc) — see $LOG" | tee -a "$LOG"
 echo "$(date -u +%FT%TZ) FAILED fallback rc=$rc" >> "$LEDGER"
 exit 1
