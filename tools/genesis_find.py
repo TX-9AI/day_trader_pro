@@ -1,5 +1,15 @@
 #!/usr/bin/env python3
-# day_trader_pro/tools/genesis_find.py — v1.0
+# day_trader_pro/tools/genesis_find.py — v1.1
+# v1.1 (2026-10-31) — dtp r519 / OPS.36. IT SEARCHES THE LEDGERS THAT HOLD THE OPEN WORK. v1.0 read only
+#   ~/options-trader-v4/docs/{GENESIS,BACKLOG}.md. Since 2026-10-24 (otv4 r510) the open work is in ~/OTV5/docs/
+#   BACKLOG.md and the trading revisions are in ~/OTV5/docs/GENESIS.md; otv4's open rows were replaced by "MOVED to
+#   OTV5" pointers, so OPS.18 lost the word "sparse" and check_genesis_find G1 went red - and for anything filed only
+#   in OTV5 the tool answered "a real absence" when it had not looked (Saturday brief 2026-10-31 §0.1, R1). Now FOUR
+#   ledgers: OTV5 GENESIS and BACKLOG first (the live tree), then otv4's (still the history). Each section names its
+#   tree, because revision ids repeat across the two (OTV5 r39 is not otv4 r39). Trees resolve under DTP_OTV5_DIR
+#   (default ~/OTV5) and DTP_OTV4_DIR (default ~/options-trader-v4), as eod_analysis and brief_sigint read them. And a
+#   ledger that could not be read now voids the "real absence" line by name instead of sitting on stderr beside it.
+#   Gate tests/check_genesis_find.py v1.1 G1 (re-anchored), G3, G5. Operator: "Concur" (2026-10-31, R1).
 # v1.0 (2026-09-21) — r411 / OPS.36. HAS THIS ALREADY BEEN FOUND? THE QUESTION
 #   COST 188k TOKENS TO ASK, SO IT DID NOT GET ASKED.
 #   🔴 THE FAILURE THIS EXISTS FOR, IN FULL, BECAUSE IT IS MINE. On 2026-09-21
@@ -35,24 +45,34 @@ import os
 import re
 import sys
 
-OTV4 = os.path.expanduser("~/options-trader-v4")
-GENESIS = os.path.join(OTV4, "docs", "GENESIS.md")
-BACKLOG = os.path.join(OTV4, "docs", "BACKLOG.md")
+OTV4 = os.environ.get("DTP_OTV4_DIR", os.path.expanduser("~/options-trader-v4"))
+OTV5 = os.environ.get("DTP_OTV5_DIR", os.path.expanduser("~/OTV5"))
+
+GENESIS_ROW = re.compile(r"^\| \*\*(r[\w.\-]+)\*\* \|")
+BACKLOG_ROW = re.compile(r"^\| \*\*([A-Z]+\.\d+)\*\* \|")
+
+# v1.1 — (label, path, row pattern), searched in this order. OTV5 first: it is where the open work and the trading
+# revisions have lived since 2026-10-24. otv4 stays: it is the history, and GENESIS there is what SETTLED most of it.
+SOURCES = (
+    ("OTV5 GENESIS — why it was done (trading tree)", os.path.join(OTV5, "docs", "GENESIS.md"), GENESIS_ROW),
+    ("OTV5 BACKLOG — what is open", os.path.join(OTV5, "docs", "BACKLOG.md"), BACKLOG_ROW),
+    ("otv4 GENESIS — history", os.path.join(OTV4, "docs", "GENESIS.md"), GENESIS_ROW),
+    ("otv4 BACKLOG — history (open rows MOVED to OTV5 2026-10-24)",
+     os.path.join(OTV4, "docs", "BACKLOG.md"), BACKLOG_ROW),
+)
 
 WIDTH = 150          # characters of context shown per hit
 DEFAULT_MAX = 6      # hits per source before the tail is summarised
 
 
 def _rows(path, pattern):
-    """(id, text) for every ledger row — one GENESIS revision or BACKLOG row."""
+    """[(id, text)] for every ledger row — one GENESIS revision or BACKLOG row — or None if the file is unreadable."""
     try:
         with open(path, encoding="utf-8", errors="replace") as f:
-            for line in f:
-                m = pattern.match(line)
-                if m:
-                    yield m.group(1), line
+            return [(m.group(1), line) for line in f for m in [pattern.match(line)] if m]
     except OSError as e:
         print(f"  COULD NOT READ {path}: {e}", file=sys.stderr)
+        return None
 
 
 def _score(text, terms):
@@ -71,8 +91,14 @@ def _excerpt(text, terms):
 
 
 def search(path, pattern, terms, label, limit):
+    """-> hit count, or None when the ledger could not be read (v1.1: said, never folded into 'no match')."""
+    rows = _rows(path, pattern)
+    if rows is None:
+        print(f"\n=== {label} — NOT SEARCHED ===")
+        print(f"  COULD NOT READ {path} (set DTP_OTV5_DIR / DTP_OTV4_DIR)")
+        return None
     hits = []
-    for rid, text in _rows(path, pattern):
+    for rid, text in rows:
         s = _score(text, terms)
         if s:
             hits.append((s, rid, text))
@@ -83,7 +109,7 @@ def search(path, pattern, terms, label, limit):
         # 🔑 NEVER A BARE EMPTY LINE. See the header: an absence that renders
         # as silence is indistinguishable from a tool that did not run.
         print(f"  NO MATCH in {os.path.basename(path)} "
-              f"({sum(1 for _ in _rows(path, pattern))} rows searched)")
+              f"({len(rows)} rows searched)")
         return 0
     for s, rid, text in hits[:limit]:
         print(f"  {rid:<10} ({s:>2} hit{'s' if s > 1 else ' '})  "
@@ -103,17 +129,24 @@ def main():
     limit = 10_000 if a.all else DEFAULT_MAX
 
     n = 0
-    n += search(GENESIS, re.compile(r"^\| \*\*(r[\w.\-]+)\*\* \|"),
-                a.terms, "GENESIS — why it was done", limit)
-    n += search(BACKLOG, re.compile(r"^\| \*\*([A-Z]+\.\d+)\*\* \|"),
-                a.terms, "BACKLOG — what is open", limit)
+    unread = []
+    for label, path, pattern in SOURCES:
+        got = search(path, pattern, a.terms, label, limit)
+        if got is None:
+            unread.append(path)
+        else:
+            n += got
     print()
     if n:
         print(f"  {n} row(s) already touch this. READ THEM before you "
               f"call it a finding.")
-    else:
-        print("  Nothing in either ledger. That is a real absence, not a "
-              "failed search — both files were read.")
+    if unread:
+        # 🔴 v1.1 — AN UNREAD LEDGER IS NOT AN ABSENCE. Say which, on stdout, where the answer is read.
+        print(f"  ⚠️ {len(unread)} of {len(SOURCES)} ledgers NOT READ: {', '.join(unread)}. "
+              f"An empty result here is NOT a real absence.")
+    elif not n:
+        print(f"  Nothing in any of the {len(SOURCES)} ledgers (OTV5 and otv4). That is a real "
+              f"absence, not a failed search — every file was read.")
     return 0
 
 

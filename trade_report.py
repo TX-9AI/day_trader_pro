@@ -1,4 +1,9 @@
-# day_trader_pro/trade_report.py — v1.24
+# day_trader_pro/trade_report.py — v1.25
+# v1.25 (2026-10-31) — dtp r519. The PROVENANCE line for a retired strategy reads
+#   "history only" when nothing superseded it. strategy_registry v1.6 moved the
+#   retired strategies (ORB, VOLT, the sweep, TCS, ...) to its HISTORICAL decode
+#   table; most were ended, not replaced, and v1.24 would print "superseded by
+#   None". Operator, on R5: "don't list the retired strategies either."
 # v1.24 (2026-10-04) — r472 / RPT.34. FITS A PHONE: NO LINE WIDER THAN 74.
 #   Operator: "can you fix the text wrapping in report 47?" 133 of 258 lines
 #   ran past the report's own 74-wide rule (85-character table rows, 94/95
@@ -849,8 +854,9 @@ def lineage_block(trades) -> None:
               f"counted as {SR.MAIN}.")
     if retired:
         for n, c in sorted(retired.items()):
-            print(f"  \u2022 {SR.code(n)} {n} is RETIRED ({c} trade(s)) \u2014 superseded by "
-                  f"{SR.superseded_by(n)}")
+            sup = SR.superseded_by(n)       # r519: most retired strategies were ended, not replaced
+            print(f"  \u2022 {SR.code(n)} {n} is RETIRED ({c} trade(s)) \u2014 "
+                  + (f"superseded by {sup}" if sup else "history only"))
     if unreg:
         print(f"  \U0001f534 {sum(unreg.values())} trade(s) in {len(unreg)} UNREGISTERED "
               f"strategy(ies) \u2014 add them to strategy_registry:")

@@ -1,6 +1,16 @@
 #!/usr/bin/env python3
 """
-tests/check_strategy_registry.py  v1.3
+tests/check_strategy_registry.py  v1.4
+v1.4  2026-10-31  r519 — PARK REGISTERED; RETIRED STRATEGIES DECODE BUT ARE NOT LISTED. The operator, on R5: "No to
+      PARC & it was never an active strategy. Also, don't list the retired strategies either. They're no longer
+      relevant to this repo." R2 now also scans the OTV5 tree (DTP_OTV5_DIR, default ~/OTV5) - every name it
+      declares decodes, except PARC (NOT_REGISTERED, by that ruling). R4 checks HISTORICAL: no name in both maps,
+      every successor a known name, REGISTRY all LIVE. R5: the frozen otv4/query.py mirror is HISTORY - every code
+      it holds must decode the same here; a code it lacks is allowed only for a LIVE OTV5-era entry (PARK; otv4 is
+      frozen and will never gain it). R11 (new): REGISTRY == OTV5 plan_state's ACTIVE trading plans minus PARC,
+      code("PARK") == "PARK", PARC unregistered. R12 (new): history still reads - each retired name keeps its old
+      code, status RETIRED, an old ORB row still labels OTV4/ORBS, and trade_report's PROVENANCE block calls it
+      RETIRED, never UNREGISTERED. Born red on 5d1ff71 at R2, R4, R11, R12.
 v1.3  2026-10-25  r508 / OPS.73 — R10: a box repointed to OTV5 is OTV5 from its OTV5_SINCE day and its old engine
       before it - an UNTAGGED row on SOFI dated before 10-25 is TEST, on/after OTV5; on NVDA OTV4 then OTV5; a box not
       repointed (QQQ until declared) keeps its declaration; an undated row keeps the old map; a tag still wins; and
@@ -41,6 +51,16 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 OTV4 = os.environ.get("OT_OTV4_ROOT", os.path.expanduser("~/options-trader-v4"))
+OTV5 = os.environ.get("DTP_OTV5_DIR", os.path.expanduser("~/OTV5"))       # v1.4
+
+# v1.4 — declared by OTV5 code and deliberately NOT registered. The operator, 2026-10-31: "No to PARC & it was never
+# an active strategy." Its rows (log mode only) render the visibly unregistered "?PAR".
+NOT_REGISTERED = ("PARC",)
+
+# v1.4 — the codes the retired strategies have always printed. R12 pins them: a month of S3 rows decodes through these.
+HISTORY_CODES = {"ORBStrategy": "ORBS", "VOLT": "VOLT", "ATPButterfly": "ATPB", "SweepCreditSpread": "SWPT",
+                 "TrendCreditSpread": "TCST", "OpeningRangeCreditSpread": "ORCS", "IronCondorStrategy": "CNDR",
+                 "SweepReversal": "SWPR", "ContinuationStrategy": "CONT"}
 
 # 📊 MEASURED from the SOFI box 2026-09-25, not assumed: the strategy names
 # TEST declares. If TEST adds one, R2 goes red until it is registered — which
@@ -77,6 +97,33 @@ def _mirror_map(path):
     return dict(re.findall(r'"([^"]+)"\s*:\s*"([^"]+)"', m.group(1)))
 
 
+def _declared(tree):
+    """Strategy names a tree's strategy/*.py declare (name = "..."), capitalised only."""
+    import glob
+    decl = set()
+    for f in glob.glob(os.path.join(tree, "strategy", "*.py")):
+        src = open(f, encoding="utf-8", errors="replace").read()
+        decl |= set(re.findall(r'name\s*=\s*"([A-Za-z0-9_]+)"', src))
+    return {d for d in decl if d and d[0].isupper()}
+
+
+def _otv5_active_trades():
+    """OTV5 strategy/plan_state.TABLE rows whose default is ACTIVE in the HOUR category (a trading plan, not a
+    management plan), read by ast - nothing of OTV5 is imported."""
+    path = os.path.join(OTV5, "strategy", "plan_state.py")
+    tree = ast.parse(open(path, encoding="utf-8").read())
+    for node in ast.walk(tree):
+        tgt = getattr(node, "target", None) or (node.targets[0] if isinstance(node, ast.Assign) else None)
+        if isinstance(tgt, ast.Name) and tgt.id == "TABLE" and isinstance(node.value, ast.Dict):
+            out = set()
+            for k, v in zip(node.value.keys, node.value.values):
+                state, cat = (e.id if isinstance(e, ast.Name) else getattr(e, "value", None) for e in v.elts[1:3])
+                if state == "ACTIVE" and cat == "HOUR":
+                    out.add(k.value)
+            return out
+    raise RuntimeError(f"no TABLE in {path}")
+
+
 def main():
     try:
         import strategy_registry as SR
@@ -96,20 +143,19 @@ def main():
        else f"duplicates={sorted(dupes)} wrong-width={wrong}")
 
     # ── R2 — every strategy either engine declares is registered ───────────
+    # v1.4 — and OTV5's tree, the one that trades. "Registered" here means DECODES (REGISTRY or HISTORICAL).
     missing = []
     try:
-        import glob
-        decl = set()
-        for f in glob.glob(os.path.join(OTV4, "strategy", "*.py")):
-            src = open(f, encoding="utf-8", errors="replace").read()
-            decl |= set(re.findall(r'name\s*=\s*"([A-Za-z0-9_]+)"', src))
-        decl = {d for d in decl if d and d[0].isupper()}
-        missing = sorted((decl | set(TEST_DECLARED)) - set(codes))
+        d5 = _declared(OTV5)
+        if not d5:
+            raise RuntimeError(f"no strategy names under {OTV5}/strategy - set DTP_OTV5_DIR")
+        decl = _declared(OTV4) | d5 | set(TEST_DECLARED)
+        missing = sorted(decl - set(codes) - set(NOT_REGISTERED))
     except Exception as exc:                                   # noqa: BLE001
         missing = [f"(could not scan: {exc})"]
     ck("R2", not missing,
-       "every declared strategy in MAIN's tree and TEST's measured set is "
-       "registered" if not missing else f"UNREGISTERED: {missing}")
+       "every declared strategy in OTV5's and otv4's trees and TEST's measured set decodes (PARC excepted by "
+       "ruling)" if not missing else f"UNREGISTERED: {missing}")
 
     # ── R3 — an unknown name renders non-blank AND obviously unregistered ──
     got = SR.code("LiquidityHuntNewThing")
@@ -119,14 +165,20 @@ def main():
        f"plausible code like 'LIQU')")
 
     # ── R4 — a retired entry names the live strategy that replaced it ──────
+    # v1.4 — retired names live in HISTORICAL (decode only). A successor may itself be retired since (SweepReversal ->
+    # SweepCreditSpread), but it must be a KNOWN name; and nothing is both listed and retired.
     bad = []
-    for n, (c, st, lins, sup) in SR.REGISTRY.items():
-        if st == SR.RETIRED:
-            if not sup or sup not in SR.REGISTRY or SR.REGISTRY[sup][1] != SR.LIVE:
-                bad.append(f"{n}->{sup!r}")
+    hist = getattr(SR, "HISTORICAL", None)
+    if not isinstance(hist, dict):
+        bad.append("no HISTORICAL decode table - retired strategies are still listed in REGISTRY")
+        hist = {}
+    bad += [f"{n} is {st} in REGISTRY" for n, (c, st, lins, sup) in SR.REGISTRY.items() if st != SR.LIVE]
+    bad += [f"{n} in both maps" for n in set(SR.REGISTRY) & set(hist)]
+    bad += [f"{n}->{h[2]!r}" for n, h in hist.items() if h[2] and h[2] not in SR.REGISTRY and h[2] not in hist]
+    bad += [f"{n} status {SR.status(n)}" for n in hist if SR.status(n) != SR.RETIRED]
     ck("R4", not bad,
-       "every RETIRED strategy points at a LIVE successor (r240: struck, not "
-       "deleted)" if not bad else f"dangling supersession: {bad}")
+       f"REGISTRY all LIVE; {len(hist)} retired name(s) decode-only, successors known (r240: struck, not deleted)"
+       if not bad else f"{bad}")
 
     # ── R5 — THE MIRROR. dtp registry == otv4 query.py ─────────────────────
     qp = os.path.join(OTV4, "query.py")
@@ -135,11 +187,14 @@ def main():
         ck("R5", False, f"cannot read _STRAT_ABBR from {qp} — the mirror is "
                         f"unverifiable, which is not the same as agreeing")
     else:
-        diff = {k: (codes.get(k), mirror.get(k))
-                for k in set(codes) | set(mirror) if codes.get(k) != mirror.get(k)}
-        ck("R5", not diff,
-           f"dtp registry and otv4/query.py agree on all {len(codes)} codes"
-           if not diff else f"DRIFT: {diff}")
+        # v1.4 — otv4 is FROZEN (OTV5 since 10-24), so its mirror is history: every code it prints must decode the
+        # same here, and an entry it lacks is allowed only if it is LIVE in OTV5's era (PARK, r519).
+        diff = {k: (codes.get(k), mirror.get(k)) for k in mirror if codes.get(k) != mirror.get(k)}
+        extra = sorted(k for k in set(codes) - set(mirror) if k not in SR.REGISTRY)
+        ck("R5", not diff and not extra,
+           f"all {len(mirror)} codes in the frozen otv4/query.py decode the same here; OTV5-era only: "
+           f"{sorted(set(codes) - set(mirror))}"
+           if not diff and not extra else f"DRIFT: {diff} unmirrored non-live: {extra}")
 
     # ── R6 — SHIP-BLOCKER: untagged + on/after TEST_EPOCH is NEVER MAIN ────
     after = SR.resolve_lineage({"strategy": "ORBStrategy"}, "2026-09-26")
@@ -219,6 +274,42 @@ def main():
            if not (bad or bad_rows) and tag_wins and cov else f"box={bad} rows={bad_rows} tag={tag_wins} cov={cov}")
     except Exception as exc:                                   # noqa: BLE001
         ck("R10", False, f"{type(exc).__name__}: {exc}")
+
+    # ── R11 (v1.4) — the LISTED set is what OTV5 trades: ACTIVE plans, PARK registered, PARC and retired not ──
+    try:
+        act = _otv5_active_trades() - set(NOT_REGISTERED)
+        listed = set(SR.REGISTRY)
+        retired_listed = sorted(listed & set(HISTORY_CODES))
+        ok = (listed == act and SR.code("PARK") == "PARK" and not SR.is_registered("PARC")
+              and SR.code("PARC").startswith(SR.UNREGISTERED_PREFIX) and not retired_listed)
+        ck("R11", ok,
+           f"REGISTRY == OTV5 ACTIVE trading plans {sorted(act)}; PARK -> PARK; PARC unregistered"
+           if ok else f"listed-not-active={sorted(listed - act)} active-not-listed={sorted(act - listed)} "
+                      f"PARK={SR.code('PARK')!r} PARC={SR.code('PARC')!r} retired-listed={retired_listed}")
+    except Exception as exc:                                   # noqa: BLE001
+        ck("R11", False, f"{type(exc).__name__}: {exc}")
+
+    # ── R12 (v1.4) — HISTORY STILL READS. Retired is not listed, but every old row decodes as before ──
+    try:
+        wrong = {n: SR.code(n) for n, c in HISTORY_CODES.items() if SR.code(n) != c or not SR.is_registered(n)}
+        not_ret = sorted(n for n in HISTORY_CODES if SR.status(n) != SR.RETIRED)
+        lab = SR.label({"strategy": "ORBStrategy", "symbol": "QQQ"}, "2026-09-10")
+        import io
+        from contextlib import redirect_stdout
+        import trade_report as TR
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            TR.lineage_block([{"strategy": "ORBStrategy", "_lineage": SR.MAIN},
+                              {"strategy": "PARK", "_lineage": SR.OTV5}])
+        prov = buf.getvalue()
+        ok = (not wrong and not not_ret and lab == "OTV4/ORBS" and "ORBS ORBStrategy is RETIRED" in prov
+              and "history only" in prov and "UNREGISTERED" not in prov and "None" not in prov)
+        ck("R12", ok,
+           "retired names decode to their old codes, read RETIRED, ORB history labels OTV4/ORBS, PROVENANCE says "
+           "'history only', nothing UNREGISTERED" if ok else
+           f"wrong={wrong} not_retired={not_ret} label={lab} provenance={prov!r}")
+    except Exception as exc:                                   # noqa: BLE001
+        ck("R12", False, f"{type(exc).__name__}: {exc}")
 
     if _fails:
         print(f"\nRED — {len(_fails)} check(s) failed: {' '.join(_fails)}")

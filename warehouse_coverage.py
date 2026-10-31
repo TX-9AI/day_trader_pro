@@ -1,5 +1,14 @@
 #!/usr/bin/env python3
-# day_trader_pro/warehouse_coverage.py — v1.10
+# day_trader_pro/warehouse_coverage.py — v1.11
+# v1.11 (2026-10-31) — dtp r519. derived_gate_disposition IS CONDITIONAL: A DAY WITH NO GATE CHANGE WRITES NONE. The
+#   writer is edge-triggered (OTV5 analysis/gate_report.py: a row on BLOCKED, CHANGED or CLEARED, never per tick), and
+#   --streams graded it EVERY, so on 2026-10-30 the board read `derived_gate_disposition MISS: SPX`: SPX's loss cap
+#   halted entries at 10:00, the capped branch returns before any gate is asked, and its derived_store held 0 rows
+#   for the day (47 on 10-29) while the box pushed every other derived stream (Saturday brief 2026-10-31 §1, R7). It
+#   now reads "silent on a day with no gate change", the grading derived_level_event has carried since r453. The
+#   pusher is still graded: derived_plan_tick / plan_check / strategy_note (same pusher, EVERY) go GAP on a box whose
+#   pusher stopped, and a box that pushed nothing is BOX_SILENT. Gate tests/check_gate_disposition_quiet.py Q1-Q4.
+#   Operator: "Agree" (2026-10-31, R7).
 # v1.10 (2026-10-31) — dtp r517 / SER.1. `--tail`: A STREAM THAT STOPPED EARLY IS NOT COVERED. --streams asks whether a box's
 #   partition EXISTS; on 2026-10-30 SPX's quote_series existed and ended at 13:53 ET (QQQ 14:38), because the box-side
 #   pusher shipped one 50,000-row object per 5-minute run and fell behind; 10-23 is still cut at 12:56 (SPX), 14:04
@@ -312,7 +321,11 @@ STREAM_POLICY = {
     "derived_plan_tick":        ("EVERY", "pusher", "the plan spine"),
     "derived_plan_check":       ("EVERY", "pusher", "one row per VARIABLE per plan per tick"),
     "derived_strategy_note":    ("EVERY", "pusher", "one row per strategy EVALUATION"),
-    "derived_gate_disposition": ("EVERY", "pusher", "which rung refused, edge-triggered"),
+    # r519 — CONDITIONAL, as derived_level_event: the writer is edge-triggered (a row on BLOCKED / CHANGED / CLEARED),
+    # so a box whose gates never changed verdict - SPX 2026-10-30, capped at 10:00 - writes none. The pusher itself
+    # is still graded EVERY by derived_plan_tick / plan_check / strategy_note above.
+    "derived_gate_disposition": ("CONDITIONAL", "pusher", "which rung refused, edge-triggered — silent on a day "
+                                                          "with no gate change"),
     "derived_level_ledger":     ("EVERY", "pusher", "levels, operator lifecycle"),
     # r453 — the TEST engine's per-bar level EVENT log (OTV4TEST r128, 09-24).
     # CONDITIONAL: a quiet tape writes none; derived_level_ledger is the EVERY check.

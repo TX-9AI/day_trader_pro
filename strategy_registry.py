@@ -1,4 +1,22 @@
-# day_trader_pro/strategy_registry.py — v1.5
+# day_trader_pro/strategy_registry.py — v1.6
+# v1.6 (2026-10-31) — dtp r519. PARK IS REGISTERED, AND THE REGISTRY LISTS ONLY WHAT TRADES. code("PARK") returned the
+#   unregistered tag "?PAR", so every (lineage, code) rollup printed the week's biggest book as ?PAR (Saturday brief
+#   2026-10-31 §6, R5). The operator, on R5: "No to PARC & it was never an active strategy. Also, don't list the
+#   retired strategies either. They're no longer relevant to this repo." So:
+#   - REGISTRY is the LIVE set, and it is exactly OTV5's ACTIVE trading plans (strategy/plan_state.TABLE): Runaway,
+#     Breakout, Hunt, the pin fly, and PARK -> "PARK". PARC is NOT registered (its rows, if any, render ?PAR, visibly
+#     unregistered, as the operator's ruling wants).
+#   - The retired strategies LEAVE it: ORBStrategy (operator 2026-10-12: "We are not bringing it back"), VOLT and
+#     ATPButterfly (off 2026-10-02, ROSTER.1), SweepCreditSpread and TrendCreditSpread (2026-10-03: "Retire the sweep
+#     & TCS"; TCS runs since OTV5 r57 as a log-only SHADOW that writes shadow_trades.db, never trades), ORCS (2026-10-
+#     04: "Retire it on this repo"), IronCondorStrategy (permanently dormant, no entry of its own since OTV4TEST r249),
+#     and the r240 pair SweepReversal / ContinuationStrategy.
+#   ⚠️ THEY ARE NOT DELETED, AND THIS IS THE TRADE-OFF, STATED. Their trades are in the S3 corpus (ORB alone is 09-02..
+#   10-02 on fifteen boxes), and code() is what every rollup prints for them: deleted, every historical ORB row would
+#   read "?ORB" and land in trade_report's "UNREGISTERED - add them to strategy_registry" block, telling the reader to
+#   re-add what the operator retired. So their codes move to HISTORICAL: a decode table for rows already written, not
+#   a list of strategies. Nothing enumerates it as the corpus; status() reads RETIRED; resolve_lineage never read the
+#   strategy at all and is unchanged. Gate: tests/check_strategy_registry.py v1.4 R2, R4, R5, R11, R12.
 # v1.5 (2026-10-25) — r508 / OPS.73. A BOX THAT IS REPOINTED TO OTV5 IS DECLARED OTV5 FROM ITS REPOINT DAY. The
 #   operator, 2026-10-25 (on moving the box map at the repoint): "Yes, that all sounds good". OTV5_SINCE names each box
 #   repointed to OTV5 and the first ET day it ran OTV5; box_lineage(box, day) is THE one reader of the box map: OTV5
@@ -157,28 +175,39 @@ def box_lineage(box, day=None):
 
 LIVE, RETIRED = "live", "retired"
 
-# ── the registry ────────────────────────────────────────────────────────────
+# ── the registry: what TRADES ───────────────────────────────────────────────
 # code, status, which engines declare it, and what replaced it if retired.
+# v1.6 — the LIVE set only, and it is OTV5's ACTIVE trading plans (strategy/plan_state.TABLE, default ACTIVE, HOUR
+# category, PARC excluded by ruling). check_strategy_registry R11 pins the two, so a plan switched on or off in OTV5
+# turns this red until it is moved here or to HISTORICAL. The lineages say which engines have written the name.
 REGISTRY = {
-    "ORBStrategy":          ("ORBS", LIVE,    (MAIN, TEST), None),
-    "RunawayContinuation":  ("RWAY", LIVE,    (MAIN, TEST), None),
-    "GEXPinButterfly":      ("GEXB", LIVE,    (MAIN, TEST), None),
-    "SweepCreditSpread":    ("SWPT", LIVE,    (MAIN, TEST), None),
-    "TrendCreditSpread":    ("TCST", LIVE,    (MAIN, TEST), None),
-    "IronCondorStrategy":   ("CNDR", LIVE,    (MAIN, TEST), None),
-    "LiquidityHunt":        ("HUNT", LIVE,    (TEST,),      None),
-    "VOLT":                 ("VOLT", LIVE,    (TEST,),      None),
-    "ATPButterfly":         ("ATPB", LIVE,    (TEST,),      None),
-    "Breakout":             ("BRKO", LIVE,    (TEST,),      None),
-    # r460 — OTV4TEST r203 (PREM.1): opening range credit spread, paper, QQQ-TEST
-    # from 2026-10-05; part of the corpus wherever the fork's code runs it.
-    "OpeningRangeCreditSpread": ("ORCS", LIVE, (TEST,),     None),
-    # ⚠️ RETIRED, NOT DELETED (r240). Both still carry P&L in the corpus —
-    # ContinuationStrategy 9 trades, SweepReversal 1 — and both were SUPERSEDED
-    # by a live strategy rather than abandoned, which is the fact a reader
-    # comparing them needs. Struck from the live set, kept enumerable.
-    "SweepReversal":        ("SWPR", RETIRED, (MAIN,), "SweepCreditSpread"),
-    "ContinuationStrategy": ("CONT", RETIRED, (MAIN,), "RunawayContinuation"),
+    "RunawayContinuation":  ("RWAY", LIVE,    (MAIN, TEST, OTV5), None),
+    "GEXPinButterfly":      ("GEXB", LIVE,    (MAIN, TEST, OTV5), None),
+    "LiquidityHunt":        ("HUNT", LIVE,    (TEST, OTV5),       None),
+    "Breakout":             ("BRKO", LIVE,    (TEST, OTV5),       None),
+    # r519 — OTV5's PARK (strategy/park.py, the 11:00 debit held to 15:45). Was the unregistered "?PAR".
+    "PARK":                 ("PARK", LIVE,    (OTV5,),            None),
+}
+
+# ── retired: a DECODE TABLE for rows already written, NOT a list ───────────
+# 🔴 v1.6 — the operator, 2026-10-31: "don't list the retired strategies either. They're no longer relevant to this
+# repo." They are not listed: nothing reads this map as the corpus, and a new retired name goes here only if it has
+# rows in the warehouse. But their codes stay decodable, because their trades are history every rollup still reads,
+# and code() returning "?ORB" for a month of ORB rows would tell the reader to re-register a retired strategy.
+# name -> (code, which engines wrote it, what superseded it or None, when and by whose ruling)
+HISTORICAL = {
+    "ORBStrategy":          ("ORBS", (MAIN, TEST), None, "retired 2026-10-12, operator: \"We are not bringing it back\""),
+    "VOLT":                 ("VOLT", (TEST,),      None, "off 2026-10-02 (ROSTER.1, OTV4TEST r187); STRK.1 retired with it"),
+    "ATPButterfly":         ("ATPB", (TEST,),      None, "off 2026-10-02, operator: \"Turn off the ATP\""),
+    "SweepCreditSpread":    ("SWPT", (MAIN, TEST), None, "retired 2026-10-03, operator: \"Retire the sweep & TCS\""),
+    # TCS since OTV5 r57 (2026-10-30) is a LOG-ONLY SHADOW: its rows go to shadow_trades.db, never to trades; this
+    # code also decodes those rows for a shadow reader.
+    "TrendCreditSpread":    ("TCST", (MAIN, TEST), None, "retired as a trade 2026-10-03; log-only shadow from OTV5 r57"),
+    "OpeningRangeCreditSpread": ("ORCS", (TEST,),  None, "retired 2026-10-04 (PREM.6), operator: \"Retire it on this repo\""),
+    "IronCondorStrategy":   ("CNDR", (MAIN, TEST), None, "permanently dormant, no entry of its own (OTV4TEST r249)"),
+    # r240 — SUPERSEDED by a strategy rather than abandoned; ContinuationStrategy 9 trades, SweepReversal 1.
+    "SweepReversal":        ("SWPR", (MAIN,), "SweepCreditSpread",   "r240"),
+    "ContinuationStrategy": ("CONT", (MAIN,), "RunawayContinuation", "r240"),
 }
 
 # ── management plans, NOT strategies ────────────────────────────────────────
@@ -207,6 +236,7 @@ REGISTRY = {
 MANAGEMENT = {"CondorManagement": "CMGT", "CreditRoll": "ROLL"}
 
 CODES = {n: v[0] for n, v in REGISTRY.items()}
+CODES.update({n: v[0] for n, v in HISTORICAL.items()})     # v1.6: history decodes; it is not listed
 CODES.update(MANAGEMENT)
 
 UNREGISTERED_PREFIX = "?"
@@ -225,18 +255,29 @@ def is_registered(name) -> bool:
 
 
 def status(name) -> str:
-    e = REGISTRY.get(str(name or "").strip())
-    return e[1] if e else UNKNOWN
+    n = str(name or "").strip()
+    e = REGISTRY.get(n)
+    if e:
+        return e[1]
+    return RETIRED if n in HISTORICAL else UNKNOWN
 
 
 def lineages_for(name):
-    e = REGISTRY.get(str(name or "").strip())
-    return e[2] if e else ()
+    n = str(name or "").strip()
+    e = REGISTRY.get(n)
+    if e:
+        return e[2]
+    h = HISTORICAL.get(n)
+    return h[1] if h else ()
 
 
 def superseded_by(name):
-    e = REGISTRY.get(str(name or "").strip())
-    return e[3] if e else None
+    n = str(name or "").strip()
+    e = REGISTRY.get(n)
+    if e:
+        return e[3]
+    h = HISTORICAL.get(n)
+    return h[2] if h else None
 
 
 def resolve_lineage(rec, entry_day=None) -> str:
