@@ -1,0 +1,12 @@
+[Unit]
+Description=dxlink node probe: every 60 s 09:00-16:05 ET weekdays, every 15 min otherwise
+
+[Timer]
+OnCalendar=Mon-Fri *-*-* 09..15:*:00 America/New_York
+OnCalendar=Mon-Fri *-*-* 16:00..05:00 America/New_York
+OnCalendar=*-*-* *:00/15:00 America/New_York
+AccuracySec=5s
+Persistent=false
+
+[Install]
+WantedBy=timers.target
