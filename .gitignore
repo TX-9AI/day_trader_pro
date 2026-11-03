@@ -46,6 +46,9 @@ data/crashloop_state.json
 # rather than wholesale, and [[LVL.19]] is what forgetting the line costs:
 # r379 shipped a reader and left its directory untracked AND unignored.
 data/AGENT_STATUS
+# r522 / PAGE.2 — the alert router's runtime directory: the spool (acked alerts, the box's delivery handed to
+# control), the outbox the recovery side posts status lines into, health.json and router.lock. Runtime state.
+data/alert_router/
 *.patch
 *.csv
 
