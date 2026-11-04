@@ -1,0 +1,10 @@
+[Unit]
+Description=dxlink node assignment: 09:17 ET weekdays, after the 09:15 wake (dtp r523 / FEED.15)
+
+[Timer]
+OnCalendar=Mon-Fri *-*-* 09:17:00 America/New_York
+AccuracySec=10s
+Persistent=false
+
+[Install]
+WantedBy=timers.target

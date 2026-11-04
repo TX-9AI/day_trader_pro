@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_dxlink_probe.py  v1.0
+day_trader_pro/tests/check_dxlink_probe.py  v1.1
+v1.1  2026-11-04  dtp r523 / FEED.15 — X9: the zone's authoritative nameservers are asked (a local UDP server plays the
+      system resolver and the zone's nameserver, with a compressed answer name): the NS is found for the host, its A
+      records come back as the "auth" source; with no server the answer is empty, named, and inside the budget.
 v1.0  2026-11-02  dtp r521 / FEED.14 — THE CONTROL PROBE READS ONE STATUS LINE AND OPENS NO SESSION.
 
 A local TLS server (a throwaway CA from `openssl`, a certificate for tasty-openapi-dxlink-md-ws.dxfeed.com) stands
@@ -188,6 +191,64 @@ ck("X8", status["nodes"]["129.153.134.53"]["state"] == "down" and len(q) == 2 an
    and g3[0] is False,
    "status file written with no fleet; %d message(s); gate: all down -> %s, its node up -> %s, its node down -> %s"
    % (len(q), g1[0], g2[0], g3[0]))
+
+# ── X9 (v1.1): the authoritative nameservers ──────────────────────────────────────────────────────────────────
+import struct  # noqa: E402
+
+
+def _dns_reply(q, answers):
+    """A reply to query q carrying `answers` = [(qtype, rdata bytes)], each owner name a pointer to the question."""
+    qid = struct.unpack(">H", q[:2])[0]
+    qend = 12
+    while q[qend] != 0:
+        qend += 1 + q[qend]
+    question = q[12:qend + 5]
+    body = b""
+    for qt, rd in answers:
+        body += b"\xc0\x0c" + struct.pack(">HHIH", qt, 1, 60, len(rd)) + rd
+    return struct.pack(">HHHHHH", qid, 0x8180, 1, len(answers), 0, 0) + question + body
+
+
+def _enc(name):
+    return b"".join(bytes([len(x)]) + x.encode() for x in name.split(".")) + b"\0"
+
+
+usock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+usock.bind(("127.0.0.1", 0))
+uport = usock.getsockname()[1]
+asked = []
+
+
+def _dns_serve():
+    usock.settimeout(8)
+    try:
+        while True:
+            q, addr = usock.recvfrom(4096)
+            qt = struct.unpack(">H", q[-4:-2])[0]
+            asked.append(qt)
+            if qt == 2:
+                usock.sendto(_dns_reply(q, [(2, _enc("ns.local"))]), addr)
+            elif qt == 1:
+                usock.sendto(_dns_reply(q, [(1, bytes([10, 1, 1, 1])), (1, bytes([10, 1, 1, 2]))]), addr)
+    except OSError:
+        pass
+
+
+threading.Thread(target=_dns_serve, daemon=True).start()
+a9 = P.auth_nodes(budget=3.0, resolvers=["127.0.0.1"], ns_lookup=lambda n: ["127.0.0.1"] if n == "ns.local" else [],
+                  port=uport)
+usock.close()
+t0 = time.monotonic()
+s9 = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+s9.bind(("127.0.0.1", 0))
+dead9 = s9.getsockname()[1]
+s9.close()
+b9 = P.auth_nodes(budget=1.0, resolvers=["127.0.0.1"], port=dead9)
+el9 = time.monotonic() - t0
+c9, n9 = P.candidates({}, seed=([], None), s3=([], None), dns=(["10.1.1.1"], None), auth=a9)
+ck("X9", a9 == (["10.1.1.1", "10.1.1.2"], None) and asked[:1] == [2] and 1 in asked and b9[0] == [] and b9[1]
+   and el9 < 1.6 and c9.get("10.1.1.2") == ["auth"] and c9.get("10.1.1.1") == ["dns", "auth"] and "auth" in n9,
+   "auth=%s asked=%s; dead=%s in %.1fs; candidates=%s" % (a9, asked, b9, el9, c9))
 
 print()
 if FAILS:

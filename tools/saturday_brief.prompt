@@ -31,6 +31,11 @@ THE BRIEF HAS SEVEN SECTIONS, IN THIS ORDER, EACH ONE STANDING ON ITS OWN:
   ## 6. PROPOSED STUDIES TO INCREASE P&L
        each with a hypothesis, the data, a pass bar written BEFORE testing, and the expected $
        effect. Stop sweep, exit replay and edge scan are evidence here. At most five.
+       · R6 no-progress lead (standing, every week): run `/home/ubuntu/day_trader_pro/venv/bin/python3 -I
+         /home/ubuntu/reviews/scripts/noprog_lead.py 2026-11-02 <this Friday>` (timeout 3600 s); quote
+         `~/reviews/studies/noprog_<this Friday>.md`'s D10-vs-BASE table, its five P1-P5 lines and its verdict
+         verbatim, with no edits to the bar and no softened FAIL; if the run fails, list it under NOT MEASURED.
+         A PASS goes to section 7 as an operator decision (a trading change under the freeze).
   ## 7. RECOMMENDATIONS
        ranked, each with the decision needed from the operator.
   Put an INDEX on top (one headline line per section) and a NOT MEASURED list at the foot.

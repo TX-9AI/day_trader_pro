@@ -1,6 +1,14 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/dxlink_probe.py — v1.0
+day_trader_pro/tools/dxlink_probe.py — v1.1
+v1.1  2026-11-04  dtp r523 / FEED.15 — THE ZONE'S OWN NAMESERVERS ARE ASKED TOO (as OTV5 r70 does on the boxes). On
+      2026-11-02/03 the recursive resolvers answered one dxlink node at a time while the host's Route 53 nameservers
+      (ns-313.awsdns-39.com and peers; the host itself is delegated, dxfeed.com sits on devexperts.com's servers)
+      answered the set. auth_nodes(): the NS set through the system resolver (the host first, then its parents), each
+      NS name resolved, each asked for the host's A records over UDP - stdlib only, bounded by AUTH_BUDGET_S, never
+      raises; a new source "auth" in candidates() beside seed / s3 / dns. Still no websocket frame, SETUP, AUTH or
+      token: DNS questions and the one upgrade status line only. The operator, 2026-11-03: "Yes to the proposal".
+      Gate tests/check_dxlink_probe.py X9 (a local UDP server plays the resolver and the zone's nameserver).
 v1.0  2026-11-02  dtp r521 / FEED.14 — CONTROL TESTS THE DXLINK NODES ITSELF, WITH NO BOX UP AND NO CREDENTIALS.
       The operator, 2026-11-02 ~14:55 ET: "we should have the probe capable of firing from control to 'test' the
       waters, even when no boxes are up to ascertain network availability." On 2026-11-02 the dxFeed node
@@ -19,7 +27,8 @@ WHAT ONE PROBE IS (per node IP, all of it bounded by --timeout):
 
 THE NODE LIST: (a) the seed data/dxlink_nodes_seed.json in the OTV5 checkout (r70 / FEED.13), (b) the fleet book
   under s3://<bucket>/fleet/dxlink_nodes/ when control can read it (read-only; a failure is named, not fatal),
-  (c) fresh DNS answers for the host (3 lookups), (d) every node already in the status file. Only IPv4 literals.
+  (c) fresh DNS answers for the host (3 lookups), (e, v1.1) the zone's authoritative nameservers' A records,
+  (d) every node already in the status file. Only IPv4 literals.
 
 THE STATUS FILE (var/feed_triage/dxlink_nodes_status.json, read by tools/feed_triage.py):
   {"probed_at": epoch, "host": ..., "sources": {...}, "nodes": {ip: {"state", "code", "latency_ms", "at", "since",
@@ -51,7 +60,7 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 sys.path.insert(0, ROOT)
 
-__version__ = "1.0"
+__version__ = "1.1"
 
 HOST = "tasty-openapi-dxlink-md-ws.dxfeed.com"
 PORT = 443
@@ -173,13 +182,148 @@ def dns_nodes(host=HOST, lookups=3):
     return sorted(out), (None if out else err)
 
 
-def candidates(prev, seed=None, s3=None, dns=None):
-    """{ip: [sources]} - the union, deterministic. `seed/s3/dns` are (list, err) pairs (injected by the gate)."""
+# ── v1.1 (r523) — the authoritative nameservers (stdlib DNS over UDP; the same reading OTV5 candle_feed v5.6 does) ──
+AUTH_BUDGET_S = 5.0
+AUTH_NS_MAX = 4
+DNS_PORT = 53
+
+
+def _dns_query(name, qtype, qid):
+    import struct
+    q = b"".join(bytes([len(lab)]) + lab.encode("ascii") for lab in name.strip(".").split(".") if lab) + b"\0"
+    return struct.pack(">HHHHHH", qid, 0x0100, 1, 0, 0, 0) + q + struct.pack(">HH", qtype, 1)
+
+
+def _dns_name(buf, off):
+    labels, jumped, end, hops = [], False, off, 0
+    while True:
+        if off >= len(buf) or hops > 64:
+            raise ValueError("bad name")
+        n = buf[off]
+        if n & 0xC0 == 0xC0:
+            if off + 1 >= len(buf):
+                raise ValueError("bad pointer")
+            if not jumped:
+                end = off + 2
+            off = ((n & 0x3F) << 8) | buf[off + 1]
+            jumped, hops = True, hops + 1
+            continue
+        if n == 0:
+            return ".".join(labels), (end if jumped else off + 1)
+        labels.append(buf[off + 1:off + 1 + n].decode("ascii", "replace"))
+        off += 1 + n
+
+
+def _dns_answers(buf, qid, qtype):
+    """The answer records of qtype: A -> dotted IPv4, NS -> the nameserver name. [] on a bad or foreign reply."""
+    import struct
+    try:
+        if len(buf) < 12:
+            return []
+        rid, flags, qd, an, _ns, _ar = struct.unpack(">HHHHHH", buf[:12])
+        if rid != qid or not flags & 0x8000 or flags & 0x000F:
+            return []
+        off = 12
+        for _ in range(qd):
+            _, off = _dns_name(buf, off)
+            off += 4
+        out = []
+        for _ in range(an):
+            _, off = _dns_name(buf, off)
+            if off + 10 > len(buf):
+                break
+            rtype, _c, _t, rdlen = struct.unpack(">HHIH", buf[off:off + 10])
+            off += 10
+            rd = off
+            off += rdlen
+            if rtype != qtype:
+                continue
+            if qtype == 1 and rdlen == 4:
+                out.append(".".join(str(b) for b in buf[rd:rd + 4]))
+            elif qtype == 2:
+                out.append(_dns_name(buf, rd)[0])
+        return out
+    except (ValueError, IndexError):
+        return []
+
+
+def _dns_udp(server, name, qtype, timeout, port=None):
+    import random
+    qid = random.randint(1, 0xFFFF)
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.settimeout(max(0.2, timeout))
+            s.sendto(_dns_query(name, qtype, qid), (server, port or DNS_PORT))
+            buf, _ = s.recvfrom(4096)
+        return _dns_answers(buf, qid, qtype)
+    except OSError:
+        return []
+
+
+def _system_resolvers():
+    out = []
+    try:
+        with open("/etc/resolv.conf", encoding="utf-8") as fh:
+            for line in fh:
+                parts = line.split()
+                if len(parts) >= 2 and parts[0] == "nameserver" and _v4(parts[1]):
+                    out.append(parts[1])
+    except OSError:
+        pass
+    return out
+
+
+def _ns_lookup(name):
+    try:
+        for info in socket.getaddrinfo(name, DNS_PORT, socket.AF_INET, socket.SOCK_DGRAM):
+            return [info[4][0]]
+    except OSError:
+        pass
+    return []
+
+
+def auth_nodes(host=HOST, budget=AUTH_BUDGET_S, resolvers=None, ns_lookup=None, port=None):
+    """(ips, err): host's A records as its zone's authoritative nameservers answer them. Never raises."""
+    try:
+        deadline = time.monotonic() + budget
+        res = resolvers if resolvers is not None else _system_resolvers()
+        labels = host.strip(".").split(".")
+        names = []
+        for i in range(0, max(1, len(labels) - 1)):          # the host itself first (it is delegated)
+            zone = ".".join(labels[i:])
+            for r in res:
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    return [], "auth dns: out of time"
+                names = _dns_udp(r, zone, 2, min(1.5, left), port=port)
+                if names:
+                    break
+            if names:
+                break
+        if not names:
+            return [], "auth dns: no NS found"
+        out = []
+        for nm in sorted(set(names))[:AUTH_NS_MAX]:
+            for ns in (ns_lookup or _ns_lookup)(nm):
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    break
+                for ip in _dns_udp(ns, host, 1, min(1.5, left), port=port):
+                    if _v4(ip) and ip not in out:
+                        out.append(ip)
+        return sorted(out), (None if out else "auth dns: no A records")
+    except Exception as exc:                                                   # noqa: BLE001
+        return [], "auth dns: %s" % type(exc).__name__
+
+
+def candidates(prev, seed=None, s3=None, dns=None, auth=None):
+    """{ip: [sources]} - the union, deterministic. `seed/s3/dns/auth` are (list, err) pairs (injected by the gate)."""
     seed = seed if seed is not None else seed_nodes()
     s3 = s3 if s3 is not None else s3_nodes()
     dns = dns if dns is not None else dns_nodes()
+    auth = auth if auth is not None else auth_nodes()
     found, notes = {}, {}
-    for name, (ips, err) in (("seed", seed), ("s3", s3), ("dns", dns)):
+    for name, (ips, err) in (("seed", seed), ("s3", s3), ("dns", dns), ("auth", auth)):
         notes[name] = err or "%d node(s)" % len(ips)
         for ip in ips:
             found.setdefault(ip, []).append(name)
