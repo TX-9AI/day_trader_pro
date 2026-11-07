@@ -1,0 +1,13 @@
+[Unit]
+Description=day_trader_pro nightly post-RTH review, headless (dtp r524 / RPT.36) - NOT INSTALLED BY THE LAND
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/reviews
+# The script decides which session is due (16:40 ET, 13:40 ET on a half day) and stands down when its review exists.
+ExecStart=/bin/bash /home/ubuntu/day_trader_pro/tools/nightly_review.sh
+# The script's own budget is 9000 s (timeout(1)); this leaves room for its bookkeeping.
+TimeoutStartSec=9300

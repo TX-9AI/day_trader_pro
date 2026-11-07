@@ -1,0 +1,12 @@
+[Unit]
+Description=nightly post-RTH review: 16:40 ET weekdays, 13:40 ET for a half day (dtp r524 / RPT.36)
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 16:40:00 America/New_York
+OnCalendar=Mon..Fri *-*-* 13:40:00 America/New_York
+AccuracySec=30s
+# A fire missed while control was down runs at the next boot; the script reviews the session that is due.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

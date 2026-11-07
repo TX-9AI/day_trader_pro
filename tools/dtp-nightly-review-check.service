@@ -1,0 +1,10 @@
+[Unit]
+Description=day_trader_pro nightly review check: page through the alert router when today's review is missing (dtp r524 / RPT.36) - NOT INSTALLED BY THE LAND
+
+[Service]
+Type=oneshot
+User=ubuntu
+ExecStart=/bin/bash /home/ubuntu/day_trader_pro/tools/nightly_review.sh --check-missing
+# exit 1 = the review was missing (paged); recorded as the unit's result, not retried.
+SuccessExitStatus=1
+TimeoutStartSec=120
