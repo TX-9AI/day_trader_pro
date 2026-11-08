@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/excursion_report.py — v3.8 — MFE/MAE distributions from the
+day_trader_pro/excursion_report.py — v3.9 — MFE/MAE distributions from the
+v3.9  2026-11-08 — dtp r536 / CHK.12 — a missing trades/ root is NO DB SOURCE, not a
+      FileNotFoundError: a --since run reaches its REFUSED path (rc 2) again.
 v3.8  2026-09-26 — r433 — REPORTS_DIR honours $DTP_REPORTS_DIR. A checker was
        RUNNING this report — correctly, since §21 forbids asserting on source —
        and every run landed on the operator's banked
@@ -367,6 +369,13 @@ def _rows_from_dbs(day: str, since: str = ""):
     Fixing the duplication broke the feature that had been living on it.
     Nothing announced the change: the header still said "since 2026-07-23".
     """
+    # v3.9 (2026-11-08, dtp r536 / CHK.12): a missing trades/ root is "no DB
+    # source", not a crash. Control's harvest timer is disabled, so on control
+    # the folder may not exist at all; the old listdir raised FileNotFoundError
+    # and a --since run died with a traceback instead of reaching the REFUSED
+    # path below (rc 2, "--since needs the DBs").
+    if since and since < day and not os.path.isdir(TRADES_DIR):
+        return None, None
     if since and since < day:
         folders = sorted(d for d in os.listdir(TRADES_DIR)
                          if len(d) == 10 and since <= d <= day

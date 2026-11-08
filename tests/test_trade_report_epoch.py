@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/test_trade_report_epoch.py — v1.0
+# day_trader_pro/tests/test_trade_report_epoch.py — v1.1
+# v1.1 (2026-11-08) — dtp r536 / CHK.12: the subprocess resolves dtp siblings from the checkout (PYTHONPATH).
 # v1.0 (2026-08-29) — r187 / dtp r228. Proves S3.5.
 #
 # 🔑 CASE B IS THE ONE THAT MATTERS AND IT IS NOT ABOUT A FLAG. The fixture
@@ -32,9 +33,14 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 
+# v1.1 (CHK.12): the epoch moved 2026-08-25 -> 2026-09-01 (dtp r315 / S3.22, 09-07)
+# and the fixture never followed, so its "post-epoch" day (08-26) became
+# pre-epoch and every case saw an empty book. The epoch is now READ from the
+# one dtp copy (config.ENGINE_EPOCH, CONST.1) and the days sit either side of it.
+import config as _cfg                                       # noqa: E402
+EPOCH = _cfg.ENGINE_EPOCH
 OLD_DAY = "2026-08-14"      # pre-epoch: the retired engines
-NEW_DAY = "2026-08-26"      # post-epoch: v4
-EPOCH = "2026-08-25"
+NEW_DAY = "2026-09-02"      # post-epoch (the first session after 09-01)
 
 
 def t(tid, day, strat, setup, reason, pnl):
@@ -72,8 +78,18 @@ def sandbox(d):
 
 
 def run(d, *a):
+    # v1.1 (2026-11-08, dtp r536 / CHK.12): trade_report now imports dtp
+    # siblings at module level (ettime, strategy_registry, fees_bridge), and the
+    # sandbox holds only trade_report.py + config.py, so every case died on
+    # ImportError before its first assertion: an ENVIRONMENT red since the
+    # ET-clock sweep. The siblings resolve from the checkout via PYTHONPATH (the
+    # sandbox copy stays first on sys.path, so the report and its paths are
+    # still the sandbox's). The assertions are unchanged.
+    env = dict(os.environ, PYTHONPATH=ROOT + os.pathsep
+               + os.environ.get("PYTHONPATH", ""))
     return subprocess.run([sys.executable, "trade_report.py", "--no-json"] + list(a),
-                          cwd=d, capture_output=True, text=True, timeout=300)
+                          cwd=d, capture_output=True, text=True, timeout=300,
+                          env=env)
 
 
 def main():

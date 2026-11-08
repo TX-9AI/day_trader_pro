@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
-tools/check_trade_report_fees.py  v1.1
+tools/check_trade_report_fees.py  v1.2
+v1.2  2026-11-08  dtp r536 / CHK.12 — T1b reads the rendered FEES header and the row's fee
+      cell (the header is "FEES" since the narrowing); the fixture is a live setup, not the
+      retired ORB trade. Red since the header change.
 v1.1  2026-09-07  dtp r312 / FEE.7 — T3 RETARGETED AT THE BRIDGE. r312 moved
 the fee import out of `trade_report` and into `fees_bridge`, and this check
 disabled the model by setting `tr._fees = None`. That attribute no longer
@@ -29,7 +32,7 @@ def check(n, ok, d=""):
     if not ok: F.append(n)
 
 def _rows(n=4, **kw):
-    r = dict(symbol="NVDA", strategy="ORBStrategy", setup_type="orb_break",
+    r = dict(symbol="NVDA", strategy="RunawayContinuation", setup_type="runaway",
              contracts=2, status="closed", entry_premium=1.0,
              exit_premium=1.5, pnl_usd=100.0, option_side="call",
              exit_reason="orb_trail_stop", _hold=4.0)
@@ -50,7 +53,16 @@ def main() -> int:
     # T1 — the marker is gone from the RENDERED output, not from the source.
     check("T1  `<- thin` no longer renders on a below-min_n bucket",
           "<- thin" not in out, out.strip().splitlines()[-1][:60])
-    check("T1b a FEES column renders instead", "FEES $" in out)
+    # v1.2 (2026-11-08, dtp r536 / CHK.12): the header lost its " $" when the
+    # table was narrowed (the NET $ column already names the unit), so the
+    # literal "FEES $" never matched and T1b was red. Same intent, asserted on
+    # the render: the header carries a FEES column AND the bucket row carries
+    # the fee figure in it (rendered negative; T4b pins the sign).
+    _hdr = next((l for l in out.splitlines() if "WIN%" in l), "")
+    _row = next((l for l in out.splitlines() if l.strip().startswith("Runaway")), "")
+    check("T1b a FEES column renders instead",
+          _hdr.rstrip().endswith("FEES") and _row.split()[-1].startswith("-"),
+          f"{_hdr.strip()[-12:]!r} / {_row.split()[-1] if _row.split() else ''!r}")
 
     # T2 — min_n SURVIVES as a threshold. Deleting the flag must not have
     # deleted the guard: rank() still refuses to name a bucket too thin.
@@ -82,7 +94,7 @@ def main() -> int:
         # that "0.00" was absent from the row and went red on `400.00` in the
         # NET column — a check failing for a reason unrelated to what it
         # checks, which is worse than no check (WA §0.6).
-        row = [l for l in out2.strip().splitlines() if "ORBStrategy" in l][0]
+        row = [l for l in out2.strip().splitlines() if "RunawayContinuation" in l][0]
         st2 = tr.stats_of(_rows(4))
         check("T3  no fee model -> the column reads n/a, never 0.00",
               row.rstrip().rstrip("*").endswith("n/a") and st2["fees"] is None,

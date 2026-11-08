@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
-tests/check_repoint_pinned.py  v1.1
+tests/check_repoint_pinned.py  v1.2
+v1.2  2026-11-08  dtp r536 / CHK.12 — P10 removed with tools/shadow_watch.py: it guarded the
+      shadow-observer corpus, which no OTV5 box runs (no shadow/ tree; the 09:40 timer is
+      disabled). P1-P9 unchanged.
 v1.1  2026-10-25  dtp r507 / OPS.72 — P8a/P8c pass install=False: they pin the managed (git-only) repoint's phases 1-2,
       and since r507 a pinned repoint also installs when the pinned tree supports it (gate: check_repoint_install.py).
       No expectation changed.
@@ -27,9 +30,7 @@ v1.0  2026-10-14  dtp r489 / OPS.67 — THE MANAGED REPOINT, RUN FOR REAL ON A F
   P9  the timer-launched writers stop before the reset; a job already
       running is waited for (rc 13 if it never ends, tree untouched); only the
       timers that were on are started again, after the import check
-  P10 tools/shadow_watch.py v1.2: a box whose tree has no shadow/ answers
-      shadow=absent and is skipped, never paged; a tree with shadow/ is still
-      measured (both found by OTV4TEST, MSG-QQQ-1014-02)
+  (P10, the shadow_watch skip, was removed in v1.2 with the tool itself.)
   BORN RED on dtp 98980e2 (no `sha` parameter).
 
 Run:  python3 tests/check_repoint_pinned.py
@@ -250,37 +251,6 @@ def _main(fleet, tmp, url, A, B, C):
     rc, out = run(script, env)
     check("P9c a job that never ends stops the box before the reset (rc 13)",
           rc == 13 and git(tree, "rev-parse", "HEAD") == A, f"rc={rc}\n{out}")
-
-    # ── shadow_watch: a box whose tree has no shadow/ is skipped, not paged ──
-    sys.path.insert(0, os.path.join(ROOT, "tools"))
-    import shadow_watch
-    home, fake, tree, env = box(tmp, url, B)       # test-shaped: no shadow/
-    rc, out = run(shadow_watch.REMOTE, env)
-    check("P10a shadow_watch's remote line answers shadow=absent on a tree without shadow/",
-          rc == 0 and out.strip() == "shadow=absent", out)
-    home, fake, tree, env = box(tmp, url, A)       # mainline-shaped, no file today
-    rc, out = run(shadow_watch.REMOTE, env)
-    check("P10b a tree with shadow/ is still measured (file=none, not skipped)",
-          "file=none" in out and "shadow=absent" not in out, out)
-    import io
-    import contextlib
-    sentm = []
-    real_sw = (fleet._exec, fleet.get_fleet, shadow_watch.notify,
-               shadow_watch.control_state.is_enabled, shadow_watch.market_calendar.is_trading_day)
-    fleet.get_fleet = lambda only=None: [("QQQ", "10.0.0.1", "running"), ("SPX", "10.0.0.2", "running")]
-    fleet._exec = lambda sym, ip, cmd, timeout=None: (0, "shadow=absent\n", "")
-    shadow_watch.notify = type("N", (), {"send": staticmethod(lambda m: sentm.append(m) or True)})
-    shadow_watch.control_state.is_enabled = lambda: True
-    shadow_watch.market_calendar.is_trading_day = lambda d: True
-    try:
-        buf = io.StringIO()
-        with contextlib.redirect_stdout(buf):
-            rc = shadow_watch.main([])
-        check("P10c a fleet of repointed boxes pages nothing",
-              rc == 0 and not sentm and "2 run no shadow" in buf.getvalue(), buf.getvalue())
-    finally:
-        (fleet._exec, fleet.get_fleet, shadow_watch.notify,
-         shadow_watch.control_state.is_enabled, shadow_watch.market_calendar.is_trading_day) = real_sw
 
     # ── an entry point that will not import ─────────────────────────────────
     home, fake, tree, env = box(tmp, url, A)

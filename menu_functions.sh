@@ -1,4 +1,7 @@
-# day_trader_pro/menu_functions.sh — v1.79
+# day_trader_pro/menu_functions.sh — v1.80
+# v1.80 (2026-11-08) - dtp r536 / CHK.12. Three confirms (the fresh-thread, resume-thread and pick-thread tmux
+#   kills) compared their answer against lowercase `y` only, the r283 defect test_confirm_and_cap C3 exists to
+#   catch; they now call `_yes`, so Y and yes confirm too. Nothing else changes.
 # v1.79 (2026-11-08) - dtp r529 / MENU.1. `mi_orb_budget_fleet` is the menu's "Ramp TOP (OT_ORB_BUDGET_USD) & spot":
 #   the ORB trade is retired (OTV5 r76) and OT_ORB_BUDGET_USD is the live Breakout ramp top. The function and
 #   tests/orb_budget_fleet.py keep their names (only historical comments cite them; renaming buys nothing).
@@ -629,7 +632,7 @@ mi_handoff_fresh_claude() {
     # ⚠️ THE FILE IS ONLY REMOVED ON CANCEL. The new thread reads it by PATH,
     # so deleting it on success would hand the fresh session a dangling
     # reference — which is how the first cut failed in a different way.
-    [ "$a" = "y" ] || { echo "  cancelled."; rm -f "$HO"; pause; return 0; }
+    _yes "$a" || { echo "  cancelled."; rm -f "$HO"; pause; return 0; }
 
     NEW="claude-$(date +%H%M%S)"
     if [ -z "${TMUX:-}" ]; then
@@ -758,7 +761,7 @@ mi_resume_claude_tmux() {
     echo "      If a session above is still RUNNING claude, attach to it"
     echo "      instead: tmux attach -t <name>"
     read -r -p "  Resume the last Claude thread and KILL every other tmux session? [y/N] " a
-    [ "$a" = "y" ] || { echo "  cancelled."; pause; return 0; }
+    _yes "$a" || { echo "  cancelled."; pause; return 0; }
 
     # 🔑 NOTHING IS INTERPOLATED INTO THE COMMAND STRING — no prompt, no
     # document, no $(...). OPS.9's failure cannot recur here by construction.
@@ -811,7 +814,7 @@ mi_resume_pick_claude_tmux() {
     echo "      this menu is gone by then."
     echo "      A session still RUNNING claude wants: tmux attach -t <name>"
     read -r -p "  Pick a Claude thread to resume and KILL every other tmux session? [y/N] " a
-    [ "$a" = "y" ] || { echo "  cancelled."; pause; return 0; }
+    _yes "$a" || { echo "  cancelled."; pause; return 0; }
 
     # ⚠️ THE MESSAGE SAYS "EXITED WITHOUT RESUMING", NOT "FAILED" — cancelling
     # the picker is a legitimate choice and is indistinguishable from an error

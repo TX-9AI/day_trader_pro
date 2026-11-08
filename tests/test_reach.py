@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/test_reach.py — v1.0
+# day_trader_pro/tests/test_reach.py — v1.1
+# v1.1 (2026-11-08) — dtp r536 / CHK.12. screen_reach v1.1 (dtp r262, 09-03) replaced the
+#   one-line "strike reached by the underlying : n/N (p%)" with a FIXED-HORIZON table (at our
+#   EXIT, +5/+15/+30/+60 min) whose last column is the reached-rate, and stated the shortfall
+#   as reach / strike-distance (below 1.00x = never reached) instead of "fell short by a
+#   median". These checks were never re-pointed and read a line that no longer exists, so they
+#   failed on every fixture. SAME INTENT, SAME FIXTURES: half/all/none/put now read the
+#   reached column of the at-our-EXIT row; R2b reads the strike-distance row (ATR) and the
+#   ratio section's below-1.00x sentence.
 # v1.0 (2026-09-03) — dtp r260.
 #
 # 🔴 R1 IS THE REASON THIS TOOL EXISTS. Every calibration before it measured
@@ -101,6 +109,14 @@ def _store(strikes, side="call"):
     return st
 
 
+def _exit_reached(out):
+    """The reached-rate of the 'at our EXIT' row of panel 1, e.g. '50%'."""
+    for l in out.splitlines():
+        if l.strip().startswith("at our EXIT"):
+            return l.split()[-1]
+    return None
+
+
 def main():
     base = ["--from", "2026-08-31", "--to", "2026-08-31",
             "--type", "RunawayContinuation"]
@@ -119,18 +135,20 @@ def main():
     # no trigger improvement fixes it.
     out = _run(_store([101.0, 104.0]), base)
     check("R2 half-reachable strikes report as 50%",
-          "strike reached by the underlying : 6/12  (50%)" in out,
-          [l for l in out.splitlines() if "reached by" in l][:1])
+          "12 measured" in out and _exit_reached(out) == "50%",
+          _exit_reached(out))
     check("R2b the shortfall is stated in ATR",
-          "fell short by a median" in out and "ATR" in out)
+          any(l.strip().startswith("strike distance") for l in out.splitlines())
+          and "reach (ATR)" in out
+          and "Below 1.00x the strike was never reached" in out)
 
     # ── R2c — ALL REACHABLE, AND ALL NOT ────────────────────────────────
     near = _run(_store([100.5]), base)
     far = _run(_store([110.0]), base)
     check("R2c every strike reachable reports 100%",
-          "(100%)" in near, [l for l in near.splitlines() if "reached by" in l][:1])
+          _exit_reached(near) == "100%", _exit_reached(near))
     check("R2d no strike reachable reports 0%",
-          "(0%)" in far, [l for l in far.splitlines() if "reached by" in l][:1])
+          _exit_reached(far) == "0%", _exit_reached(far))
 
     # ── R3 — ATR COMES FROM BEFORE THE FILL ─────────────────────────────
     # 🔴 An ATR over the POST-fill bars is inflated by the travel it is meant
@@ -144,8 +162,7 @@ def main():
     # ⚠️ Not assumed. A flipped sign would report every put as unreachable.
     puts = _run(_store([199.0], side="put"), base)
     check("R4 a PUT with a reachable strike reports reached",
-          "(100%)" in puts,
-          [l for l in puts.splitlines() if "reached by" in l][:1])
+          _exit_reached(puts) == "100%", _exit_reached(puts))
 
     # ── R5 — THE FORWARD-LOOKING CAVEAT IS STATED ───────────────────────
     # ⚠️ Reach is a post-entry fact. It is fine in a STUDY and fatal in a gate,

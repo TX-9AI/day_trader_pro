@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""day_trader_pro/tests/test_stream_coverage.py — v1.3
+"""day_trader_pro/tests/test_stream_coverage.py — v1.4
+v1.4  2026-11-08 — dtp r536 / CHK.12. S4b and S14 follow the SHD.5 ruling (r413): `shadow` is DEAD,
+so an absent box is not a gap and the row carries the ruling. They had asserted the 09-05
+LIVE state and been red since 09-21. Fixtures unchanged.
 v1.3  2026-10-03 — dtp r457 / OPS.64. panel() READS THE INSTANCE MAP. This test
       simulates the map as selector.PANEL (so every fixture that sets the panel
       still sets the expected boxes) and S9 is RE-POINTED BY THE RULING: the
@@ -19,7 +22,8 @@ PINNED ON BEHAVIOUR RATHER THAN ON THE TABLE.
 A test that reads the map back is the map agreeing with itself (C.23) and would
 pass against any typo that still parses. They drive `check_streams` and assert
 the VERDICT: SPX absent from `prints` is not a gap while any other box is; a box
-absent from `trades` is not a gap at all; `shadow` absent from a box IS one now.
+absent from `trades` is not a gap at all; `shadow` absent from a box is NOT one
+(DEAD by the SHD.5 ruling since 09-15; S4b/S14 re-pointed by CHK.12, 2026-11-08).
 
 v1.0  2026-09-05 — dtp r277. PER-STREAM COVERAGE, AND THE FOUR WAYS IT COULD
 CRY WOLF.
@@ -176,8 +180,11 @@ def main():
           by.get("derived_fire_snapshot", {}).get("verdict") == "CONDITIONAL")
     check("S4 a DEAD stream is not a gap",
           by.get("theo_series", {}).get("verdict") == "DEAD")
-    check("S4b ...and `shadow` is no longer one of them",
-          by.get("shadow", {}).get("verdict") == "OK",
+    # v1.4 (CHK.12): r413 (09-21) recorded the SHD.5 ruling: the shadow
+    # observer was DISABLED fleet-wide w/c 09-15, and no OTV5 box runs it. Its
+    # absence is ORDERED, so `shadow` is DEAD again and must not grade OK or GAP.
+    check("S4b ...and `shadow` is one of them, by the SHD.5 ruling",
+          by.get("shadow", {}).get("verdict") == "DEAD",
           by.get("shadow", {}).get("verdict"))
 
     # ══ S5 — AND NOTHING IS QUIETLY SKIPPED ═══════════════════════════════
@@ -318,13 +325,16 @@ def main():
     check("S13 no box writing `trades` is NOT a gap — CDC, so nobody traded",
           by2.get("trades", {}).get("verdict") == "CONDITIONAL")
 
-    # 🔴 S14 — `shadow` WAS DECLARED DEAD AND IS LIVE. Measured on QQQ
-    # 2026-09-05: 32 date dirs, newest 09-04, shadow unit present; and 15 boxes
-    # push it every session in the bucket. Under v1.2 this case returned DEAD.
-    check("S14 a box absent from `shadow` is a gap — it is live, not dead",
-          by2.get("shadow", {}).get("verdict") == "GAP"
-          and by2.get("shadow", {}).get("missing") == ["QQQ"],
-          f"{by2.get('shadow', {}).get('verdict')} {by2.get('shadow', {}).get('missing')}")
+    # 🔴 S14 — `shadow` was LIVE when this was written (measured on QQQ
+    # 2026-09-05) and is DEAD since the SHD.5 ruling (observer disabled
+    # fleet-wide w/c 09-15, recorded by r413). v1.4 (CHK.12): the same fixture
+    # (QQQ absent, two boxes present) must now NOT page a gap: an ordered
+    # absence is not a missing box, and the board must say WHY (the ruling).
+    _sh = by2.get("shadow", {})
+    check("S14 a box absent from `shadow` is not a gap — the stream is DEAD by ruling",
+          _sh.get("verdict") == "DEAD" and not _sh.get("missing")
+          and "SHD.5" in str(_sh.get("note", "")),
+          f"{_sh.get('verdict')} {_sh.get('missing')}")
 
     # ══ A1-A5 — ACCEPTED LOSS ═════════════════════════════════════════════
     # 🔴 THE REAL CASE: QQQ lost `eod` and `ohlc` on 2026-09-03 to a full disk,

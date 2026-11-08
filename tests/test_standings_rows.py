@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/test_standings_rows.py — v1.6
+# day_trader_pro/tests/test_standings_rows.py — v1.7
+# v1.7 (2026-11-08) — dtp r536 / CHK.12 — S9 fixture rows carry the 13 fields the query returns (RPT.23) and a live
+#   setup instead of the retired ORB trade; S6 unchanged (standings v1.12 fits 43 again). Red on both since 09-10.
 # v1.6 (2026-11-08) — dtp r533 / OTV4DEP.2 — the trades DDL is read from OTV5's database/trade_logger.py
 #   (DTP_OTV5_DIR, default ~/OTV5), the tree the boxes run; it was the frozen ~/options-trader-v4. OTV4_TRADE_LOGGER
 #   is gone. Hygiene item 7 of the 11-07 brief.
@@ -222,11 +224,15 @@ def main():
     _tab = chr(9)
 
     def _fake(ip, cmd, timeout=None):
+        # v1.7 (CHK.12): 13 fields, the query's real shape since RPT.23 (r331)
+        # added option_side / is_short_position / is_condor_leg / center_symbol.
+        # The old 9-field rows were dropped as unparseable (⁉2) and S9 has been
+        # red since; the closed row is a LIVE setup, not the retired ORB trade.
         rows = [
             _tab.join(["O", f"{_today} 13:05:00", "CVX", "GEXPinButterfly",
-                       "0.42", "0.55", "12", "", "0"]),
-            _tab.join(["C", f"{_today} 10:00:00", "CVX", "ORBStrategy",
-                       "1.20", "1.05", "4", "-60.0", "0"]),
+                       "0.42", "0.55", "12", "", "0", "call", "0", "0", ""]),
+            _tab.join(["C", f"{_today} 10:00:00", "CVX", "RunawayContinuation",
+                       "1.20", "1.05", "4", "-60.0", "0", "call", "0", "0", ""]),
         ]
         return 0, "\n".join(rows) + "\n", ""
 

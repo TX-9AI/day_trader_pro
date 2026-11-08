@@ -1,5 +1,6 @@
 """
-day_trader_pro/tests/test_excursion_report.py — v1.0 — 2026-08-03
+day_trader_pro/tests/test_excursion_report.py — v1.1 — 2026-11-08 (v1.0 2026-08-03)
+v1.1: the subprocess sandboxes copy ettime.py (CHK.12); the remaining cases re-pointed, see below.
 
 Guards the four v2.3 defects. Every one of them was invisible: the report
 rendered a full, well-formed page while reading the wrong source, counting the
@@ -23,6 +24,15 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import excursion_report as er  # noqa: E402
+
+
+def _copy_siblings(tmp):
+    """v1.1 (2026-11-08, dtp r536 / CHK.12): the subprocess cases copy the
+    report into a temp dir and run it there; since the ET-clock sweep it imports
+    ettime at module level, so the sandbox needs that sibling too or every case
+    dies on ImportError (an ENVIRONMENT red). Assertions unchanged."""
+    shutil.copy(os.path.join(os.path.dirname(er.__file__), "ettime.py"),
+                os.path.join(tmp, "ettime.py"))
 
 DAY = "2026-08-03"
 
@@ -66,7 +76,11 @@ def test_db_source_loads_harvests_actual_filename(tmp_path, monkeypatch):
     rows, src = er._rows_from_dbs(DAY)
     assert rows is not None and len(rows) == 1, \
         "the dated DB filename must be found; None here is the old defect"
-    assert "(1 DBs)" in src, f"src must mark a DB-backed read, got {src!r}"
+    # v1.1 (CHK.12): the label became "N DBs across M session(s)" in v2.7/v3.0
+    # (multi-folder --since reads); the intent, a DB-backed read naming its count,
+    # is unchanged.
+    assert "(1 DBs across 1 session(s))" in src, \
+        f"src must mark a DB-backed read, got {src!r}"
     assert rows[0]["_box"] == "AAPL"
 
 
@@ -157,6 +171,7 @@ def test_since_over_single_day_fallback_exits_nonzero():
     try:
         shutil.copy(er.__file__.replace(".pyc", ".py"),
                     os.path.join(tmp, "excursion_report.py"))
+        _copy_siblings(tmp)
         os.makedirs(os.path.join(tmp, "reports"), exist_ok=True)
         with open(os.path.join(tmp, "reports",
                                f"fleet_trades_{DAY}.json"), "w") as fh:
@@ -177,6 +192,7 @@ def test_no_since_over_fallback_still_reports():
     try:
         shutil.copy(er.__file__.replace(".pyc", ".py"),
                     os.path.join(tmp, "excursion_report.py"))
+        _copy_siblings(tmp)
         os.makedirs(os.path.join(tmp, "reports"), exist_ok=True)
         with open(os.path.join(tmp, "reports",
                                f"fleet_trades_{DAY}.json"), "w") as fh:
@@ -312,10 +328,15 @@ def test_small_group_is_not_given_a_lift_number():
 
 
 def test_winner_giveback_states_the_timestamp_limitation():
+    # v1.1 (CHK.12): RPT.1 (dtp, 2026-08-04, report v2.6) replaced the blanket
+    # "CANNOT CONCLUDE ... NO TIMESTAMP" caveat with PEAK TIMING once trade_logger
+    # v3.9 stamped the peak. The intent is unchanged: winners WITHOUT a peak
+    # timestamp must be COUNTED and NAMED, never imputed. These fixture rows carry
+    # no *_at column, so all 20 must be reported as predating the columns.
     rows = [_n(0.40, 0.20) for _ in range(20)]
     text = er.build_report(rows, "d", "trades/d (29 DBs)", 0, "PAPER")
-    assert "CANNOT CONCLUDE FROM THIS ALONE" in text
-    assert "NO TIMESTAMP" in text
+    assert "PEAK TIMING" in text
+    assert "20 winner(s) predate the v3.9 columns" in text
 
 
 def test_capture_ratio_is_realized_over_mfe():

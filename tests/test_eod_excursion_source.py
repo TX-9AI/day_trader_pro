@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/test_eod_excursion_source.py — v1.0
+# day_trader_pro/tests/test_eod_excursion_source.py — v1.1
+# v1.1 (2026-11-08) — dtp r536 / CHK.12: the sandbox copies ettime.py (excursion_report's
+#   module-level import); the case A / case B assertions are unchanged.
 # v1.0 (2026-08-29) — r186 / dtp r227. Proves S3.3.
 #
 # 🔴 THE CLAIM UNDER TEST IS NOT "the flag was added". It is that the NIGHTLY
@@ -65,8 +67,11 @@ ROWS = [
 
 def build_sandbox(d):
     """A control checkout with ONLY the warehouse bundle populated."""
+    # v1.1 (2026-11-08): + ettime.py. excursion_report imports it at module
+    # level since the ET-clock sweep, and a sandbox without it died on
+    # ImportError before reaching either case: an ENVIRONMENT red, not content.
     for f in ("excursion_report.py", "config.py", "consolidate_trades.py",
-              "warehouse_reader.py"):
+              "warehouse_reader.py", "ettime.py"):
         shutil.copy(os.path.join(ROOT, f), os.path.join(d, f))
     os.makedirs(os.path.join(d, "reports", "warehouse"))
     os.makedirs(os.path.join(d, "trades"))          # exists, but EMPTY

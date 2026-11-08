@@ -1,4 +1,11 @@
-# day_trader_pro/standings.py — v1.11
+# day_trader_pro/standings.py — v1.12
+# v1.12 (2026-11-08) — dtp r536 / CHK.12 — THE TABLES FIT A PHONE AGAIN. r331 (RPT.23) added the
+#   `dir` column at width 6 and pushed every row to 46-47 characters; test_standings_rows S6
+#   (43, Termius on mobile) has been red since 09-10. Rows now read `HH:MM SYM   TAG  DIR  e→m  P&L`:
+#   DIR is 4 wide with SHORT shown as SHRT (price_bias still RETURNS "SHORT"; only the cell is
+#   abbreviated), entry→mark is joined, and the row P&L is whole dollars (the *Net* headline and
+#   the unrealized line keep cents). The mock fleet's closed rows are a LIVE setup (Runaway), not
+#   the retired ORB trade. No number changes; only the layout.
 # v1.11 (2026-10-11) — r479 / OPS.22 — zone "US/Eastern" -> "America/New_York": the legacy link tzdata 2026c moved out of the default install. Same rules; no behaviour change.
 # v1.10 (2026-10-03) — dtp r457 / OPS.64 — asks the INSTANCE MAP for which boxes exist (instance_registry.discover()/fleet_members()), not config.UNIVERSE, so a retired (untagged) box needs no list edit. The list is the printed fallback.
 # v1.9 (2026-09-10) — dtp r345 / RPT.27. THE ACCOUNTING GUARD. r342 fixed the
@@ -446,7 +453,7 @@ def _mock_query(sym, today_et):
     h = _stable_hash(sym)
     n_closed = h % 4
     closed = [{"ts": f"{today_et} 1{i}:0{i}:00", "sym": sym,
-               "strategy": "ORBStrategy", "bias": "LONG",
+               "strategy": "RunawayContinuation", "bias": "LONG",
                "entry": "1.20", "mark": "1.05",
                "contracts": "4", "credit": "0",
                "pnl": round(((h + i) % 300) - 150.0, 2)}
@@ -475,6 +482,11 @@ def _mock_query(sym, today_et):
 
 def _money(v):
     return f"{'+' if v >= 0 else '-'}${abs(v):.2f}"
+
+
+def _money0(v):
+    """Whole dollars for a table cell (v1.12); the headline keeps cents."""
+    return f"{'+' if v >= 0 else '-'}${abs(v):.0f}"
 
 
 def run(send=False):
@@ -568,19 +580,23 @@ def run(send=False):
         # ⚠️ '—' NOT '$0.00'. A box that has not stamped a mark yet is
         # UNMEASURED, and a fabricated zero on a live position reads as a
         # flat trade — the plausible-silence class this project keeps finding.
-        return "—" if v is None else _money(v)
+        return "—" if v is None else _money0(v)
+
+    def _dir(b):
+        # v1.12: the cell is 4 wide so a row fits 43 characters (S6).
+        return {"SHORT": "SHRT"}.get(b or "?", b or "?")
 
     if all_open:
         lines.append("")
         lines.append(f"OPEN POSITIONS ({len(all_open)})")
-        lines.append(f"  {'time':<5} {'sym':<5} {'strat':<4} {'dir':<6}"
-                     f"{'entry':>5} {'now':>5} {'P&L':>9}")
+        lines.append(f"  {'time':<5} {'sym':<5} {'tag':<4} {'dir':<4} "
+                     f"{'entry':>5} {'now':>5} {'P&L':>7}")
         for r in sorted(all_open, key=lambda x: str(x["ts"])):
             lines.append(f"  {_hhmm(r['ts']):<5} {r['sym'][:5]:<5} "
                          f"{_abbr(r['strategy']):<4} "
-                         f"{r.get('bias', '?'):<6}"
+                         f"{_dir(r.get('bias')):<4} "
                          f"{float(r['entry'] or 0):>5.2f}"
-                         f"→{float(r['mark'] or 0):>5.2f} {_pnl(r['pnl']):>9}")
+                         f"→{float(r['mark'] or 0):>5.2f} {_pnl(r['pnl']):>7}")
         _live = [r["pnl"] for r in all_open if r["pnl"] is not None]
         if _live:
             # ⚠️ OPEN AND REALIZED ARE NEVER ADDED TOGETHER. The headline Net
@@ -598,15 +614,15 @@ def run(send=False):
     if all_closed:
         lines.append("")
         lines.append(f"CLOSED TODAY ({len(all_closed)})")
-        lines.append(f"  {'time':<5} {'sym':<5} {'strat':<4} {'dir':<6}"
-                     f"{'entry':>5} {'exit':>5} {'P&L':>9}")
+        lines.append(f"  {'time':<5} {'sym':<5} {'tag':<4} {'dir':<4} "
+                     f"{'entry':>5} {'exit':>5} {'P&L':>7}")
         for r in sorted(all_closed, key=lambda x: str(x["ts"])):
             lines.append(f"  {_hhmm(r['ts']):<5} {r['sym'][:5]:<5} "
                          f"{_abbr(r['strategy']):<4} "
-                         f"{r.get('bias', '?'):<6}"
+                         f"{_dir(r.get('bias')):<4} "
                          f"{float(r['entry'] or 0):>5.2f}"
                          f"→{float(r['mark'] or 0):>5.2f} "
-                         f"{_money(r['pnl']):>9}")
+                         f"{_money0(r['pnl']):>7}")
 
     msg = "\n".join(lines)
     print(msg)
