@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""day_trader_pro/tests/screen_reach.py — v1.2
+"""day_trader_pro/tests/screen_reach.py — v1.3
+v1.3  2026-11-08  dtp r533 / OTV4DEP.2 — the trend meter is imported from OTV5 (DTP_OTV5_DIR, default ~/OTV5), not the
+      frozen ~/options-trader-v4 (OTV4_ROOT is gone). Hygiene item 7 of the 11-07 brief.
 v1.2  2026-10-11  r479 / OPS.22 — zone "US/Eastern" -> "America/New_York": the legacy link tzdata 2026c moved out of the default install. Same rules; no behaviour change.
 v1.1  2026-09-03 — dtp r261. 🔴 v1.0 MEASURED REACH ENTRY-TO-EXIT AND THE MEDIAN
       RUNAWAY HOLD IS THREE MINUTES, so "the underlying travelled 0.99 ATR"
@@ -69,10 +71,9 @@ from progress import Bar                                      # noqa: E402
 ET = ZoneInfo("America/New_York")
 UTC = ZoneInfo("UTC")
 
-_CANDS = [os.path.expanduser("~/options-trader-v4"),
-          os.path.expanduser("~/options_trader_v4"),
-          os.path.join(_root, "..", "options-trader-v4"),
-          os.environ.get("OTV4_ROOT", "")]
+_CANDS = [os.environ.get("DTP_OTV5_DIR", ""),                 # v1.3: OTV5, the tree that trades (was otv4)
+          os.path.expanduser("~/OTV5"),
+          os.path.join(_root, "..", "OTV5")]
 _measure = None
 for _c in _CANDS:
     if _c and os.path.exists(os.path.join(_c, "analysis", "trend_strength.py")):
@@ -80,8 +81,8 @@ for _c in _CANDS:
         from analysis.trend_strength import measure as _measure  # noqa: E402
         break
 if _measure is None:
-    raise SystemExit("  CANNOT FIND options_trader_v4/analysis/trend_strength.py"
-                     " — set OTV4_ROOT.")
+    raise SystemExit("  CANNOT FIND OTV5/analysis/trend_strength.py"
+                     " — set DTP_OTV5_DIR.")
 
 TRIG_WINDOW = 10        # the shortest window carried the most signal
 # 🔑 FIXED HORIZONS, IN MINUTES. The tape's capacity, not our participation.

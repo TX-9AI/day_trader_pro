@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""day_trader_pro/tests/calibrate_trend_strength.py — v1.3
+"""day_trader_pro/tests/calibrate_trend_strength.py — v1.4
+v1.4  2026-11-08  dtp r533 / OTV4DEP.2 — the meter is imported from OTV5 (DTP_OTV5_DIR, default ~/OTV5), the tree
+      that trades; it was the frozen ~/options-trader-v4 (OTV4_ROOT is gone). Hygiene item 7 of the 11-07 brief.
 v1.3  2026-10-11  r479 / OPS.22 — zone "US/Eastern" -> "America/New_York": the legacy link tzdata 2026c moved out of the default install. Same rules; no behaviour change.
 v1.2  2026-09-03 — dtp r259. 🔴 THE OUTCOME IS A SAMPLE QUANTILE — "DID IT
       RUN" — NOT A FIXED PERCENTAGE. The first calibration came back negative
@@ -78,14 +80,12 @@ from progress import Bar                                      # noqa: E402
 ET = ZoneInfo("America/New_York")
 UTC = ZoneInfo("UTC")
 
-# ⚠️ THE METER LIVES IN otv4. Located rather than reimplemented; if it cannot
-# be found this FAILS LOUDLY, because a calibration that silently falls back to
-# a local copy of the maths is worse than none — it would set a threshold for a
-# function that does not trade.
-_CANDS = [os.path.expanduser("~/options-trader-v4"),
-          os.path.expanduser("~/options_trader_v4"),
-          os.path.join(_root, "..", "options-trader-v4"),
-          os.environ.get("OTV4_ROOT", "")]
+# ⚠️ THE METER LIVES IN OTV5, THE FLEET'S TREE (v1.4: it was the frozen otv4). Located rather than reimplemented;
+# if it cannot be found this FAILS LOUDLY, because a calibration that silently falls back to a local copy of the
+# maths is worse than none — it would set a threshold for a function that does not trade.
+_CANDS = [os.environ.get("DTP_OTV5_DIR", ""),
+          os.path.expanduser("~/OTV5"),
+          os.path.join(_root, "..", "OTV5")]
 _measure = None
 for _c in _CANDS:
     if _c and os.path.exists(os.path.join(_c, "analysis", "trend_strength.py")):
@@ -94,8 +94,8 @@ for _c in _CANDS:
         break
 if _measure is None:
     raise SystemExit(
-        "  CANNOT FIND options_trader_v4/analysis/trend_strength.py. The "
-        "calibration must score the SAME function that trades; set OTV4_ROOT.")
+        "  CANNOT FIND OTV5/analysis/trend_strength.py. The "
+        "calibration must score the SAME function that trades; set DTP_OTV5_DIR.")
 
 COMPONENTS = ("score", "efficiency", "acceptance", "shallowness", "pace",
               # r259 — the acceptance TRAJECTORY family and the FVG component.

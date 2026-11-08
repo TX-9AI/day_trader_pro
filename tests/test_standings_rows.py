@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/test_standings_rows.py — v1.5
+# day_trader_pro/tests/test_standings_rows.py — v1.6
+# v1.6 (2026-11-08) — dtp r533 / OTV4DEP.2 — the trades DDL is read from OTV5's database/trade_logger.py
+#   (DTP_OTV5_DIR, default ~/OTV5), the tree the boxes run; it was the frozen ~/options-trader-v4. OTV4_TRADE_LOGGER
+#   is gone. Hygiene item 7 of the 11-07 brief.
 # v1.5 (2026-10-11) — r479 / OPS.22 — zone "US/Eastern" -> "America/New_York": the legacy link tzdata 2026c moved out of the default install. Same rules; no behaviour change.
 # v1.4 (2026-09-02) — dtp r250. 🔴 THE FIXTURE WAS BUILT FROM MY OWN QUERY'S
 #   ASSUMPTIONS and therefore agreed with its mistakes: the CREATE TABLE here
@@ -73,11 +76,10 @@ def _schema_columns():
     """
     import re
     cands = [
-        os.path.expanduser("~/options-trader-v4/database/trade_logger.py"),
-        os.path.expanduser("~/options_trader_v4/database/trade_logger.py"),
-        os.path.join(_root, "..", "options-trader-v4", "database", "trade_logger.py"),
-        os.path.join(_root, "..", "options_trader_v4", "database", "trade_logger.py"),
-        os.environ.get("OTV4_TRADE_LOGGER", ""),
+        os.path.join(os.environ.get("DTP_OTV5_DIR", ""), "database", "trade_logger.py")
+        if os.environ.get("DTP_OTV5_DIR") else "",
+        os.path.expanduser("~/OTV5/database/trade_logger.py"),
+        os.path.join(_root, "..", "OTV5", "database", "trade_logger.py"),
     ]
     src = None
     for c in cands:
@@ -86,9 +88,9 @@ def _schema_columns():
             break
     if src is None:
         raise SystemExit(
-            "  CANNOT FIND options_trader_v4/database/trade_logger.py. "
+            "  CANNOT FIND OTV5/database/trade_logger.py. "
             "The trades DDL is the source of truth for this check and "
-            "it must not be guessed. Set OTV4_TRADE_LOGGER to its path.")
+            "it must not be guessed. Set DTP_OTV5_DIR to the OTV5 checkout.")
     lines = src.splitlines()
     i = next(n for n, l in enumerate(lines)
              if "CREATE TABLE IF NOT EXISTS trades (" in l)

@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/check_forward_scan_series.py — v1.0
+# day_trader_pro/tests/check_forward_scan_series.py — v1.1
+# v1.1 (2026-11-08) — dtp r533 / OTV4DEP.2 — F1 diffs PUSH_DAY_FILED against OTV5's warehouse/s3_push.py
+#   (DTP_OTV5_DIR, default ~/OTV5), the pusher the boxes run; it read the frozen ~/options-trader-v4 (OT_V4_ROOT is
+#   gone). Hygiene item 7 of the 11-07 brief.
 # v1.0 (2026-09-23) — r417 / WH.20. THE FORWARD SCAN REACHES THE STREAMS THAT
 #   NEED IT.
 #   🔴 THE DEFECT. `warehouse_cache.load()` has scanned a forward window and
@@ -35,7 +38,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-OTV4 = os.environ.get("OT_V4_ROOT", os.path.expanduser("~/options-trader-v4"))
+OTV5 = os.environ.get("DTP_OTV5_DIR", os.path.expanduser("~/OTV5"))     # v1.1: was the frozen otv4
 
 _fails = []
 
@@ -47,8 +50,8 @@ def ck(tag, ok, msg=""):
 
 
 def _tables_from_source():
-    """SERIES_TABLES + DERIVED_SERIES_TABLES, read out of otv4's s3_push."""
-    path = os.path.join(OTV4, "warehouse", "s3_push.py")
+    """SERIES_TABLES + DERIVED_SERIES_TABLES, read out of OTV5's s3_push (v1.1: was otv4's)."""
+    path = os.path.join(OTV5, "warehouse", "s3_push.py")
     src = open(path, encoding="utf-8").read()
     got = set()
     for name in ("SERIES_TABLES", "DERIVED_SERIES_TABLES"):
@@ -81,8 +84,8 @@ def main():
             ck("F1", not missing and not extra,
                f"missing={sorted(missing)} extra={sorted(extra)}")
         except Exception as exc:
-            ck("F1", False, f"could not read otv4 s3_push ({exc}); "
-                            f"set OT_V4_ROOT")
+            ck("F1", False, f"could not read OTV5 s3_push ({exc}); "
+                            f"set DTP_OTV5_DIR")
 
     if fw is None:
         ck("F2", False, "forward_window is absent")

@@ -1,19 +1,26 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_no_otv4_deps.py  v1.0
+day_trader_pro/tests/check_no_otv4_deps.py  v1.1
+v1.1  2026-11-08  dtp r533 / OTV4DEP.2 — THE GATE NOW COVERS tests/. Hygiene item 7 of the 11-07 brief: seven dtp
+      tests and screens still located the trading code they check (the trend meter, the structure classifier, the
+      trades DDL, the derived schemas, s3_push's series tables) in the frozen ~/options-trader-v4. r533 points each at
+      OTV5 (DTP_OTV5_DIR, default ~/OTV5). tests/ is scanned like the rest; ALLOWED gains the test files whose
+      references are decoys (a planted otv4 tree a check must NOT read), fixtures, the Claude project-folder name, or
+      a named HISTORY read (the frozen query.py mirror, the handoffs folder scratch_purge rehomes). N4's floor rises to
+      the tree with tests/ (221 .py files at r533). N5's fixture adds a tests/ file that must be flagged.
 v1.0  2026-11-08  dtp r532 / OTV4DEP.1 — NO dtp TOOL READS CODE OR LIVE DOCS FROM THE FROZEN TREE. The 11-07
       Saturday brief (section 5 item 7) found dtp tools still importing from, or defaulting to, ~/options-trader-v4,
       frozen since otv4 r500: claude_boot's boot-alert address, brief_sigint's SPX weighting rule, the level-history
       builder (whose trading-side module OTV5 never carried), gen_handoff's reading list. r532 moves each to OTV5 or
-      removes it. This gate keeps it that way for dtp's own code (tests/ is hygiene item 7's, not this gate's).
+      removes it. This gate keeps it that way for dtp's own code.
 
   N1  every reference to the frozen tree in dtp code (a string constant outside a docstring in a .py, a non-comment
       line in a .sh) sits in an ALLOWED file, at most as many times as that file is allowed, each for a named reason.
   N2  no name bound to the frozen tree is put on sys.path, or joined to a `tests` path, anywhere in dtp code.
   N3  a name bound to the frozen tree is joined to `docs` only where the allow-list says the read is history.
-  N4  the scan is not vacuous: it parsed more than 60 dtp .py files (80 at r532, tests/ excluded).
-  N5  CONTROL: on a fixture tree the same scanner flags an unlisted reference, a sys.path insert and a tests join,
-      a docs join, and passes a comment, a docstring and an allowed reference.
+  N4  the scan is not vacuous: it parsed more than 150 dtp .py files, tests/ included (v1.0: > 60, tests/ excluded).
+  N5  CONTROL: on a fixture tree the same scanner flags an unlisted reference (in tools/ AND in tests/), a sys.path
+      insert and a tests join, a docs join, and passes a comment, a docstring and an allowed reference.
 """
 from __future__ import annotations
 
@@ -39,6 +46,18 @@ ALLOWED = {
     "tools/saturday_brief.sh": (1, "ANCHOR: the Claude session's cwd (project memory), r527"),
     "tools/scratch_purge.py": (2, "HANDOFF_DIRS is the history folder it rehomes; the recreate note names the docs half"),
     "tools/transcript_text.py": (1, "Claude's project transcript folder name"),
+    # v1.1 — tests/. Each is a decoy, a fixture, a folder name or a named history read; none locates code to run.
+    "tests/check_control_repo.py": (2, "asserts CONTROL_REPO is NOT a retired tree (v3/v4 named to be refused)"),
+    "tests/check_edge_runner.py": (7, "a planted otv4 tree and the otv4-dir env decoy the runner must NOT read"),
+    "tests/check_land_sh.py": (4, "a dash.sh fixture line the POS/NEG spec parser is exercised on"),
+    "tests/check_no_otv4_deps.py": (8, "this gate's own pattern and fixtures"),
+    "tests/check_otv5_paths.py": (4, "a divergent otv4 fee model / calendar the check must NOT read"),
+    "tests/check_r_tool_paths.py": (2, "the otv4-dir env decoy the R SUITE must never run"),
+    "tests/check_resume_item.py": (1, "asserts no menu body cds into the frozen tree"),
+    "tests/check_saturday_brief.py": (1, "asserts the brief's output names no otv4 path"),
+    "tests/check_scratch_purge.py": (2, "HISTORY: the handoffs folder scratch_purge rehomes (snapshot + P12 registry)"),
+    "tests/check_strategy_registry.py": (1, "HISTORY: R5 diffs the FROZEN otv4/query.py mirror (every code decodes)"),
+    "tests/check_transcript_pick.py": (1, "Claude's project transcript folder name"),
 }
 # file -> why: the only places a frozen-tree name may be joined to docs/.
 DOCS_JOIN_OK = {"tools/genesis_find.py": "history search"}
@@ -111,7 +130,7 @@ def scan(root, files, allowed, docs_ok):
     """{'n1': [...], 'n2': [...], 'n3': [...], 'parsed': int}"""
     res = {"n1": [], "n2": [], "n3": [], "parsed": 0}
     for rel in files:
-        if rel.startswith("tests/") or not rel.endswith((".py", ".sh")):
+        if not rel.endswith((".py", ".sh")):
             continue
         try:
             src = open(os.path.join(root, rel), encoding="utf-8").read()
@@ -143,6 +162,7 @@ def tracked(root):
 def control():
     with tempfile.TemporaryDirectory() as td:
         os.makedirs(os.path.join(td, "tools"))
+        os.makedirs(os.path.join(td, "tests"))
         w = lambda rel, body: open(os.path.join(td, rel), "w").write(body)   # noqa: E731
         w("tools/bad_ref.py", 'X = "/home/ubuntu/options-trader-v4/x"\n')
         w("tools/bad_path.py", 'import os, sys\nOT = os.environ.get("DTP_OTV4_DIR", "y")\n'
@@ -151,12 +171,14 @@ def control():
         w("tools/ok_comment.py", '"""mentions ~/options-trader-v4 in a docstring"""\n# ~/options-trader-v4\nA = 1\n')
         w("tools/ok_allowed.py", 'H = "~/options-trader-v4/handoffs"\n')
         w("tools/bad.sh", 'cd ~/options-trader-v4 && ls\n# ~/options-trader-v4 in a comment\n')
-        files = ["tools/bad_ref.py", "tools/bad_path.py", "tools/ok_comment.py", "tools/ok_allowed.py", "tools/bad.sh"]
+        w("tests/bad_test.py", 'import os\nR = os.path.expanduser("~/options-trader-v4")\n')
+        files = ["tools/bad_ref.py", "tools/bad_path.py", "tools/ok_comment.py", "tools/ok_allowed.py", "tools/bad.sh",
+                 "tests/bad_test.py"]
         r = scan(td, files, {"tools/ok_allowed.py": (1, "fixture")}, {})
         n1 = " ".join(r["n1"])
         n2 = " ".join(r["n2"])
         ok = ("bad_ref.py" in n1 and "bad_path.py" in n1 and "bad.sh" in n1 and "ok_comment" not in n1
-              and "ok_allowed" not in n1 and "bad_path.py:3 sys.path" in n2 and "join(tests)" in n2
+              and "ok_allowed" not in n1 and "tests/bad_test.py" in n1 and "bad_path.py:3 sys.path" in n2 and "join(tests)" in n2
               and any("bad_path.py:4 join(docs)" in x for x in r["n3"]))
         return ok, f"n1={r['n1']} n2={r['n2']} n3={r['n3']}"
 
@@ -168,7 +190,7 @@ def main():
     check("N1", not r["n1"], "; ".join(r["n1"]) or f"{len(ALLOWED)} allowed file(s), each within its count")
     check("N2", not r["n2"], "; ".join(r["n2"]) or "no frozen-tree name on sys.path or joined to tests/")
     check("N3", not r["n3"], "; ".join(r["n3"]) or "docs/ joins only where the read is history")
-    check("N4", r["parsed"] > 60, f"{r['parsed']} .py files parsed")
+    check("N4", r["parsed"] > 150, f"{r['parsed']} .py files parsed, tests/ included")
     ok, why = control()
     check("N5", ok, "" if ok else why)
     print(f"check_no_otv4_deps: {'ALL PASS' if not FAILED else 'FAIL ' + ' '.join(FAILED)} ({len(RAN)} checks)")

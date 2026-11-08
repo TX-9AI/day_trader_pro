@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/test_trend_calibration.py — v1.2
+# day_trader_pro/tests/test_trend_calibration.py — v1.3
+# v1.3 (2026-11-08) — dtp r533 / OTV4DEP.2 — C12 reads OTV5's analysis/trend_strength.py (DTP_OTV5_DIR, default
+#   ~/OTV5), the meter the calibration imports; it read the frozen ~/options-trader-v4 (OTV4_ROOT is gone).
 # v1.2 (2026-09-03) — dtp r259. C10-C13: the outcome is a sample QUANTILE
 #   ('did it run'), the acceptance-trajectory and FVG families are scored,
 #   and the FVG component is pinned as backward-looking — a forward-looking
@@ -242,8 +244,8 @@ def main():
     # only counts gaps completed INSIDE the window, which is what a decision at
     # the fill can actually see.
     ts_src = open(os.path.join(
-        os.environ.get("OTV4_ROOT",
-                       os.path.expanduser("~/options-trader-v4")),
+        os.environ.get("DTP_OTV5_DIR",
+                       os.path.expanduser("~/OTV5")),
         "analysis", "trend_strength.py"), encoding="utf-8").read()
     check("C12 the FVG component looks only INSIDE the window",
           "BACKWARD-LOOKING BY CONSTRUCTION" in ts_src

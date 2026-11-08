@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""day_trader_pro/tests/test_natural_key.py — v1.0
+"""day_trader_pro/tests/test_natural_key.py — v1.1
+v1.1  2026-11-08  dtp r533 / OTV4DEP.2 — THE SCHEMAS ARE OTV5's, THE TREE THE BOXES RUN. N4 parsed the frozen
+      ~/options-trader-v4 (frozen since otv4 r500); it now finds the OTV5 checkout (DTP_OTV5_DIR, default ~/OTV5, by
+      the same strategy/plan.py marker). OTV4_ROOT is gone. Hygiene item 7 of the 11-07 brief.
 v1.0  2026-09-05 — dtp r276. THE CDC COLLAPSE KEYS ON THE TABLE'S OWN PRIMARY
 KEY, AND THE KEY IS READ FROM otv4's SCHEMAS RATHER THAN DECLARED HERE.
 
@@ -38,13 +41,12 @@ def check(name, ok, detail=""):
         FAILED.append(name)
 
 
-def _otv4_root():
-    """The otv4 checkout, by marker file rather than by a guessed path (WA §3)."""
-    cand = [os.environ.get("OTV4_ROOT", ""),
-            os.path.expanduser("~/options-trader-v4"),
-            os.path.expanduser("~/options_trader_v4"),
+def _otv5_root():
+    """The OTV5 checkout, by marker file rather than by a guessed path (WA §3). v1.1: was the frozen otv4."""
+    cand = [os.environ.get("DTP_OTV5_DIR", ""),
+            os.path.expanduser("~/OTV5"),
             os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
-                os.path.abspath(__file__)))), "options_trader_v4")]
+                os.path.abspath(__file__)))), "OTV5")]
     for c in cand:
         if c and os.path.exists(os.path.join(c, "strategy", "plan.py")):
             return c
@@ -161,9 +163,9 @@ def main():
     check("N3c character_ledger keeps the partition-scoped _rid key",
           not keyed3)
 
-    # ══ N4 — THE KEYS MATCH otv4's OWN SCHEMAS ════════════════════════════
-    root = _otv4_root()
-    check("N4 the otv4 checkout was found (set OTV4_ROOT if it is elsewhere)",
+    # ══ N4 — THE KEYS MATCH OTV5's OWN SCHEMAS (v1.1: was otv4's) ═════════
+    root = _otv5_root()
+    check("N4 the OTV5 checkout was found (set DTP_OTV5_DIR if it is elsewhere)",
           bool(root), root or "not found")
     if root:
         real = _pks(root)

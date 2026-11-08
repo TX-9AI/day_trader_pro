@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""day_trader_pro/tests/screen_entry_vectors.py — v1.1
+"""day_trader_pro/tests/screen_entry_vectors.py — v1.2
+v1.2  2026-11-08  dtp r533 / OTV4DEP.2 — the structure classifier (strategy.structure.is_credit_vertical) is imported
+      from OTV5 (DTP_OTV5_DIR, default ~/OTV5), not the frozen ~/options-trader-v4. Hygiene item 7 of the 11-07 brief.
 v1.1  2026-10-11  r479 / OPS.22 — zone "US/Eastern" -> "America/New_York": the legacy link tzdata 2026c moved out of the default install. Same rules; no behaviour change.
 WHICH DERIVED VECTORS COINCIDE WITH A DIRECTIONALLY CORRECT ENTRY? (RPT.A)
 
@@ -90,7 +92,7 @@ def _credit(row) -> bool:
     """The engine's own structure test. Falls back to the stored credit only if
     the classifier is unavailable, and says so rather than silently differing."""
     try:
-        sys.path.insert(0, os.path.expanduser("~/options-trader-v4"))
+        sys.path.insert(0, os.environ.get("DTP_OTV5_DIR", os.path.expanduser("~/OTV5")))   # v1.2: was otv4
         from strategy.structure import is_credit_vertical
         return bool(is_credit_vertical(dict(row)))
     except Exception:                                          # noqa: BLE001
