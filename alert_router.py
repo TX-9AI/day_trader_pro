@@ -1,5 +1,14 @@
 #!/usr/bin/env python3
-# day_trader_pro/alert_router.py — v0.3.0
+# day_trader_pro/alert_router.py — v0.4.0
+# v0.4.0 (2026-11-08) — dtp r540 / ROUTE.1 — EVERY ALERT CONTROL TAKES IS TRIAGED BY ITS EVENT TYPE, AS IT ARRIVES.
+#   The operator, 2026-11-08: "The telegram alerts should be flowing to control—that's your 'notification' when
+#   something happens. You get the message instead of the operator & you decide how to triage that whilst queuing the
+#   feed the operator sees." ingest_alert() hands each live (not replayed) alert to alert_triage.Triage.on_event():
+#   the event goes to the inbox (data/alert_router/inbox/<day>.jsonl, which the Claude session follows), an approved
+#   recovery runs on the triage's own thread for a flat box, and the alert's FEED decides its place in this queue:
+#   "digest" holds the 09:15 wake's and the close's UP / DN for DIGEST_HOLD_S so the wave is one message. A critical
+#   type already goes out at P0 ungrouped (CODE_PRIO / CRIT_RE) and BLIND episodes are unchanged. --dry-run builds no
+#   triage (it acts on nothing and writes no inbox).
 # v0.3.0 (2026-11-08) — dtp r539 / TIMER.1 — THE TRIAGE FILE FOLLOWER IS REMOVED WITH THE TRIAGE. The operator,
 #   2026-11-08, on the per-minute dtp-feed-triage timer: "I absolutely hate it ... It should be reactionary, by event
 #   type—not run every minute looking for problems." tools/feed_triage.py is deleted, so nothing writes
@@ -76,11 +85,12 @@ from datetime import datetime
 import config
 import ettime
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 STATE_DIR = os.path.join(config.DATA_DIR, "alert_router")
 
 GROUP_HOLD_S = 20.0          # the first alert of a cause waits this long for the rest of the fleet
+DIGEST_HOLD_S = 240.0        # v0.4.0: an UP / DN in the wake or close window waits this long (one message per wave)
 UPDATE_HOLD_S = 45.0         # boxes joining an announced episode are batched into one update per this
 RECOVERY_HOLD_S = 20.0       # sight-restored lines are batched this long before the recovery message
 EPISODE_IDLE_S = 3 * 3600.0  # an episode with no activity for this long is closed without a message
@@ -168,7 +178,7 @@ class Episode:
 
 
 class Router:
-    def __init__(self, post, state_dir=None, clock=_now, log=None, spool=True):
+    def __init__(self, post, state_dir=None, clock=_now, log=None, spool=True, triage=None):
         self.post = post                              # post(text) -> ("ok"|"retry"|"fatal", retry_after|None, why)
         self.state_dir = state_dir or STATE_DIR
         self.clock = clock
@@ -189,6 +199,7 @@ class Router:
         self.last_tick = clock()
         self.sent = []                                # (ts, label, text) — what went out, for tests and status
         self.dropped = 0
+        self.triage = triage                          # alert_triage.Triage (v0.4.0) or None
         if self.spool_on:
             os.makedirs(self.state_dir, exist_ok=True)
 
@@ -271,7 +282,13 @@ class Router:
             if via != "control":
                 self.direct_done.add(key)
             self._note_open(box, rec, now)
-            self._place(box, rec, now)                # an UP/DN is held GROUP_HOLD_S; _flush_group mutes take-downs
+            feed = "group"
+            if self.triage is not None and not replay:
+                try:
+                    _typ, feed, _act = self.triage.on_event(box, rec)
+                except Exception as e:                # noqa: BLE001 - triage never costs an alert its delivery
+                    self.log("%s: triage failed (%s); delivered as usual" % (box, type(e).__name__))
+            self._place(box, rec, now, feed=feed)     # an UP/DN is held GROUP_HOLD_S (a digest DIGEST_HOLD_S)
             return via == "control"
 
     def ingest_alerted(self, box, aid):
@@ -281,7 +298,7 @@ class Router:
             if self.spool_on:
                 self._spool({"t": "done", "ids": ["%s|%s" % (box, aid)]})
 
-    def _place(self, box, rec, now):
+    def _place(self, box, rec, now, feed="group"):
         code = rec.get("code", "MSG")
         if code in EPISODE_CODES:
             return self._blind(box, rec, now)
@@ -291,7 +308,7 @@ class Router:
             gk = (code, (rec.get("cause") or "") if code != "MSG" else _shape(rec.get("text"), box))
             g = self.groups.get(gk)
             if g is None:
-                g = self.groups[gk] = Group(gk, code, now, now + GROUP_HOLD_S)
+                g = self.groups[gk] = Group(gk, code, now, now + (DIGEST_HOLD_S if feed == "digest" else GROUP_HOLD_S))
             g.members[box] = rec
             return None
         if rec.get("via") != "control":
@@ -751,6 +768,11 @@ def run(dry_run=False, state_dir=None, discover_fn=None, stop=None):
     n = r.replay()
     if n:
         log("replayed %d acked-but-unsent alert(s) from the spool" % n)
+    if not dry_run:                                             # v0.4.0: triage after the replay, live alerts only
+        import alert_triage
+        r.triage = alert_triage.Triage(
+            post_status=lambda kind, text, boxes=(), cause="": post_status(kind, text, boxes, cause, state_dir),
+            state_dir=state_dir, open_n=r.open_n, log=log)
     pg = pager.Pager(out=open(os.devnull, "w"), on_alert=r.ingest_alert, on_alerted=r.ingest_alerted,
                      ack=not dry_run, healthy_fn=r.healthy)
     stop = stop or threading.Event()
