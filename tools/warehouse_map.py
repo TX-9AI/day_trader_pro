@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-# day_trader_pro/tools/warehouse_map.py — v1.5
+# day_trader_pro/tools/warehouse_map.py — v1.6
+# v1.6 (2026-11-08) — dtp r541 / CAP.1 (OTV5 r94). Five MEANING rows for the capture prefixes: raw/market_metrics,
+#   raw/chain_rest, raw/chain_listing, raw/corporate_events, raw/candles_full (OTV5 tools/capture_all.py). The operator,
+#   2026-11-08: "If they offer it, we better be downloading it. Non-negotiable. It all goes to the fucking warehouse."
 # v1.5 (2026-11-08) — dtp r538 / RETIRE.3. raw/shadow_trades gets its MEANING row, RETIRED: OTV5 r88 deleted the TCS
 #   shadow that would have written it (the operator, 2026-11-08: "Delete"); it never held an object.
 # v1.4 (2026-11-08) — dtp r531 / DOC.37 (Saturday brief 11-07 §4 item 10). The map was 67 days old (1.12M objects,
@@ -154,6 +157,23 @@ MEANING = {
     "raw/character_axis_sample": ("push_series ns=dseries (r270)",
                                   "tape character axis samples, append-only on "
                                   "(symbol, ts_epoch)"),
+    # ── r541 / CAP.1 (OTV5 r94): tools/capture_all.py, everything TastyTrade serves that the feed does not keep.
+    # Each object is the RAW response (gzip JSON / CSV), so no field is dropped by a model or a column list.
+    "raw/market_metrics": ("OTV5 tools/capture_all.py metrics (optbot-capture-metrics 09:38 / 15:52 ET)",
+                           "/market-metrics raw: IV index/rank/percentile, IV per expiry, IV30, HV30/60/90, "
+                           "beta, corr_spy, liquidity, earnings/dividend dates, borrow rate; SPX adds the "
+                           "context list (VIX family, SPY/IWM/DIA, sector ETFs)"),
+    "raw/chain_rest": ("OTV5 tools/capture_all.py chain (optbot-capture-chain 09:42 / 12:30 / 16:15 ET)",
+                       "EVERY expiry and strike of the box's chain over REST /market-data/by-type: "
+                       "bid/ask/sizes, mark, last, volume, open interest, day OHLC, delta/gamma/theta/vega/rho, IV, theo; the term structure "
+                       "raw/chain_snapshots (front expiry, 5 min) does not hold"),
+    "raw/chain_listing": ("OTV5 tools/capture_all.py chain, once per day",
+                          "the nested option chain itself: expiries, strikes, settlement, roots"),
+    "raw/corporate_events": ("OTV5 tools/capture_all.py events (optbot-capture-events 16:25 ET)",
+                             "kind=earnings / dividends history per equity, kind=risk_free"),
+    "raw/candles_full": ("OTV5 tools/capture_all.py candles (one-off backfills, a stopped bot only)",
+                         "DXLink Candle with EVERY field: vwap, bid/ask volume, imp_volatility, open "
+                         "interest, count - raw/candles keeps OHLCV only; futures and the VIX family too"),
     # ── outside raw/: fleet state, studies and one-off probes ───────────
     "fleet/dxlink_nodes": ("share_dxlink_nodes (OTV5 s3_push v5.6, FEED.13)",
                            "each box's dxlink node book, merged fleet-wide"),
