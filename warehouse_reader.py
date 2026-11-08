@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-# day_trader_pro/warehouse_reader.py — v2.2
+# day_trader_pro/warehouse_reader.py — v2.3
+# v2.3 (2026-11-08) — dtp r535 / CONST.1 — the bucket is config.WAREHOUSE_BUCKET (the one dtp copy; tests/check_const_parity.py pins it to OTV5's).
 # v2.2 (2026-10-11) — r479 / OPS.22 — zone "US/Eastern" -> "America/New_York": the legacy link tzdata 2026c moved out of the default install. Same rules; no behaviour change.
 # v2.1 (2026-09-05) — dtp r287 / TZ.1. `et_day` and `et_bounds` MOVED TO
 #   `ettime` and are re-exported here. They are the ET/UTC boundary, and this
@@ -183,7 +184,7 @@ import boto3
 import config
 import consolidate_trades as CT
 
-BUCKET = os.environ.get("OT_S3_BUCKET", "vertigo-warehouse-tx9ai")
+BUCKET = config.WAREHOUSE_BUCKET
 REGION = os.environ.get("OT_S3_REGION", "us-east-2")
 PREFIX = os.environ.get("OT_S3_PREFIX", "raw")
 

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-# day_trader_pro/warehouse_coverage.py — v1.11
+# day_trader_pro/warehouse_coverage.py — v1.12
+# v1.12 (2026-11-08) — dtp r535 / CONST.1 — the bucket is config.WAREHOUSE_BUCKET (the one dtp copy; tests/check_const_parity.py pins it to OTV5's).
 # v1.11 (2026-10-31) — dtp r519. derived_gate_disposition IS CONDITIONAL: A DAY WITH NO GATE CHANGE WRITES NONE. The
 #   writer is edge-triggered (OTV5 analysis/gate_report.py: a row on BLOCKED, CHANGED or CLEARED, never per tick), and
 #   --streams graded it EVERY, so on 2026-10-30 the board read `derived_gate_disposition MISS: SPX`: SPX's loss cap
@@ -239,10 +240,10 @@ from datetime import date as _date, timedelta
 
 import boto3
 
-import config  # noqa: F401  (kept for path/env parity with the other tools)
+import config  # r535: the bucket comes from here
 import market_calendar
 
-BUCKET = os.environ.get("OT_S3_BUCKET", "vertigo-warehouse-tx9ai")
+BUCKET = config.WAREHOUSE_BUCKET
 REGION = os.environ.get("OT_S3_REGION", "us-east-2")
 PREFIX = os.environ.get("OT_S3_PREFIX", "raw")
 

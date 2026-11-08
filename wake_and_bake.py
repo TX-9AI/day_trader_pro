@@ -1,4 +1,5 @@
-# day_trader_pro/wake_and_bake.py — v1.9
+# day_trader_pro/wake_and_bake.py — v1.10
+# v1.10 (2026-11-08) — dtp r535 / CONST.1 — _in_rth reads market_calendar: a holiday is not RTH, a half day closes 13:00.
 # v1.9 (2026-10-11) — r479 / OPS.22 — zone "US/Eastern" -> "America/New_York": the legacy link tzdata 2026c moved out of the default install. Same rules; no behaviour change.
 # v1.8 (2026-10-03) — dtp r457 / OPS.64 — asks the INSTANCE MAP for which boxes exist (instance_registry.discover()/fleet_members()), not config.UNIVERSE, so a retired (untagged) box needs no list edit. The list is the printed fallback. The expected count is len(fleet_members()).
 # v1.7 (2026-09-21) — r406 / DEV.14. DISPLAY ONLY — NO BEHAVIOUR CHANGE.
@@ -169,6 +170,7 @@ import config
 import ec2ops
 import eod_report
 import instance_registry
+import market_calendar
 import notify
 import ssh_util
 
@@ -236,10 +238,15 @@ def _discover(only):
 
 
 def _in_rth(now=None):
+    """r535 / CONST.1 — the session comes from market_calendar (the dtp calendar, pinned day for day to OTV5's
+    utils/market_calendar by tests/check_const_parity.py): a holiday is not RTH and a half day ends at 13:00. v1.9
+    called every weekday 09:30-16:00 RTH, so a holiday or 11-27 after 13:00 refused a `full` run without --force."""
     now = now or datetime.now(_ET)
-    if now.weekday() >= 5:
+    d = now.date()
+    if not market_calendar.is_trading_day(d):
         return False
-    return dtime(9, 30) <= now.time() <= dtime(16, 0)
+    close = dtime(13, 0) if market_calendar.is_half_day(d) else dtime(16, 0)
+    return dtime(9, 30) <= now.time() <= close
 
 
 def _ids(mapping):
@@ -492,7 +499,7 @@ def run(only=None, assume_yes=False, dry=False, leave_running=False,
     # when you need it. `wake`/`bake` only start boxes or sync files (no restart),
     # so they're safe in RTH too.
     if mode == "full" and _in_rth(now) and not force and not config.MOCK_AWS:
-        _log("ABORT", "inside RTH (09:30-16:00 ET). A full run restarts the "
+        _log("ABORT", "inside RTH (09:30 to the close, ET). A full run restarts the "
                       "fleet mid-session — refusing. Re-run with --force only if "
                       "you truly mean to. (For an emergency stop, use shutdown.)")
         return 2

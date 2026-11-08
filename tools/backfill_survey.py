@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-# day_trader_pro/tools/backfill_survey.py — v1.3
+# day_trader_pro/tools/backfill_survey.py — v1.4
+# v1.4 (2026-11-08) — dtp r535 / CONST.1 — the bucket is config.WAREHOUSE_BUCKET (the one dtp copy; tests/check_const_parity.py pins it to OTV5's).
 # v1.3 (2026-10-11) — r479 / OPS.22 — zone "US/Eastern" -> "America/New_York": the legacy link tzdata 2026c moved out of the default install. Same rules; no behaviour change.
 # v1.1 (2026-08-16) — `--streams`: the same question for the OTHER streams.
 #      The trades survey found the warehouse is the sole copy of 33 closed
@@ -66,7 +67,7 @@ sys.path.insert(0, ROOT)
 import config  # noqa: E402
 
 TRADES_DIR = os.path.join(ROOT, "trades")
-BUCKET = os.environ.get("OT_S3_BUCKET", "vertigo-warehouse-tx9ai")
+BUCKET = config.WAREHOUSE_BUCKET
 REGION = os.environ.get("OT_S3_REGION", "us-east-2")
 _ET = ZoneInfo("America/New_York")
 _UTC = ZoneInfo("UTC")

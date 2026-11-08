@@ -1,4 +1,5 @@
-# day_trader_pro/selector.py  v0.4.3
+# day_trader_pro/selector.py  v0.4.4
+# v0.4.4 (2026-11-08)  dtp r535 / CONST.1. PANEL = list(config.UNIVERSE), not a second literal copy.
 # v0.4.3 (2026-09-29)  r455 / OPS.62. PANEL 17 -> 15, MU and PLTR retired and
 #   terminated. Mirrors config.UNIVERSE; pinned by test_panel_mirror C1.
 # v0.4.2 (2026-09-24)  r423 / OPS.47. PANEL 15 -> 17 (AAL, SOFI), mirroring
@@ -222,9 +223,9 @@ def _validate(raw):
 # for the GEX butterfly is fleet-wide and is NOT interrupted by this change.
 # **A box that stopped collecting because it stopped trading would be a box
 # whose pitchfork and ADX depth quietly dies** - WA §30.
-PANEL = ["NVDA", "SPX", "QQQ", "GOOGL", "AMZN", "AVGO",
-         "TSLA", "META", "NFLX", "CRM", "UNH", "CVX", "AMD",
-         "AAL", "SOFI"]
+# r535 / CONST.1 — the panel IS config.UNIVERSE (it was a second literal copy, pinned equal by test_panel_mirror C1;
+# now it cannot drift). A list, as before: callers index and iterate it.
+PANEL = list(config.UNIVERSE)
 
 
 def select(report):

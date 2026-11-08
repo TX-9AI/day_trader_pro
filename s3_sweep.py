@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/s3_sweep.py  v1.4
+day_trader_pro/s3_sweep.py  v1.5
 
+v1.5  2026-11-08  dtp r535 / CONST.1 — the bucket is config.WAREHOUSE_BUCKET (the one dtp copy; tests/check_const_parity.py pins it to OTV5's).
+      The PANEL fallback (used only when selector cannot be imported) is config.UNIVERSE, not a
+      fourth literal copy of the fleet.
 v1.4  2026-10-03  r457 / OPS.64 — A RETIRED BOX'S HISTORY NEEDS NO LIST EDIT.
       The guard protected only the panel and ALWAYS_KEEP, so retiring a box
       exposed its trades to --culled --apply unless someone added it here
@@ -92,7 +95,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import config                                                   # noqa: E402
 
-BUCKET = os.environ.get("OT_S3_BUCKET", "vertigo-warehouse-tx9ai")
+BUCKET = config.WAREHOUSE_BUCKET
 PREFIX = "raw"
 
 # 🔴 THE 15 SYMBOLS THE FLEET ACTUALLY RUNS. Any key naming one of these is
@@ -108,9 +111,7 @@ try:
 except Exception as _exc:                                       # noqa: BLE001
     print(f"  ⚠️ selector.PANEL unavailable ({_exc}) — using the built-in "
           f"fallback list. Do NOT --apply a culled sweep in this state.")
-    PANEL = {"NVDA", "SPX", "QQQ", "GOOGL", "AMZN", "AVGO",
-             "TSLA", "META", "NFLX", "CRM", "UNH", "CVX", "AMD",
-             "AAL", "SOFI"}
+    PANEL = set(s.upper() for s in config.UNIVERSE)          # r535: config, not a literal copy
 
 # v1.1 — F2. The legacy rule holds only where the push side keyed the object
 # on sha256(canon(record)). Whole-file streams key on the raw bytes and store

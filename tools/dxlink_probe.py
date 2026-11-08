@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/dxlink_probe.py — v1.1
+day_trader_pro/tools/dxlink_probe.py — v1.2
+v1.2  2026-11-08  dtp r535 / CONST.1 — the bucket is config.WAREHOUSE_BUCKET (the one dtp copy; tests/check_const_parity.py pins it to OTV5's). FORGET_S is pinned to OTV5
+      candle_feed.NODE_FORGET_S by the same gate.
 v1.1  2026-11-04  dtp r523 / FEED.15 — THE ZONE'S OWN NAMESERVERS ARE ASKED TOO (as OTV5 r70 does on the boxes). On
       2026-11-02/03 the recursive resolvers answered one dxlink node at a time while the host's Route 53 nameservers
       (ns-313.awsdns-39.com and peers; the host itself is delegated, dxfeed.com sits on devexperts.com's servers)
@@ -158,7 +160,8 @@ def s3_nodes():
     try:
         import boto3
         from botocore.config import Config
-        bucket = os.environ.get("OT_S3_BUCKET", "vertigo-warehouse-tx9ai")
+        import config
+        bucket = config.WAREHOUSE_BUCKET
         s3 = boto3.client("s3", config=Config(connect_timeout=5, read_timeout=10, retries={"max_attempts": 1}))
         out = set()
         for page in s3.get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix=NODES_PREFIX + "/"):

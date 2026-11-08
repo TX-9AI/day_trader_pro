@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-# day_trader_pro/warehouse_cost.py — v1.2
+# day_trader_pro/warehouse_cost.py — v1.3
+# v1.3 (2026-11-08) — dtp r535 / CONST.1 — the bucket is config.WAREHOUSE_BUCKET (the one dtp copy; tests/check_const_parity.py pins it to OTV5's).
 # v1.2 (2026-08-16) — TWO OF MY MISTAKES, COMPOUNDING.
 #      (a) `--versions` calls ListObjectVersions, which needs
 #          `s3:ListBucketVersions` — an action I did NOT put in
@@ -63,7 +64,10 @@ from collections import defaultdict
 
 import boto3
 
-BUCKET = os.environ.get("OT_S3_BUCKET", "vertigo-warehouse-tx9ai")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import config  # noqa: E402
+
+BUCKET = config.WAREHOUSE_BUCKET
 REGION = os.environ.get("OT_S3_REGION", "us-east-2")
 
 # us-east-2 standard, quoted 2026-08-16.

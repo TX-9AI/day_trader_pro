@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/ohlc_from_s3.py  v0.1.0
+day_trader_pro/ohlc_from_s3.py  v0.1.1
+v0.1.1  2026-11-08 — dtp r535 / CONST.1 — the bucket is config.WAREHOUSE_BUCKET (the one dtp copy; tests/check_const_parity.py pins it to OTV5's).
 v0.1.0  2026-10-26 — dtp r514 / LABEL.1 — THE NIGHTLY 1m TAPE COMES FROM THE WAREHOUSE WHEN THE BOXES ARE DOWN.
         auto_label and daily_bars read ohlc/<date>/<SYM>_ohlc_<date>.csv, which only harvest (an scp from a RUNNING box)
         ever wrote; eod_analysis runs after TAKEDOWN, so ohlc/ had held one empty 2026-09-03 dir and LABEL had been
@@ -28,8 +29,11 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, DIR)
+import config  # noqa: E402
+
 ET = ZoneInfo("America/New_York")
-BUCKET = os.environ.get("OT_S3_BUCKET", "vertigo-warehouse-tx9ai")
+BUCKET = config.WAREHOUSE_BUCKET
 REGION = os.environ.get("OT_S3_REGION", "us-east-2")
 PREFIX = os.environ.get("OT_S3_PREFIX", "raw")
 OHLC_ROOT = os.path.join(DIR, "ohlc")

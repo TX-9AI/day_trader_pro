@@ -1,4 +1,10 @@
-# day_trader_pro/config.py — v0.1.8
+# day_trader_pro/config.py — v0.1.9
+# v0.1.9 (2026-11-08) — r535 / CONST.1. ONE WAREHOUSE BUCKET AND ONE ENGINE EPOCH. The bucket literal
+#   "vertigo-warehouse-tx9ai" was a default in eight dtp modules and the engine epoch "2026-09-01" in two;
+#   tools/trades_epoch_strip.py alone read OT_WAREHOUSE_BUCKET where every other site reads OT_S3_BUCKET, so one
+#   bucket override would have sent the strip to a different bucket from everything else. WAREHOUSE_BUCKET and
+#   ENGINE_EPOCH below are now the only dtp copies; tests/check_const_parity.py pins them to OTV5's (s3_push,
+#   warehouse_source, deploy/s3-push.service, tests/trade_report).
 # v0.1.8 (2026-09-29) — r455 / OPS.62. UNIVERSE 17 -> 15: MU and PLTR RETIRED
 #   by operator ruling (the two worst performers, to preserve feed integrity)
 #   and TERMINATED 09-29. Reporting-only as since r423; the wake and the close
@@ -49,6 +55,15 @@ import os
 # --------------------------------------------------------------------------
 # Ohio == us-east-2 (matches the console screenshot). Override with DTP_REGION.
 REGION = os.environ.get("DTP_REGION", "us-east-2")
+
+# --------------------------------------------------------------------------
+# The warehouse (r535 / CONST.1) — the ONE dtp copy of each
+# --------------------------------------------------------------------------
+# OTV5 owns both (the boxes push to the bucket; the epoch is OTV5 tests/trade_report.ENGINE_EPOCH and
+# warehouse_source.DAY_ONE). dtp cannot import OTV5 at runtime from every cwd, so it keeps one copy here and
+# tests/check_const_parity.py fails when the two differ.
+WAREHOUSE_BUCKET = os.environ.get("OT_S3_BUCKET", "vertigo-warehouse-tx9ai")
+ENGINE_EPOCH = os.environ.get("DTP_ENGINE_EPOCH", "2026-09-01")   # epoch 3 (r301): nothing older is pooled
 
 # --------------------------------------------------------------------------
 # Trading universe  (tag "Name" on each dedicated EC2 instance == the ticker)

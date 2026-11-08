@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/trades_epoch_strip.py  v1.0
+day_trader_pro/tools/trades_epoch_strip.py  v1.1
+v1.1  2026-11-08  dtp r535 / CONST.1 — THE BUCKET OVERRIDE IS THE SAME ONE EVERY OTHER TOOL READS. v1.0 read
+      OT_WAREHOUSE_BUCKET where the other ten sites read OT_S3_BUCKET (nothing set either, so no run went astray);
+      the bucket and the epoch are now config.WAREHOUSE_BUCKET and config.ENGINE_EPOCH.
 v1.0  2026-09-07  dtp r314 / S3.22 — SEVER PRE-EPOCH TRADES FROM THE SAMPLE.
 
 Operator, 2026-09-07: *"I have trades data going back to July which informs
@@ -68,12 +71,15 @@ import os
 import re
 import sys
 
-BUCKET = os.environ.get("OT_WAREHOUSE_BUCKET", "vertigo-warehouse-tx9ai")
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import config  # noqa: E402
+
+BUCKET = config.WAREHOUSE_BUCKET
 # 🔴 HARDCODED. Not a flag, not an env var. This tool deletes from `raw/` and
 # the only thing standing between it and the rest of the warehouse is that it
 # cannot be pointed anywhere else.
 PREFIX = "raw/trades/"
-EPOCH = os.environ.get("DTP_ENGINE_EPOCH", "2026-09-01")
+EPOCH = config.ENGINE_EPOCH
 MANIFEST = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                         "reports", "warehouse", "epoch_strip_manifest.txt")
 

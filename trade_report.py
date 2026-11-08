@@ -1,4 +1,6 @@
-# day_trader_pro/trade_report.py — v1.25
+# day_trader_pro/trade_report.py — v1.26
+# v1.26 (2026-11-08) — dtp r535 / CONST.1. ENGINE_EPOCH is config.ENGINE_EPOCH (the one dtp copy); the literal is a
+#   standalone fallback only, pinned to OTV5's tests/trade_report.ENGINE_EPOCH by tests/check_const_parity.py.
 # v1.25 (2026-10-31) — dtp r519. The PROVENANCE line for a retired strategy reads
 #   "history only" when nothing superseded it. strategy_registry v1.6 moved the
 #   retired strategies (ORB, VOLT, the sweep, TCS, ...) to its HISTORICAL decode
@@ -341,6 +343,7 @@ try:
     REPORTS_DIR = getattr(config, "REPORTS_DIR",
                           os.path.expanduser("~/day_trader_pro/reports"))
 except Exception:                                     # standalone
+    config = None
     REPORTS_DIR = os.path.expanduser("~/day_trader_pro/reports")
 
 BUNDLE_GLOB = os.path.join(REPORTS_DIR, "fleet_trades_*.json")
@@ -365,7 +368,10 @@ WAREHOUSE_DIR = os.path.join(REPORTS_DIR, "warehouse")
 # would default every unqualified run to a window whose first six sessions are
 # gone, which reads as six quiet days rather than as a filter meeting an empty
 # prefix — the exact confusion r297 fixed one layer down.
-ENGINE_EPOCH = os.environ.get("DTP_ENGINE_EPOCH", "2026-09-01")
+# r535 / CONST.1 — the value is config.ENGINE_EPOCH (the one dtp copy, pinned to OTV5 by tests/check_const_parity.py);
+# the literal survives only for a standalone run with no config on the path, and the same gate pins it.
+ENGINE_EPOCH = (config.ENGINE_EPOCH if config is not None
+                else os.environ.get("DTP_ENGINE_EPOCH", "2026-09-01"))
 
 try:
     from zoneinfo import ZoneInfo
