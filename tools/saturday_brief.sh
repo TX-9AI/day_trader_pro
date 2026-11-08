@@ -1,5 +1,21 @@
 #!/usr/bin/env bash
-# day_trader_pro/tools/saturday_brief.sh — v1.7
+# day_trader_pro/tools/saturday_brief.sh — v1.8
+# v1.8 (2026-11-08) — dtp r527 / SAT.6 (the 11-07 brief R9; hygiene queue item 2). Operator, 2026-11-07:
+#   "These should all be addressed one at a time by their own agent".
+#   · A MISSING PROMPT REFUSES FIRST. check_saturday_brief S5 was red in the 11-07 sweep (rc=0): the sweep
+#     ran at 03:06-03:24 ET while the real brief held ~/.saturday_brief_inflight, so the wrapper STOOD
+#     DOWN on the live marker before it ever reached the prompt check. A missing prompt is a broken chain
+#     whatever else is true, so the refusal now comes before the brief-exists and in-flight stand-downs,
+#     and it writes one REFUSED line to the ledger. The gate drives its own marker (S5c: a fresh marker
+#     AND no prompt must still refuse).
+#   · THE BRIEF'S TREES ARE OTV5 AND dtp, NOT THE FROZEN otv4. --smoke asked for otv4's HEAD and the
+#     brief reported it as its tree; the run parameters now carry OTV5's and dtp's HEADs (TREES line, also
+#     printed by --dry). The session still starts in ~/options-trader-v4: that is the working directory
+#     Claude's project memory is keyed by (the operator's standing session uses the same one), and only
+#     that; it is never read as a tree.
+#   · THE PRIOR BRIEF COMES ONLY FROM ~/reviews/weekly/. The otv4/handoffs/ fallback is gone (no brief has
+#     lived there since r520). A prior whose _work folder does not exist (10-31's were in /tmp) is passed
+#     as NONE with the reason, so the session does not pass a dead --prior to botlog_scan/checker_sweep.
 # v1.7 (2026-10-31) — dtp r520 / SAT.4. THE BRIEF IS REWRITTEN FOR THE FLEET THAT EXISTS, AND IT
 #   LEAVES THE GITIGNORED FOLDER. The operator, 2026-10-31: "Re-do the entire brief".
 #   · OUT defaults to ~/reviews/weekly/saturday_<date>.md (beside the daily reviews), not
@@ -159,7 +175,14 @@ export PATH="/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin"
 # smoke, canary and watchdog alike — because a session that can land is a
 # session that can land whichever flag started it.
 export VERTIGO_UNATTENDED=1
-OTV4="/home/ubuntu/options-trader-v4"
+# The session's WORKING DIRECTORY only: Claude's project memory is keyed by it, and the operator's
+# standing session uses the same one. It is frozen (otv4) and is never reported as the brief's tree.
+ANCHOR="${SATURDAY_BRIEF_ANCHOR:-/home/ubuntu/options-trader-v4}"
+# The trees the brief is ABOUT (v1.8): their HEADs go into the run parameters and --dry.
+OTV5="${SATURDAY_BRIEF_OTV5:-/home/ubuntu/OTV5}"
+DTP="${SATURDAY_BRIEF_DTP:-$(dirname "$(dirname "$(readlink -f "$0")")")}"
+_head() { git -C "$1" rev-parse --short HEAD 2>/dev/null || echo "UNREADABLE"; }
+TREES="OTV5 $(_head "$OTV5") ($OTV5) · dtp $(_head "$DTP") ($DTP)"
 STAMP="$(date +%Y-%m-%d)"
 # ⚠️ OVERRIDABLE SO THE GATE NEED NOT DEPEND ON TODAY'S REAL BRIEF. Its
 # first cut ran against the live path, so once a genuine brief existed the
@@ -169,11 +192,17 @@ WEEKLY="${SATURDAY_BRIEF_WEEKLY:-/home/ubuntu/reviews/weekly}"
 OUT="${SATURDAY_BRIEF_OUT:-$WEEKLY/saturday_${STAMP}.md}"
 WORK="${OUT%.md}_work"
 MARKER="${SATURDAY_BRIEF_MARKER:-/home/ubuntu/.saturday_brief_inflight}"
-# 🔑 THE PRIOR BRIEF, FOR THE WEEK-ON-WEEK DIFF: the newest saturday_*.md before today in
-# the weekly folder, else (the first week after the move) the newest in handoffs/.
+# 🔑 THE PRIOR BRIEF, FOR THE WEEK-ON-WEEK DIFF: the newest saturday_*.md before today in the
+# weekly folder ONLY (v1.8: no handoffs/ fallback). Its _work folder is the --prior for botlog_scan
+# and checker_sweep; when it does not exist the session is told NONE and why.
 PRIOR="$(ls -1 "$WEEKLY"/saturday_20*.md 2>/dev/null | grep -v "saturday_${STAMP}.md" | sort | tail -1)"
-[ -z "$PRIOR" ] && PRIOR="$(ls -1 "$OTV4"/handoffs/saturday_20*.md 2>/dev/null | grep -v "saturday_${STAMP}.md" | sort | tail -1)"
-PRIOR_WORK="${PRIOR%.md}_work"
+if [ -n "$PRIOR" ] && [ -d "${PRIOR%.md}_work" ]; then
+  PRIOR_WORK="${PRIOR%.md}_work"
+elif [ -n "$PRIOR" ]; then
+  PRIOR_WORK="NONE - ${PRIOR%.md}_work does not exist; run botlog_scan and checker_sweep without --prior and say so"
+else
+  PRIOR_WORK="NONE - no prior brief; run botlog_scan and checker_sweep without --prior and say so"
+fi
 # ⏱ THE DEADLINE. The operator reads it after 07:30 ET; a session still running then is
 # killed by timeout(1) and the wrapper records FAILED, rather than racing the reader.
 DEADLINE_ET="${SATURDAY_BRIEF_DEADLINE_ET:-07:30}"
@@ -305,8 +334,8 @@ if [ "${1:-}" = "--smoke" ]; then
   SMOKE_OUT="/home/ubuntu/saturday_brief_smoke.md"
   rm -f "$SMOKE_OUT"
   echo "  smoke: invoking the real claude with tools [$TOOLS]"
-  cd "$OTV4" || { echo "  cannot cd $OTV4"; exit 1; }
-  "$CLAUDE_BIN" -p $ISOLATE "Run exactly one shell command: git -C $OTV4 rev-parse --short HEAD
+  cd "$ANCHOR" || { echo "  cannot cd $ANCHOR"; exit 1; }
+  "$CLAUDE_BIN" -p $ISOLATE "Run exactly one shell command: git -C $OTV5 rev-parse --short HEAD
 Then write a file to exactly this path: $SMOKE_OUT
 containing one line: SMOKE OK <that sha> <today's date>
 Do nothing else. Do not commit, push, or deploy."     --allowedTools "$TOOLS" >> "$LOG" 2>&1
@@ -327,6 +356,8 @@ if [ "${1:-}" = "--dry" ]; then
   echo "  output: $OUT"
   echo "  work:   $WORK"
   echo "  prior:  ${PRIOR:-(none)}"
+  echo "  prior_work: $PRIOR_WORK"
+  echo "  trees:  $TREES"
   echo "  budget: ${BUDGET_S}s (deadline $DEADLINE_ET ET)"
   [ -f "$PROMPT_FILE" ] && echo "  prompt file present ($(wc -l < "$PROMPT_FILE") lines)" \
                         || echo "  ⚠️ PROMPT FILE MISSING"
@@ -341,6 +372,14 @@ fi
 # case he cannot cover: the session being down or restarted.
 # ⚠️ TWO TIMERS FOR ONE JOB IS A DOUBLE-BRIEF WAITING TO HAPPEN, so this runs
 # 90 MINUTES LATER and refuses if the work is already done or in flight.
+# 🔴 v1.8: A MISSING PROMPT REFUSES BEFORE EITHER STAND-DOWN. On 11-07 the sweep's S5 ran while the
+# real brief held the in-flight marker, the wrapper stood down (rc 0) and never reached this check;
+# a missing prompt is a broken chain whatever the marker says.
+if [ ! -f "$PROMPT_FILE" ]; then
+  echo "  ⚠️ REFUSED: no prompt file at $PROMPT_FILE" | tee -a "$LOG"
+  echo "$(date -u +%FT%TZ) REFUSED no_prompt $PROMPT_FILE" >> "$LEDGER"
+  exit 1
+fi
 if [ -f "$OUT" ]; then
   echo "  brief already written for $STAMP — the standing session got there first; exiting."
   echo "$(date -u +%FT%TZ) STOOD_DOWN brief_exists $OUT" >> "$LEDGER"
@@ -363,12 +402,7 @@ if [ -f "$MARKER" ]; then
   rm -f "$MARKER"
 fi
 
-if [ ! -f "$PROMPT_FILE" ]; then
-  echo "  ⚠️ REFUSED: no prompt file at $PROMPT_FILE" | tee -a "$LOG"
-  exit 1
-fi
-
-cd "$OTV4" || { echo "  ⚠️ cannot cd $OTV4" | tee -a "$LOG"; exit 1; }
+cd "$ANCHOR" || { echo "  ⚠️ cannot cd $ANCHOR" | tee -a "$LOG"; exit 1; }
 
 # ⚠️ THE OUTPUT PATH IS PASSED IN, NOT GUESSED BY THE SESSION. A brief that
 # writes to a name nobody predicted is a brief nobody finds.
@@ -382,7 +416,8 @@ RUN PARAMETERS (from the wrapper; use them exactly):
   BRIEF   write the finished brief to exactly this path: $OUT
   WORK    your working files (sweep.json, botlog.json, disk.json, tool outputs): $WORK
   PRIOR   last week's brief: ${PRIOR:-NONE - say so; nothing can be called new}
-  PRIOR_WORK  last week's working files: $PRIOR_WORK
+  PRIOR_WORK  last week's working files (the --prior for botlog_scan and checker_sweep): $PRIOR_WORK
+  TREES   the trees this brief reports on (section 3.4 and the header): $TREES
   DEADLINE    you are stopped at $_deadline_hm ET; have the file written well before it" \
   --allowedTools "$TOOLS" >> "$LOG" 2>&1
 rc=$?

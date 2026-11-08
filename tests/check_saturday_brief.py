@@ -1,6 +1,15 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_saturday_brief.py  v1.3
+day_trader_pro/tests/check_saturday_brief.py  v1.4
+v1.4  2026-11-08  dtp r527 / SAT.6 (the 11-07 brief R9). S5 was RED in the 11-07 sweep, rc=0: the sweep ran while
+      the real brief held the LIVE in-flight marker, the wrapper stood down on it, and the refusal was never
+      reached. Worse, S7 touched that same live marker to "6 hours ago" and then left it — a sweep during a
+      real brief backdated the running brief's guard. Every wrapper run here now uses a SCRATCH marker
+      (_SCRATCH carries SATURDAY_BRIEF_MARKER); S5c DRIVES the 11-07 shape (a fresh marker AND no prompt must
+      still REFUSE, and write one REFUSED ledger line); S18 the run parameters and --dry carry OTV5's and dtp's
+      HEADs (fixture repos) and never otv4's; S19 the prior comes from the weekly folder only (an anchor with
+      handoffs/saturday_*.md is ignored), and S19b/S19c a prior without a _work folder is passed as NONE while
+      one with it is passed as the --prior path.
 v1.3  2026-10-31  dtp r520 / SAT.4 — THE BRIEF IS THE OPERATOR'S SEVEN SECTIONS, FOR THE FLEET THAT EXISTS.
       The operator, 2026-10-31: "Re-do the entire brief" and "don't list the retired strategies either".
       S10/S10b the prompt and the tracked spec (docs/SATURDAY_BRIEF.md) name the same seven sections in order;
@@ -59,7 +68,14 @@ _SCRATCH = {
                                        "check_saturday_brief.log"),
     "SATURDAY_BRIEF_LEDGER": os.path.join(tempfile.gettempdir(),
                                           "check_saturday_brief.ledger"),
+    # v1.4: NEVER the live marker. A sweep running during the real brief made the wrapper stand down on
+    # the brief's own marker (S5 red, rc=0), and S7 backdated that marker.
+    "SATURDAY_BRIEF_MARKER": os.path.join(tempfile.gettempdir(),
+                                          "check_saturday_brief.inflight"),
 }
+_MK = _SCRATCH["SATURDAY_BRIEF_MARKER"]
+if os.path.exists(_MK):
+    os.remove(_MK)
 
 
 FAILS, RAN = [], []
@@ -193,8 +209,22 @@ try:
     ck("S5", r.returncode != 0 and "REFUSED" in (r.stdout + r.stderr),
        f"a MISSING prompt REFUSES (rc={r.returncode}) rather than invoking "
        f"claude with an empty brief")
+    # S5c — THE 11-07 SHAPE: a FRESH in-flight marker AND no prompt. The refusal must come first.
+    open(_MK, "w").close()
+    _led = _SCRATCH["SATURDAY_BRIEF_LEDGER"]
+    _n0 = sum(1 for _ in open(_led)) if os.path.exists(_led) else 0
+    r = subprocess.run(["bash", SH], capture_output=True, text=True, timeout=120,
+                       env=dict(os.environ, **_SCRATCH, SATURDAY_BRIEF_CLAUDE="/bin/false",
+                                SATURDAY_BRIEF_OUT=_TMPOUT))
+    _new = open(_led).read().splitlines()[_n0:] if os.path.exists(_led) else []
+    ck("S5c", r.returncode != 0 and "REFUSED" in (r.stdout + r.stderr)
+       and any("REFUSED no_prompt" in l for l in _new),
+       f"a missing prompt REFUSES even while a fresh in-flight marker stands (rc={r.returncode}), "
+       f"and writes one REFUSED ledger line ({len(_new)} new)")
 finally:
     os.rename(_bak, PROMPT)
+    if os.path.exists(_MK):
+        os.remove(_MK)
 
 ck("S5b", os.path.exists(PROMPT), "the prompt file was restored by this check")
 
@@ -254,7 +284,7 @@ ck("S6d", cn is not None and cnd not in (None, "6"),
 # the brief still happening?". 97 such lines accumulated and on 2026-09-26
 # they were read as a broken timer, on the morning of its FIRST Saturday.
 
-MARK = "/home/ubuntu/.saturday_brief_inflight"
+MARK = _MK  # v1.4: the scratch marker, never the live one
 _pre = os.path.exists(MARK)
 try:
     subprocess.run(["touch", "-d", "6 hours ago", MARK], check=True)
@@ -373,7 +403,7 @@ open(_stub, "w").write(f'#!/bin/bash\n[ -f "{_mk}" ] && echo yes > "{_d}/seen"\n
 os.chmod(_stub, 0o755)
 _o16 = os.path.join(_d, "weekly", "saturday_TEST.md")
 r = subprocess.run(["bash", SH], capture_output=True, text=True, timeout=120,
-                   env=dict(os.environ, **_SCRATCH, SATURDAY_BRIEF_CLAUDE=_stub, SATURDAY_BRIEF_MARKER=_mk,
+                   env=dict(os.environ, **dict(_SCRATCH, SATURDAY_BRIEF_MARKER=_mk), SATURDAY_BRIEF_CLAUDE=_stub,
                             SATURDAY_BRIEF_WEEKLY=os.path.join(_d, "weekly"), SATURDAY_BRIEF_OUT=_o16))
 ck("S16", os.path.exists(os.path.join(_d, "seen")) and not os.path.exists(_mk),
    "a real run holds its own in-flight marker while the session runs, and clears it after")
@@ -381,6 +411,65 @@ _hp = open(os.path.join(_d, "prompt")).read() if os.path.exists(os.path.join(_d,
 ck("S17", f"exactly this path: {_o16}" in _hp and "WORK" in _hp and "DEADLINE" in _hp
    and os.path.isdir(_o16[:-3] + "_work") and "## 1. TRADING SUMMARY" in _hp,
    "the session is handed the prompt, its BRIEF path, its WORK folder (created) and its DEADLINE")
+
+# ------------------------------------------------------------------------ S18 / S19
+# v1.4 — DRIVEN on fixtures. Two throwaway git repos stand in for OTV5 and dtp, an anchor with a
+# handoffs/ brief stands in for the frozen otv4, and a weekly folder holds the priors.
+import shutil
+_f = tempfile.mkdtemp(prefix="chk_satbrief_trees_")
+def _repo(name):
+    d = os.path.join(_f, name); os.makedirs(d)
+    g = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t",
+             GIT_COMMITTER_EMAIL="t@t")
+    subprocess.run(["git", "init", "-q", d], check=True, env=g)
+    open(os.path.join(d, "f"), "w").write(name)
+    subprocess.run(["git", "-C", d, "add", "f"], check=True, env=g)
+    subprocess.run(["git", "-C", d, "commit", "-qm", name], check=True, env=g)
+    return d, subprocess.run(["git", "-C", d, "rev-parse", "--short", "HEAD"], capture_output=True,
+                             text=True).stdout.strip()
+_o5, _h5 = _repo("otv5fx")
+_dt, _hd = _repo("dtpfx")
+_an, _ha = _repo("anchorfx")
+os.makedirs(os.path.join(_an, "handoffs"))
+open(os.path.join(_an, "handoffs", "saturday_2026-09-01.md"), "w").write("old")
+_wk = os.path.join(_f, "weekly"); os.makedirs(_wk)
+_fx = dict(os.environ, **_SCRATCH, SATURDAY_BRIEF_OTV5=_o5, SATURDAY_BRIEF_DTP=_dt,
+           SATURDAY_BRIEF_ANCHOR=_an, SATURDAY_BRIEF_WEEKLY=_wk,
+           SATURDAY_BRIEF_OUT=os.path.join(_wk, "saturday_TEST.md"))
+def _dry():
+    return subprocess.run(["bash", SH, "--dry"], env=_fx, capture_output=True, text=True, timeout=60).stdout
+_d0 = _dry()
+_tl = next((l for l in _d0.splitlines() if l.strip().startswith("trees:")), "")
+ck("S18", f"OTV5 {_h5}" in _tl and f"dtp {_hd}" in _tl and _ha not in _tl,
+   f"the brief's trees are OTV5 and dtp, never the anchor (otv4): {_tl.strip()[:90]}")
+_pl = next((l for l in _d0.splitlines() if l.strip().startswith("prior:")), "")
+_pw = next((l for l in _d0.splitlines() if l.strip().startswith("prior_work:")), "")
+ck("S19", "(none)" in _pl and "handoffs" not in _d0 and "NONE" in _pw,
+   f"with an empty weekly folder there is NO prior, even though the anchor holds handoffs/saturday_*.md: "
+   f"{_pl.strip()} | {_pw.strip()[:40]}")
+open(os.path.join(_wk, "saturday_2026-10-31.md"), "w").write("p1")
+_d1 = _dry()
+_pw1 = next((l for l in _d1.splitlines() if l.strip().startswith("prior_work:")), "")
+ck("S19b", "saturday_2026-10-31.md" in _d1 and "NONE" in _pw1 and "does not exist" in _pw1,
+   f"a prior whose _work folder is missing is passed as NONE with the reason: {_pw1.strip()[:70]}")
+os.makedirs(os.path.join(_wk, "saturday_2026-11-07_work"))
+open(os.path.join(_wk, "saturday_2026-11-07.md"), "w").write("p2")
+_d2 = _dry()
+_pw2 = next((l for l in _d2.splitlines() if l.strip().startswith("prior_work:")), "")
+ck("S19c", _pw2.strip() == f"prior_work: {os.path.join(_wk, 'saturday_2026-11-07_work')}",
+   f"the newest prior with a _work folder is the --prior path: {_pw2.strip()[:80]}")
+# and the real run hands the session the same TREES line (stub claude, scratch marker)
+_st = os.path.join(_f, "stub.sh")
+open(_st, "w").write(f'#!/bin/bash\nprintf "%s\\n" "$@" > "{_f}/prompt"\nexit 0\n')
+os.chmod(_st, 0o755)
+subprocess.run(["bash", SH], env=dict(_fx, SATURDAY_BRIEF_CLAUDE=_st), capture_output=True, text=True,
+               timeout=120)
+_hp2 = open(os.path.join(_f, "prompt")).read() if os.path.exists(os.path.join(_f, "prompt")) else ""
+ck("S18b", f"TREES   the trees this brief reports on" in _hp2 and f"OTV5 {_h5}" in _hp2
+   and f"dtp {_hd}" in _hp2 and f"PRIOR_WORK" in _hp2
+   and os.path.join(_wk, "saturday_2026-11-07_work") in _hp2,
+   "the real run's parameters carry the OTV5 and dtp HEADs and the prior _work path")
+shutil.rmtree(_f, ignore_errors=True)
 
 print()
 if FAILS:

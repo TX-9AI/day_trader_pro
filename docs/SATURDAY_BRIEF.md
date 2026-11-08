@@ -1,4 +1,4 @@
-# THE SATURDAY BRIEF — spec v2.1
+# THE SATURDAY BRIEF — spec v2.2
 
 **Status: the operator's spec, as of 2026-10-31.** It replaces `options-trader-v4/handoffs/SATURDAY_BRIEF.md`
 and `SATURDAY_RUNBOOK.md` (2026-09-19). Those were written for seventeen boxes, two engines and ORB. The fleet is now
@@ -168,6 +168,10 @@ fittability line this week. Its "READY" counts signal rows, not trades (D7), so 
 
     /home/ubuntu/day_trader_pro/venv/bin/python /home/ubuntu/day_trader_pro/tools/botlog_scan.py \
         --from <Mon> --to <Fri> --out <WORK>/botlog --prior <PRIOR_WORK>/botlog --by-day
+
+`<PRIOR_WORK>` is the wrapper's PRIOR_WORK parameter (v2.2, wrapper v1.8): last week's `_work` folder from
+`~/reviews/weekly/` only. When it reads `NONE - …`, run `botlog_scan` and `checker_sweep` without `--prior` and say
+so in the section. The header's tree line is the wrapper's TREES parameter (OTV5's and dtp's HEADs), never otv4's.
 
 `botlog_scan` sends one read-only script through `fleet.py run`. On each box it reads `~/options-trader/bot.log`
 and its rotations, and nothing else. It counts per box and per day: ERROR, CRITICAL, Traceback (with the exception
