@@ -1,6 +1,15 @@
 #!/usr/bin/env python3
-"""day_trader_pro/tests/orb_budget_fleet.py — v1.1
-SPOT AND THE ORB BUDGET ON EVERY RUNNING BOX.
+"""day_trader_pro/tests/orb_budget_fleet.py — v1.2
+SPOT AND THE RAMP TOP (OT_ORB_BUDGET_USD) ON EVERY RUNNING BOX.
+
+v1.2  2026-11-08 — dtp r529 / MENU.1. The ORB trade is retired (OTV5 r76);
+      OT_ORB_BUDGET_USD is the live Breakout ramp top (configure.sh item 7,
+      "Ramp TOP (MAX)"), so the report says so. AND THE UNIT READER WAS WRONG:
+      it split `Environment=` lines on the first "=", which reads the quoted
+      form configure.sh and strip_retired_env leave (`Environment="K=V"`) as
+      the key `"K` - every such box reported (DEFAULT). Lines are now read the
+      way systemd reads them (shlex: bare, quoted, several per line); a line
+      that will not parse is counted on the box's row, never guessed at.
 
 v1.1  2026-09-01 — reads the systemd unit's Environment= lines before importing
       config. v1.0 read config's defaults and reported QQQ/200 on every box.
@@ -70,15 +79,34 @@ import json, os, subprocess, sys
 # ⚠️ INJECT AND IMPORT, rather than reimplementing the precedence. config.py
 # decides how OT_ORB_BUDGET_USD falls back to OT_RISK_USD and what the final
 # default is; duplicating that logic here is how the two drift apart.
+import shlex
+UNPARSED = [0]
+def unit_env(text):
+    # r529: read each Environment= line the way systemd does - one or more
+    # assignments, bare, "double" or 'single' quoted. A line shlex refuses is
+    # counted, never half-read.
+    pairs = []
+    for line in text.splitlines():
+        if not line.startswith("Environment="):
+            continue
+        try:
+            toks = shlex.split(line[len("Environment="):])
+        except ValueError:
+            UNPARSED[0] += 1
+            continue
+        for t in toks:
+            if "=" in t:
+                k, v = t.split("=", 1)
+                if k:
+                    pairs.append((k, v))
+    return pairs
+
 UNIT = "/etc/systemd/system/optionsbot.service"
 try:
     out = subprocess.run(["sudo", "grep", "-h", "^Environment=", UNIT],
                          capture_output=True, text=True, timeout=15).stdout
-    for line in out.splitlines():
-        kv = line.split("=", 1)[1] if "=" in line else ""
-        if "=" in kv:
-            k, v = kv.split("=", 1)
-            os.environ[k.strip()] = v.strip()
+    for k, v in unit_env(out):
+        os.environ[k] = v
 except Exception as e:
     print("UNIT_UNREADABLE|%s" % e)
 
@@ -98,6 +126,8 @@ except FileNotFoundError:
     err = "no orb_state.json at %s" % path
 except Exception as e:
     err = "state unreadable: %s" % e
+if UNPARSED[0]:
+    err = (err + "; " if err else "") + "%d unit line(s) unparsed" % UNPARSED[0]
 print("OK|%s|%s|%.2f|%d|%.2f|%s" % (I, spot if spot else "", B,
                                     1 if D else 0, R, err))
 sys.exit(0)
@@ -119,8 +149,8 @@ def run(only, install_dir="~/options-trader"):
         print("  no running boxes.")
         return 1
 
-    print(f"\n  ORB BUDGET AND SPOT — {len(running)} running box(es)")
-    print(f"  {'sym':<6} {'spot':>9} {'budget':>9} {'bud/spot':>9}  note")
+    print(f"\n  RAMP TOP (OT_ORB_BUDGET_USD) AND SPOT — {len(running)} running box(es)")
+    print(f"  {'sym':<6} {'spot':>9} {'ramp top':>9} {'top/spot':>9}  note")
     print("  " + "-" * 52)
 
     rows, problems = [], []
@@ -156,12 +186,12 @@ def run(only, install_dir="~/options-trader"):
     n_def = sum(1 for r in rows if r[3])
     print()
     if n_def:
-        print(f"  ⚠️  {n_def} of {len(rows)} box(es) are on the DEFAULT budget "
+        print(f"  ⚠️  {n_def} of {len(rows)} box(es) are on the DEFAULT ramp top "
               f"(one trade's risk).")
         print("      Those will size a 1-lot on an expensive underlying. "
-              "configure.sh -> 8.")
+              "configure.sh -> 7 (Ramp TOP).")
     else:
-        print(f"  all {len(rows)} box(es) have an explicit ORB budget.")
+        print(f"  all {len(rows)} box(es) have an explicit Ramp TOP.")
     if problems:
         print()
         for sym, why in problems:
@@ -172,7 +202,7 @@ def run(only, install_dir="~/options-trader"):
 
 
 def main(argv):
-    ap = argparse.ArgumentParser(description="ORB budget and spot per box")
+    ap = argparse.ArgumentParser(description="Ramp TOP (OT_ORB_BUDGET_USD) and spot per box")
     ap.add_argument("--only", default=None,
                     help="comma-separated symbols (default: whole universe)")
     ap.add_argument("--install-dir", default="~/options-trader")

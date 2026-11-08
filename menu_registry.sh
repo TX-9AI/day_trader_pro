@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# day_trader_pro/menu_registry.sh — v1.26
+# day_trader_pro/menu_registry.sh — v1.27
+# v1.27 (2026-11-08) — dtp r529 / MENU.1. The FLEET item "ORB budget & spot (every running box)" is "Ramp TOP
+#   (OT_ORB_BUDGET_USD) & spot": the ORB trade is retired (OTV5 r76 RETIRE.1) and that key is the live Breakout ramp
+#   top (configure.sh item 7 "Ramp TOP (MAX)"). Same function, same script; only what it is called changed.
 # v1.26 (2026-10-25) — DEV.3. Service status's label names the OTV5 units: bot + feed + s3-push (no shadow-observer on OTV5).
 # v1.25 (2026-10-25) — dtp r509 / OPS.74. Instance map's label says it reads EC2 live.
 # v1.24 (2026-10-25) — dtp r507 / OPS.72. REPOINT the fleet's label says it asks for a pin and installs.
@@ -252,7 +255,7 @@ MENU=(
   "ITEM|Fleet ping|mi_fleet_ping"
   "ITEM|Run command (all running)|mi_run_command_all_running"
   "ITEM|status.py + query.py      (one/all/some)|mi_status_py_query_py_one_all_some"
-  "ITEM|ORB budget & spot (every running box)|mi_orb_budget_fleet"
+  "ITEM|Ramp TOP (OT_ORB_BUDGET_USD) & spot|mi_orb_budget_fleet"
   "ITEM|Dry-run spool-up (real reads)|mi_dry_run_spool_up_real_reads"
 
   "SECTION|SENSORS (derived stores; read-only, one/all/some)"

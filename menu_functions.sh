@@ -1,4 +1,7 @@
-# day_trader_pro/menu_functions.sh — v1.78
+# day_trader_pro/menu_functions.sh — v1.79
+# v1.79 (2026-11-08) - dtp r529 / MENU.1. `mi_orb_budget_fleet` is the menu's "Ramp TOP (OT_ORB_BUDGET_USD) & spot":
+#   the ORB trade is retired (OTV5 r76) and OT_ORB_BUDGET_USD is the live Breakout ramp top. The function and
+#   tests/orb_budget_fleet.py keep their names (only historical comments cite them; renaming buys nothing).
 # v1.78 (2026-11-08) - dtp r528 / RSUITE.1. THE R SUITE RUNS OTV5'S TOOLS. `_r_tool` resolved
 #   ${DTP_OTV4_DIR:-~/options-trader-v4}/tests/<tool>, so all four R SUITE items (EXCURSIONS, Stop/TP sweep, R LEDGER,
 #   Exit replay) ran the FROZEN otv4 copies: the menu never got r75's streaming exit_replay (the otv4 copy is the one
@@ -513,9 +516,10 @@ mi_status_py_query_py_one_all_some() {
 
 # Pull OHLC for a day       (one/all/some)
 
-# ORB budget & spot (every running box)
+# Ramp TOP (OT_ORB_BUDGET_USD) & spot
 mi_orb_budget_fleet() {
-    # r206 — WHAT EACH BOX WILL ACTUALLY SIZE AN ORB WITH.
+    # r206, relabelled r529 — EACH BOX'S RAMP TOP (OT_ORB_BUDGET_USD, the Breakout
+    # ramp's ceiling; configure.sh item 7) BESIDE ITS SPOT. The ORB trade is retired.
     # 🔑 THIS CALLS THE SCRIPT, IT DOES NOT REIMPLEMENT IT. tests/
     # orb_budget_fleet.py is the one implementation, staged and proven against
     # the live fleet before this item existed. A menu item that inlined its own
