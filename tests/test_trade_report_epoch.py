@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/test_trade_report_epoch.py — v1.1
+# day_trader_pro/tests/test_trade_report_epoch.py — v1.2
+# v1.2 (2026-11-08) — dtp r537 / SWEEP.7: case A reads the SOURCE line across the report's phone-width fold; a
+#   longer TMPDIR (control's ~/bin/heavy now gives each job /tmp/heavy-<pid>) split the path mid-word and A went red.
 # v1.1 (2026-11-08) — dtp r536 / CHK.12: the subprocess resolves dtp siblings from the checkout (PYTHONPATH).
 # v1.0 (2026-08-29) — r187 / dtp r228. Proves S3.5.
 #
@@ -102,7 +104,10 @@ def main():
         if "DECOY_ROOT_BUNDLE" in a.stdout:
             p.append("A: the default read the repo-root bundles — nothing "
                      "writes that folder any more (C.12)")
-        if "reports/warehouse" not in a.stdout:
+        # v1.2 (SWEEP.7): the report folds every line to the phone width (_WidthWrap, textwrap with
+        # break_long_words), so a long sandbox path is split mid-word; read the SOURCE across the fold.
+        flat = "".join(ln.strip() for ln in a.stdout.splitlines())
+        if "reports/warehouse" not in flat:
             p.append("A: the SOURCE line does not name the directory read: %s"
                      % a.stdout.splitlines()[:1])
 

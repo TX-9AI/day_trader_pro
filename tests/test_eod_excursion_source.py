@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/test_eod_excursion_source.py — v1.1
+# day_trader_pro/tests/test_eod_excursion_source.py — v1.2
+# v1.2 (2026-11-08) — dtp r537 / SWEEP.7: run() passes _sandbox_env() - no inherited OT_/DTP_ paths;
+#   checker_sweep's DTP_REPORTS_DIR made the copied report read the sweep's scratch, red only in the sweep.
 # v1.1 (2026-11-08) — dtp r536 / CHK.12: the sandbox copies ettime.py (excursion_report's
 #   module-level import); the case A / case B assertions are unchanged.
 # v1.0 (2026-08-29) — r186 / dtp r227. Proves S3.3.
@@ -82,10 +84,16 @@ def build_sandbox(d):
     return d
 
 
+def _sandbox_env():
+    """The sandbox owns its paths: strip every inherited OT_/DTP_ variable (SWEEP.7)."""
+    return {k: v for k, v in os.environ.items()
+            if not (k.startswith("OT_") or k.startswith("DTP_"))}
+
+
 def run(d, *extra):
     return subprocess.run(
         [sys.executable, "excursion_report.py", "--date", DAY] + list(extra),
-        cwd=d, capture_output=True, text=True, timeout=300)
+        cwd=d, capture_output=True, text=True, timeout=300, env=_sandbox_env())
 
 
 def main():

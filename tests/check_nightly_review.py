@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_nightly_review.py  v1.1
+day_trader_pro/tests/check_nightly_review.py  v1.2
+v1.2  2026-11-08  dtp r537 / SWEEP.7 — THE REVIEW'S SCRATCH LIVES IN ITS OWN DIR ON DISK AND IS REMOVED.
+  N12 the wrapper for real with a fake claude that writes scratch to $TMPDIR: TMPDIR is a fresh
+      <WORK_ROOT>/<day>-<epoch>-<pid> dir (never /tmp), the RUN PARAMETERS name it, and it is gone after a run that
+      PRODUCED and after one that wrote no review; a killed run's dir older than 2 days is pruned at the next start,
+      a younger one and a non-run dir are kept; the prompt forbids /tmp
 v1.1  2026-11-07  dtp r525 / RPT.37 — GIVEBACK WITHOUT PARK, AND HUNT BY CALL AND PUT (tools/review_kit.py v1.1).
   N9  giveback without PARK on the fixture (the hand-computed ex-PARK giveback, peak open, share and green-to-red
       beside the overall); a seven-column giveback.csv is migrated in place (every old row and cell kept, six
@@ -384,6 +389,56 @@ n11 = (days11 == ["2026-11-04", "2026-11-05"] and [m[0] for m in mism11] == ["20
        and "python $K hunt DAY" in pr and "without PARK" in pr and "hunt_side.csv" in pr)
 ck("N11", n11, "days=%s mismatches=%s kept=%s idempotent=%s prompt=%s" % (
     days11, [m[0] for m in mism11], gl2[1][:34], read(gb2) == b1, "python $K hunt DAY" in pr))
+
+# ── N12 ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+WR = os.path.join(TMP, "work_root")
+os.makedirs(WR)
+FAKE12 = os.path.join(TMP, "fake_claude12.sh")
+SEEN12 = os.path.join(TMP, "seen12.txt")
+with open(FAKE12, "w") as fh:
+    fh.write("#!/bin/bash\n"
+             "echo \"TMPDIR=$TMPDIR\" >> " + SEEN12 + "\n"
+             "printf '%s' \"$*\" | grep -o 'WORK      [^ ]*' >> " + SEEN12 + "; echo >> " + SEEN12 + "\n"
+             "head -c 4096 /dev/zero > \"$TMPDIR/derived_dump.json\"\n"
+             "out=$(printf '%s' \"$*\" | sed -n 's/.*write the finished review to exactly this path: \\([^ ]*\\).*/\\1/p'"
+             " | head -1)\n"
+             "[ \"${FAKE12_WRITE:-1}\" = 1 ] && [ -n \"$out\" ] && echo '# fake review' > \"$out\"\n"
+             "exit 0\n")
+os.chmod(FAKE12, 0o755)
+stale = os.path.join(WR, "2026-11-01-1000")
+young = os.path.join(WR, "2026-11-05-2000")
+keep = os.path.join(WR, "notes")
+for dpath in (stale, young, keep):
+    os.makedirs(dpath)
+old_t = datetime.now().timestamp() - 3 * 86400
+os.utime(stale, (old_t, old_t))
+rv12 = os.path.join(TMP, "reviews12")
+os.makedirs(rv12)
+x12 = {"NIGHTLY_REVIEW_CLAUDE": FAKE12, "NIGHTLY_REVIEW_WORK_ROOT": WR}
+g = wrap([], "2026-11-06T16:41", rv12, extra=x12)
+seen = read(SEEN12) if os.path.exists(SEEN12) else ""
+m12 = re.search(r"TMPDIR=(\S+)", seen)
+tdir = m12.group(1) if m12 else ""
+in_root = tdir.startswith(WR + "/2026-11-06-")
+wrap_src = read(WRAP)
+default_disk = 'WORK_ROOT="${NIGHTLY_REVIEW_WORK_ROOT:-/home/ubuntu/nightly_review_work}"' in wrap_src
+named = ("WORK      " + tdir) in seen
+gone_ok = bool(tdir) and not os.path.exists(tdir) and os.path.exists(os.path.join(rv12, "2026-11-06.md"))
+pruned = not os.path.exists(stale) and os.path.isdir(young) and os.path.isdir(keep)
+# a session that writes no review: the work dir still goes
+os.remove(os.path.join(rv12, "2026-11-06.md"))
+reset(SEEN12)
+h = wrap([], "2026-11-06T16:41", rv12, extra=dict(x12, FAKE12_WRITE="0"))
+seen2 = read(SEEN12) if os.path.exists(SEEN12) else ""
+m2 = re.search(r"TMPDIR=(\S+)", seen2)
+t2 = m2.group(1) if m2 else ""
+gone_fail = h.returncode == 1 and t2.startswith(WR + "/2026-11-06-") and not os.path.exists(t2)
+left = sorted(os.listdir(WR))
+pr12 = read(os.path.join(TOOLS, "nightly_review.prompt"))
+pforbid = "WORK directory" in pr12 and "Never" in pr12 and "write to /tmp" in pr12
+ck("N12", in_root and default_disk and named and gone_ok and pruned and gone_fail and pforbid and left == ["2026-11-05-2000", "notes"],
+   "tmpdir_in_root=%s default_on_disk=%s named=%s gone_after_produced=%s pruned_stale_only=%s gone_after_failed=%s prompt=%s left=%s rc=%s/%s"
+   % (in_root, default_disk, named, gone_ok, pruned, gone_fail, pforbid, left, g.returncode, h.returncode))
 
 shutil.rmtree(TMP, ignore_errors=True)
 print()

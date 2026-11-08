@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/checker_sweep.py — v1.1
+day_trader_pro/tools/checker_sweep.py — v1.2
+v1.2  2026-11-08  dtp r537 / SWEEP.7 — the headline counts [env] reds APART: "N run, R red, E env red". The 11-08
+      sweep printed "OTV5: 335 run, 3 red" where one was check_probe_intraday_candles failing on control because the
+      dtp venv has no tastytrade (a box-side probe, already flagged [env] per file); the per-file RED lines are unchanged.
 v1.1  2026-11-08  dtp r531 / DOC.37 — comments only: the lander's store-path citation names the "r13 — CHECKS NEVER
       TOUCH THE BOX'S STORES" block of OTV5 tools/land.sh instead of :631 (OTV5 r76 RETIRE.1 moved it to 656-665).
 v1.0  2026-10-31  dtp r520 / SAT.4 — THE SATURDAY CHECKER SWEEP, EACH CHECKER IN ITS OWN SCRATCH, DIFFED BY CHECK ID.
@@ -157,11 +160,14 @@ def diff(now: dict, prior: dict) -> dict:
 def report(now: dict, d: dict = None) -> None:
     by = {}
     for r in now["results"]:
-        t = by.setdefault(r["tree"], [0, 0])
+        t = by.setdefault(r["tree"], [0, 0, 0])
         t[0] += 1
         t[1] += r["rc"] != 0
-    print("CHECKER SWEEP " + " · ".join(f"{t}: {n} run, {rd} red" for t, (n, rd) in sorted(by.items()))
-          + f"   (py {now['py']})")
+        t[2] += bool(r["rc"] != 0 and r.get("env"))
+    # v1.2 (SWEEP.7): an [env] red (the interpreter lacks a package: a box-side probe on control, say) is counted
+    # apart from the code reds, so a reader of the headline is not told there are N code reds when some are env.
+    print("CHECKER SWEEP " + " · ".join(f"{t}: {n} run, {rd - e} red, {e} env red" for t, (n, rd, e) in
+                                         sorted(by.items())) + f"   (py {now['py']})")
     if d is None:
         print("  no prior sweep.json: every red below is listed, none can be called new")
         for r in now["results"]:

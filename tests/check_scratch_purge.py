@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-tests/check_scratch_purge.py  v1.4
+tests/check_scratch_purge.py  v1.5
+v1.5  2026-11-08  dtp r537 / SWEEP.7 — P26-P27: the /tmp litter sweep (dry run removes nothing and names 5; a real run removes the 5 generator-pattern dirs even under --if-over and keeps a young dir, an old dir with a new file, a non-pattern name, a symlink and its target, a file, and a held-open dir). Every invocation now sweeps an isolated CLAUDE_TMP_LITTER_ROOT, never the real /tmp.
 v1.4  2026-10-31  OPS.75 — THE PRUNE FIXTURE IS A REAL GIT CLONE, AGED THROUGH ITS TREE. 2026-10-31 the timer pruned three OTV5 build clones holding approved,
       uncommitted fixes. The P19/P20 fixture is now a REAL git clone (git init + commit) aged through its whole tree:
       the bare `.git` directory was not a repository, and v1.3 refuses to delete what it cannot read. The new
@@ -89,6 +90,8 @@ def run(env_extra, *args, cwd=None):
     env = dict(os.environ)
     env.setdefault("CLAUDE_HANDOFF_DIR", os.path.join(_ISO, "handoffs"))
     env.setdefault("CLAUDE_SCRATCH_LOG", os.path.join(_ISO, "purge.log"))
+    # v1.5 (SWEEP.7): every invocation sweeps an isolated litter root, never the real /tmp.
+    env.setdefault("CLAUDE_TMP_LITTER_ROOT", os.path.join(_ISO, "tmp_litter"))
     env.update(env_extra)
     return subprocess.run([sys.executable, TOOL, *args], capture_output=True,
                           text=True, env=env, timeout=120, cwd=cwd)
@@ -537,6 +540,62 @@ with tempfile.TemporaryDirectory() as tmp:
     # P22 — CONTROL: the sibling stage/ payload is never touched
     ck("P22", os.path.exists(os.path.join(stage, "land.spec")),
        "stage/ is the PAYLOAD, holds no .git, and must survive a prune")
+
+# ── P26 / P27 · v1.5 (SWEEP.7): THE /tmp TOP-LEVEL LITTER ─────────────────────
+# A fake litter root: what must go, and every neighbour that must stay.
+_LR = tempfile.mkdtemp(prefix="sp_litter_", dir=_ISO)
+_old = time.time() - 3 * 86400
+
+
+def _mk(name, old=True, inner=True):
+    d = os.path.join(_LR, name)
+    os.makedirs(d)
+    if inner:
+        f = os.path.join(d, "x.db")
+        with open(f, "w") as fh:
+            fh.write("x" * 100)
+        if old:
+            os.utime(f, (_old, _old))
+    if old:
+        os.utime(d, (_old, _old))
+    return d
+
+
+_gone = [_mk("check_boot_brief_ab12cd"), _mk("chk_sweep_w9"), _mk("mut_qdkl187x"), _mk("heavy-4242"),
+         _mk("sweep-check_x-77")]
+_young = _mk("check_park_new", old=False)
+_fresh_inner = _mk("check_inner_new")
+with open(os.path.join(_fresh_inner, "now.txt"), "w") as fh:      # an old dir with one NEW file inside: still in use
+    fh.write("now")
+os.utime(_fresh_inner, (_old, _old))                                # the DIR looks old; only its newest file is new
+_other = _mk("nr")                                                  # not a generator's pattern
+_target = _mk("keep_target")
+_link = os.path.join(_LR, "check_link")
+os.symlink(_target, _link)                                          # a symlink named like litter: never followed
+_file = os.path.join(_LR, "check_file")
+with open(_file, "w") as fh:
+    fh.write("f")
+os.utime(_file, (_old, _old))                                       # a FILE named like litter: not a dir, kept
+_heldd = _mk("check_held_open")
+_sleeper = subprocess.Popen(["sleep", "60"], cwd=_heldd)            # a process sits in it
+try:
+    rd = run({"CLAUDE_TMP_LITTER_ROOT": _LR}, "--dry-run", "--if-over", "999999")
+    dry_kept = all(os.path.isdir(d) for d in _gone)
+    dry_said = "would remove 5 /tmp litter dir(s)" in (rd.stdout + rd.stderr)
+    ck("P26", dry_kept and dry_said,
+       f"--dry-run (and under --if-over) names the 5 litter dirs and removes nothing: kept={dry_kept} "
+       f"said={dry_said}")
+    rr = run({"CLAUDE_TMP_LITTER_ROOT": _LR}, "--if-over", "999999")
+    removed = not any(os.path.exists(d) for d in _gone)
+    stayed = all(os.path.isdir(d) for d in (_young, _fresh_inner, _other, _target, _heldd))
+    link_ok = os.path.islink(_link) and os.path.isdir(_target) and os.path.isfile(_file)
+    said = "removed 5 /tmp litter dir(s)" in (rr.stdout + rr.stderr)
+    ck("P27", removed and stayed and link_ok and said,
+       f"the litter goes even under --if-over (the scratch root's size is not /tmp's): removed={removed}; "
+       f"young, an old dir with a new file, a non-pattern name, a symlink's target, a held-open dir all stay="
+       f"{stayed}; symlink and file untouched={link_ok}; summary={said}")
+finally:
+    _sleeper.kill()
 
 bad = [n for n, ok, _ in _res if not ok]
 print(f"\n  {len(_res) - len(bad)}/{len(_res)} passed")

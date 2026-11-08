@@ -1,6 +1,15 @@
 #!/usr/bin/env python3
 """
-tools/scratch_purge.py  v1.4
+tools/scratch_purge.py  v1.5
+v1.5  2026-11-08  dtp r537 / SWEEP.7 — /tmp's TOP LEVEL: THE LITTER LEFT BY CHECKERS RUN DIRECTLY IS SWEPT TOO.
+      🔴 2026-11-08 /tmp (a 1.9G tmpfs) was at 80%: 5,584 `check_*` and 382 `chk_*` dirs (about 300M) from ~134
+      checkers that mkdtemp and never remove, run DIRECTLY this weekend (the lander and checker_sweep give each check
+      its own TMPDIR and remove it; a direct run does not), plus `mut_*` dirs from hand-made mutant harnesses. Two
+      checkers then failed sqlite VACUUM with "disk I/O error". sweep_tmp_litter() removes ONLY top-level DIRECTORIES of
+      $CLAUDE_TMP_LITTER_ROOT (default /tmp) that this uid owns, that are not symlinks, whose name is one of the
+      generators' own patterns (check_*, chk_*, mut_*, sweep-*, heavy-<pid>), whose NEWEST file is older than
+      $CLAUDE_TMP_LITTER_HOURS (default 24) and that no process of this uid holds open or sits in. It runs on every
+      invocation, BEFORE --if-over (the scratch root's size says nothing about /tmp's), and it is cheap. GATE P26-P27.
 v1.4  2026-11-08  dtp r532 / OTV4DEP.1 — THE RECREATE NOTE NAMES THE TREE THE CLONES COME FROM. A pruned build
       clone's note said `git clone --depth 1 file:///home/ubuntu/options-trader-v4`, the frozen tree; since 10-24 the
       build clones are OTV5 (or dtp) clones. The note now names ~/OTV5 first, then dtp, then otv4 for a dtp land's docs
@@ -121,7 +130,9 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import shutil
+import stat
 import subprocess
 import sys
 import time
@@ -169,7 +180,11 @@ BUILD_GRACE_MIN = int(os.environ.get("CLAUDE_BUILD_GRACE_MIN", "120"))
 # a confident zero, which is the worst kind. Found by running it against the
 # live tree rather than reasoning about the path.
 BUILD_SCAN_DEPTH = int(os.environ.get("CLAUDE_BUILD_SCAN_DEPTH", "6"))
-_VERSION = "v1.4"
+_VERSION = "v1.5"
+# ── v1.5 (SWEEP.7) — /tmp's top-level litter (see the header). Overridable so the gate never touches the real /tmp.
+TMP_LITTER_ROOT = os.environ.get("CLAUDE_TMP_LITTER_ROOT", "/tmp")
+TMP_LITTER_HOURS = float(os.environ.get("CLAUDE_TMP_LITTER_HOURS", "24"))
+_LITTER = re.compile(r"^(?:(?:check|chk|mut)_[A-Za-z0-9_.-]+|sweep-[A-Za-z0-9_.-]+|heavy-[0-9]+)$")
 HANDOFF_DIRS = [os.environ.get(
     "CLAUDE_HANDOFF_DIR", os.path.join(HOME, "options-trader-v4", "handoffs"))]
 # A directory younger than this is left alone even when nothing holds it open —
@@ -489,6 +504,76 @@ def sweep_retention(dry: bool) -> int:
     return dropped
 
 
+def _held_under(root: str) -> set:
+    """Every path under root that a process of this uid has open or uses as its cwd (read from /proc)."""
+    held = set()
+    for pid in os.listdir("/proc"):
+        if not pid.isdigit():
+            continue
+        base = f"/proc/{pid}"
+        try:
+            if os.stat(base).st_uid != UID:
+                continue
+        except OSError:
+            continue
+        cands = [os.path.join(base, "cwd")]
+        try:
+            fdd = os.path.join(base, "fd")
+            cands += [os.path.join(fdd, f) for f in os.listdir(fdd)]
+        except OSError:
+            pass
+        for c in cands:
+            try:
+                tgt = os.readlink(c)
+            except OSError:
+                continue
+            if tgt.startswith(root.rstrip("/") + "/"):
+                held.add(tgt)
+    return held
+
+
+def sweep_tmp_litter(dry: bool) -> tuple:
+    """v1.5 (SWEEP.7) — remove the checkers' and harnesses' abandoned temp dirs from the TOP of TMP_LITTER_ROOT.
+    Only directories (never a symlink or a file), only this uid's, only the generators' own name patterns, only when
+    the newest file inside is older than TMP_LITTER_HOURS, never one a process holds open or sits in."""
+    root = TMP_LITTER_ROOT
+    if not os.path.isdir(root):
+        return 0, 0
+    cutoff = time.time() - TMP_LITTER_HOURS * 3600
+    held = _held_under(root)
+    n = freed = 0
+    try:
+        names = os.listdir(root)
+    except OSError:
+        return 0, 0
+    for name in names:
+        if not _LITTER.match(name):
+            continue
+        p = os.path.join(root, name)
+        try:
+            st = os.lstat(p)
+        except OSError:
+            continue
+        if not stat.S_ISDIR(st.st_mode) or st.st_uid != UID or not _contained(p, root):
+            continue
+        if any(h == p or h.startswith(p + "/") for h in held):
+            continue
+        if _newest_mtime(p) >= cutoff:
+            continue
+        _, size = dir_stats(p)
+        if not dry:
+            try:
+                shutil.rmtree(p)
+            except OSError as exc:
+                _log(f"  litter remove FAILED {p}: {exc}")
+                continue
+        n += 1
+        freed += size
+    _log(f"{'would remove' if dry else 'removed'} {n} /tmp litter dir(s) {_sz(freed)} "
+         f"(root {root}, older than {TMP_LITTER_HOURS:g}h, patterns check_/chk_/mut_/sweep-/heavy-)")
+    return n, freed
+
+
 def _newest_mtime(path: str) -> float:
     """v1.3 (OPS.75) — the newest mtime anywhere in the tree. A directory's own
     mtime moves only when ITS entries change, so a clone edited deep inside
@@ -664,6 +749,9 @@ def main(argv=None) -> int:
                     help="do nothing unless the scratch root exceeds MB; "
                          "for a timer, so a healthy box costs one log line")
     a = ap.parse_args(argv)
+
+    # v1.5 (SWEEP.7): /tmp's litter first, on every invocation - the scratch root's size says nothing about /tmp's.
+    sweep_tmp_litter(a.dry_run)
 
     # ⚠️ THE THRESHOLD CHECK REPORTS WHAT IT MEASURED AND WHAT IT DECIDED.
     # A guard that exits silently is indistinguishable from one that never

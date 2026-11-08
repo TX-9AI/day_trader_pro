@@ -1,5 +1,6 @@
 """
-day_trader_pro/tests/test_excursion_report.py — v1.1 — 2026-11-08 (v1.0 2026-08-03)
+day_trader_pro/tests/test_excursion_report.py — v1.2 — 2026-11-08 (v1.0 2026-08-03)
+v1.2: the subprocess sandboxes run with _sandbox_env() - no inherited OT_/DTP_ paths (SWEEP.7).
 v1.1: the subprocess sandboxes copy ettime.py (CHK.12); the remaining cases re-pointed, see below.
 
 Guards the four v2.3 defects. Every one of them was invisible: the report
@@ -33,6 +34,15 @@ def _copy_siblings(tmp):
     dies on ImportError (an ENVIRONMENT red). Assertions unchanged."""
     shutil.copy(os.path.join(os.path.dirname(er.__file__), "ettime.py"),
                 os.path.join(tmp, "ettime.py"))
+
+def _sandbox_env():
+    """v1.2 (2026-11-08, dtp r537 / SWEEP.7): the sandbox owns its paths. checker_sweep
+    exports DTP_REPORTS_DIR (and the OT_* store paths) to every checker; inherited here,
+    the report read the sweep's scratch reports/ instead of the sandbox's, so both cases
+    went red only inside the sweep. Strip every OT_/DTP_ variable; the copied report then
+    falls back to its own ./reports, which is what each case builds."""
+    return {k: v for k, v in os.environ.items()
+            if not (k.startswith("OT_") or k.startswith("DTP_"))}
 
 DAY = "2026-08-03"
 
@@ -179,7 +189,7 @@ def test_since_over_single_day_fallback_exits_nonzero():
         proc = subprocess.run(
             [sys.executable, "excursion_report.py", "--date", DAY,
              "--since", "2026-07-23"],
-            cwd=tmp, capture_output=True, text=True)
+            cwd=tmp, capture_output=True, text=True, env=_sandbox_env())
         assert proc.returncode == 2, \
             f"--since over the fallback must refuse; rc={proc.returncode}"
         assert "REFUSED" in proc.stderr
@@ -199,7 +209,7 @@ def test_no_since_over_fallback_still_reports():
             json.dump([row("bos_exit")], fh)
         proc = subprocess.run(
             [sys.executable, "excursion_report.py", "--date", DAY],
-            cwd=tmp, capture_output=True, text=True)
+            cwd=tmp, capture_output=True, text=True, env=_sandbox_env())
         assert proc.returncode == 0, proc.stderr
         assert "SOURCE DEGRADED" in proc.stdout
     finally:

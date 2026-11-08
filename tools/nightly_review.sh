@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
-# day_trader_pro/tools/nightly_review.sh — v1.0
+# day_trader_pro/tools/nightly_review.sh — v1.1
+# v1.1 (2026-11-08) — dtp r537 / SWEEP.7. EVERY RUN WORKS IN ITS OWN DIRECTORY ON DISK AND REMOVES IT.
+#   🔴 The 11-06 backfill session chose /tmp/nr and /tmp/rev1106 for itself (361M, a 196M derived_1106.json) and left
+#   them: /tmp on control is a 1.9G tmpfs, it reached 80%, and sqlite VACUUM in two checkers failed "disk I/O error".
+#   Now: WORK=$NIGHTLY_REVIEW_WORK_ROOT/<day>-<epoch>-<pid> (default ~/nightly_review_work, on disk), TMPDIR=$WORK for the
+#   session, the path in RUN PARAMETERS ("every scratch file goes here, never /tmp"), removed by the EXIT trap on every
+#   path out; a run killed before its trap fires leaves a dir that the next run prunes (older than 2 days).
 # v1.0 (2026-11-07) — dtp r524 / RPT.36. THE NIGHTLY POST-RTH REVIEW RUNS FROM A SYSTEMD TIMER, NOT FROM A SESSION.
 #   🔴 WHAT HAPPENED. The review (~/reviews/YYYY-MM-DD.md, the EV benchmark's daily record) was a session-only
 #   CronCreate job ("20 20 * * 1-5", created 10-26). Session jobs expire after 7 days and die with the session: its
@@ -42,6 +48,7 @@ LOG="${NIGHTLY_REVIEW_LOG:-/home/ubuntu/nightly_review.log}"
 LEDGER="${NIGHTLY_REVIEW_LEDGER:-/home/ubuntu/nightly_review.ledger}"
 MARKER="${NIGHTLY_REVIEW_MARKER:-/home/ubuntu/.nightly_review_inflight}"
 MISSING_FLAG="${NIGHTLY_REVIEW_MISSING_FLAG:-/home/ubuntu/NIGHTLY_REVIEW_MISSING.txt}"
+WORK_ROOT="${NIGHTLY_REVIEW_WORK_ROOT:-/home/ubuntu/nightly_review_work}"   # on disk, never the /tmp tmpfs
 # The page. Injectable so the gate never queues a real line into the operator's Telegram.
 POST_CMD="${NIGHTLY_REVIEW_POST:-$PY /home/ubuntu/day_trader_pro/alert_router.py post --kind info}"
 ALIVE_CMD="${NIGHTLY_REVIEW_ALIVE:-}"          # empty: ask alert_router.router_alive (health.json within 120 s)
@@ -164,7 +171,13 @@ cd "$REVIEWS" || { ledger "FAILED cd"; exit 1; }
   echo " NIGHTLY REVIEW $DUE — $(date '+%Y-%m-%d %H:%M:%S %Z')"
   echo "=============================================================="; } >> "$LOG"
 touch "$MARKER"
-trap 'rm -f "$MARKER"' EXIT
+# The session's scratch: its own dir on disk, pruned of any killed run's leftovers, removed on every path out.
+mkdir -p "$WORK_ROOT" || { rm -f "$MARKER"; ledger "FAILED mkdir work"; exit 1; }
+find "$WORK_ROOT" -mindepth 1 -maxdepth 1 -type d -name '20??-??-??-*' -mtime +2 -exec rm -rf -- {} + 2>/dev/null
+WORK="$WORK_ROOT/$DUE-$(date +%s)-$$"
+mkdir -p "$WORK" || { rm -f "$MARKER"; ledger "FAILED mkdir work"; exit 1; }
+trap 'rm -f "$MARKER"; [ -n "${WORK:-}" ] && case "$WORK" in "$WORK_ROOT"/20??-??-??-*) rm -rf -- "$WORK" ;; esac' EXIT
+export TMPDIR="$WORK"
 _deadline_hm="$(TZ=America/New_York date -d "@$(( $(date +%s) + MAX_S ))" +%H:%M)"
 timeout "$MAX_S" "$CLAUDE_BIN" -p $ISOLATE "$(cat "$PROMPT_FILE")
 
@@ -173,6 +186,7 @@ RUN PARAMETERS (from the wrapper; use them exactly):
   OUT       write the finished review to exactly this path: $OUT
   PRIOR     the previous review, the format to follow: ${PRIOR:-NONE - use the section list above}
   KIT       $KIT  (python: $PY)
+  WORK      $WORK  - EVERY scratch file you make goes here (it is deleted when you finish); never /tmp
   DEADLINE  you are stopped at $_deadline_hm ET; have the file written well before it" \
   --allowedTools "$TOOLS" >> "$LOG" 2>&1
 rc=$?

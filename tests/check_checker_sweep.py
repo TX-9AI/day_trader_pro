@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_checker_sweep.py  v1.0
+day_trader_pro/tests/check_checker_sweep.py  v1.1
+v1.1  2026-11-08  dtp r537 / SWEEP.7 — W8: the headline counts the [env] red apart ("N run, R red, E env red").
 v1.0  2026-10-31  dtp r520 / SAT.4 — THE SATURDAY SWEEP GIVES EVERY CHECKER ITS OWN SCRATCH AND DIFFS BY CHECK ID.
 
 Driven on a fixture tree of real checker files, run by the real tool:
@@ -93,6 +94,10 @@ ck("W3", g("tests/check_c_ids.py")["ids"] == ["C2", "C3"] and g("tests/test_d_si
 ck("W4", g("tests/check_e_slow.py")["rc"] == 124, f"an overrun is rc=124 ({g('tests/check_e_slow.py')['rc']})")
 ck("W5", g("tests/check_f_env.py")["env"] is True and g("tests/check_c_ids.py")["env"] is False,
    "an import failure is flagged env; an ordinary red is not")
+
+ck("W8", "fx: 7 run, 3 red, 1 env red" in r.stdout,
+   "v1.2 (SWEEP.7): the headline counts the [env] red apart from the three code reds: "
+   + (r.stdout.splitlines()[0] if r.stdout else "(no output)"))
 
 # week two: c fixes C2 and breaks C4, a breaks, d is green, f removed, h added
 write(tree, "tests/check_a_creates.py", "import sys\nprint('  A1   FAIL  broke'); sys.exit(1)\n")
