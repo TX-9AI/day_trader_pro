@@ -1,6 +1,17 @@
 #!/usr/bin/env python3
 """
-tests/check_floor_overshoot.py  v1.2
+tests/check_floor_overshoot.py  v1.3
+
+v1.3  2026-11-08  r534 — THE GATE NO LONGER RESTS ON BUNDLES THAT CAN BE PRUNED. F1/F2 read the
+      untracked reports/warehouse corpus, which grows a session a day and is pruned by hand, and
+      F3/F5 drove the report on two named bundles in it (the Saturday brief 11-07 §5 "also found").
+      Now: tests/fixtures/floor_overshoot/corpus_r383.json is the r383 corpus itself, frozen (every
+      hard_stop_* row of the 13 bundles 08-31..09-15, fields copied verbatim; it reproduces 171 / 146
+      / -20.0% / -23.3% exactly), and tests/fixtures/floor_overshoot/bundles/ holds byte-identical
+      copies of the 09-14 and 09-07 bundles F3-F5 drive the report on. Because the corpus is frozen it
+      cannot grow, so F1/F2 assert r383's own figures again (v1.1's reason not to - a growing corpus -
+      is gone); the live corpus is still read when present and PRINTED, never asserted. A missing
+      fixture is a FAIL (a defect in this repo), so the GREEN VACUOUS branch is gone.
 
 v1.2  2026-09-26  r433 — the report it DRIVES now writes to scratch. F3/F4/F5
       run excursion_report.py for real, which is right, but the child landed on
@@ -107,7 +118,12 @@ R383_N, R383_WORSE = 171, 146
 # so an honest shift in the tape does not go red — only the finding vanishing.
 MIN_CORPUS = 40
 MIN_WORSE_SHARE = 0.70
-BUNDLES = os.path.join(_root, "reports", "warehouse")
+# v1.3: the asserted corpus and the bundles the report is driven on are FIXTURES; the live
+# reports/warehouse corpus (untracked, grows daily, pruned by hand) is only printed.
+FIXTURE = os.path.join(_root, "tests", "fixtures", "floor_overshoot")
+CORPUS_R383 = os.path.join(FIXTURE, "corpus_r383.json")
+BUNDLES = os.path.join(FIXTURE, "bundles")
+LIVE_BUNDLES = os.path.join(_root, "reports", "warehouse")
 
 # 🔴 THE REPORT IS RUN FOR REAL (F3-F5) AND MUST NOT LAND IN reports/.
 # Driving the report instead of grepping it is correct — a source assertion
@@ -126,57 +142,75 @@ def check(name: str, ok: bool, detail: str = "") -> None:
         _fails.append(name)
 
 
-def _corpus():
-    """Every debit floor exit in the banked bundles, recomputed from scratch."""
+def _floor_rows(trades):
+    """(declared, realized, overshoot) for every debit floor exit, recomputed from scratch."""
     rows = []
-    for p in sorted(glob.glob(os.path.join(BUNDLES, "fleet_trades_*.json"))):
+    for t in trades:
+        er = str(t.get("exit_reason") or "")
+        if not er.startswith("hard_stop_"):
+            continue
+        sp, ep, pp = (t.get("stop_premium"), t.get("entry_premium"),
+                      t.get("pnl_pct"))
+        if not sp or not ep or ep <= 0 or pp is None:
+            continue
+        declared = (1.0 - (sp / ep)) * 100.0
+        realized = -pp * 100.0
+        rows.append((declared, realized, realized - declared))
+    return rows
+
+
+def _fixture_corpus():
+    """The r383 corpus, frozen: the rows exactly as the 13 bundles held them."""
+    with open(CORPUS_R383, encoding="utf-8") as fh:
+        return _floor_rows(json.load(fh).get("rows") or [])
+
+
+def _live_corpus():
+    """Every debit floor exit in the live banked bundles (printed only, never asserted)."""
+    trades = []
+    for p in sorted(glob.glob(os.path.join(LIVE_BUNDLES, "fleet_trades_*.json"))):
         try:
-            d = json.load(open(p, encoding="utf-8"))
+            trades += json.load(open(p, encoding="utf-8")).get("trades") or []
         except Exception:                                      # noqa: BLE001
             continue
-        for t in d.get("trades") or []:
-            er = str(t.get("exit_reason") or "")
-            if not er.startswith("hard_stop_"):
-                continue
-            sp, ep, pp = (t.get("stop_premium"), t.get("entry_premium"),
-                          t.get("pnl_pct"))
-            if not sp or not ep or ep <= 0 or pp is None:
-                continue
-            declared = (1.0 - (sp / ep)) * 100.0
-            realized = -pp * 100.0
-            rows.append((declared, realized, realized - declared))
-    return rows
+    return _floor_rows(trades)
 
 
 def main() -> int:
     print("check_floor_overshoot — the floor a row declared vs the floor it got")
     print()
 
-    # ⚠️ GREEN VACUOUS, NOT RED. `reports/` is untracked, so a fresh clone has no
-    # corpus — and a gate that goes red for a property of the TARGET rather than
-    # a defect in it is CV.1's shape: it teaches the reader to skip reds. It says
-    # plainly that nothing was checked, so "nothing to check" can never be read
-    # as "everything passed" (r373's S0).
-    if not os.path.isdir(BUNDLES):
-        print(f"  GREEN VACUOUS — no bundle corpus at {BUNDLES}")
-        print("  Nothing was checked. This is a clone without reports/warehouse,")
-        print("  not a passing run. Re-run where the bundles live.")
-        return 0
+    # v1.3: the fixtures ship with the repo, so a missing one is a defect HERE, not a
+    # property of the host - FAIL, never vacuous.
+    have = os.path.isfile(CORPUS_R383) and all(
+        os.path.isfile(os.path.join(BUNDLES, f"fleet_trades_{d}.json")) for d in ("2026-09-14", "2026-09-07"))
+    check("F0 the fixtures are present", have, FIXTURE)
+    if not have:
+        print()
+        print("FAILED: " + ", ".join(_fails))
+        return 1
 
-    rows = _corpus()
+    rows = _fixture_corpus()
     worse = [r for r in rows if r[2] > 0.5]
     share = (len(worse) / len(rows)) if rows else 0.0
     check("F1 the finding holds: most debit floor exits realize WORSE than the "
-          "floor they declared",
-          len(rows) >= MIN_CORPUS and share >= MIN_WORSE_SHARE,
+          "floor they declared - r383's own corpus reproduces its own count",
+          len(rows) == R383_N and len(worse) == R383_WORSE
+          and len(rows) >= MIN_CORPUS and share >= MIN_WORSE_SHARE,
           f"n={len(rows)} worse={len(worse)} ({share:.0%})  "
           f"[r383 recorded {R383_WORSE}/{R383_N} = "
           f"{R383_WORSE / R383_N:.0%} over 13 sessions]")
+    live = _live_corpus()
+    if live:
+        lw = [r for r in live if r[2] > 0.5]
+        print(f"  LIVE  reports/warehouse today: n={len(live)} worse={len(lw)} "
+              f"({len(lw) / len(live):.0%}), median declared -{median(r[0] for r in live):.1f}% "
+              f"realized -{median(r[1] for r in live):.1f}%   (printed, not asserted)")
 
     if rows:
         md, mr = median(r[0] for r in rows), median(r[1] for r in rows)
         check("F2 declared and realized are DIFFERENT numbers, both reported",
-              abs(md - 20.0) < 1.0 and abs(mr - 23.3) < 1.0 and mr > md,
+              abs(md - 20.0) < 0.05 and abs(mr - 23.3) < 0.05 and mr > md,
               f"median declared -{md:.1f}%  median realized -{mr:.1f}%  "
               f"median overshoot {median(r[2] for r in rows):.1f} pts")
     else:

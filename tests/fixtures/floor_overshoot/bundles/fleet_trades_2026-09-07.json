@@ -1,0 +1,50 @@
+{
+  "meta": {
+    "date_et": "2026-09-07",
+    "generated_utc": "2026-09-09T20:44:37.469170+00:00",
+    "source": "s3://vertigo-warehouse-tx9ai/raw",
+    "boxes_reporting": [],
+    "boxes_skipped": [],
+    "n_trades": 0,
+    "n_closed": 0,
+    "n_open": 0,
+    "n_trade_objects": 0,
+    "trade_columns": []
+  },
+  "selection": null,
+  "fleet_stats": {
+    "n_trades_total": 0,
+    "n_closed": 0,
+    "n_open": 0,
+    "wins": 0,
+    "losses": 0,
+    "win_rate": 0.0,
+    "net_pnl": 0,
+    "best": 0.0,
+    "worst": 0.0,
+    "by_strategy": {},
+    "by_setup_type": {},
+    "by_setup_grade": {},
+    "by_exit_reason": {}
+  },
+  "by_box": {},
+  "breaker_events": [],
+  "ohlc_index": [
+    "AMD",
+    "AMZN",
+    "AVGO",
+    "CRM",
+    "CVX",
+    "GOOGL",
+    "META",
+    "MU",
+    "NFLX",
+    "NVDA",
+    "PLTR",
+    "QQQ",
+    "SPX",
+    "TSLA",
+    "UNH"
+  ],
+  "trades": []
+}
