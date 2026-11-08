@@ -13,8 +13,8 @@ THE BRIEF HAS SEVEN SECTIONS, IN THIS ORDER, EACH ONE STANDING ON ITS OWN:
   ## 1. TRADING SUMMARY
        EV benchmark (~/reviews/window_ev.csv, theories.csv; pre- and post-decay days apart);
        by setup, side, day and symbol; missed moves; giveback (~/reviews/giveback.csv);
-       the TCS shadow (raw/shadow_trades) and the PARK late-day shadow (derived_plan_check
-       park_late_*), never in EV; fees on their own line, never in EV; the R ledger and excursions.
+       the PARK late-day shadow (derived_plan_check park_late_*, read by check_name), never in EV
+       (the TCS shadow was deleted by OTV5 r88); fees on their own line, never in EV; the R ledger and excursions.
   ## 2. ISSUES FROM THE BOT LOGS
        tools/botlog_scan.py over every box's bot.log for the week: new ERROR/CRITICAL/Traceback
        signatures first, then count jumps, restarts, blind/stale feed episodes, gate refusals

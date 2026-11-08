@@ -1,4 +1,6 @@
-# day_trader_pro/strategy_registry.py — v1.6
+# day_trader_pro/strategy_registry.py — v1.7
+# v1.7 (2026-11-08) — dtp r538 / RETIRE.3. The TrendCreditSpread history row says its log-only shadow is deleted (OTV5
+#   r88; the operator, 2026-11-08: "Delete"); the code TCST stays to decode its historical trades. Nothing else changes.
 # v1.6 (2026-10-31) — dtp r519. PARK IS REGISTERED, AND THE REGISTRY LISTS ONLY WHAT TRADES. code("PARK") returned the
 #   unregistered tag "?PAR", so every (lineage, code) rollup printed the week's biggest book as ?PAR (Saturday brief
 #   2026-10-31 §6, R5). The operator, on R5: "No to PARC & it was never an active strategy. Also, don't list the
@@ -200,9 +202,9 @@ HISTORICAL = {
     "VOLT":                 ("VOLT", (TEST,),      None, "off 2026-10-02 (ROSTER.1, OTV4TEST r187); STRK.1 retired with it"),
     "ATPButterfly":         ("ATPB", (TEST,),      None, "off 2026-10-02, operator: \"Turn off the ATP\""),
     "SweepCreditSpread":    ("SWPT", (MAIN, TEST), None, "retired 2026-10-03, operator: \"Retire the sweep & TCS\""),
-    # TCS since OTV5 r57 (2026-10-30) is a LOG-ONLY SHADOW: its rows go to shadow_trades.db, never to trades; this
-    # code also decodes those rows for a shadow reader.
-    "TrendCreditSpread":    ("TCST", (MAIN, TEST), None, "retired as a trade 2026-10-03; log-only shadow from OTV5 r57"),
+    # TCS: retired as a trade 2026-10-03; its OTV5 r57 log-only shadow was deleted by OTV5 r88 (RETIRE.3, 2026-11-08,
+    # operator: "Delete") without ever booking a row. The code stays to decode its historical trades.
+    "TrendCreditSpread":    ("TCST", (MAIN, TEST), None, "retired 2026-10-03; its log-only shadow deleted OTV5 r88"),
     "OpeningRangeCreditSpread": ("ORCS", (TEST,),  None, "retired 2026-10-04 (PREM.6), operator: \"Retire it on this repo\""),
     "IronCondorStrategy":   ("CNDR", (MAIN, TEST), None, "permanently dormant, no entry of its own (OTV4TEST r249)"),
     # r240 — SUPERSEDED by a strategy rather than abandoned; ContinuationStrategy 9 trades, SweepReversal 1.

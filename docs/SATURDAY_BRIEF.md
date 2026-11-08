@@ -1,4 +1,6 @@
-# THE SATURDAY BRIEF — spec v2.3
+# THE SATURDAY BRIEF — spec v2.4
+
+**v2.4 · 2026-11-08 · dtp r538 (RETIRE.3)** — §1.5: the TCS shadow is gone (OTV5 r88 deleted it; the operator, 2026-11-08: "Delete"), so the section reads only the PARK late-day shadow, through `_envelopes` on `check_name`; §5's remnant note no longer keeps the TCS.
 
 **Status: the operator's spec, as of 2026-10-31.** It replaces `options-trader-v4/handoffs/SATURDAY_BRIEF.md`
 and `SATURDAY_RUNBOOK.md` (2026-09-19). Those were written for seventeen boxes, two engines and ORB. The fleet is now
@@ -132,17 +134,15 @@ section 2's refusal counts to say **why** a box sat out where the log shows it.
 total given back out of peak open profit, the green-to-red count and dollars, the worst day, and the setup that
 gave back most.
 
-**1.5 The shadows (never in EV).**
-- **TCS shadow**: `raw/shadow_trades/dt=<day>/sym=<SYM>/` (datatype `shadow_trade`, OTV5 r57). n, would-be net,
-  win %, by symbol and side. Weekly only (the TCS ruling: Saturday breakdown, no daily).
+**1.5 The shadow (never in EV).** (The TCS shadow, `raw/shadow_trades`, was deleted by OTV5 r88 RETIRE.3 on the
+operator's 2026-11-08 "Delete": it never fired. Not read, not scored.)
 - **PARK late-day shadow**: `raw/derived_plan_check/` rows whose check starts with `park_late_` (OTV5 r63,
   `park_late_would_exit`). For each PARK trade it touched: would-exit time and mark against the actual exit, and the
   dollar difference. Total and n.
-Read both through OTV5 `tests/warehouse_source.py` (§36a on OTV5; never a hand-rolled paginator):
-`load_derived("plan_check", dates)` for the PARK rows, and for the TCS shadow `_envelopes(s3, "shadow_trades",
-dates, meta)` deduped by trade_id on the latest `pushed_at_utc`, the way `load_trades` does it. If the prefix is
-empty, put it in NOT MEASURED and say whether the boxes have the code (3.4). `raw/shadow/` is a different, older
-stream (its last day is 2026-09-11).
+Read it through OTV5 `tests/warehouse_source.py` (§36a on OTV5; never a hand-rolled paginator), folding
+`raw/derived_plan_check/` one object at a time (`_envelopes`; `load_derived` materialises the week and runs out of
+memory on control) and filtering on the `check_name` column. If no row is found, put it in NOT MEASURED and say
+whether the boxes have the code (3.4). `raw/shadow/` is a different, older stream (its last day is 2026-09-11).
 
 **1.6 Fees.** Per day and week, from `window_ev.csv`'s `fees` column. Reported beside the P&L, never subtracted
 from EV.
@@ -268,8 +268,8 @@ Look for:
   --check` for the menu);
 - **retired-strategy remnants**: code paths, config keys, env switches, tests and menu items that still name a
   strategy the operator retired. Search for the terms in the block below. A remnant is reported as **code to
-  remove**. The strategy is never described or scored. (The ORB *engine* stays: Runaway reads it. TCS stays as a
-  log-only shadow.)
+  remove**. The strategy is never described or scored. (The ORB *engine* stays: Runaway reads it. The TCS and its
+  shadow are removed, OTV5 r88.)
 - **stale tests and fixtures**: hard-coded dates that act as "today" or as an expiry (`EXP = "2026-…"`,
   `--date 2026-…`), and fixtures that will go red within 14 days of the brief. Name each file and line. The
   10-30 `check_tcs_shadow` I4 red was this kind of failure;

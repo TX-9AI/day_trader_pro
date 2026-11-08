@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-# day_trader_pro/tools/warehouse_map.py — v1.4
+# day_trader_pro/tools/warehouse_map.py — v1.5
+# v1.5 (2026-11-08) — dtp r538 / RETIRE.3. raw/shadow_trades gets its MEANING row, RETIRED: OTV5 r88 deleted the TCS
+#   shadow that would have written it (the operator, 2026-11-08: "Delete"); it never held an object.
 # v1.4 (2026-11-08) — dtp r531 / DOC.37 (Saturday brief 11-07 §4 item 10). The map was 67 days old (1.12M objects,
 #   66.8 GB; tonight 4.73M, 518 GB) and listed derived_exit_counterfactual as ABSENT though 9-14 boxes push it daily.
 #   Regenerated. Five prefixes had no MEANING row and are now traced to their writers: raw/character_axis_sample
@@ -172,6 +174,9 @@ MEANING = {
                       "recomputes from candles"),
     "raw/orb_state": ("RETIRED — s3_push v1.8, 2026-08-16",
                       "captured ZERO objects in thirty days"),
+    "raw/shadow_trades": ("RETIRED — OTV5 r88 (RETIRE.3), 2026-11-08",
+                          "the TCS shadow's trades (OTV5 r57); it never fired, so "
+                          "the prefix never held an object"),
 }
 
 
