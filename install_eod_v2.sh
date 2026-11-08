@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
-# day_trader_pro/install_eod_v2.sh — v1.1
+# day_trader_pro/install_eod_v2.sh — v1.2
+# v1.2 (2026-11-08) — dtp r539 / TIMER.1. THE 16:30 dtp-eod-analysis UNIT IS NO LONGER WRITTEN. Its timer has
+#   been disabled since v1.0 (the conductor runs eod_analysis.run() itself once the boxes are down) and the
+#   devtools item calls eod_analysis.py directly, so the unit had no caller; tools/install_morning_check.sh
+#   removes it from control. The operator, 2026-11-08: "consolidate, clean up and optimize". --rollback no longer
+#   re-arms it. check_eod_units U2 retired; U3's floor keeps the analysis allowance as a named constant.
 # v1.1 (2026-09-11) — dtp r361 / CND.4 + CND.5. 🔴 THIS INSTALLER DROPPED THE
 #   CLOSE'S TELEGRAM CREDENTIALS. install_eod_conductor.sh (v1) wrote
 #   `EnvironmentFile=${DIR}/.env` into the conductor unit and warned when a
@@ -28,7 +33,7 @@
 #                                REPORTS ITSELF once the boxes are down
 #   15:55  dtp-harvest        -> DISABLED   (the conductor drains to S3 itself)
 #   16:15  dtp-eod            -> DISABLED   (P&L now comes from the warehouse)
-#   16:30  dtp-eod-analysis   -> DISABLED   (ordered by the conductor, not timed)
+#   16:30  dtp-eod-analysis   -> REMOVED    (ordered by the conductor, not timed; v1.2)
 #
 # 🔑 THE REPORTS ARE ORDERED, NOT SCHEDULED. A 16:30 timer with a 25-minute gap
 # was a CLOCK STANDING IN FOR A DEPENDENCY. The conductor knows when the close
@@ -60,7 +65,6 @@ if [ "$MODE" = "--rollback" ]; then
   sudo sed -i "s|eod_conductor_v2.py|eod_conductor.py|" \
        /etc/systemd/system/dtp-eod-conductor.service
   sudo systemctl enable --now dtp-harvest.timer dtp-eod.timer 2>/dev/null || true
-  sudo systemctl enable --now dtp-eod-analysis.timer 2>/dev/null || true
   sudo systemctl daemon-reload
   echo; systemctl list-timers 'dtp-*' --all --no-pager
   exit 0
@@ -83,39 +87,6 @@ StandardError=append:$REPO/logs/eod_conductor.log
 TimeoutStartSec=7200
 UNIT
 
-# ── 2. the reports, 25 minutes later ────────────────────────────────────────
-# ⚠️ THIS UNIT IS INSTALLED BUT ITS TIMER IS DISABLED. The conductor invokes
-# eod_analysis directly once the boxes are down, so the schedule below is only
-# a fallback the operator can re-arm; the service definition is what devtools
-# item 56 and any manual re-run use.
-sudo tee /etc/systemd/system/dtp-eod-analysis.service >/dev/null <<UNIT
-[Unit]
-Description=day_trader_pro EOD analysis (reports from S3; no boxes touched)
-After=network-online.target
-
-[Service]
-Type=oneshot
-User=ubuntu
-WorkingDirectory=$REPO
-ExecStart=$PY $REPO/eod_analysis.py
-EnvironmentFile=$REPO/.env
-StandardOutput=append:$REPO/logs/eod_analysis.log
-StandardError=append:$REPO/logs/eod_analysis.log
-TimeoutStartSec=3600
-UNIT
-
-sudo tee /etc/systemd/system/dtp-eod-analysis.timer >/dev/null <<UNIT
-[Unit]
-Description=Run the EOD analysis at 16:30 ET, Mon-Fri
-
-[Timer]
-OnCalendar=Mon-Fri 16:30:00 America/New_York
-Persistent=false
-
-[Install]
-WantedBy=timers.target
-UNIT
-
 # ── 3. retire what the new chain replaces ───────────────────────────────────
 # harvest: the conductor drains to S3 and the reports read S3, so pulling a
 #          second copy to control has no consumer left.
@@ -123,11 +94,6 @@ UNIT
 #          one question. pnl_s3 is now the single source.
 sudo systemctl disable --now dtp-harvest.timer 2>/dev/null || true
 sudo systemctl disable --now dtp-eod.timer 2>/dev/null || true
-
-# ⚠️ THE ANALYSIS TIMER IS DISABLED, NOT DELETED. The unit stays on disk so
-# devtools item 56 and a manual re-run still work, and so --rollback can re-arm
-# it without reinstalling anything.
-sudo systemctl disable --now dtp-eod-analysis.timer 2>/dev/null || true
 
 # ── 4. can the close page? — NAMES ONLY, never a value (§18a) ──────────────
 # v1.1 — restored from install_eod_conductor.sh v1, which this file replaced

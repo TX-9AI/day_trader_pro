@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_eod_units.py  v1.0
+day_trader_pro/tests/check_eod_units.py  v1.1
+v1.1  2026-11-08  dtp r539 / TIMER.1 — the installer no longer writes dtp-eod-analysis (no caller: the conductor runs
+      eod_analysis itself, the devtools item runs the script). U2 is retired with the unit; U3's floor takes the
+      analysis allowance from ANALYSIS_ALLOWANCE_S, the 3600 s budget that unit declared, as CLOSE_ALLOWANCE_S does.
+      U6 (new): the installer writes no dtp-eod-analysis unit and never enables one.
 v1.0  2026-09-11  dtp r361 / CND.4 + CND.5 — the close's units must be able
       to page, and must outlive the work they run.
 
@@ -19,10 +23,9 @@ killed at exactly 30:00 inside EDGE_SCAN, the last report phase, so the unit
 recorded `failed` on the first night in a week the close did its job.
 
   U1  the conductor unit loads $REPO/.env
-  U2  the analysis unit loads it too — a manual rerun must page the same way
+  U2  RETIRED v1.1 with the analysis unit
   U3  the conductor's TimeoutStartSec covers its own worst case, derived from
-      the conductor's constants and the analysis unit's declared budget —
-      never from a number typed into this check
+      the conductor's constants plus the two named allowances below
   U4  the installer still checks both Telegram NAMES are present in .env —
       names only, never values (WORKING_AGREEMENT §18a)
   U5  the installer parses (`bash -n`)
@@ -45,6 +48,7 @@ FAILS = []
 # summed (40-66s each), plus the 45s settle and the EC2 stop-and-wait. This is
 # the one input the conductor does not expose as a constant.
 CLOSE_ALLOWANCE_S = 900
+ANALYSIS_ALLOWANCE_S = 3600   # the budget the retired dtp-eod-analysis unit declared; the conductor runs it in-line
 
 
 def check(name, ok, detail=""):
@@ -72,17 +76,13 @@ def main():
         print("  FAIL  installer unreadable: {}".format(exc))
         return 1
     cond = unit_block(src, "dtp-eod-conductor.service")
-    anal = unit_block(src, "dtp-eod-analysis.service")
-    if cond is None or anal is None:
-        print("  FAIL  a unit heredoc was not found (conductor={}, analysis={})"
-              .format(cond is not None, anal is not None))
+    if cond is None:
+        print("  FAIL  the conductor unit heredoc was not found")
         return 1
 
     env_line = re.compile(r"^EnvironmentFile=\$REPO/\.env\s*$", re.M)
     check("U1", bool(env_line.search(cond)),
           "conductor unit loads $REPO/.env")
-    check("U2", bool(env_line.search(anal)),
-          "analysis unit loads $REPO/.env")
 
     # ⚠️ READ FROM SOURCE, NOT BY IMPORT. The first cut imported the conductor
     # and went red under the system python3 on `No time zone found with key
@@ -105,10 +105,9 @@ def main():
     except OSError as exc:
         check("U3", False, "conductor unreadable: {}".format(exc))
     if worst_purge is not None:
-        t_cond, t_anal = timeout_of(cond), timeout_of(anal)
-        if t_cond is None or t_anal is None:
-            check("U3", False, "TimeoutStartSec missing (conductor={}, "
-                               "analysis={})".format(t_cond, t_anal))
+        t_cond, t_anal = timeout_of(cond), ANALYSIS_ALLOWANCE_S
+        if t_cond is None:
+            check("U3", False, "conductor TimeoutStartSec missing")
         else:
             floor = CLOSE_ALLOWANCE_S + worst_purge + t_anal
             check("U3", t_cond >= floor,
@@ -125,6 +124,10 @@ def main():
           "presence check {} · value leak {}".format(
               "found" if names_ok else "MISSING",
               repr(leaks.group(0)) if leaks else "none"))
+
+    code_only = "\n".join(l for l in src.splitlines() if not l.lstrip().startswith("#"))
+    check("U6", "dtp-eod-analysis" not in code_only,
+          "installer writes/enables no dtp-eod-analysis unit")
 
     r = subprocess.run(["bash", "-n", INSTALLER], capture_output=True, text=True)
     check("U5", r.returncode == 0, (r.stderr or "parses").strip()[:120])

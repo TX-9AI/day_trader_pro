@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/dxlink_probe.py — v1.2
+day_trader_pro/tools/dxlink_probe.py — v1.3
+v1.3  2026-11-08  dtp r539 / TIMER.1 — THE PER-MINUTE FEED TRIAGE IS GONE, SO ITS FILES ARE TOO. The operator,
+      2026-11-08: "I absolutely hate it ... It should be reactionary, by event type—not run every minute looking for
+      problems." tools/feed_triage.py is deleted; a transition line now goes straight to control's alert router
+      (enqueue() -> alert_router.post_status "info"), and the status file moves to var/dxlink/ (DTP_DXPROBE_VAR),
+      read by tools/dxlink_assign.py. The r539 install moves the live file across, so no state is lost.
 v1.2  2026-11-08  dtp r535 / CONST.1 — the bucket is config.WAREHOUSE_BUCKET (the one dtp copy; tests/check_const_parity.py pins it to OTV5's). FORGET_S is pinned to OTV5
       candle_feed.NODE_FORGET_S by the same gate.
 v1.1  2026-11-04  dtp r523 / FEED.15 — THE ZONE'S OWN NAMESERVERS ARE ASKED TOO (as OTV5 r70 does on the boxes). On
@@ -32,12 +37,12 @@ THE NODE LIST: (a) the seed data/dxlink_nodes_seed.json in the OTV5 checkout (r7
   (c) fresh DNS answers for the host (3 lookups), (e, v1.1) the zone's authoritative nameservers' A records,
   (d) every node already in the status file. Only IPv4 literals.
 
-THE STATUS FILE (var/feed_triage/dxlink_nodes_status.json, read by tools/feed_triage.py):
+THE STATUS FILE (var/dxlink/dxlink_nodes_status.json, read by tools/dxlink_assign.py):
   {"probed_at": epoch, "host": ..., "sources": {...}, "nodes": {ip: {"state", "code", "latency_ms", "at", "since",
    "detail", "pending", "pending_n", "announced", "announced_at"}}}
   `state` is the CONFIRMED state; a change must be seen on CONFIRM_N consecutive probes before it is adopted.
 
-MESSAGES: one line into the triage outbox (feed_triage.enqueue) when a node's confirmed state crosses up <-> not-up,
+MESSAGES: one line to control's alert router (enqueue -> alert_router.post_status "info") when a node's confirmed state crosses up <-> not-up,
   at most one per node per MSG_GAP_S. The first sight of a node is a baseline and sends nothing.
 
     venv/bin/python tools/dxlink_probe.py               # probe, write the status file, enqueue transitions
@@ -62,7 +67,7 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 sys.path.insert(0, ROOT)
 
-__version__ = "1.1"
+__version__ = "1.3"
 
 HOST = "tasty-openapi-dxlink-md-ws.dxfeed.com"
 PORT = 443
@@ -71,7 +76,7 @@ TIMEOUT_S = float(os.environ.get("DTP_DXPROBE_TIMEOUT_S", "5"))
 CONFIRM_N = 2                       # consecutive probes in a new state before it is adopted
 MSG_GAP_S = 600                     # at most one message per node per 10 minutes
 FORGET_S = 14 * 86400               # a node not up for 14 days leaves the list (seed nodes never do)
-VAR_DIR = os.environ.get("DTP_TRIAGE_VAR", os.path.join(ROOT, "var", "feed_triage"))
+VAR_DIR = os.environ.get("DTP_DXPROBE_VAR", os.path.join(ROOT, "var", "dxlink"))
 STATUS_PATH = os.environ.get("DTP_DXPROBE_STATUS", os.path.join(VAR_DIR, "dxlink_nodes_status.json"))
 OTV5_DIR = os.environ.get("DTP_OTV5_DIR", os.path.expanduser("~/OTV5"))
 SEED_PATH = os.environ.get("DTP_DXLINK_SEED", os.path.join(OTV5_DIR, "data", "dxlink_nodes_seed.json"))
@@ -402,6 +407,12 @@ def save_status(d, path=None):
     os.replace(tmp, p)
 
 
+def enqueue(text, source="dxlink_probe"):
+    """One line for the operator through control's alert router (never sends anything itself)."""
+    import alert_router
+    return alert_router.post_status("info", text)
+
+
 def run(dry=False, prober=probe, cand=None, now=None, status_path=None, enqueue=None):
     prev = load_status(status_path)
     found, notes = cand if cand is not None else candidates(prev)
@@ -425,8 +436,7 @@ def run(dry=False, prober=probe, cand=None, now=None, status_path=None, enqueue=
     save_status(new, status_path)
     if msgs:
         if enqueue is None:
-            import feed_triage
-            enqueue = feed_triage.enqueue
+            enqueue = globals()["enqueue"]
         for m in msgs:
             enqueue(m, source="dxlink_probe")
     return 0, new, msgs

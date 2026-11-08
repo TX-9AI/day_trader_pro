@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
-# day_trader_pro/tools/saturday_brief.sh — v1.8
+# day_trader_pro/tools/saturday_brief.sh — v1.9
+# v1.9 (2026-11-08) — dtp r539 / TIMER.1 (the operator, 2026-11-08: "consolidate, clean up and optimize"). Comment
+#   only: the layer table below named 07:17 / 08:47 / 11:17 UTC; the installed crontab fires the brief Sat 08:00 UTC,
+#   the watchdog Sat 12:45 UTC and the canary Wed 07:17 UTC, and the in-session layer was removed (the crontab's
+#   own header says why). The table now states what runs. No behaviour change.
 # v1.8 (2026-11-08) — dtp r527 / SAT.6 (the 11-07 brief R9; hygiene queue item 2). Operator, 2026-11-07:
 #   "These should all be addressed one at a time by their own agent".
 #   · A MISSING PROMPT REFUSES FIRST. check_saturday_brief S5 was red in the 11-07 sweep (rc=0): the sweep
@@ -133,14 +137,15 @@
 #
 # 🔴 FOUR LAYERS, BECAUSE THE FAILURE THIS MUST SURVIVE IS SILENCE. A timer
 #   that stops firing is indistinguishable from a quiet week.
-#     1 PREFERRED  in-session, Sat 07:17 UTC, inside the attached agent.
-#                  Best output, most fragile: dies on restart, expires in 7d.
-#     2 FALLBACK   Sat 08:47 UTC (this file, no flag). ISOLATED --session-id,
-#                  stands down if the brief exists or the primary is in flight.
-#     3 WATCHDOG   Sat 11:17 UTC (--watchdog). Retries once, then leaves a
-#                  file the operator trips over. Nothing here pages him (§17).
+#     1 REMOVED    the in-session layer (it died with the session that made
+#                  it, silently; see the crontab header).
+#     2 BRIEF      Sat 08:00 UTC (this file, no flag) = 03:00 EST / 04:00 EDT.
+#                  ISOLATED --session-id, stands down if the brief exists or
+#                  another run is in flight.
+#     3 WATCHDOG   Sat 12:45 UTC (--watchdog). Retries once, then leaves a
+#                  file the operator trips over. Nothing here pages them (§17).
 #     4 CANARY     WED 07:17 UTC (--canary). Proves the chain midweek, so a
-#                  break is found then rather than at 08:00 Saturday.
+#                  break is found then rather than on Saturday morning.
 #
 # 🔴 v1.1 — THE ORIGINAL SAFETY CLAIM HERE WAS FALSE AND IS CORRECTED.
 #   v1.0 said: "IT LANDS NOTHING, AND THAT IS ENFORCED RATHER THAN REQUESTED.

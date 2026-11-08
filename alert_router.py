@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-# day_trader_pro/alert_router.py — v0.2.0
+# day_trader_pro/alert_router.py — v0.3.0
+# v0.3.0 (2026-11-08) — dtp r539 / TIMER.1 — THE TRIAGE FILE FOLLOWER IS REMOVED WITH THE TRIAGE. The operator,
+#   2026-11-08, on the per-minute dtp-feed-triage timer: "I absolutely hate it ... It should be reactionary, by event
+#   type—not run every minute looking for problems." tools/feed_triage.py is deleted, so nothing writes
+#   var/feed_triage/actions.jsonl or outbox.jsonl: poll_triage(), its offsets file, and v0.2.0's take-down mute
+#   (which only that action log could arm, and which never fired - the triage ran --dry-run throughout) are removed.
+#   dxlink_probe / dxlink_assign / morning_check post their lines through post_status() like every other sender.
 # v0.2.0 (2026-11-03) — PAGE.2 + FEED.14 R5 — A TRIAGE TAKE-DOWN IS ONE LINE, NOT A STOPPED AND A STARTED ALERT.
 #   The operator, 2026-11-02: "I don't need to see blind box alerts if it's a contingency take-down"; 2026-11-03 "Yes
 #   to the proposal" (ruling R5: the router mutes STOPPED/STARTED for take-downs). poll_triage() follows dtp r521's
@@ -50,7 +56,7 @@
     python alert_router.py post --kind working --boxes AMD,AVGO --cause BARS_STALE "restarting the feed on AVGO"
     python alert_router.py status                               # health.json, queue depth, open episodes
 
-The recovery side (a sub-agent, the connection-triage tool) posts through post_status() / `post`; it never needs
+The recovery side (a sub-agent, dxlink_probe, dxlink_assign, morning_check) posts through post_status() / `post`; it never needs
 Telegram credentials.
 """
 
@@ -70,7 +76,7 @@ from datetime import datetime
 import config
 import ettime
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 STATE_DIR = os.path.join(config.DATA_DIR, "alert_router")
 
@@ -102,15 +108,6 @@ CRIT_RE = re.compile(r"EMERGENCY|CATASTROPHIC|HALT|KILL[ _-]?SWITCH|DISK|RECONCI
                      r"LONE SHORT|GO TO TASTYTRADE NOW", re.IGNORECASE)
 STATUS_KINDS = ("working", "recovered", "info", "critical")
 
-# FEED.14 R5 — the connection triage's files (dtp tools/feed_triage.py writes them; same env names, same defaults)
-TRIAGE_VAR = os.environ.get("DTP_TRIAGE_VAR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "var",
-                                                          "feed_triage"))
-TRIAGE_ACTIONS = os.environ.get("DTP_TRIAGE_LOG", os.path.join(TRIAGE_VAR, "actions.jsonl"))
-TRIAGE_OUTBOX = os.environ.get("DTP_TRIAGE_OUTBOX", os.path.join(TRIAGE_VAR, "outbox.jsonl"))
-TAKEDOWN_KINDS = {"takedown_intent", "stand_down", "stand_down_again", "wake", "close_wake"}
-TAKEDOWN_LEAD_S = 300.0      # a box's DN/UP up to this long BEFORE the action line is still the take-down's
-TAKEDOWN_MUTE_S = 1800.0     # ... and up to this long after it (a woken box boots, sweeps and starts in ~25 min)
-MUTED_CODES = {"UP", "DN"}
 
 
 def _now():
@@ -192,9 +189,6 @@ class Router:
         self.last_tick = clock()
         self.sent = []                                # (ts, label, text) — what went out, for tests and status
         self.dropped = 0
-        self.takedowns = {}                           # box -> [action ts, ...] from the triage action log (R5)
-        self.muted = []                               # (box, code, id) muted take-down alerts, for tests and status
-        self.tri_off = None                           # {path: byte offset} into the triage files
         if self.spool_on:
             os.makedirs(self.state_dir, exist_ok=True)
 
@@ -279,108 +273,6 @@ class Router:
             self._note_open(box, rec, now)
             self._place(box, rec, now)                # an UP/DN is held GROUP_HOLD_S; _flush_group mutes take-downs
             return via == "control"
-
-    # ── FEED.14 R5: triage take-downs ──────────────────────────────────────────────────────────────────────────────
-    def _is_takedown(self, box, rec):
-        if rec.get("code") not in MUTED_CODES or CRIT_RE.search(rec.get("text", "")):
-            return False
-        try:
-            ts = float(rec.get("ts"))
-        except (TypeError, ValueError):
-            ts = self.clock()
-        return any(a - TAKEDOWN_LEAD_S <= ts <= a + TAKEDOWN_MUTE_S for a in self.takedowns.get(box, ()))
-
-    def _mute(self, box, rec):
-        aid = str(rec.get("id", ""))
-        self.muted.append((box, rec.get("code"), aid))
-        self.log("%s: %s alert %s muted - a connection-triage take-down (%s)"
-                 % (box, rec.get("code"), aid, str(rec.get("text", ""))[:60]))
-        self._spool({"t": "done", "ids": ["%s|%s" % (box, aid)], "muted": True})
-
-    def poll_triage(self, actions=None, outbox=None):
-        """Follow the triage's action log (take-down marks) and outbox (its summary lines). -> lines read."""
-        actions, outbox = actions or TRIAGE_ACTIONS, outbox or TRIAGE_OUTBOX
-        first = self.tri_off is None
-        if first:
-            self.tri_off = self._load_offsets()
-        n = 0
-        for path, is_actions in ((actions, True), (outbox, False)):
-            try:
-                size = os.path.getsize(path)
-            except OSError:
-                continue
-            off = self.tri_off.get(path)
-            if off is None or off > size:             # unseen, or rotated / truncated
-                off = 0 if is_actions else (size if first and off is None else 0)
-            if off == size:
-                self.tri_off[path] = off
-                continue
-            try:
-                with open(path, "rb") as fh:
-                    fh.seek(off)
-                    data = fh.read()
-            except OSError:
-                continue
-            end = data.rfind(b"\n") + 1                # only whole lines
-            for raw in data[:end].splitlines():
-                try:
-                    row = json.loads(raw.decode("utf-8"))
-                except Exception:                           # noqa: BLE001
-                    continue
-                n += 1
-                if is_actions:
-                    self._note_takedown(row)
-                else:
-                    self._triage_line(row)
-            self.tri_off[path] = off + end
-        if n or first:
-            self._save_offsets()
-        return n
-
-    def _note_takedown(self, row):
-        if row.get("kind") not in TAKEDOWN_KINDS or row.get("dry") or not row.get("sym"):
-            return
-        try:
-            at = float(row.get("at"))
-        except (TypeError, ValueError):
-            return
-        if self.clock() - at > TAKEDOWN_MUTE_S:
-            return
-        with self.lock:
-            self.takedowns.setdefault(str(row["sym"]), []).append(at)
-
-    def _triage_line(self, row):
-        try:
-            ts = float(row.get("ts", self.clock()))
-        except (TypeError, ValueError):
-            ts = self.clock()
-        if self.clock() - ts > OUTBOX_MAX_AGE_S:
-            self.log("triage outbox line too old (%s); not sent" % str(row.get("text", ""))[:60])
-            return
-        st = {"kind": "info", "text": row.get("text", ""), "ts": ts, "source": row.get("source", "feed_triage")}
-        self._spool({"t": "st", "st": st})
-        self.ingest_status(st)
-
-    def _offsets_path(self):
-        return os.path.join(self.state_dir, "triage_offsets.json")
-
-    def _load_offsets(self):
-        try:
-            with open(self._offsets_path(), encoding="utf-8") as fh:
-                return {k: int(v) for k, v in json.load(fh).items()}
-        except Exception:                                   # noqa: BLE001
-            return {}
-
-    def _save_offsets(self):
-        if not self.spool_on:
-            return
-        try:
-            tmp = self._offsets_path() + ".tmp"
-            with open(tmp, "w", encoding="utf-8") as fh:
-                json.dump(self.tri_off, fh)
-            os.replace(tmp, self._offsets_path())
-        except Exception as e:                              # noqa: BLE001
-            self.log("triage offsets not saved (%s)" % type(e).__name__)
 
     def ingest_alerted(self, box, aid):
         """The box sent `aid` itself (control did not ack in time)."""
@@ -503,11 +395,6 @@ class Router:
         self._send_due(now)
 
     def _flush_group(self, g, now):
-        if g.code in MUTED_CODES:                     # R5: the action line may have come after the box's alert
-            for b in [b for b in g.members if self._is_takedown(b, g.members[b])]:
-                self._mute(b, g.members.pop(b))
-            if not g.members:
-                return
         boxes = self.order(list(g.members))
         ids = ["%s|%s" % (b, g.members[b].get("id")) for b in boxes]
         if len(boxes) == 1:
@@ -882,7 +769,6 @@ def run(dry_run=False, state_dir=None, discover_fn=None, stop=None):
     last_health = 0.0
     while not stop.is_set():
         r.poll_outbox()
-        r.poll_triage()
         r.tick()
         if time.time() - last_health >= 5.0:
             r.write_health(followed=list(pg.streams))

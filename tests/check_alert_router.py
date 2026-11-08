@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_alert_router.py  v1.1
+day_trader_pro/tests/check_alert_router.py  v1.2
+v1.2  2026-11-08  dtp r539 / TIMER.1 — the per-minute feed triage is deleted, and with it the router's triage file
+      follower and take-down mute. A14 now asserts they are gone: no poll_triage, no TRIAGE_* paths, run() polls only
+      the outbox, and a box's STOPPED reaches the operator (nothing can mute it).
 v1.1  2026-11-03  FEED.14 R5 (operator "Yes to the proposal"): A14 a connection-triage take-down mutes the box's own
       STOPPED/STARTED - a DN after a stand_down line is taken and never sent while another box's DN in the same
       second is; a DN that arrives BEFORE the action line is muted at its group flush; an UP after a wake is muted,
@@ -402,58 +405,17 @@ def main():
             os.environ[k] = v
     check("A12", rc_locked == 3 and rc_nocred == 2, "locked=%r nocred=%r" % (rc_locked, rc_nocred))
 
-    # A14 — FEED.14 R5: triage take-downs
-    tdir = os.path.join(TMP, "triage")
-    os.makedirs(tdir, exist_ok=True)
-    acts, obx = os.path.join(tdir, "actions.jsonl"), os.path.join(tdir, "outbox.jsonl")
-    st14 = os.path.join(TMP, "state14")
-
-    def put(path, row):
-        with open(path, "a") as fh:
-            fh.write(json.dumps(row) + "\n")
-    put(obx, {"ts": T0 - 60, "source": "feed_triage", "text": "OLD BACKLOG LINE"})
-    p14 = Post()
-    r14 = mk(p14, state=st14, spool=True)
-    r14.poll_triage(acts, obx)                                  # first start: the outbox backlog is skipped
-    put(acts, {"kind": "takedown_intent", "sym": "CCC", "reason": "stopping", "at": T0, "dry": False})
-    put(acts, {"kind": "stand_down", "sym": "CCC", "reason": "for SPX", "at": T0 + 2, "dry": False})
-    put(acts, {"kind": "stand_down", "sym": "EEE", "reason": "dry", "at": T0, "dry": True})
-    put(obx, {"ts": T0 + 2, "source": "feed_triage", "text": "FEED TRIAGE | STOOD DOWN CCC | for SPX"})
-    r14.poll_triage(acts, obx)
-    CLK.t = T0 + 10
-    own_c = r14.ingest_alert("CCC", rec("CCC", "DN", cause="instance stop", text="🔴 CCC STOPPED"))
-    r14.ingest_alert("AAA", rec("AAA", "DN", cause="instance stop", text="🔴 AAA STOPPED"))
-    r14.ingest_alert("EEE", rec("EEE", "DN", cause="x", text="🔴 EEE STOPPED"))
-    r14.ingest_alert("FFF", rec("FFF", "DN", via="direct", cause="x", text="🔴 FFF STOPPED"))
-    r14.ingest_alert("DDD", rec("DDD", "DN", cause="instance stop", text="🔴 DDD STOPPED"))
-    put(acts, {"kind": "stand_down", "sym": "DDD", "reason": "late line", "at": T0 + 12, "dry": False})
-    CLK.t = T0 + 13
-    r14.poll_triage(acts, obx)
-    run_until(r14, T0 + 60)
-    put(acts, {"kind": "wake", "sym": "CCC", "reason": "slot", "at": T0 + 1200, "dry": False})
-    CLK.t = T0 + 1201
-    r14.poll_triage(acts, obx)
-    CLK.t = T0 + 1500
-    r14.tick()
-    r14.ingest_alert("CCC", rec("CCC", "UP", text="🚀 CCC STARTED"))
-    run_until(r14, T0 + 1560)
-    CLK.t = T0 + 4 * 3600
-    r14.tick()
-    r14.ingest_alert("CCC", rec("CCC", "UP", text="🚀 CCC STARTED again"))
-    run_until(r14, T0 + 4 * 3600 + 60)
-    texts = [t for _ts, t in p14.sent]
-    blob = "\n".join(texts)
-    muted = sorted((b, c) for b, c, _i in r14.muted)
-    r14b = mk(Post(), state=st14, spool=True)
-    n_restart = r14b.poll_triage(acts, obx)
-    ok14 = (own_c is True and muted == [("CCC", "DN"), ("CCC", "UP"), ("DDD", "DN")]
-            and "CCC STOPPED" not in blob and "DDD STOPPED" not in blob and "AAA STOPPED" in blob
-            and "EEE STOPPED" in blob and "FFF STOPPED" not in blob and "CCC STARTED again" in blob
-            and "CCC STARTED\n" not in blob + "\n" and sum("STOOD DOWN CCC" in t for t in texts) == 1
-            and "OLD BACKLOG LINE" not in blob and n_restart == 0)
+    # A14 — v1.2: the triage follower and its mute are gone; a STOPPED always goes out
     import inspect
-    ok14 = ok14 and "r.poll_triage()" in inspect.getsource(ar.run)
-    check("A14", ok14, "muted=%r sent=%r restart re-read=%r" % (muted, texts, n_restart))
+    p14 = Post()
+    r14 = mk(p14)
+    CLK.t = T0 + 10
+    r14.ingest_alert("CCC", rec("CCC", "DN", cause="instance stop", text="🔴 CCC STOPPED"))
+    run_until(r14, T0 + 60)
+    blob = "\n".join(t for _ts, t in p14.sent)
+    ok14 = ("CCC STOPPED" in blob and not hasattr(r14, "poll_triage") and not hasattr(ar, "TRIAGE_ACTIONS")
+            and "poll_triage" not in inspect.getsource(ar.run) and "r.poll_outbox()" in inspect.getsource(ar.run))
+    check("A14", ok14, "sent=%r" % blob[:80])
 
     # A13 — the guard
     import notify

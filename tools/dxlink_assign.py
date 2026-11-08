@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/dxlink_assign.py — v1.1
+day_trader_pro/tools/dxlink_assign.py — v1.2
+v1.2  2026-11-08  dtp r539 / TIMER.1 — the summary line goes to control's alert router through dxlink_probe.enqueue
+      (alert_router.post_status "info"); tools/feed_triage.py and its outbox are deleted (the operator, 2026-11-08:
+      "It should be reactionary, by event type—not run every minute looking for problems").
 v1.1  2026-11-07  dtp r525 / FEED.15b — THE ASSIGNMENT GOES LIVE, DELIVERED AS EACH BOX COMES UP. The operator,
       2026-11-07: "Yes" to switching it on (and "Try not to suggest 'log only' as the proposed fix"). The timer moves
       from 09:17 to 09:16 ET and the service runs --apply --until 09:25. A box that is stopped cannot be written to
@@ -33,8 +36,8 @@ WHAT IT DOES (one pass; --apply to write, otherwise a dry run that writes nothin
   4. --apply: WRITE_SCRIPT writes ~/options-trader/data/dxlink_assign.json on that box (tmp + rename), with the box's
      symbol, today's ET date, the node, written_at and by, and reads it back. OTV5 candle_feed v5.9 reads it at every
      connect (the assigned node first; pre-open only after its own probe answers 101) and, before 09:27 ET, a box
-     connected elsewhere switches to it once. One line per box to stdout; one summary line into the triage outbox
-     (feed_triage.enqueue) when anything was written.
+     connected elsewhere switches to it once. One line per box to stdout; one summary line to control's alert router
+     (dxlink_probe.enqueue -> control's alert router) when anything was written.
 
 NEVER: a restart, a service stop/start, an instance action, a token, an environment read, or a write outside that one
 file. The file is ignored by the box when it is for another day or symbol, older than 12 h or names a non-IPv4 node.
@@ -62,7 +65,7 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 sys.path.insert(0, ROOT)
 
-__version__ = "1.1"
+__version__ = "1.2"
 EVERY_S = 20
 
 ET = ZoneInfo("America/New_York")
@@ -244,8 +247,8 @@ def run(apply=False, now=None, boxes=None, status=None, nodes=None, ssh_run=None
     print("[assign] " + line)
     if apply and wrote and enqueue is not False:
         if enqueue is None:
-            import feed_triage
-            enqueue = feed_triage.enqueue
+            import dxlink_probe
+            enqueue = dxlink_probe.enqueue
         enqueue(line, source="dxlink_assign")
     return 0, picks, wrote
 
@@ -296,8 +299,8 @@ def run_window(apply=True, until="09:25", every=EVERY_S, clock=time.time, sleep=
     print("[assign] " + line)
     if apply and done and enqueue is not False:
         if enqueue is None:
-            import feed_triage
-            enqueue = feed_triage.enqueue
+            import dxlink_probe
+            enqueue = dxlink_probe.enqueue
         enqueue(line, source="dxlink_assign")
     return (0 if not missing else 1), done, missing
 

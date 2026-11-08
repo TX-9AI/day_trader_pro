@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_dxlink_probe.py  v1.1
+day_trader_pro/tests/check_dxlink_probe.py  v1.2
+v1.2  2026-11-08  dtp r539 / TIMER.1 — feed_triage.py is deleted: X8 reads the confirmed node states from the status
+      file itself (the reader left is dxlink_assign, gated by check_dxlink_assign); X10 (new): the default enqueue
+      puts one "info" line in control's alert-router outbox and nothing else.
 v1.1  2026-11-04  dtp r523 / FEED.15 — X9: the zone's authoritative nameservers are asked (a local UDP server plays the
       system resolver and the zone's nameserver, with a compressed answer name): the NS is found for the host, its A
       records come back as the "auth" source; with no server the answer is empty, named, and inside the budget.
@@ -16,7 +19,8 @@ in for a dxlink node and records every byte it receives.
   X6  a closed port -> unreachable, quickly
   X7  the state machine: first sight is a baseline (no message); a change needs 2 probes; up->down and down->up
       each give ONE message; a repeat or a flap inside MSG_GAP_S gives none
-  X8  run() with zero boxes: writes the status file, enqueues the transition, and feed_triage's node gate reads it
+  X8  run() with zero boxes: writes the status file, enqueues the transitions; the confirmed states follow them
+  X10 the default enqueue writes one info line to the router outbox (alert_router.post_status)
 """
 import json
 import os
@@ -33,7 +37,7 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 sys.path.insert(0, ROOT)
 import dxlink_probe as P  # noqa: E402
-import feed_triage as F  # noqa: E402
+import alert_router as AR  # noqa: E402
 
 FAILS, RAN = [], []
 TMP = tempfile.mkdtemp(prefix="check_dxlink_probe_")
@@ -180,17 +184,31 @@ for k in (1, 2):
     P.run(prober=lambda ip: fake[ip], cand=cand, now=t + 60 * k, status_path=path,
           enqueue=lambda m, source=None: q.append(m))
 status = json.load(open(path))
-g1 = F.node_gate(status, "54.204.44.247", t + 150)
+g1 = (status["nodes"]["54.204.44.247"]["state"] == "up",)
 fake["54.204.44.247"] = UP
 for k in (3, 4):
     P.run(prober=lambda ip: fake[ip], cand=cand, now=t + 60 * k + P.MSG_GAP_S, status_path=path,
           enqueue=lambda m, source=None: q.append(m))
-g2 = F.node_gate(json.load(open(path)), "54.204.44.247", t + 240 + P.MSG_GAP_S + 5)
-g3 = F.node_gate(json.load(open(path)), "129.153.134.53", t + 240 + P.MSG_GAP_S + 5)
+_st2 = json.load(open(path))
+g2 = (_st2["nodes"]["54.204.44.247"]["state"] == "up",)
+g3 = (_st2["nodes"]["129.153.134.53"]["state"] == "up",)
 ck("X8", status["nodes"]["129.153.134.53"]["state"] == "down" and len(q) == 2 and g1[0] is False and g2[0] is True
    and g3[0] is False,
-   "status file written with no fleet; %d message(s); gate: all down -> %s, its node up -> %s, its node down -> %s"
+   "status file written with no fleet; %d message(s); 54.204 up after all down -> %s, after recovery -> %s, 129.153 up -> %s"
    % (len(q), g1[0], g2[0], g3[0]))
+
+# ── X10 (v1.2): the default enqueue is the router outbox ─────────────────────────────────────────────────────
+_ar_dir = os.path.join(TMP, "alert_router")
+_old_sd, AR.STATE_DIR = AR.STATE_DIR, _ar_dir
+try:
+    P.enqueue("DXLINK NODE 1.1.1.1 DOWN (test)")
+finally:
+    AR.STATE_DIR = _old_sd
+_ob = os.path.join(_ar_dir, "outbox")
+_files = sorted(os.listdir(_ob)) if os.path.isdir(_ob) else []
+_rec = json.load(open(os.path.join(_ob, _files[0]))) if len(_files) == 1 else {}
+ck("X10", len(_files) == 1 and _rec.get("kind") == "info" and "1.1.1.1 DOWN" in _rec.get("text", ""),
+   "router outbox: %d file(s), kind %r" % (len(_files), _rec.get("kind")))
 
 # ── X9 (v1.1): the authoritative nameservers ──────────────────────────────────────────────────────────────────
 import struct  # noqa: E402

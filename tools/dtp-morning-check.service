@@ -1,0 +1,14 @@
+[Unit]
+Description=day_trader_pro morning check: 09:19 wake verify, 09:50 Hunt shadow rule, 11:10 PARK shadow rule (dtp r539 / TIMER.1; installed by tools/install_morning_check.sh)
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/day_trader_pro
+# Telegram names for the direct fallback when the router is down (the same file dtp-morning loads; never printed).
+EnvironmentFile=/home/ubuntu/day_trader_pro/.env
+# The step is picked by the ET time of the run (wake before 09:40, hunt before 11:00, park after).
+ExecStart=/home/ubuntu/day_trader_pro/venv/bin/python /home/ubuntu/day_trader_pro/tools/morning_check.py
+TimeoutStartSec=600
+MemoryMax=600M
