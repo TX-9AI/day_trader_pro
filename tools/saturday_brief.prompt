@@ -17,8 +17,8 @@ THE BRIEF HAS SEVEN SECTIONS, IN THIS ORDER, EACH ONE STANDING ON ITS OWN:
        park_late_*), never in EV; fees on their own line, never in EV; the R ledger and excursions.
   ## 2. ISSUES FROM THE BOT LOGS
        tools/botlog_scan.py over every box's bot.log for the week: new ERROR/CRITICAL/Traceback
-       signatures first, then count jumps, restarts, blind/stale feed episodes, gate refusals,
-       cap hits, anomalies.
+       signatures first, then count jumps, restarts, blind/stale feed episodes, gate refusals
+       by class (--by-day explains each sat-out box-day), cap hits, anomalies.
   ## 3. FLEET HEALTH
        tools/checker_sweep.py diffed by check ID; S3 parity (conductor verdicts, box vs bucket,
        warehouse_coverage --streams and --tail); disk with days to full; code and service state.

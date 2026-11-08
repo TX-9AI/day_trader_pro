@@ -1,4 +1,4 @@
-# THE SATURDAY BRIEF — spec v2.0
+# THE SATURDAY BRIEF — spec v2.1
 
 **Status: the operator's spec, as of 2026-10-31.** It replaces `options-trader-v4/handoffs/SATURDAY_BRIEF.md`
 and `SATURDAY_RUNBOOK.md` (2026-09-19). Those were written for seventeen boxes, two engines and ORB. The fleet is now
@@ -167,12 +167,15 @@ fittability line this week. Its "READY" counts signal rows, not trades (D7), so 
 **Purpose:** what went wrong on the boxes that the trade record does not show.
 
     /home/ubuntu/day_trader_pro/venv/bin/python /home/ubuntu/day_trader_pro/tools/botlog_scan.py \
-        --from <Mon> --to <Fri> --out <WORK>/botlog --prior <PRIOR_WORK>/botlog
+        --from <Mon> --to <Fri> --out <WORK>/botlog --prior <PRIOR_WORK>/botlog --by-day
 
 `botlog_scan` sends one read-only script through `fleet.py run`. On each box it reads `~/options-trader/bot.log`
 and its rotations, and nothing else. It counts per box and per day: ERROR, CRITICAL, Traceback (with the exception
-line), refusals by gate tag (`[pin]`, `[commit]`, `[size]`, …), blind/stale/reconnect feed lines, cap hits, and
-service starts. Each line is folded into a signature, with token-shaped text redacted on the box. It diffs the
+line), refusals by class (v1.1, dtp r526: `pin`, `commit` (COMMIT.2), `sizing:<reason>`, `entry_end`, `orb_break`,
+`gate:<Strategy>@<condition>`, `afd`, `park_starved`, `no_chain`, `pin_exempt_would_refuse`, `other:<tag>`),
+blind/stale/reconnect feed lines, real cap hits (never the start-up banner), and service starts with their ET times
+(`start_rth` counts a start between 09:30 and 16:00 ET). Every line is keyed by its ET day. `--by-day` prints each
+box-day's refusal classes: a sat-out day in 1.3 is explained from it, by class and count. Each line is folded into a signature, with token-shaped text redacted on the box. It diffs the
 signatures against last week's.
 
 Report, in this order:
@@ -183,7 +186,7 @@ Report, in this order:
    session day (the 09:15 wake is the expected one).
 3. **Feed episodes**: blind or stale stretches. Give the box, the day and how long, and say whether a trade was
    open during it.
-4. **Gate refusals**: totals by tag and box, linked to 1.3's sat-out days. A gate that refused every fire on a
+4. **Gate refusals**: totals by class and box, and for each of 1.3's sat-out days the `--by-day` line that explains it. A gate that refused every fire on a
    trend day is a finding, not a defect.
 5. **Cap hits**: box, day, time, and what was refused after it.
 6. **Anything else** a human would flag (a loop, an order rejected, a session reset during RTH).
