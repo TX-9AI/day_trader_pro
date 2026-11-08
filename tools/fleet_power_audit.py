@@ -1,6 +1,17 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/fleet_power_audit.py  v1.1
+day_trader_pro/tools/fleet_power_audit.py  v1.2
+
+v1.2  2026-11-08  dtp r530 / OPS.76 — A BOX THAT STOPPED ITSELF IS RECORDED AS
+      ITS OWN CLASS. 2026-11-08 00:00 ET QQQ's midnight backstop powered it
+      off from inside the OS; nothing went through ec2ops.stop(), so the
+      ledger still ended in START and "who left it that way" had no answer.
+      Every run now reads EC2's own stop reason for each STOPPED box whose
+      ledger still ends in START and appends one row: HALT (the box shut
+      itself down - StateReason Client.InstanceInitiatedShutdown, e.g. the
+      midnight backstop) or XSTOP (stopped outside ec2ops - the console,
+      another identity), timed by EC2's transition time. Written once: the
+      next run sees the HALT/XSTOP as the last event and writes nothing.
 
 v1.1  2026-09-25  r425 / OPS.49 — SELF-EXPIRING ACKNOWLEDGEMENTS, so a box that
       is up ON PURPOSE stops nagging without anyone muting the watcher.
@@ -63,7 +74,7 @@ ACK_PATH = os.environ.get(
 
 ROW = re.compile(
     r"^(?P<ts>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) ET\s+"
-    r"(?P<action>START|STOP)(?P<mock>\s+MOCK)?\s+(?P<ids>\S+)\s+"
+    r"(?P<action>START|STOP|HALT|XSTOP)(?P<mock>\s+MOCK)?\s+(?P<ids>\S+)\s+"
     r"caller=(?P<caller>\S+)\s+pid=(?P<pid>\d+)\s+argv=(?P<argv>.*)$")
 
 
@@ -126,6 +137,27 @@ def last_power_event(rows):
     return last if last["action"] == "START" else None
 
 
+def record_unseen_stops(fleet, ledger, path):
+    """For each STOPPED box whose ledger's last row is a START, append EC2's stop as a HALT or
+    XSTOP row (ec2ops.record_observed_stop) and return [(sym, iid, class, code, when_et)].
+    A box with no ledger rows, or whose last row is already a stop of any class, is left alone,
+    so a row is written once and a box never stopped through the ledger is not invented into it."""
+    out = []
+    for sym in sorted(fleet):
+        r = fleet[sym]
+        if not isinstance(r, dict) or r.get("state") != "stopped":
+            continue
+        iid = r.get("instance_id", "")
+        rows = ledger.get(iid, [])
+        if not rows or rows[-1]["action"] != "START":
+            continue
+        code = r.get("state_reason_code", "")
+        reason = r.get("state_transition_reason", "")
+        cls = ec2ops.record_observed_stop(path, iid, code, reason, "fleet_power_audit")
+        out.append((sym, iid, cls, code, ec2ops.transition_time_et(reason)))
+    return out
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -169,6 +201,10 @@ def main(argv=None):
     ledger, ledger_exists = read_ledger(a.log)
     acks, expired = read_acks(a.ack_file, today)
 
+    # r530 / OPS.76 — a STOPPED box whose ledger still ends in START was stopped
+    # by something other than ec2ops. EC2 says what; record it once, as its own class.
+    observed = record_unseen_stops(fleet, ledger, a.log)
+
     orphans, unexplained, acked = [], [], []
     for sym in sorted(running):
         iid = running[sym].get("instance_id", "")
@@ -189,7 +225,7 @@ def main(argv=None):
     # about the wrong object, which is OPS.43's exact shape and the hardest
     # kind to catch because nothing about it reads as broken.
     bad = orphans + unexplained
-    if a.quiet and not bad:
+    if a.quiet and not bad and not observed:
         return 0
 
     print(f"fleet power audit — {now:%Y-%m-%d %H:%M} ET "
@@ -200,6 +236,12 @@ def main(argv=None):
         print(f"  ⚠️  no ledger at {a.log} — it is written on the first power "
               f"change through ec2ops; nothing here is attributable yet")
 
+    for sym, iid, cls, code, when in observed:
+        what = ("SELF-HALTED: the box shut itself down (e.g. the midnight backstop)"
+                if cls == ec2ops.SELF_HALT else
+                f"STOPPED OUTSIDE ec2ops (console or another identity; EC2 code {code or 'none'})")
+        print(f"  \u2139\ufe0f  {sym} ({iid}) {what} at {when or 'an unknown time'} ET "
+              f"\u2014 recorded as {cls} in the ledger")
     for sym, why in acked:
         print(f"  \u2713 {sym} running, ACKNOWLEDGED for today ({why})")
     for sym, day in expired:

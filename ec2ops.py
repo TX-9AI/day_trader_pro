@@ -1,4 +1,10 @@
-# day_trader_pro/ec2ops.py — v0.1.5
+# day_trader_pro/ec2ops.py — v0.1.6
+# v0.1.6 (2026-11-08) — dtp r530 / OPS.76. A BOX THAT STOPS ITSELF IS SEEN. describe_by_tag carries EC2's own stop
+#   reason (StateReason.Code, StateTransitionReason). 2026-11-08 00:00 ET QQQ's midnight backstop
+#   (optbot-midnight-halt) powered it off from inside the OS, so nothing went through stop() and the ledger kept a
+#   START with no stop. NEW stop_class(code) names who stopped a box (SELF_HALT = shut down from the box itself,
+#   XSTOP = stopped outside this module, e.g. the console), transition_time_et() reads when, and
+#   record_observed_stop() appends that as its own ledger row (HALT / XSTOP) - observed, never claimed as ours.
 # v0.1.5 (2026-10-25) — (OPS.30) — RUN AS A SCRIPT, IT REFUSES. This is a library (describe_by_names, start, stop, ...)
 #   with no CLI, yet the handoff and settings.json name it as an entry point, and `python3 ec2ops.py start --only AMD`
 #   exited 0 with zero bytes on stdout and stderr - read as "started". A `__main__` now prints a usage line naming the
@@ -181,6 +187,9 @@ def describe_by_tag(key=None, value=None):
                 "private_ip": inst.get("PrivateIpAddress", ""),
                 "public_ip": inst.get("PublicIpAddress", ""),
                 "pinned": False,
+                # r530: EC2's own account of the last stop (empty while running).
+                "state_reason_code": (inst.get("StateReason") or {}).get("Code", ""),
+                "state_transition_reason": inst.get("StateTransitionReason", "") or "",
             }
     return out
 
@@ -189,7 +198,8 @@ def _mock_describe_by_tag(key, value):
     """Offline: every mock instance is treated as tagged."""
     state = _mock_load()
     return {n: {"instance_id": _mock_instance_id(n), "state": st,
-                "private_ip": "", "public_ip": "", "pinned": False}
+                "private_ip": "", "public_ip": "", "pinned": False,
+                "state_reason_code": "", "state_transition_reason": ""}
             for n, st in state.items() if n != config.REPORTER_TAG}
 
 
@@ -288,6 +298,57 @@ def _power_log(action, ids, note=""):
             fh.write(row)
     except Exception:                                          # noqa: BLE001
         pass
+
+
+# r530 / OPS.76 — WHO STOPPED IT, FROM EC2'S OWN WORDS. EC2 names a stop by StateReason.Code:
+#   Client.InstanceInitiatedShutdown - the OS shut itself down (the midnight backstop, a `shutdown` on the box);
+#   Client.UserInitiatedShutdown     - an API or console stop. If it was ours, stop() already wrote a STOP row;
+#                                      the audit only records one when the ledger still ends in START.
+# Anything else (spot, a host fault, an empty code) is XSTOP with the code named, never guessed at.
+SELF_HALT, XSTOP = "HALT", "XSTOP"
+_SELF_CODES = ("Client.InstanceInitiatedShutdown",)
+
+
+def stop_class(code):
+    """-> HALT when the box shut itself down, else XSTOP (stopped outside this module)."""
+    return SELF_HALT if (code or "") in _SELF_CODES else XSTOP
+
+
+def transition_time_et(reason):
+    """'User initiated (2026-11-08 05:00:33 GMT)' -> '2026-11-08 00:00:33' ET, or '' when absent."""
+    import re as _re
+    m = _re.search(r"\((\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) GMT\)", reason or "")
+    if not m:
+        return ""
+    import datetime
+    from zoneinfo import ZoneInfo
+    t = datetime.datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S").replace(
+        tzinfo=datetime.timezone.utc)
+    return t.astimezone(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def record_observed_stop(path, instance_id, code, reason, observer):
+    """Append one HALT/XSTOP row for a stop that did not go through stop(). NEVER raises.
+    The row's time is EC2's transition time when it gives one, else now; caller= names EC2's code,
+    so the row can never be read as a power change this module made."""
+    cls = stop_class(code)
+    try:
+        ts = transition_time_et(reason)
+        if not ts:
+            import datetime
+            from zoneinfo import ZoneInfo
+            ts = datetime.datetime.now(
+                ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S")
+        row = (f"{ts} ET  {cls:<5}  {instance_id}  caller=ec2:{code or 'no-code'}  pid=0  "
+               f"argv=observed-by={observer}\n")
+        d = os.path.dirname(path)
+        if d:
+            os.makedirs(d, exist_ok=True)
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(row)
+    except Exception:                                          # noqa: BLE001
+        pass
+    return cls
 
 
 def start(instance_ids):
