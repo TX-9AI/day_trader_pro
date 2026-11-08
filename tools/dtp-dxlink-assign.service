@@ -1,10 +1,10 @@
 [Unit]
-Description=day_trader_pro control-assigned dxlink node per box (dtp r523 / FEED.15) - NOT INSTALLED BY THE LAND; ships --dry-run until the operator has read a morning of its plans
+Description=day_trader_pro control-assigned dxlink node per box, written to each box as it comes up after the 09:15 wake (dtp r525 / FEED.15b; installed by tools/install_dxlink_assign.sh)
 After=network-online.target
 
 [Service]
 Type=oneshot
 User=ubuntu
 WorkingDirectory=/home/ubuntu/day_trader_pro
-ExecStart=/home/ubuntu/day_trader_pro/venv/bin/python /home/ubuntu/day_trader_pro/tools/dxlink_assign.py --dry-run
-TimeoutStartSec=180
+ExecStart=/home/ubuntu/day_trader_pro/venv/bin/python /home/ubuntu/day_trader_pro/tools/dxlink_assign.py --apply --until 09:25
+TimeoutStartSec=900

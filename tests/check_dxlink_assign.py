@@ -1,6 +1,15 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_dxlink_assign.py  v1.0
+day_trader_pro/tests/check_dxlink_assign.py  v1.1
+v1.1  2026-11-07  dtp r525 / FEED.15b — THE ASSIGNMENT GOES LIVE, DELIVERED AS EACH BOX COMES UP.
+  D7  run_window(): passes repeat until every running/expected box has its file; a box whose ssh is not up yet, or
+      that reaches running late, is written on a later pass; a written box keeps its node and is never written twice;
+      the deadline stops it with NOT WRITTEN named and rc 1; ONE outbox line; a dry run is one pass, writes nothing
+  D8  the units: the timer fires Mon..Fri 09:16 America/New_York (after the 09:15 wake, dtp-morning.timer), not
+      persistent; the service runs --apply --until 09:25, before OTV5 candle_feed's ASSIGN_SWITCH_BY_ET 09:27;
+      systemd-analyze verify passes; the installer installs both units and enables the timer, and is not run by
+      the land
+  D9  main(): --until on a non-trading day writes nothing and returns 0; --until without --apply is a dry pass
 v1.0  2026-11-04  dtp r523 / FEED.15 — CONTROL ASSIGNS EACH BOX ITS DXLINK NODE (tools/dxlink_assign.py).
   D1  plan(): 14 boxes over 3 up nodes - cap 5, every box assigned, no node over the cap; a box already on an up node
       keeps it; a box on a node that is not up moves; holding and unknown boxes are placed first; deterministic
@@ -136,6 +145,135 @@ bad = [w for w in ("systemctl stop", "systemctl start", "systemctl restart", "st
 writes = [w for w in ("open(tmp, \"w\"", "open(tmp, 'w'") if w in code]
 ck("D6", not bad and len(writes) == 1 and code.count("os.replace(") == 1,
    "forbidden=%s writes=%d replace=%d" % (bad, len(writes), code.count("os.replace(")))
+
+# ── D7: run_window() ─────────────────────────────────────────────────────────────────────────────────────
+class Clock:
+    def __init__(self, t):
+        self.t = t
+
+    def __call__(self):
+        return self.t
+
+    def sleep(self, s):
+        self.t += s
+
+
+t0 = datetime(2026, 11, 9, 9, 16, 5, tzinfo=A.ET).timestamp()
+ck7 = Clock(t0)
+up = {"AMZN": 0, "QQQ": 1, "SPX": 2}          # the pass on which each box first answers ssh
+writes7, posts7 = [], []
+
+
+def obs7():
+    p = int(round((ck7.t - t0) / 20.0))
+    out = []
+    for s_, k in up.items():
+        if p >= k:
+            out.append({"sym": s_, "ip": "10.2.0.%d" % k, "open": 0, "node": None, "read": True})
+    return out
+
+
+def ssh7(ip, command, timeout=None):
+    writes7.append(ip)
+    return local_ssh(ip, command, timeout)
+
+
+rc7, done7, miss7 = A.run_window(apply=True, until="09:25", every=20, clock=ck7, sleep=ck7.sleep, observe_fn=obs7,
+                                 ssh_run=ssh7, enqueue=lambda m, source=None: posts7.append(m), nodes=[N1, N2],
+                                 expected=["AMZN", "QQQ", "SPX"])
+ck8 = Clock(t0)
+up8 = {"AMZN": 0}
+posts8 = []
+
+
+def obs8():
+    return [{"sym": "AMZN", "ip": "10.3.0.1", "open": 0, "node": None, "read": True}]
+
+
+rc8, done8, miss8 = A.run_window(apply=True, until="09:17", every=20, clock=ck8, sleep=ck8.sleep, observe_fn=obs8,
+                                 ssh_run=local_ssh, enqueue=lambda m, source=None: posts8.append(m), nodes=[N1],
+                                 expected=["AMZN", "GOOGL"])
+# a holding box that comes up LATE sorts first; the flat box written on pass 1 must keep its node, written once
+ck9 = Clock(t0)
+w9 = []
+
+
+def obs9():
+    p = int(round((ck9.t - t0) / 20.0))
+    out = [{"sym": "QQQ", "ip": "10.4.0.2", "open": 0, "node": None, "read": True}]
+    if p >= 1:
+        out.append({"sym": "AMZN", "ip": "10.4.0.1", "open": 1, "node": None, "read": True})
+    return out
+
+
+def ssh9(ip, command, timeout=None):
+    w9.append(ip)
+    return local_ssh(ip, command, timeout)
+
+
+rc9, done9, _m9 = A.run_window(apply=True, until="09:25", every=20, clock=ck9, sleep=ck9.sleep, observe_fn=obs9,
+                               ssh_run=ssh9, enqueue=lambda m, source=None: None, nodes=[N1, N2],
+                               expected=["AMZN", "QQQ"])
+pp, _c = A.plan([{"sym": "AMZN", "open": 1, "node": None}, {"sym": "QQQ", "open": 0, "node": None}], [N1, N2],
+                pinned={"QQQ": N1})
+ckd = Clock(t0)
+dw = []
+rcd, doned, _m = A.run_window(apply=False, until="09:25", every=20, clock=ckd, sleep=ckd.sleep, observe_fn=obs7,
+                              ssh_run=lambda *a, **k: dw.append(1) or (0, "", ""), enqueue=lambda m, source=None: dw.append(m),
+                              nodes=[N1], expected=["AMZN", "QQQ", "SPX"])
+ck("D7", rc7 == 0 and sorted(done7) == ["AMZN", "QQQ", "SPX"] and miss7 == [] and len(writes7) == 3
+   and len(set(writes7)) == 3 and len(posts7) == 1 and "written 3/3" in posts7[0]
+   and rc8 == 1 and miss8 == ["GOOGL"] and len(posts8) == 1 and "NOT WRITTEN by 09:17: GOOGL" in posts8[0]
+   and ck8.t <= datetime(2026, 11, 9, 9, 17, tzinfo=A.ET).timestamp()
+   and rcd == 0 and doned == {} and dw == [] and ckd.t == t0
+   and rc9 == 0 and done9 == {"QQQ": N1, "AMZN": N2} and sorted(w9) == ["10.4.0.1", "10.4.0.2"] and pp == {"QQQ": N1, "AMZN": N2},
+   "late boxes: done=%s writes=%d posts=%s; deadline: rc=%d missing=%s; dry: done=%s calls=%d" % (
+       sorted(done7), len(writes7), posts7[:1], rc8, miss8, doned, len(dw)))
+
+# ── D8: the units ────────────────────────────────────────────────────────────────────────────────────────
+TD = os.path.join(ROOT, "tools")
+tmr = open(os.path.join(TD, "dtp-dxlink-assign.timer")).read()
+svc = open(os.path.join(TD, "dtp-dxlink-assign.service")).read()
+ins = open(os.path.join(TD, "install_dxlink_assign.sh")).read()
+import re  # noqa: E402
+cal = re.findall(r"^OnCalendar=(.+)$", tmr, re.M)
+until = re.search(r"--until (\d\d:\d\d)", svc)
+cf = os.path.expanduser("~/OTV5/data/candle_feed.py")
+by = None
+if os.path.exists(cf):
+    mby = re.search(r"^ASSIGN_SWITCH_BY_ET = \((\d+), (\d+)\)", open(cf).read(), re.M)
+    by = (int(mby.group(1)), int(mby.group(2))) if mby else None
+by = by or (9, 27)
+ver = subprocess.run(["systemd-analyze", "verify", os.path.join(TD, "dtp-dxlink-assign.service")],
+                     capture_output=True, text=True)
+ver_err = [l for l in (ver.stderr or "").splitlines() if "dtp-dxlink-assign" in l]
+nxt = subprocess.run(["systemd-analyze", "calendar", "--iterations=2", cal[0] if cal else "x"],
+                     capture_output=True, text=True).stdout
+ck("D8", cal == ["Mon..Fri *-*-* 09:16:00 America/New_York"] and "Persistent=false" in tmr
+   and "--apply" in svc and "--dry-run" not in svc and until is not None
+   and tuple(int(x) for x in until.group(1).split(":")) < by
+   and ver.returncode == 0 and not ver_err
+   and "install -m 0644" in ins and "enable --now dtp-dxlink-assign.timer" in ins and 'id -u)" = 0' in ins
+   and "Next elapse" in nxt,
+   "cal=%s until=%s switch_by=%s verify=%s %s" % (cal, until.group(1) if until else None, by, ver.returncode,
+                                                  ver_err[:1]))
+
+# ── D9: main() ───────────────────────────────────────────────────────────────────────────────────────────
+import market_calendar  # noqa: E402
+_itd = market_calendar.is_trading_day
+seen9 = []
+_rw = A.run_window
+A.run_window = lambda **k: seen9.append(k) or (0, {}, [])
+market_calendar.is_trading_day = lambda d=None: False
+r9a = A.main(["--apply", "--until", "09:25"])
+market_calendar.is_trading_day = lambda d=None: True
+r9b = A.main(["--until", "09:25"])
+r9c = A.main(["--apply", "--until", "09:25", "--every", "15"])
+market_calendar.is_trading_day = _itd
+A.run_window = _rw
+ck("D9", r9a == 0 and len(seen9) == 2 and seen9[0]["apply"] is False and seen9[1]["apply"] is True
+   and seen9[1]["every"] == 15 and seen9[1]["until"] == "09:25",
+   "holiday rc=%s calls=%s" % (r9a, [(k["apply"], k["until"], k["every"]) for k in seen9]))
 
 print()
 if FAILS:

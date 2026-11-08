@@ -1,6 +1,17 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/review_kit.py — v1.0
+day_trader_pro/tools/review_kit.py — v1.1
+v1.1  2026-11-07  dtp r525 / RPT.37 — TWO NIGHTLY TRACKS: GIVEBACK WITHOUT PARK, AND HUNT BY CALL AND PUT. The operator,
+      2026-11-07: "Yes, to 2 & 3" (the Saturday recap: the giveback ratio both with and without PARK's green-to-red
+      trades - 49% overall, nearer 40% without; and Hunt calls +$6,842 / 71% win against puts -$196 / 39%).
+      giveback.csv gains six columns AFTER its seven (every old column kept, in place): giveback_pct,
+      giveback_ex_park_usd, peak_open_ex_park_usd, giveback_ex_park_pct, green_to_red_ex_park_n,
+      green_to_red_ex_park_usd. A file still on the seven-column header is migrated in place (old rows keep their
+      cells; the new ones are filled by `backfill` or left empty). NEW hunt DAY: LiquidityHunt split by side (long =
+      call, short = put), the day and the window to date: n, net, win %, EV a trade, fees BESIDE (never inside;
+      estimated where the row has none, counted in fees_est); upserts hunt_side.csv. NEW backfill FROM TO: every
+      day with a trades CSV - the new giveback columns appended to the RECORDED row (its seven cells are never
+      rewritten; a recomputed cell that differs is printed as a MISMATCH) and the hunt rows.
 v1.0  2026-11-07  dtp r524 / RPT.36 — THE NIGHTLY REVIEW'S MECHANICAL HALF, SO AN UNATTENDED SESSION CANNOT DRIFT ON IT.
       The nightly post-RTH review (~/reviews/YYYY-MM-DD.md) was a session-only CronCreate job: it expired after 7 days
       (last fire 11-02) and was fixed in UTC, so after the 11-01 DST change it fired at 15:20 ET, before the close.
@@ -25,6 +36,10 @@ SUBCOMMANDS (every one reads only; the CSV writers REPLACE the day's rows, so a 
                        day's row in window_ev.csv and theories.csv.
   giveback DAY         the daily giveback (operator 2026-10-29) from ~/reviews/trades/DAY.csv; upserts giveback.csv.
                        Same formula as ~/reviews/scripts/giveback.py v1.0.
+  hunt DAY             v1.1: LiquidityHunt by side (call = long, put = short), the day and the window to date, fees
+                       beside; upserts hunt_side.csv.
+  backfill FROM TO     v1.1: for every day FROM..TO with ~/reviews/trades/DAY.csv: the six ex-PARK giveback columns
+                       onto the recorded giveback row (recorded cells kept; differences printed) and the hunt rows.
   upsert FILE DAY ROWS  replace FILE's rows whose first column is DAY with the CSV rows in ROWS (header included,
                        must match FILE's header exactly). The one door for the other nightly CSVs. A row whose first
                        cell is not a date (giveback.csv's '--help' row, 11-07) is dropped on every rewrite.
@@ -58,7 +73,14 @@ TRADE_COLS = ["sym", "trade_id", "strategy", "direction", "contracts", "entry_pr
               "entry_time", "exit_time", "exit_reason", "fee", "mfe_premium"]
 WINDOW_HDR = "date,trades,realized,fees,ev_per_trade,ev_ex_worst_setup,worst_setup,ev_ex_worst_symbol,worst_symbol"
 THEORY_HDR = "date,baseline_n,baseline_ev,t1_ev,t2_ev,t3_ev,t1t2_ev,t1t3_ev,all3_ev"
-GIVEBACK_HDR = ("date,trades,giveback_usd,peak_open_usd,realized_on_green_usd,green_to_red_n,green_to_red_usd")
+GIVEBACK_HDR_V1 = "date,trades,giveback_usd,peak_open_usd,realized_on_green_usd,green_to_red_n,green_to_red_usd"
+GIVEBACK_HDR = GIVEBACK_HDR_V1 + (",giveback_pct,giveback_ex_park_usd,peak_open_ex_park_usd,giveback_ex_park_pct,"
+                                  "green_to_red_ex_park_n,green_to_red_ex_park_usd")          # v1.1: six appended
+PARK = "PARK"
+HUNT = "LiquidityHunt"
+HUNT_HDR = ("date,side,n,net,win_pct,ev_per_trade,fees,fees_est,cum_n,cum_net,cum_win_pct,cum_ev_per_trade,cum_fees,"
+            "cum_fees_est")
+OTV4TEST_SYMS = ("AAL",)        # warehouse_source.mainline already drops OTV4TEST at `trades`; a guard for old CSVs
 
 
 def _day(s):
@@ -285,9 +307,49 @@ def giveback(day, rows):
         out.append(dict(sym=r["sym"], strat=r["strategy"], pnl=pnl, peak_open=max(0.0, pk - e) * c * 100,
                         giveback=(max(pk, e) - max(x, e)) * c * 100, g2r=(pk > e and pnl < 0)))
     g2r = [r for r in out if r["g2r"]]
-    return dict(n=len(out), giveback=sum(r["giveback"] for r in out), peak_open=sum(r["peak_open"] for r in out),
+    xp = [r for r in out if r["strat"] != PARK]
+    xg = [r for r in xp if r["g2r"]]
+    gb, pk = sum(r["giveback"] for r in out), sum(r["peak_open"] for r in out)
+    xgb, xpk = sum(r["giveback"] for r in xp), sum(r["peak_open"] for r in xp)
+    return dict(n=len(out), giveback=gb, peak_open=pk,
                 kept=sum(r["pnl"] for r in out if r["peak_open"] > 0), g2r_n=len(g2r),
-                g2r_usd=sum(r["pnl"] for r in g2r), rows=out)
+                g2r_usd=sum(r["pnl"] for r in g2r), rows=out,
+                pct=(100.0 * gb / pk if pk else None), x_giveback=xgb, x_peak_open=xpk,
+                x_pct=(100.0 * xgb / xpk if xpk else None), x_g2r_n=len(xg), x_g2r_usd=sum(r["pnl"] for r in xg))
+
+
+def _pct(v):
+    return "" if v is None else "%.2f" % v
+
+
+def giveback_cells_v1(day, g):
+    return "%s,%d,%.2f,%.2f,%.2f,%d,%.2f" % (day, g["n"], g["giveback"], g["peak_open"], g["kept"], g["g2r_n"],
+                                            g["g2r_usd"])
+
+
+def giveback_cells_new(g):
+    return "%s,%.2f,%.2f,%s,%d,%.2f" % (_pct(g["pct"]), g["x_giveback"], g["x_peak_open"], _pct(g["x_pct"]),
+                                        g["x_g2r_n"], g["x_g2r_usd"])
+
+
+def migrate_giveback(path):
+    """v1.1 — a giveback.csv on the seven-column header gains the six new columns, empty, every row kept as it was.
+    Any other header that is not the current one is refused (upsert's rule)."""
+    if not os.path.exists(path):
+        return False
+    lines = open(path).read().splitlines()
+    if not lines or lines[0] != GIVEBACK_HDR_V1:
+        return False
+    extra = "," * (GIVEBACK_HDR.count(",") - GIVEBACK_HDR_V1.count(","))
+    tmp = path + ".tmp"
+    with open(tmp, "w") as fh:
+        fh.write(GIVEBACK_HDR + "\n")
+        for l in lines[1:]:
+            if l and l.split(",", 1)[0][:1].isdigit():
+                fh.write(l + extra + "\n")
+    os.replace(tmp, path)
+    print("  giveback.csv: migrated to the v1.1 header (six columns appended, %d rows kept)" % (len(lines) - 1))
+    return True
 
 
 def cmd_giveback(day, write=True):
@@ -297,8 +359,11 @@ def cmd_giveback(day, write=True):
     if rows and "mfe_premium" not in rows[0]:
         raise SystemExit("review_kit: %s has no mfe_premium column - run `review_kit.py trades %s` first" % (path, day))
     g = giveback(day, rows)
-    print("%s: n=%d giveback $%.2f of a $%.2f peak open profit, realized on those $%.2f; green-to-red %d for $%.2f"
-          % (day, g["n"], g["giveback"], g["peak_open"], g["kept"], g["g2r_n"], g["g2r_usd"]))
+    print("%s: n=%d giveback $%.2f of a $%.2f peak open profit (%s%%), realized on those $%.2f; green-to-red %d for $%.2f"
+          % (day, g["n"], g["giveback"], g["peak_open"], _pct(g["pct"]) or "n/a", g["kept"], g["g2r_n"],
+             g["g2r_usd"]))
+    print("  without PARK: giveback $%.2f of $%.2f (%s%%); green-to-red %d for $%.2f"
+          % (g["x_giveback"], g["x_peak_open"], _pct(g["x_pct"]) or "n/a", g["x_g2r_n"], g["x_g2r_usd"]))
     by = {}
     for r in g["rows"]:
         by.setdefault(r["strat"], [0, 0.0])
@@ -307,10 +372,113 @@ def cmd_giveback(day, write=True):
     print("  by setup: " + "; ".join("%s $%.0f (n %d)" % (k, v[1], v[0]) for k, v in
                                      sorted(by.items(), key=lambda kv: -kv[1][1])))
     if write:
-        upsert(os.path.join(REVIEWS, "giveback.csv"), day, GIVEBACK_HDR, [
-            "%s,%d,%.2f,%.2f,%.2f,%d,%.2f" % (day, g["n"], g["giveback"], g["peak_open"], g["kept"], g["g2r_n"],
-                                              g["g2r_usd"])])
+        gp = os.path.join(REVIEWS, "giveback.csv")
+        migrate_giveback(gp)
+        upsert(gp, day, GIVEBACK_HDR, [giveback_cells_v1(day, g) + "," + giveback_cells_new(g)])
     return g
+
+
+# ── hunt by side (v1.1) ─────────────────────────────────────────────────────────────────────────────────────────────
+def _trade_files(cut):
+    return [f for f in sorted(glob.glob(os.path.join(REVIEWS, "trades", "20*.csv")))
+            if WINDOW_START <= os.path.basename(f)[:10] <= cut]
+
+
+def hunt_rows(cut):
+    """-> [{day, side, pnl, fee, est}] for every closed LiquidityHunt trade 10-26..cut, side call (long) / put (short)."""
+    out = []
+    for f in _trade_files(cut):
+        day = os.path.basename(f)[:10]
+        for r in csv.DictReader(open(f)):
+            if r.get("strategy") != HUNT or r.get("pnl_usd") in (None, "") or r.get("sym") in OTV4TEST_SYMS:
+                continue
+            d = (r.get("direction") or "").lower()
+            side = "call" if d in ("long", "call") else "put" if d in ("short", "put") else None
+            if side is None:
+                raise SystemExit("review_kit: %s %s has direction %r - neither long nor short" % (f, r.get("trade_id"),
+                                                                                                    d))
+            if r.get("fee") not in (None, ""):
+                fee, est = float(r["fee"]), False
+            else:
+                fee, est = float(r["contracts"]) * (FEE_EST_SPX if r.get("sym") == "SPX" else FEE_EST), True
+            out.append(dict(day=day, side=side, pnl=float(r["pnl_usd"]), fee=fee, est=est))
+    return out
+
+
+def _agg(xs):
+    n = len(xs)
+    net = sum(x["pnl"] for x in xs)
+    return dict(n=n, net=net, win=(100.0 * sum(1 for x in xs if x["pnl"] > 0) / n if n else None),
+                ev=(net / n if n else None), fees=sum(x["fee"] for x in xs),
+                fees_est=sum(x["fee"] for x in xs if x["est"]))
+
+
+def hunt(day):
+    day = _day(day)
+    rows = hunt_rows(day)
+    res = {}
+    for side in ("call", "put"):
+        res[side] = (_agg([x for x in rows if x["side"] == side and x["day"] == day]),
+                     _agg([x for x in rows if x["side"] == side]))
+    return res
+
+
+def hunt_lines(day, res):
+    def f(v):
+        return "" if v is None else "%.2f" % v
+    out = []
+    for side in ("call", "put"):
+        a, c = res[side]
+        out.append("%s,%s,%d,%.2f,%s,%s,%.2f,%.2f,%d,%.2f,%s,%s,%.2f,%.2f" % (
+            day, side, a["n"], a["net"], f(a["win"]), f(a["ev"]), a["fees"], a["fees_est"],
+            c["n"], c["net"], f(c["win"]), f(c["ev"]), c["fees"], c["fees_est"]))
+    return out
+
+
+def cmd_hunt(day, write=True):
+    day = _day(day)
+    res = hunt(day)
+    for side in ("call", "put"):
+        a, c = res[side]
+        print("%s Hunt %-4s day: n=%d net %+.2f win %s%% EV %s | window: n=%d net %+.2f win %s%% EV %s | fees beside "
+              "%.2f (window %.2f, est %.2f)" % (day, side, a["n"], a["net"], _pct(a["win"]) or "n/a",
+                                                  _pct(a["ev"]) or "n/a", c["n"], c["net"], _pct(c["win"]) or "n/a",
+                                                  _pct(c["ev"]) or "n/a", a["fees"], c["fees"], c["fees_est"]))
+    if write:
+        upsert(os.path.join(REVIEWS, "hunt_side.csv"), day, HUNT_HDR, hunt_lines(day, res))
+    return res
+
+
+# ── backfill (v1.1) ─────────────────────────────────────────────────────────────────────────────────────────────────
+def cmd_backfill(frm, to):
+    frm, to = _day(frm), _day(to)
+    gp = os.path.join(REVIEWS, "giveback.csv")
+    migrate_giveback(gp)
+    rec = {}
+    if os.path.exists(gp):
+        for l in open(gp).read().splitlines()[1:]:
+            if l and l[:1].isdigit():
+                rec[l.split(",", 1)[0]] = l
+    mism = []
+    days = [os.path.basename(f)[:10] for f in _trade_files(to) if os.path.basename(f)[:10] >= frm]
+    for day in days:
+        rows = list(csv.DictReader(open(os.path.join(REVIEWS, "trades", day + ".csv"))))
+        g = giveback(day, rows)
+        mine = giveback_cells_v1(day, g)
+        old = rec.get(day)
+        if old:
+            v1 = ",".join(old.split(",")[:GIVEBACK_HDR_V1.count(",") + 1])
+            if v1 != mine:
+                mism.append((day, v1, mine))
+                print("  MISMATCH %s giveback: recorded %s | recomputed %s (recorded kept)" % (day, v1, mine))
+        else:
+            v1 = mine
+        upsert(gp, day, GIVEBACK_HDR, [v1 + "," + giveback_cells_new(g)])
+        upsert(os.path.join(REVIEWS, "hunt_side.csv"), day, HUNT_HDR, hunt_lines(day, hunt(day)))
+        print("  %s: giveback ex-PARK %s%% of %s%%; hunt rows written" % (day, _pct(g["x_pct"]) or "n/a",
+                                                                     _pct(g["pct"]) or "n/a"))
+    print("backfill %s..%s: %d day(s), %d giveback mismatch(es)" % (frm, to, len(days), len(mism)))
+    return days, mism
 
 
 def main(argv=None):
@@ -337,6 +505,12 @@ def main(argv=None):
         return 0
     if cmd == "giveback" and len(rest) == 1:
         cmd_giveback(rest[0])
+        return 0
+    if cmd == "hunt" and len(rest) == 1:
+        cmd_hunt(rest[0])
+        return 0
+    if cmd == "backfill" and len(rest) == 2:
+        cmd_backfill(rest[0], rest[1])
         return 0
     if cmd == "upsert" and len(rest) == 3:
         cmd_upsert(rest[0], rest[1], rest[2])

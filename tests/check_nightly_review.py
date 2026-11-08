@@ -1,6 +1,16 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_nightly_review.py  v1.0
+day_trader_pro/tests/check_nightly_review.py  v1.1
+v1.1  2026-11-07  dtp r525 / RPT.37 — GIVEBACK WITHOUT PARK, AND HUNT BY CALL AND PUT (tools/review_kit.py v1.1).
+  N9  giveback without PARK on the fixture (the hand-computed ex-PARK giveback, peak open, share and green-to-red
+      beside the overall); a seven-column giveback.csv is migrated in place (every old row and cell kept, six
+      columns appended) and the day's row is written with all thirteen
+  N10 hunt DAY: LiquidityHunt split long -> call, short -> put; the day and the window to date (n, net, win %, EV a
+      trade); fees BESIDE (never inside EV), the estimate counted in fees_est; other setups and OTV4TEST rows
+      excluded; an unknown direction refuses; upserts hunt_side.csv, a re-run never double-appends
+  N11 backfill FROM TO: the recorded giveback cells are never rewritten (a recomputed cell that differs is a printed
+      MISMATCH), the new cells are appended, the hunt rows are written; a second run changes nothing; the prompt
+      asks for both tracks
 v1.0  2026-11-07  dtp r524 / RPT.36 — THE NIGHTLY REVIEW RUNS FROM A SYSTEMD TIMER (tools/nightly_review.sh,
       tools/review_kit.py, tools/dtp-nightly-review{,-check}.{service,timer}, tools/install_nightly_review.sh).
   N1  the four units pass `systemd-analyze verify`; each service's ExecStart is the landed nightly_review.sh
@@ -290,6 +300,90 @@ inst_units = re.findall(r"dtp-nightly-review[\w.-]*\.(?:service|timer)", inst.sp
 bn = subprocess.run(["bash", "-n", os.path.join(TOOLS, "install_nightly_review.sh")]).returncode
 ck("N8", not miss and sorted(inst_units) == sorted(UNITS) and bn == 0,
    "prompt missing=%s installer units=%s bash -n rc=%d" % (miss, inst_units, bn))
+
+# ── N9 ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
+gbp = os.path.join(fx, "giveback.csv")
+with open(gbp, "w") as fh:
+    fh.write(K.GIVEBACK_HDR_V1 + "\n2026-11-04,25,6334.00,16564.50,5409.00,8,-4821.50\n")
+g9 = K.cmd_giveback("2026-11-05", write=True)
+gl = read(gbp).splitlines()
+# ex PARK: AMD only - giveback 100, peak open 300 (33.33%), no green-to-red; overall 600 of 800 = 75%
+n9 = (abs(g9["x_giveback"] - 100) < 1e-6 and abs(g9["x_peak_open"] - 300) < 1e-6 and abs(g9["x_pct"] - 100 / 3.0) < 1e-6
+      and g9["x_g2r_n"] == 0 and abs(g9["pct"] - 75.0) < 1e-6
+      and gl[0] == K.GIVEBACK_HDR and gl[0].startswith(K.GIVEBACK_HDR_V1 + ",")
+      and gl[1] == "2026-11-04,25,6334.00,16564.50,5409.00,8,-4821.50,,,,,,"
+      and gl[2] == "2026-11-05,2,600.00,800.00,-800.00,1,-1000.00,75.00,100.00,300.00,33.33,0,0.00"
+      and all(l.count(",") == K.GIVEBACK_HDR.count(",") for l in gl))
+ck("N9", n9, "ex-PARK %.0f of %.0f (%.2f%%) vs overall %.2f%%; file=%s" % (g9["x_giveback"], g9["x_peak_open"],
+                                                                         g9["x_pct"] or -1, g9["pct"] or -1, gl[1:]))
+
+# ── N10 ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+fx2 = os.path.join(TMP, "fx2")
+os.makedirs(os.path.join(fx2, "trades"))
+shutil.copytree(os.path.join(fx, "scripts"), os.path.join(fx2, "scripts"))
+hrows = [  # day, sym, strategy, direction, contracts, pnl, fee
+    ("2026-11-04", "SPX", "LiquidityHunt", "long", 1, 500.0, "3.00"),
+    ("2026-11-04", "AMD", "LiquidityHunt", "short", 2, -100.0, ""),       # est 2 x 1.25 = 2.50
+    ("2026-11-05", "QQQ", "LiquidityHunt", "long", 1, -50.0, "1.50"),
+    ("2026-11-05", "QQQ", "LiquidityHunt", "short", 1, 80.0, "1.00"),
+    ("2026-11-05", "SPX", "LiquidityHunt", "short", 1, 20.0, ""),        # est 2.47
+    ("2026-11-05", "AMD", "RunawayContinuation", "long", 1, 999.0, "1.00"),
+    ("2026-11-05", "AAL", "LiquidityHunt", "long", 1, 777.0, "1.00"),     # OTV4TEST
+]
+for day in ("2026-11-04", "2026-11-05"):
+    with open(os.path.join(fx2, "trades", day + ".csv"), "w", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=K.TRADE_COLS)
+        w.writeheader()
+        for i, (d, s_, st_, dr, c, p_, fee) in enumerate(hrows):
+            if d == day:
+                w.writerow(dict(sym=s_, trade_id="h%d" % i, strategy=st_, direction=dr, contracts=c, entry_premium=1,
+                                exit_premium=1, pnl_usd=p_, entry_time=d + "T09:40:00-05:00",
+                                exit_time=d + "T09:45:00-05:00", exit_reason="x", fee=fee, mfe_premium=1))
+K.REVIEWS = fx2
+h = K.cmd_hunt("2026-11-05", write=True)
+K.cmd_hunt("2026-11-05", write=True)
+hl = read(os.path.join(fx2, "hunt_side.csv")).splitlines()
+dc, cc = h["call"]
+dp, cp = h["put"]
+n10 = (dc["n"] == 1 and dc["net"] == -50 and dc["win"] == 0 and dc["ev"] == -50 and abs(dc["fees"] - 1.5) < 1e-9
+       and cc["n"] == 2 and cc["net"] == 450 and cc["win"] == 50 and cc["ev"] == 225 and abs(cc["fees"] - 4.5) < 1e-9
+       and dp["n"] == 2 and dp["net"] == 100 and dp["win"] == 100 and abs(dp["fees_est"] - 2.47) < 1e-9
+       and cp["n"] == 3 and cp["net"] == 0 and abs(cp["ev"]) < 1e-9 and abs(cp["fees"] - 5.97) < 1e-9
+       and abs(cp["fees_est"] - 4.97) < 1e-9 and hl[0] == K.HUNT_HDR and len(hl) == 3
+       and hl[1] == "2026-11-05,call,1,-50.00,0.00,-50.00,1.50,0.00,2,450.00,50.00,225.00,4.50,0.00"
+       and hl[2] == "2026-11-05,put,2,100.00,100.00,50.00,3.47,2.47,3,0.00,66.67,0.00,5.97,4.97")
+with open(os.path.join(fx2, "trades", "2026-11-06.csv"), "w", newline="") as fh:
+    w = csv.DictWriter(fh, fieldnames=K.TRADE_COLS)
+    w.writeheader()
+    w.writerow(dict(sym="QQQ", trade_id="hx", strategy="LiquidityHunt", direction="sideways", contracts=1,
+                    entry_premium=1, exit_premium=1, pnl_usd=1, entry_time="2026-11-06T09:40:00-05:00",
+                    exit_time="2026-11-06T09:45:00-05:00", exit_reason="x", fee="", mfe_premium=1))
+try:
+    K.hunt("2026-11-06")
+    bad_dir = False
+except SystemExit:
+    bad_dir = True
+os.remove(os.path.join(fx2, "trades", "2026-11-06.csv"))
+ck("N10", n10 and bad_dir, "call day %s window %s | put day %s window %s | rows=%d unknown direction refused=%s"
+   % ((dc["n"], dc["net"]), (cc["n"], cc["net"], cc["ev"]), (dp["n"], dp["net"]), (cp["n"], cp["net"], cp["fees"]),
+      len(hl) - 1, bad_dir))
+
+# ── N11 ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+gb2 = os.path.join(fx2, "giveback.csv")
+with open(gb2, "w") as fh:   # 11-04 recorded with a DIFFERENT figure than the recompute: it must be kept
+    fh.write(K.GIVEBACK_HDR_V1 + "\n2026-11-04,2,1.00,2.00,3.00,4,5.00\n")
+days11, mism11 = K.cmd_backfill("2026-10-26", "2026-11-05")
+b1 = read(gb2)
+h1 = read(os.path.join(fx2, "hunt_side.csv"))
+K.cmd_backfill("2026-10-26", "2026-11-05")
+gl2 = b1.splitlines()
+n11 = (days11 == ["2026-11-04", "2026-11-05"] and [m[0] for m in mism11] == ["2026-11-04"]
+       and gl2[1].startswith("2026-11-04,2,1.00,2.00,3.00,4,5.00,") and gl2[1].count(",") == K.GIVEBACK_HDR.count(",")
+       and gl2[2].startswith("2026-11-05,") and len(gl2) == 3
+       and read(gb2) == b1 and read(os.path.join(fx2, "hunt_side.csv")) == h1 and len(h1.splitlines()) == 5
+       and "python $K hunt DAY" in pr and "without PARK" in pr and "hunt_side.csv" in pr)
+ck("N11", n11, "days=%s mismatches=%s kept=%s idempotent=%s prompt=%s" % (
+    days11, [m[0] for m in mism11], gl2[1][:34], read(gb2) == b1, "python $K hunt DAY" in pr))
 
 shutil.rmtree(TMP, ignore_errors=True)
 print()

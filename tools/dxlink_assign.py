@@ -1,6 +1,16 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/dxlink_assign.py — v1.0
+day_trader_pro/tools/dxlink_assign.py — v1.1
+v1.1  2026-11-07  dtp r525 / FEED.15b — THE ASSIGNMENT GOES LIVE, DELIVERED AS EACH BOX COMES UP. The operator,
+      2026-11-07: "Yes" to switching it on (and "Try not to suggest 'log only' as the proposed fix"). The timer moves
+      from 09:17 to 09:16 ET and the service runs --apply --until 09:25. A box that is stopped cannot be written to
+      (the fleet sleeps until the 09:15 wake, orchestrator.py ec2ops.start), so a pre-wake run would find no running
+      box and write nothing: the file is delivered AFTER the wake, and OTV5 r74 candle_feed reads it on its ~15 s
+      flush cadence and switches to it once before ASSIGN_SWITCH_BY_ET 09:27 (PlannedNodeSwitch, 1-5 s, pre-open).
+      run_window() repeats the pass every --every seconds (20) until every running fleet box has its file or the
+      --until deadline: a box whose ssh is not up yet, or that reaches running late, is planned and written on a
+      later pass; a box already written keeps its node (plan(pinned=), counted first, so it never moves twice) and is
+      not written again. A non-trading day writes nothing. One outbox line at the end. Same NEVERs as v1.0.
 v1.0  2026-11-04  dtp r523 / FEED.15 — CONTROL ASSIGNS EACH BOX ITS DXLINK NODE BEFORE THE OPEN.
       The operator, 2026-11-02: "if we have control over the connections, then spread them out"; "Yes, connect to a
       known new server & if we can probe to spread out our connections prior to the open, it might be worth looking
@@ -32,8 +42,10 @@ file. The file is ignored by the box when it is for another day or symbol, older
     venv/bin/python tools/dxlink_assign.py            # dry run: the plan, nothing written
     venv/bin/python tools/dxlink_assign.py --apply    # write each running box's assignment
 
-Proposed schedule (NOT installed): 09:17 ET weekdays, after the 09:15 wake (tools/dtp-dxlink-assign.{service,timer};
-the service ships with --dry-run until the operator has read a morning of its plans, like the triage).
+    venv/bin/python tools/dxlink_assign.py --apply --until 09:25    # the morning service: repeat until every box has it
+
+Schedule (tools/dtp-dxlink-assign.{service,timer}, installed by tools/install_dxlink_assign.sh): 09:16 ET weekdays,
+after the 09:15 wake, --apply --until 09:25 (v1.1; v1.0 shipped 09:17 --dry-run).
 """
 import argparse
 import base64
@@ -50,7 +62,8 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 sys.path.insert(0, ROOT)
 
-__version__ = "1.0"
+__version__ = "1.1"
+EVERY_S = 20
 
 ET = ZoneInfo("America/New_York")
 STATUS_FRESH_S = 15 * 60
@@ -108,19 +121,26 @@ def _tagged(text, tag):
 
 
 # ── the plan (pure) ───────────────────────────────────────────────────────────────────────────────────────
-def plan(boxes, nodes):
+def plan(boxes, nodes, pinned=None):
     """boxes: [{"sym", "open" (int|None), "node" (ip|None)}]; nodes: the up nodes. -> ({sym: node}, cap).
 
     Holding (open > 0) or unknown (None) boxes first, then flat ones, each in symbol order. A box already on an up
-    node keeps it while that node is under the cap; else the least-loaded node (ties in sorted node order)."""
+    node keeps it while that node is under the cap; else the least-loaded node (ties in sorted node order).
+    v1.1: pinned {sym: node} - boxes already written this morning keep their node and count toward its load first,
+    so a later pass never moves a box twice."""
     nodes = sorted(set(n for n in nodes if n))
     if not nodes or not boxes:
         return {}, 0
     cap = int(math.ceil(len(boxes) / float(len(nodes))))
     load = {n: 0 for n in nodes}
-    order = sorted(boxes, key=lambda b: (0 if (b.get("open") is None or (b.get("open") or 0) > 0) else 1,
-                                         str(b.get("sym"))))
     out = {}
+    syms = {b["sym"] for b in boxes}
+    for sym, n in sorted((pinned or {}).items()):
+        if sym in syms and n in load:
+            out[sym] = n
+            load[n] += 1
+    order = sorted((b for b in boxes if b["sym"] not in out),
+                   key=lambda b: (0 if (b.get("open") is None or (b.get("open") or 0) > 0) else 1, str(b.get("sym"))))
     for b in order:
         cur = b.get("node")
         if cur in load and load[cur] < cap:
@@ -178,18 +198,27 @@ def write(box, node, now, ssh_run=None):
     return bool(rc == 0 and back.get("ok") and back.get("node") == node and back.get("symbol") == box["sym"])
 
 
-def run(apply=False, now=None, boxes=None, status=None, nodes=None, ssh_run=None, enqueue=None):
+def resolve_nodes(status=None, now=None):
     now = now or time.time()
+    if status is None:
+        import dxlink_probe as P
+        status = P.load_status()
+    nodes = up_nodes(status, now)
     if nodes is None:
-        if status is None:
-            import dxlink_probe as P
-            status = P.load_status()
-        nodes = up_nodes(status, now)
-        if nodes is None:
-            print("[assign] probe status stale or absent - probing now (read-only)")
-            nodes = probe_now()
+        print("[assign] probe status stale or absent - probing now (read-only)")
+        nodes = probe_now()
+    return nodes
+
+
+def run(apply=False, now=None, boxes=None, status=None, nodes=None, ssh_run=None, enqueue=None, done=None):
+    """One pass. done: {sym: node} already written this morning (v1.1) - those boxes are planned at that node (so
+    they keep it) and not written again."""
+    now = now or time.time()
+    done = done or {}
+    if nodes is None:
+        nodes = resolve_nodes(status, now)
     boxes = observe() if boxes is None else boxes
-    picks, cap = plan(boxes, nodes)
+    picks, cap = plan(boxes, nodes, pinned=done)
     if not picks:
         print("[assign] nothing to assign (%d up node(s), %d running box(es)) - nothing written"
               % (len(nodes), len(boxes)))
@@ -197,6 +226,8 @@ def run(apply=False, now=None, boxes=None, status=None, nodes=None, ssh_run=None
     wrote = []
     for b in sorted(boxes, key=lambda x: x["sym"]):
         n = picks[b["sym"]]
+        if b["sym"] in done and done[b["sym"]] == n:
+            continue
         tag = "keeps" if b.get("node") == n else "moves from %s" % (b.get("node") or "unknown")
         if apply:
             ok = write(b, n, now, ssh_run=ssh_run)
@@ -211,7 +242,7 @@ def run(apply=False, now=None, boxes=None, status=None, nodes=None, ssh_run=None
             % ("written" if apply else "planned (dry run)", len(picks), len(nodes), cap,
                ", ".join("%s x%d" % kv for kv in per.items())))
     print("[assign] " + line)
-    if apply and wrote:
+    if apply and wrote and enqueue is not False:
         if enqueue is None:
             import feed_triage
             enqueue = feed_triage.enqueue
@@ -219,12 +250,74 @@ def run(apply=False, now=None, boxes=None, status=None, nodes=None, ssh_run=None
     return 0, picks, wrote
 
 
+def _hm_epoch(hm, now):
+    h, m = (int(x) for x in hm.split(":"))
+    d = datetime.fromtimestamp(now, ET)
+    return d.replace(hour=h, minute=m, second=0, microsecond=0).timestamp()
+
+
+def run_window(apply=True, until="09:25", every=EVERY_S, clock=time.time, sleep=time.sleep, observe_fn=None,
+               ssh_run=None, enqueue=None, status=None, nodes=None, expected=None):
+    """v1.1 — repeat run() every `every` s until every running fleet box (and every `expected` symbol, the tagged
+    fleet) has today's file, or the `until` ET deadline. The nodes are resolved once. One outbox line at the end."""
+    observe_fn = observe_fn or observe
+    start = clock()
+    deadline = _hm_epoch(until, start)
+    if nodes is None:
+        nodes = resolve_nodes(status, start)
+    if expected is None:
+        try:
+            import instance_registry
+            expected = sorted(instance_registry.fleet_members())
+        except Exception:                                                   # noqa: BLE001
+            expected = None
+    done, passes, picks = {}, 0, {}
+    while True:
+        passes += 1
+        boxes = observe_fn()
+        _rc, picks, wrote = run(apply=apply, now=clock(), boxes=boxes, nodes=nodes, ssh_run=ssh_run,
+                                enqueue=False, done=done)
+        for s in wrote:
+            done[s] = picks[s]
+        want = set(expected or []) | {b["sym"] for b in boxes}
+        missing = sorted(want - set(done)) if apply else []
+        if not apply or not nodes or not missing or clock() + every > deadline:
+            break
+        print("[assign] pass %d: %d written, waiting on %s - next pass in %ds" % (passes, len(done),
+                                                                                  " ".join(missing), every))
+        sleep(every)
+    per = {n: sum(1 for v in done.values() if v == n) for n in sorted(set(done.values()))}
+    want = set(expected or []) | set(picks)
+    missing = sorted(want - set(done)) if apply else []
+    line = ("DXLINK ASSIGNMENT %s %d/%d box(es) over %d node(s) in %d pass(es): %s%s"
+            % ("written" if apply else "planned (dry run, nothing written)", len(done), len(want), len(nodes or []),
+               passes, ", ".join("%s x%d" % kv for kv in per.items()) or "-",
+               (" | NOT WRITTEN by %s: %s" % (until, " ".join(missing))) if missing else ""))
+    print("[assign] " + line)
+    if apply and done and enqueue is not False:
+        if enqueue is None:
+            import feed_triage
+            enqueue = feed_triage.enqueue
+        enqueue(line, source="dxlink_assign")
+    return (0 if not missing else 1), done, missing
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="control-assigned dxlink node per box (FEED.15)")
     ap.add_argument("--apply", action="store_true", help="write each running box's assignment (default: dry run)")
     ap.add_argument("--dry-run", action="store_true", help="the default; print the plan, write nothing")
+    ap.add_argument("--until", metavar="HH:MM", help="v1.1: repeat the pass until every box has its file or this ET "
+                                                     "time (the morning service: --apply --until 09:25)")
+    ap.add_argument("--every", type=int, default=EVERY_S, help="seconds between passes with --until (20)")
     a = ap.parse_args(argv)
-    return run(apply=a.apply and not a.dry_run)[0]
+    apply = a.apply and not a.dry_run
+    if a.until:
+        import market_calendar
+        if not market_calendar.is_trading_day():
+            print("[assign] not a trading day - nothing to assign")
+            return 0
+        return run_window(apply=apply, until=a.until, every=a.every)[0]
+    return run(apply=apply)[0]
 
 
 if __name__ == "__main__":
