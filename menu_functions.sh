@@ -1,4 +1,11 @@
-# day_trader_pro/menu_functions.sh — v1.77
+# day_trader_pro/menu_functions.sh — v1.78
+# v1.78 (2026-11-08) - dtp r528 / RSUITE.1. THE R SUITE RUNS OTV5'S TOOLS. `_r_tool` resolved
+#   ${DTP_OTV4_DIR:-~/options-trader-v4}/tests/<tool>, so all four R SUITE items (EXCURSIONS, Stop/TP sweep, R LEDGER,
+#   Exit replay) ran the FROZEN otv4 copies: the menu never got r75's streaming exit_replay (the otv4 copy is the one
+#   the 11-07 brief measured killed for memory on control) or stop_sweep's None-bound fix. It now resolves
+#   ${DTP_OTV5_DIR:-~/OTV5}/tests/<tool> - the live tree on control - and OTV5 r79 ports excursions.py (it had no OTV5
+#   copy). DTP_OTV4_DIR is no longer read here. A missing tool still says "path fault, not an empty day".
+#   Gate tests/check_r_tool_paths.py.
 # v1.77 (2026-10-25) - DEV.3. SERVICE STATUS READS THE UNITS AN OTV5 BOX RUNS: `optionsbot`, `candle-feed` and
 #   `s3-push.timer` (OTV5 deploy/: setup_ec2.sh installs optionsbot + candle-feed, install_s3_push_timer.sh the push
 #   timer). `shadow-observer` is not an OTV5 unit, so every box read `shadow=inactive` - a fault that does not exist.
@@ -1671,11 +1678,11 @@ mi_manifold_health_board() {
 }
 
 # Strategy notes: what each engine SAW   (one/all/some)
-_r_tool() {  # $1 = tool filename under otv4 tests/
-    local OTV4="${DTP_OTV4_DIR:-$HOME/options-trader-v4}"
-    local TOOL="$OTV4/tests/$1"
+_r_tool() {  # $1 = tool filename under OTV5 tests/ (v1.78: the live tree, never the frozen otv4 copy)
+    local OTV5="${DTP_OTV5_DIR:-$HOME/OTV5}"
+    local TOOL="$OTV5/tests/$1"
     if [ ! -f "$TOOL" ]; then
-        echo "  🔴 $TOOL missing — set DTP_OTV4_DIR (path fault, not an empty day)"
+        echo "  🔴 $TOOL missing — set DTP_OTV5_DIR (path fault, not an empty day)"
         pause; return
     fi
     # r313 — TWO PROMPTS, MATCHING `P&L from WAREHOUSE`. The single `A..B`
