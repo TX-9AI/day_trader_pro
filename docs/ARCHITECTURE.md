@@ -1,4 +1,21 @@
-# day_trader_pro/docs/ARCHITECTURE.md — v1.0 — 2026-07-29
+# day_trader_pro/docs/ARCHITECTURE.md — v1.1 — 2026-11-08 (body: the 2026-07-29 snapshot)
+
+> ⚠️ **SNAPSHOT BANNER (v1.1, dtp r531, Saturday brief 11-07 §4 item 9).** Sections 1-6 below are the **2026-07-29**
+> design note, kept as written because its seams-and-outage lesson still holds. Its layout is not today's: there is no
+> `~/options-trader-v3`, the bot is no longer "the same 13 boxes", and no tool regenerates this file, so it is
+> bannered rather than rewritten. **The current layout, read on control 2026-11-08:**
+>
+>     ~/day_trader_pro/      control plane, live      (github.com/TX-9AI/day_trader_pro)
+>     ~/OTV5/                the bot repo, live       (github.com/TX-9AI/OTV5) - every fleet box runs it
+>     ~/options-trader-v4/   FROZEN since otv4 r500   (github.com/TX-9AI/options_trader_v4) - history, docs
+>                            halves of dtp lands, and the Claude session's project folder; nothing trades from it
+>     ~/market-brief/        reporter                 (github.com/TX-9AI/market_brief_v1)
+>     ~/reviews/             nightly reviews, Saturday briefs, studies (not a repo)
+>
+> **The fleet:** 14 boxes (AMD AMZN AVGO CRM CVX GOOGL META NFLX NVDA QQQ SOFI SPX TSLA UNH), one engine (OTV5), each
+> with the checkout at `~/options-trader` (no suffix) on its own box; control drives them over ssh (`fleet.py`) and
+> the instance map. The S3 warehouse is the durable copy (`docs/WAREHOUSE_MAP.md`).
+
 
 **Day_Trader_Pro is the over-arching project.** `market_brief` and
 `options_trader` are modules of it, not peers of it. This document records the

@@ -1,10 +1,10 @@
-# THE SATURDAY BRIEF — spec v2.2
+# THE SATURDAY BRIEF — spec v2.3
 
 **Status: the operator's spec, as of 2026-10-31.** It replaces `options-trader-v4/handoffs/SATURDAY_BRIEF.md`
 and `SATURDAY_RUNBOOK.md` (2026-09-19). Those were written for seventeen boxes, two engines and ORB. The fleet is now
 one engine (OTV5) on the boxes the instance map names. This file is tracked in `day_trader_pro/docs/`. The
 timer's prompt is `tools/saturday_brief.prompt`, and `tests/check_saturday_brief.py` checks that the prompt matches
-this spec. Backlog row: **SAT.4** (OTV5 `docs/BACKLOG.md`, section H).
+this spec. Backlog row: **SAT.4** (OTV5 `docs/BACKLOG.md`, section I — "The box: install, services, menus and the agent"; v2.3 corrects "section H").
 
 ## THE OPERATOR'S RULINGS (2026-10-31, verbatim)
 
@@ -209,7 +209,7 @@ A box the scan could not read is listed by name as NOT READ. Its silence is neve
         --out <WORK>/sweep --prior <PRIOR_WORK>/sweep
 
 The sweep runs OTV5 and dtp (otv4 is frozen; add `--trees otv5,dtp,otv4` only if asked). Each checker gets its
-own scratch directory, with the lander's store paths (OTV5 `tools/land.sh:631`). The sweep writes `sweep.json`
+own scratch directory, with the lander's store paths (OTV5 `tools/land.sh`, the "r13 — CHECKS NEVER TOUCH THE BOX'S STORES" block; line 656-665 at OTV5 r81 — cited by its anchor because RETIRE.1 moved it once already). The sweep writes `sweep.json`
 and `diff.json`. Report: **NEWLY RED** (file and IDs; give the cause where you can read it), **GREEN THAT WAS
 RED**, and **STILL RED, IDS CHANGED**. Give the standing reds as one count. A newly red checker comes first in this
 section. A red flagged `[env]` is an interpreter fault, not a verdict. On the first run there is no prior: say so.

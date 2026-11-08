@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/test_fit_readiness_memory.py — v1.3
+# day_trader_pro/tests/test_fit_readiness_memory.py — v1.4
+# v1.4 (2026-11-08) — dtp r531 / FIT.3. M3 COUNTS FOUR SOURCE LINES, NOT THREE: fit_readiness v1.9 reads a fourth
+#      stream, `raw/trades`, because READY now floors CLOSED TRADES rather than fired signal rows. The property is
+#      unchanged (one SOURCE line per stream read, naming what ran); the trades line must be one of them.
 # v1.3 (2026-09-05) — dtp r286. M3 RE-DERIVED AGAIN, FOR THE SAME REASON IT
 #      MOVED AT r266: it asserted the LITERAL banner text "after collapse by
 #      (_rid, ts)", and r286 removed that sentence because it was FALSE — the
@@ -146,7 +149,8 @@ def main():
     # mattered: a per-stream SOURCE line exists, and it NAMES the rule that
     # actually ran rather than one the report assumed.
     check("M3 a SOURCE line still prints per stream, naming the real rule",
-          out.count("SOURCE: s3 [") == 3
+          out.count("SOURCE: s3 [") == 4
+          and "SOURCE: s3 [trades]" in out
           and ("collapsed on " in out or "NOT COLLAPSED" in out),
           out.split("SOURCE: s3 [")[1][:70] if "SOURCE: s3 [" in out else out[:70])
 

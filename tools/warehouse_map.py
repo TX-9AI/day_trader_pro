@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-# day_trader_pro/tools/warehouse_map.py — v1.3
+# day_trader_pro/tools/warehouse_map.py — v1.4
+# v1.4 (2026-11-08) — dtp r531 / DOC.37 (Saturday brief 11-07 §4 item 10). The map was 67 days old (1.12M objects,
+#   66.8 GB; tonight 4.73M, 518 GB) and listed derived_exit_counterfactual as ABSENT though 9-14 boxes push it daily.
+#   Regenerated. Five prefixes had no MEANING row and are now traced to their writers: raw/character_axis_sample
+#   (push_series ns=dseries, r270), raw/derived_level_event (push_derived, r128), fleet/dxlink_nodes (OTV5 s3_push v5.6
+#   share_dxlink_nodes, FEED.13), study/candles_1d (daily_candles_study/box_study_upload.py, a box-role study upload)
+#   and probe/fieldtest-20261025 (the 10-25 post-repoint probe PUTs a box role cannot delete). The source-of-truth line
+#   now names OTV5 warehouse/s3_push.py (otv4 is frozen). The listing already streams (warehouse_cost.scan_current
+#   aggregates per page, ~4 MB RSS over 4.7M keys), so no memory change was needed.
 # v1.3 (2026-10-11) — r479 / OPS.22 — zone "US/Eastern" -> "America/New_York": the legacy link tzdata 2026c moved out of the default install. Same rules; no behaviour change.
 # v1.2 (2026-09-01) — r242. CLI ONLY; the menu item is removed. Operator:
 #   "don't keep adding more shit to devtools. We run those as separate
@@ -75,8 +83,8 @@ GB = 1024 ** 3
 # is used, and guessing costs the operator a round trip that he is the one
 # running. The writer citation is what forces the read — an entry cannot be
 # added without opening the function that produces the objects.
-# ⚠️ SOURCE OF TRUTH: options_trader_v4 warehouse/s3_push.py, the `stages` list
-# in the drain (twelve stages), verified against the 2026-09-01 bucket scan.
+# ⚠️ SOURCE OF TRUTH: OTV5 warehouse/s3_push.py (v1.4; options_trader_v4 is frozen), the `stages` list in the
+# drain, verified against the 2026-11-08 bucket scan (first written against the 2026-09-01 scan).
 # ─────────────────────────────────────────────────────────────────────────────
 MEANING = {
     # ── the book ────────────────────────────────────────────────────────
@@ -139,6 +147,19 @@ MEANING = {
     "raw/derived_exit_counterfactual": ("push_derived",
                                         "flow exits that WOULD have fired; "
                                         "acts on nothing"),
+    "raw/derived_level_event": ("push_derived (DERIVED_TABLES, r128)",
+                                "level lifecycle events, NEVER_PURGE on the box"),
+    "raw/character_axis_sample": ("push_series ns=dseries (r270)",
+                                  "tape character axis samples, append-only on "
+                                  "(symbol, ts_epoch)"),
+    # ── outside raw/: fleet state, studies and one-off probes ───────────
+    "fleet/dxlink_nodes": ("share_dxlink_nodes (OTV5 s3_push v5.6, FEED.13)",
+                           "each box's dxlink node book, merged fleet-wide"),
+    "study/candles_1d": ("daily_candles_study/box_study_upload.py (box role)",
+                         "cleaned 1d candles for studies; never read by a bot"),
+    "probe/fieldtest-20261025": ("the 2026-10-25 post-repoint PUT probe",
+                                 "14 probe objects a box role cannot delete; "
+                                 "inert"),
     # ── JSONL trees ─────────────────────────────────────────────────────
     "raw/shadow": ("push_jsonl_tree <- ~/options-trader/data/shadow",
                    "sweep-precursor velocity primitives"),

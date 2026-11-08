@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/checker_sweep.py — v1.0
+day_trader_pro/tools/checker_sweep.py — v1.1
+v1.1  2026-11-08  dtp r531 / DOC.37 — comments only: the lander's store-path citation names the "r13 — CHECKS NEVER
+      TOUCH THE BOX'S STORES" block of OTV5 tools/land.sh instead of :631 (OTV5 r76 RETIRE.1 moved it to 656-665).
 v1.0  2026-10-31  dtp r520 / SAT.4 — THE SATURDAY CHECKER SWEEP, EACH CHECKER IN ITS OWN SCRATCH, DIFFED BY CHECK ID.
       The 2026-10-31 brief gave every OTV5 checker ONE shared scratch directory and ten of its thirteen OTV5 reds
       were that artefact (a trades.db created by one checker with another's schema); it also rebuilt the sweep and
       the ID diff by hand for the fourth week (its C4, C7). The lander gives each CHECK a fresh scratch
-      (OTV5 tools/land.sh:626-631); this does the same for every checker of every tree, and keeps the result as
+      (OTV5 tools/land.sh, the "r13 — CHECKS NEVER TOUCH THE BOX'S STORES" block); this does the same for every checker of every tree, and keeps the result as
       JSON so next week diffs file by file AND id by id.
 
   · interpreter: dtp's venv (numpy, pytz, tastytrade); a red under a bare python3 is an environment red.
@@ -51,7 +53,7 @@ ENV_RED = re.compile(r"ModuleNotFoundError|ImportError: No module named")
 
 
 def scratch_env(s: str) -> dict:
-    """The lander's per-CHECK store paths (OTV5 tools/land.sh:631) and dtp's artefact paths, all under s."""
+    """The lander's per-CHECK store paths (OTV5 tools/land.sh's r13 store block) and dtp's artefact paths, all under s."""
     os.makedirs(os.path.join(s, "tmp"), exist_ok=True)
     os.makedirs(os.path.join(s, "signal_journal"), exist_ok=True)
     env = {k: v for k, v in os.environ.items() if k not in ("LAND_ARCHIVE", "LAND_STAGE")}

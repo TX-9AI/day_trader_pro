@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/test_fit_rungs.py — v1.0
+# day_trader_pro/tests/test_fit_rungs.py — v1.1
+# v1.1 (2026-11-08) — dtp r531 / FIT.3. B2's record carries `trades` (202), because fit_readiness v1.9 floors
+#      CLOSED TRADES and fails closed on a record with none: without it B2 would pass on the unreadable-trades
+#      early return and never reach the dominance sentence it exists to check.
 # v1.0 (2026-09-04) — dtp r267. TWO THINGS THE FIT REPORT GOT WRONG, both
 #      visible in the 08-31..09-04 run and neither a data problem.
 #
@@ -55,10 +58,10 @@ def main():
     # dominates". Over entry rungs the top is 167/189 = 88% — still dominant
     # here, but now that is a TRUE statement about `entry_window`, which is a
     # gate you can act on, rather than about a management tick you cannot.
-    rec = {"fired": 202, "declined": 37412, "rungs": rungs}
+    rec = {"fired": 202, "declined": 37412, "rungs": rungs, "trades": 202}
     v, why = F.verdict(rec)
     check("B2 the verdict names an ENTRY rung, never 'manage'",
-          "manage" not in why, why[:70])
+          "manage" not in why and "ENTRY refusals" in why, why[:70])
 
     # ══ B3 — a strategy whose refusals are ALL management ═════════════════
     # IronCondorStrategy was 1,385 rungs, every one `manage`. Reporting that as

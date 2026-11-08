@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/fit_readiness.py — v1.8
+day_trader_pro/fit_readiness.py — v1.9
+v1.9  2026-11-08 — dtp r531 / FIT.3 (Saturday brief 11-07 D7, carried). 🔴 READY COUNTED SIGNAL ROWS AS IF THEY WERE TRADES. `verdict()` floored "fired" at MIN_FIRED, and `fired` is the number of `strategy_note` rows whose evaluation fired - one per TICK while a plan stays armed - so 11-02..11-06 printed LiquidityHunt READY on 4,383 "fired" against 32 closed trades and RunawayContinuation on 8,114 against 39. The outcome floor is about OUTCOMES, and an outcome is a trade. 🔑 THE FLOOR NOW READS CLOSED TRADES (MIN_TRADES 30), counted per strategy from the warehouse `trades` prefix (latest state per trade_id, OTV4TEST rows dropped through strategy_registry.resolve_lineage, ET entry day inside the window), or from the box's own trades.db beside --db. ⚠️ FAILS CLOSED: a trade source that cannot be read is NOT READY with the reason named, never READY on signal rows. ⚠️ NO COLUMN DROPPED: `fired` and `declined` still print, the fired line now says it counts signal rows, and a `trades` line is added. The operator, 2026-11-07: "Try not to suggest 'log only' as the proposed fix".
 v1.8  2026-09-20 — r397 / D3 — THE VOLUME FLOOR AND THE JUDGEMENT WERE APPLIED TO DIFFERENT POPULATIONS. `verdict()` tested `MIN_DECLINED` against `declined` — for ORBStrategy over 2026-09-14..09-18 that is **3,362, of which 3,265 are `manage`** — and then ran the dominance test over an ENTRY sample of **3**, emitting "100% of declines are 'entry_underwater'" while the report printed `declined 3362` two lines above. A factor of 1,120 between the number in the sentence and the number in the verdict, on the strategy carrying the operator's open question. It cost the 2026-09-20 brief a full reconciliation pass and came within one step of overturning a correct finding from the week before. 🔑 THE FLOOR NOW GUARDS THE POPULATION IT IS ABOUT (`total`, the entry-rung count the histogram has always printed correctly) and the message NAMES ITS DENOMINATOR. ⚠️ THE dtp-r267 SPLIT ITSELF IS UNTOUCHED AND CORRECT — the defect was the sentence and the floor, not the design. ⚠️ `management_rungs()` is extracted so `verdict()` and `render()` share one definition, and it DERIVES rather than subtracting: `rungs` is fed from strategy_note, gate_disposition AND plan_ledger, so `declined - entry_total` is not the management count.
 v1.7  2026-09-08 — dtp r322 / CND.1 — THE SAME r287 MISTAKE, IN THE SAME REVISION. `import ettime` sat inside this module's docstring, so `today_et()` at the bottom of `_dates()` raised NameError. Menu item 47 (FIT READINESS) would have died on use; it is run by hand rather than by timer, which is the only reason it was not noticed first. Moved to the import block and verified by execution.
 v1.6  2026-09-05 — dtp r287 / TZ.1 — the naive `today` here asked a UTC box and rolled at 20:00 ET (19:00 in winter), so a report run after that silently asked for TOMORROW and came back empty. It now goes through `ettime`, the one ET/UTC boundary.
@@ -146,7 +147,8 @@ import ettime                                            # noqa: E402
 
 # ⚠️ THE BAR IS DELIBERATELY CRUDE AND STATED OUT LOUD. These are not tuned
 # numbers — they are the point at which a human should LOOK, not a verdict.
-MIN_FIRED = 30            # below this, outcome stats are noise
+MIN_TRADES = 30           # closed trades; below this, outcome stats are noise (v1.9: was MIN_FIRED on signal rows)
+MIN_FIRED = MIN_TRADES    # the old name, kept for any reader; v1.9 floors TRADES, never signal rows
 MIN_DECLINED = 50         # below this, the decline surface is not populated
 MAX_RUNG_SHARE = 0.70     # one rung holding more than this = no surface
 
@@ -321,7 +323,76 @@ def _rows_warehouse(dates, cache):
     return src, notes
 
 
-def collect(src: dict, dates: list) -> dict:
+def _entry_day(rec) -> str:
+    """The ET session day a trade was ENTERED, from its ISO `entry_time` (UTC on every box)."""
+    raw = str((rec or {}).get("entry_time") or "").strip()
+    if not raw:
+        return ""
+    try:
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return raw[:10]
+    if dt.tzinfo is None:                      # an untagged stamp is the box's UTC
+        from datetime import timezone
+        dt = dt.replace(tzinfo=timezone.utc)
+    return ettime.et_day(dt.timestamp())
+
+
+def trade_counts(rows, dates):
+    """{strategy: n} CLOSED trades entered on an ET day in `dates`, OTV4TEST rows dropped. -> (counts, dropped).
+
+    🔑 v1.9 — THE POPULATION READY FLOORS. One row per trade_id (the caller collapses push states). The lineage rule
+    is strategy_registry.resolve_lineage, the same one every dtp rollup reads, so an OTV4TEST row (SOFI/AAL before
+    their OTV5 day) never counts toward an OTV5 setup's readiness.
+    """
+    import strategy_registry as SR
+    want, counts, dropped = set(dates), Counter(), 0
+    for r in rows:
+        if str(r.get("status") or "").lower() != "closed":
+            continue
+        day = _entry_day(r)
+        if day not in want:
+            continue
+        if SR.resolve_lineage(r, day) == SR.TEST:
+            dropped += 1
+            continue
+        counts[canon(r.get("strategy"))] += 1
+    return counts, dropped
+
+
+def _trades_warehouse(dates, s3=None):
+    """Closed-trade counts from raw/trades. -> (counts or None, note). None = unreadable, named."""
+    try:
+        s3 = s3 or wr._client()
+        objs = []
+        # ⚠️ `dt=` on raw/trades is the PUSH day (UTC): a close after 19:00 ET files under the next day.
+        last = datetime.strptime(dates[-1], "%Y-%m-%d").date() + timedelta(days=1)
+        for d in list(dates) + [last.isoformat()]:
+            objs.extend(wr.read_prefix(s3, "trades", d))
+        rows = wr.latest_per_trade(objs)
+    except Exception as exc:                                    # noqa: BLE001
+        return None, f"SOURCE: s3 [trades] — 🔴 UNREADABLE: {type(exc).__name__}: {exc}"
+    counts, dropped = trade_counts(rows, dates)
+    return counts, (f"SOURCE: s3 [trades] — {sum(counts.values())} closed trade(s) in the window"
+                    f", {dropped} OTV4TEST row(s) dropped")
+
+
+def _trades_sqlite(db):
+    """Closed-trade rows from the trades.db beside a --db derived store. -> (rows or None, note)."""
+    path = os.path.join(os.path.dirname(os.path.abspath(db)), "trades.db")
+    if not os.path.exists(path):
+        return None, f"SOURCE: {path} — 🔴 NO trades.db BESIDE --db (READY cannot be judged)"
+    try:
+        tc = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        tc.row_factory = sqlite3.Row
+        rows = [dict(r) for r in tc.execute("SELECT * FROM trades")]
+        tc.close()
+    except sqlite3.Error as exc:
+        return None, f"SOURCE: {path} [trades] — 🔴 UNREADABLE: {exc}"
+    return rows, f"SOURCE: {path} [trades] — {len(rows)} row(s)"
+
+
+def collect(src: dict, dates: list, trades=None) -> dict:
     """Per strategy: fired/declined rows, rung histogram, derived vectors.
 
     🔑 IT TAKES PLAIN DICTS AND KNOWS NOTHING ABOUT THE SOURCE. Both
@@ -344,7 +415,12 @@ def collect(src: dict, dates: list) -> dict:
     out = defaultdict(lambda: {
         "fired": 0, "declined": 0, "rungs": Counter(),
         "plans": Counter(), "vec_fired": defaultdict(lambda: array("d")),
-        "vec_declined": defaultdict(lambda: array("d"))})
+        "vec_declined": defaultdict(lambda: array("d")), "trades": None})
+    # 🔑 v1.9 — CLOSED TRADES PER STRATEGY, the population READY floors. `trades` is {strategy: n} from
+    # trade_counts(), or None when the trade source could not be read (verdict() then fails closed and says so).
+    if trades is not None:
+        for strat, n in trades.items():
+            out[canon(strat)]["trades"] = int(n)
     if not src:
         return out
 
@@ -386,6 +462,11 @@ def collect(src: dict, dates: list) -> dict:
         strat = canon(r.get("strategy"))   # dtp-r267
         if strat:
             out[strat]["plans"][r.get("terminal_reason") or "(live)"] += 1
+    if trades is not None:
+        # ⚠️ A STRATEGY SEEN ONLY IN THE DERIVED ROWS TRADED ZERO TIMES - a read source, not an unread one.
+        for strat in out:
+            if out[strat]["trades"] is None:
+                out[strat]["trades"] = 0
     return out
 
 
@@ -437,8 +518,16 @@ def management_rungs(rungs):
 def verdict(rec: dict) -> tuple:
     """(READY|NOT READY, reason). Coverage, not volume."""
     nf, nd = rec["fired"], rec["declined"]
-    if nf < MIN_FIRED:
-        return "NOT READY", f"only {nf} fired (need ~{MIN_FIRED} for outcomes)"
+    # 🔴 v1.9 — THE OUTCOME FLOOR READS CLOSED TRADES, NEVER SIGNAL ROWS. `fired` counts strategy_note rows whose
+    # evaluation fired - one per TICK while a plan stays armed - and printed Hunt READY on 4,383 against 32 trades.
+    nt = rec.get("trades")
+    if nt is None:
+        # ⚠️ FAILS CLOSED, BY NAME: no trade count is not zero trades, and it is never READY on signal rows.
+        return ("NOT READY", f"closed-trade count unreadable ({nf} fired signal row(s) are evaluations, "
+                             f"not trades; READY needs ~{MIN_TRADES} closed trades)")
+    if nt < MIN_TRADES:
+        return ("NOT READY", f"only {nt} closed trade(s) (need ~{MIN_TRADES} for outcomes; the {nf} fired "
+                             f"signal row(s) are evaluations, not trades)")
     # ⚠️ dtp-r267 — computed over ENTRY rungs only. Including `manage` made
     # every strategy look un-fittable for a reason that has nothing to do with
     # its entry gates.
@@ -482,7 +571,8 @@ def verdict(rec: dict) -> tuple:
                     f"should be")
     if len(_entry) < 2:
         return "NOT READY", "declines land on fewer than two distinct rungs"
-    return "READY", f"{nf} fired / {nd} declined across {len(rec['rungs'])} rungs"
+    return ("READY", f"{nt} closed trade(s) / {nf} fired signal row(s) / {nd} declined across "
+                     f"{len(rec['rungs'])} rungs")
 
 
 def render(data: dict, dates: list, only=None) -> str:
@@ -513,7 +603,9 @@ def render(data: dict, dates: list, only=None) -> str:
         L.append("─" * 74)
         L.append(f"    {v}: {why}")
         L.append("")
-        L.append(f"    fired    {rec['fired']:>6}")
+        _nt = rec.get("trades")
+        L.append(f"    trades   {('unread' if _nt is None else _nt):>6}   closed trades - the population READY floors")
+        L.append(f"    fired    {rec['fired']:>6}   signal rows (one per evaluation tick that fired), NOT trades")
         L.append(f"    declined {rec['declined']:>6}")
 
         _entry = entry_rungs(rec["rungs"])
@@ -582,10 +674,14 @@ def main(argv=None) -> int:
     _cache = None
     if a.db:
         src, notes = _rows_sqlite(a.db, dates)
+        _trows, _tnote = _trades_sqlite(a.db)
+        trades = None if _trows is None else trade_counts(_trows, dates)[0]
     else:
         import warehouse_cache as _wc
         _cache = _wc.WarehouseCache("fitready")
         src, notes = _rows_warehouse(dates, _cache)
+        trades, _tnote = _trades_warehouse(dates)
+    notes.append(_tnote)
     for n in notes:
         print("  " + n)
     print()
@@ -599,7 +695,7 @@ def main(argv=None) -> int:
               "for running this ON A BOX.")
         return 1
     try:
-        print(render(collect(src, dates), dates, a.setup))
+        print(render(collect(src, dates, trades), dates, a.setup))
     finally:
         if _cache is not None:
             _cache.close()
