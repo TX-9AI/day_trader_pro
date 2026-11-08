@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """
-tools/claude_boot.py  v1.2
+tools/claude_boot.py  v1.3
+v1.3  2026-11-08  r532 / OTV4DEP.1 — THE BOOT ALERT'S ADDRESS COMES FROM OTV5, NOT THE FROZEN TREE. `public_ip()`
+      ran the venv against ~/options-trader-v4 to import `notifications.alert_manager.public_ip`; OTV5 carries the
+      same function (r0 lineage, measured identical on control 2026-11-08: the venv import from OTV5 returned the
+      address), so the subprocess now puts ${DTP_OTV5_DIR:-~/OTV5} on its path. WORKDIR keeps ~/options-trader-v4 ON
+      PURPOSE: it is the Claude session's working directory, and Claude's project memory is keyed by that folder name;
+      nothing reads it as a code tree (tests/check_no_otv4_deps allow-lists it by name).
 v1.2  2026-10-04  r469 / OPS.66 — THE BOOT SESSION IS NAMED ✨1-REPORTER. Operator:
       "I want to make your OT_RC_NAME sticky. It should be ✨1-REPORTER."
       launch_cmd now passes `--remote-control '<RC_NAME>'` (OTV4TEST's launch
@@ -332,24 +338,24 @@ def launch_cmd(claude: str, mode: str, guarded: bool = False) -> str:
 def public_ip():
     """(ip, why) — the address to SSH to, or a NAMED absence.
 
-    🔑 otv4's `notifications.alert_manager.public_ip` (r387/OPS.20) IS THE ONE
+    🔑 v1.3 — OTV5's `notifications.alert_manager.public_ip` (otv4 r387/OPS.20, carried by the split) IS THE ONE
     DEFINITION and is reused rather than rewritten — [[GEX.2]] landed for
     exactly that mistake, a second implementation of a quantity production
     already computes. r387 verified this one against IMDSv2 on all fifteen
     boxes before it shipped.
-    🔴 BUT IT IS CALLED IN A SUBPROCESS, WITH otv4 AS THE CWD, AND THAT IS NOT
+    🔴 BUT IT IS CALLED IN A SUBPROCESS, WITH THE TRADING TREE (OTV5 since v1.3) ON ITS PATH, AND THAT IS NOT
     FUSSINESS. A plain import fails here: this runs with `day_trader_pro` as
     its working directory, `alert_manager` does `import config`, and **BOTH
-    repos carry a `config.py`** — so dtp's shadows otv4's and the import dies.
+    repos carry a `config.py`** — so dtp's shadows the trading tree's and the import dies.
     That is §3/[[OPS.11]]'s documented trap (`main.py` and `config.py` are
     ambiguous across the three checkouts under $HOME) reaching a new caller.
     Measured: the direct import raised ImportError from dtp's cwd and returned
-    the address correctly from otv4's.
+    the address correctly from the trading tree's (otv4 then, OTV5 measured 2026-11-08).
     ⚠️ BOUNDED AND NEVER RAISES — a boot alert must not hang on a network
     lookup, and a missing IP is NAMED rather than dropped (§0.5).
     """
-    otv4 = os.path.join(HOME, "options-trader-v4")
-    # 🔴 THE VENV INTERPRETER, NOT /usr/bin/python3 — MEASURED. otv4's
+    otv5 = os.environ.get("DTP_OTV5_DIR", os.path.join(HOME, "OTV5"))   # v1.3: was ~/options-trader-v4
+    # 🔴 THE VENV INTERPRETER, NOT /usr/bin/python3 — MEASURED. The trading tree's
     # `alert_manager` reaches `utils/time_utils.py`, which imports `pytz`, and
     # the system interpreter on control HAS NO pytz: the call dies
     # ModuleNotFoundError while the venv returns the address. That is
@@ -360,7 +366,7 @@ def public_ip():
                                  "python"), "-c",
                     "import sys;sys.path.insert(0,%r);"
                     "from notifications.alert_manager import public_ip as p;"
-                    "i,w=p();print(i or '');print(w or '')" % otv4],
+                    "i,w=p();print(i or '');print(w or '')" % otv5],
                    timeout=8)
     if rc != 0:
         return None, "lookup failed rc=%d" % rc

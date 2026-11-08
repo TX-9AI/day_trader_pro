@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/brief_sigint.py  v1.1
+day_trader_pro/tools/brief_sigint.py  v1.2
+v1.2  2026-11-08  dtp r532 / OTV4DEP.1 - THE ONE WEIGHTING RULE IS READ FROM OTV5. `load_composite` put
+      ~/options-trader-v4/tests on sys.path for `brief_bias_join`, which existed only in the frozen tree. OTV5 r82
+      ports that file byte-for-byte (tests/brief_bias_join.py v5.0), so the import now reads
+      ${DTP_OTV5_DIR:-~/OTV5}/tests and the board and the study still share ONE `composite_call`. DTP_OTV4_DIR no
+      longer moves it. A failed import still OMITS the SPX row and says so (no local copy).
 v1.1  2026-09-10  dtp r339 - SPX GETS A ROW. Operator: *"we cannot have our
       largest net symbol be silent on that brief."* market_brief's _NON_EQUITY
       never polls it, so the row is DERIVED from the thirteen constituents that
-      ARE scored, using `composite_call` IMPORTED from otv4's brief_bias_join -
+      ARE scored, using `composite_call` IMPORTED from brief_bias_join (otv4's then; OTV5's since v1.2) -
       the same function the study scores against the tape. A local copy would
       let the board advertise a signal nobody measured, so a failed import
       OMITS the row and says so rather than computing one here.
@@ -94,7 +99,7 @@ except Exception:                                               # noqa: BLE001
 
 DIR_MAP = {"BULLISH": "LONG", "BEARISH": "SHORT", "NEUTRAL": "NEUT"}
 
-OTV4_DIR = os.environ.get("DTP_OTV4_DIR", os.path.expanduser("~/options-trader-v4"))
+OTV5_DIR = os.environ.get("DTP_OTV5_DIR", os.path.expanduser("~/OTV5"))   # v1.2: was DTP_OTV4_DIR / ~/options-trader-v4
 
 
 def load_composite():
@@ -106,8 +111,9 @@ def load_composite():
     fails the SPX row is OMITTED and SAID SO — a silent local reimplementation
     is how the two drift.
     """
-    if OTV4_DIR not in sys.path:
-        sys.path.insert(0, os.path.join(OTV4_DIR, "tests"))
+    _tests = os.path.join(OTV5_DIR, "tests")
+    if _tests not in sys.path:                                  # v1.2: the v1.1 test compared the repo, not tests/
+        sys.path.insert(0, _tests)
     try:
         from brief_bias_join import composite_call, SPX_PROXY
         return composite_call, SPX_PROXY
@@ -207,8 +213,8 @@ def board(day, rows, floor=CONVICTION_FLOOR):
     if cc is None:
         L.append("⚠️ SPX: composite unavailable — brief_bias_join did not "
                  "import from")
-        L.append("   {} (set DTP_OTV4_DIR). NO SPX row rather than a "
-                 "locally-computed one.".format(OTV4_DIR))
+        L.append("   {} (set DTP_OTV5_DIR). NO SPX row rather than a "
+                 "locally-computed one.".format(OTV5_DIR))
     else:
         call, avg, k = cc(rows, floor, members)
         if not k:

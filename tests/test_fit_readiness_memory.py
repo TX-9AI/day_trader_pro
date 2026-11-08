@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/test_fit_readiness_memory.py — v1.4
+# day_trader_pro/tests/test_fit_readiness_memory.py — v1.5
+# v1.5 (2026-11-08) — dtp r532 / OTV4DEP.1. THE FIXTURE PLANTS A LIVE SETUP. Its 100,000 notes were "TrendCreditSpread",
+#      which fit_readiness v1.10 no longer lists (only strategy_registry's LIVE set is rendered; the operator, 2026-10-31:
+#      "don't list the retired strategies either"), so M2/M4 read a row that is now counted, not printed. The rows are
+#      "RunawayContinuation" now; the counts, the memory ceiling and the collapse are pinned exactly as before.
 # v1.4 (2026-11-08) — dtp r531 / FIT.3. M3 COUNTS FOUR SOURCE LINES, NOT THREE: fit_readiness v1.9 reads a fourth
 #      stream, `raw/trades`, because READY now floors CLOSED TRADES rather than fired signal rows. The property is
 #      unchanged (one SOURCE line per stream read, naming what ran); the trades line must be one of them.
@@ -74,7 +78,7 @@ def main():
             notes = []
             for i in range(10_000):
                 rid += 1
-                notes.append({"_rid": rid, "strategy": "TrendCreditSpread",
+                notes.append({"_rid": rid, "strategy": "RunawayContinuation",
                               "fired": 1 if i % 5 == 0 else 0,
                               "outcome": None if i % 5 == 0 else
                                          ("adx_floor" if i % 2 else "vwap"),
@@ -86,7 +90,7 @@ def main():
         for t in ("gate_disposition", "plan_ledger"):
             store[f"raw/derived_{t}/dt={d}/sym=QQQ/1.json"] = json.dumps(
                 {"symbol": "QQQ", "record": [
-                    {"_rid": i, "strategy": "TrendCreditSpread", "gate": "adx",
+                    {"_rid": i, "strategy": "RunawayContinuation", "gate": "adx",
                      "event": "BLOCKED", "terminal_reason": "EXPIRED"}
                     for i in range(50)]}).encode()
 

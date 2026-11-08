@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/check_fit_trades.py — v1.0
+# day_trader_pro/tests/check_fit_trades.py — v1.1
+# v1.1 (2026-11-08) — dtp r532 / OTV4DEP.1. T11: the report lists only strategy_registry's LIVE setups. A retired
+#   strategy (TrendCreditSpread) and a management plan (CreditRoll) with rows in the window are not named; one line
+#   counts them, names and rows, so nothing vanishes silently. The operator, 2026-10-31: "don't list the retired
+#   strategies either."
 # v1.0 (2026-11-08) — dtp r531 / FIT.3 (Saturday brief 11-07 D7). READY FLOORS CLOSED TRADES, NEVER SIGNAL ROWS.
 #   fit_readiness v1.8 floored `fired`, the count of strategy_note rows whose evaluation fired (one per tick while a
 #   plan stays armed), so 11-02..11-06 printed LiquidityHunt READY on 4,383 "fired" against 32 closed trades and
@@ -112,6 +116,18 @@ def main():
     check("T6 the report prints the trades line", "trades       12" in txt, "")
     check("T6b fired still prints, labelled as signal rows", "fired      4383" in txt and "NOT trades" in txt)
     check("T6c declined still prints", "declined   9000" in txt)
+
+    # ══ T11 — v1.10: only LIVE setups are listed; the rest are counted, never named ══════════════════════════
+    _blank = {"plans": Counter(), "vec_fired": {}, "vec_declined": {}}
+    txt11 = F.render({"LiquidityHunt": {**rec, **_blank},
+                      "TrendCreditSpread": {**rec, **_blank, "fired": 7, "declined": 3},
+                      "CreditRoll": {**rec, **_blank, "fired": 0, "declined": 5}}, days)
+    check("T11 a retired strategy and a management plan are not listed",
+          "TrendCreditSpread" not in txt11 and "CreditRoll" not in txt11, "")
+    check("T11b the live setup still is", "  LiquidityHunt" in txt11, "")
+    check("T11c the hidden names are COUNTED, with their rows",
+          "Not listed: 2 retired or non-strategy name(s) with 15 row(s)" in txt11,
+          txt11.split("Not listed:")[1][:70] if "Not listed:" in txt11 else "no count line")
 
     # ══ T7 — collect(): a read source gives 0 to a setup that never traded; an unread one leaves None ═════════
     src = {"strategy_note": [{"strategy": "Breakout", "fired": 1, "payload": "{}", "outcome": None}],

@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/fit_readiness.py — v1.9
+day_trader_pro/fit_readiness.py — v1.10
+v1.10 2026-11-08 — dtp r532 / OTV4DEP.1 (hygiene queue item 6). 🔴 THE REPORT LISTED RETIRED STRATEGIES. Old
+      gate_disposition and plan rows still carry names that no longer trade (TrendCreditSpread, and the CreditRoll
+      management plan), so 11-02..11-06 printed them as setups with 0 trades. The operator, 2026-10-31: "don't list the
+      retired strategies either." `render` now lists only strategy_registry's LIVE set; every other name with rows is
+      COUNTED in one closing line (how many names, how many rows), never named, so nothing is dropped silently.
+      `collect` and the verdict are unchanged; the decode maps that read old rows stay.
 v1.9  2026-11-08 — dtp r531 / FIT.3 (Saturday brief 11-07 D7, carried). 🔴 READY COUNTED SIGNAL ROWS AS IF THEY WERE TRADES. `verdict()` floored "fired" at MIN_FIRED, and `fired` is the number of `strategy_note` rows whose evaluation fired - one per TICK while a plan stays armed - so 11-02..11-06 printed LiquidityHunt READY on 4,383 "fired" against 32 closed trades and RunawayContinuation on 8,114 against 39. The outcome floor is about OUTCOMES, and an outcome is a trade. 🔑 THE FLOOR NOW READS CLOSED TRADES (MIN_TRADES 30), counted per strategy from the warehouse `trades` prefix (latest state per trade_id, OTV4TEST rows dropped through strategy_registry.resolve_lineage, ET entry day inside the window), or from the box's own trades.db beside --db. ⚠️ FAILS CLOSED: a trade source that cannot be read is NOT READY with the reason named, never READY on signal rows. ⚠️ NO COLUMN DROPPED: `fired` and `declined` still print, the fired line now says it counts signal rows, and a `trades` line is added. The operator, 2026-11-07: "Try not to suggest 'log only' as the proposed fix".
 v1.8  2026-09-20 — r397 / D3 — THE VOLUME FLOOR AND THE JUDGEMENT WERE APPLIED TO DIFFERENT POPULATIONS. `verdict()` tested `MIN_DECLINED` against `declined` — for ORBStrategy over 2026-09-14..09-18 that is **3,362, of which 3,265 are `manage`** — and then ran the dominance test over an ENTRY sample of **3**, emitting "100% of declines are 'entry_underwater'" while the report printed `declined 3362` two lines above. A factor of 1,120 between the number in the sentence and the number in the verdict, on the strategy carrying the operator's open question. It cost the 2026-09-20 brief a full reconciliation pass and came within one step of overturning a correct finding from the week before. 🔑 THE FLOOR NOW GUARDS THE POPULATION IT IS ABOUT (`total`, the entry-rung count the histogram has always printed correctly) and the message NAMES ITS DENOMINATOR. ⚠️ THE dtp-r267 SPLIT ITSELF IS UNTOUCHED AND CORRECT — the defect was the sentence and the floor, not the design. ⚠️ `management_rungs()` is extracted so `verdict()` and `render()` share one definition, and it DERIVES rather than subtracting: `rungs` is fed from strategy_note, gate_disposition AND plan_ledger, so `declined - entry_total` is not the management count.
 v1.7  2026-09-08 — dtp r322 / CND.1 — THE SAME r287 MISTAKE, IN THE SAME REVISION. `import ettime` sat inside this module's docstring, so `today_et()` at the bottom of `_dates()` raised NameError. Menu item 47 (FIT READINESS) would have died on use; it is run by hand rather than by timer, which is the only reason it was not noticed first. Moved to the import block and verified by execution.
@@ -593,10 +599,17 @@ def render(data: dict, dates: list, only=None) -> str:
               "  against a live tape.", "=" * 74]
         return "\n".join(L)
 
+    # v1.10 — only LIVE setups are listed (strategy_registry.status); the rest are counted below, never named.
+    import strategy_registry as SR
+    hidden_names, hidden_rows = 0, 0
     for strat in sorted(data):
         if only and only.lower() not in strat.lower():
             continue
         rec = data[strat]
+        if SR.status(strat) != SR.LIVE:
+            hidden_names += 1
+            hidden_rows += int(rec.get("fired") or 0) + int(rec.get("declined") or 0)
+            continue
         v, why = verdict(rec)
         L.append("─" * 74)
         L.append(f"  {strat}")
@@ -650,6 +663,9 @@ def render(data: dict, dates: list, only=None) -> str:
             L.append("")
             L.append("    Derived vector: not enough paired observations yet.")
         L.append("")
+    if hidden_names:
+        L.append(f"  Not listed: {hidden_names} retired or non-strategy name(s) with {hidden_rows} row(s) in this window"
+                 " (strategy_registry: not LIVE).")
     L.append("=" * 74)
     return "\n".join(L)
 

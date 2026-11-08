@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """
-tests/check_handoff_item.py  v1.4
+tests/check_handoff_item.py  v1.5
+v1.5  2026-11-08  dtp r532 / OTV4DEP.1 — H9d AND H8 FOLLOW gen_handoff v1.6 TO OTV5. H9d counts the GENESIS rows of the
+      ledger the handoff now cites (${DTP_OTV5_DIR:-~/OTV5}/docs/GENESIS.md, not the frozen tree's). H8 still pins that
+      open means the STATE cell, not the 🔴 severity mark: OTV5's state cell is the third column and its open state is
+      🔲, so the pin is on `cols[3]` being read as the state and on 🔲 selecting the open rows.
 v1.4  2026-09-20  r410 — H11, H11b, H12, H12b, H13 and H13b: THE TURNOVER'S
       OWN FIGURES, ITS CLOCK, AND THE TOOLS IT PRESCRIBES.
       🔴 H11 GENERALISES H9d, WHICH WAS WRITTEN FOR EXACTLY THIS AND NEVER
@@ -218,7 +222,7 @@ def main():
     # handoff is read by a thread with no way to know better. Anchored on the
     # ABSENCE of the stale literal AND on the emitted number agreeing with the
     # ledger, so a future hardcode cannot satisfy it.
-    _g_md = "/home/ubuntu/options-trader-v4/docs/GENESIS.md"
+    _g_md = os.path.join(os.environ.get("DTP_OTV5_DIR", os.path.expanduser("~/OTV5")), "docs", "GENESIS.md")   # v1.5
     _real = None
     if os.path.exists(_g_md):
         with open(_g_md, encoding="utf-8") as f:
@@ -267,7 +271,8 @@ def main():
     # H8 — open means the STATUS column. The first draft filtered on the 🔴
     # severity marker and listed long-closed rows as outstanding.
     check("H8 open rows are read from the status column, not the severity mark",
-          '"⬜" in cols[3]' in gen)
+          "cols[3].strip()" in gen and 'state.startswith("🔲")' in gen
+          and "cols[2].strip()" in gen)                        # v1.5: OTV5's state cell is the third column
 
     # ── H11 — THE READING BUDGETS ARE MEASURED, WHICH IS H9d GENERALISED.
     # 🔴 H9d PINNED THE ROW COUNT AND THE THREE SIZES BESIDE IT WENT ON ROTTING.

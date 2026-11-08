@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """
-tools/scratch_purge.py  v1.3
+tools/scratch_purge.py  v1.4
+v1.4  2026-11-08  dtp r532 / OTV4DEP.1 — THE RECREATE NOTE NAMES THE TREE THE CLONES COME FROM. A pruned build
+      clone's note said `git clone --depth 1 file:///home/ubuntu/options-trader-v4`, the frozen tree; since 10-24 the
+      build clones are OTV5 (or dtp) clones. The note now names ~/OTV5 first, then dtp, then otv4 for a dtp land's docs
+      half. HANDOFF_DIRS keeps ~/options-trader-v4/handoffs: it is the HISTORY folder this tool rehomes, not a code tree.
 v1.3  2026-10-31  OPS.75 — A BUILD CLONE'S UNCOMMITTED WORK IS SALVAGED BEFORE THE PRUNE, AND ITS AGE IS ITS
       NEWEST FILE, NOT ITS TOP DIRECTORY. 2026-10-31 00:30-01:30 ET the timer pruned five OTV5 build clones in a live
       session (b_ent, b_exh, b_orb, b_park, b_base) as "reconstructible"; three held approved, tested, UNCOMMITTED
@@ -165,7 +169,7 @@ BUILD_GRACE_MIN = int(os.environ.get("CLAUDE_BUILD_GRACE_MIN", "120"))
 # a confident zero, which is the worst kind. Found by running it against the
 # live tree rather than reasoning about the path.
 BUILD_SCAN_DEPTH = int(os.environ.get("CLAUDE_BUILD_SCAN_DEPTH", "6"))
-_VERSION = "v1.3"
+_VERSION = "v1.4"
 HANDOFF_DIRS = [os.environ.get(
     "CLAUDE_HANDOFF_DIR", os.path.join(HOME, "options-trader-v4", "handoffs"))]
 # A directory younger than this is left alone even when nothing holds it open —
@@ -569,9 +573,9 @@ def _tombstone(path: str, size: int, salvaged: str = None) -> None:
                    if salvaged else
                    "NOTHING UNIQUE WAS LOST: the clone was CLEAN (git status\n"
                    "empty), so everything in it came from git. Recreate with:\n")
-                + "    git clone --depth 1 file:///home/ubuntu/options-trader-v4 "
+                + "    git clone --depth 1 file:///home/ubuntu/OTV5 "
                 + path + "\n"
-                "  (or .../day_trader_pro for the dtp half)\n"
+                "  (or .../day_trader_pro for the dtp half, .../options-trader-v4 for its docs half)\n"
                 "\n"
                 "Full record: " + LOG_PATH + "\n"
                 "Delete this note freely; it is only here to answer the\n"

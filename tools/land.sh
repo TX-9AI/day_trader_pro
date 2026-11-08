@@ -1,5 +1,13 @@
 #!/usr/bin/env bash
-# day_trader_pro/tools/land.sh — v1.18
+# day_trader_pro/tools/land.sh — v1.19
+# v1.19 (2026-11-08) — dtp r532 / OTV4DEP.1. DEL RUNS BEFORE THE CHECKS. At v1.18 the DEL block ran after the
+#   CHECK loop, so a delivery that removes a file ran its CHECKs with that file still on disk: r532's gate
+#   check_no_otv4_deps refused its own land on tools/build_level_history.py, the file the same spec deletes, and
+#   the general case is worse, a CHECK passing on an import of a module the delivery removes. The block is moved,
+#   unchanged, to just before the CHECK loop, mirroring OTV5 land.sh v5.3 (r76 / RETIRE.1); a DEL of a file that is
+#   not present still refuses the land. ONE CONSEQUENCE, HANDLED: a refusal after the move can leave a DEL'd file
+#   removed and staged, so die()'s discard-the-payload recipe now lists the DEL targets too (they are in HEAD, so
+#   its per-path loop restores them). Nothing else in the lander changes. Gate tests/check_land_del_order.py.
 # v1.18 (2026-10-24) — dtp r502 / OPS.19. THE RESOLVER NAMES EVERY CHECKOUT THAT
 #   MATCHES AND REFUSES AN AMBIGUOUS ONE. It took the FIRST `$HOME/*/` checkout
 #   carrying all the REPO markers, in glob order, so a second clone of a tree
@@ -488,6 +496,15 @@ die() {
       # creates none that need removing.
       local _pay
       _pay="$(cd "$d" 2>/dev/null && find . -type f ! -name land.spec -printf '%P ' 2>/dev/null)"
+      # v1.19 — DEL now runs before the CHECKs, so a refusal can leave a DEL'd file removed and staged. Its
+      # path is in HEAD, so the per-path recipe below restores it; it only has to be on the list.
+      if [ -n "${spec:-}" ] && [ -f "${spec:-}" ]; then
+        local _dl _dt
+        while IFS= read -r _dl; do
+          _dt="$(_spec_path "$(_spec_rest "$_dl" "DEL")")"
+          [ -n "$_dt" ] && _pay="$_pay$_dt "
+        done < <(grep '^DEL ' "$spec" 2>/dev/null || true)
+      fi
       if [ -n "$_pay" ]; then
         # 🔴 r372 / LAND.9 — PER PATH, BECAUSE `git checkout` DIES ON A FILE
         # THE PAYLOAD ADDED. After the reset an ADDED file is untracked, git
@@ -691,6 +708,34 @@ land_one() {
   _nc=$(grep -c '^CHECK' "$spec" 2>/dev/null || true); _nc=${_nc:-0}
   pb_init $(( _nc + 4 ))
 
+  # ── DEL (v1.4; v1.19 moved BEFORE the CHECKs) ───────────────────────────
+  # v1.19 (r532) — a file the delivery deletes must not be on disk while the CHECKs run. At v1.18 DEL ran
+  # after them, so r532's own gate (check_no_otv4_deps) refused the land on the very file it deletes, and a
+  # live import of a removed module would pass every CHECK. Mirrors OTV5 land.sh v5.3 (r76 / RETIRE.1).
+  # ── DEL (v1.4) — A DELIVERY CAN REMOVE A FILE ───────────────────────────
+  # 🔴 UNTIL NOW IT COULD NOT. A payload only ADDS or overwrites, so retiring a
+  # document meant the operator deleting it by hand afterwards — outside the
+  # gate, outside the commit, and outside the record. r269 needed to remove
+  # eight spent thread contracts and had nowhere to say so.
+  # ⚠️ ONE PATH PER DIRECTIVE, NEVER A GLOB. A pattern here would delete
+  # whatever happened to match at land time, which is the same class as the
+  # `ls | head -1` archive guess v1.1 removed and the BRE gate v1.3 removed.
+  # ⚠️ AND A MISSING TARGET IS A REFUSAL, NOT A NO-OP. If the file is already
+  # gone the spec is describing a repo that does not exist, and landing it
+  # would record a deletion that never happened.
+  local deleted=0
+  while IFS= read -r line; do
+    local target="$(_spec_path "$(_spec_rest "$line" "DEL")")"
+    [ -z "$target" ] && continue
+    if [ ! -e "$repo/$target" ]; then
+      die "DEL $target — not present in $repo. The spec describes a repo this is not."
+      return 1
+    fi
+    git rm -q -- "$target" || { die "DEL $target failed"; return 1; }
+    deleted=$((deleted+1))
+  done < <(grep '^DEL ' "$spec" 2>/dev/null || true)
+  [ "$deleted" -gt 0 ] && echo "  removed $deleted file(s) named by DEL"
+
   # ── THE CHECKS: EXECUTED, NOT GREPPED (v1.1) ────────────────────────────
   # WA §0.6 — "the land gate RUNS the thing and requires its output, not its
   # presence." §21 says the same one level up: a test that reads source text
@@ -736,30 +781,6 @@ land_one() {
   # ── generated maps regenerate INSIDE the land command (§33) ─────────────
   # Detected, not assumed: dtp carries neither, and "not applicable" must
   # never look like "passed" (the CV.1 failure).
-  # ── DEL (v1.4) — A DELIVERY CAN REMOVE A FILE ───────────────────────────
-  # 🔴 UNTIL NOW IT COULD NOT. A payload only ADDS or overwrites, so retiring a
-  # document meant the operator deleting it by hand afterwards — outside the
-  # gate, outside the commit, and outside the record. r269 needed to remove
-  # eight spent thread contracts and had nowhere to say so.
-  # ⚠️ ONE PATH PER DIRECTIVE, NEVER A GLOB. A pattern here would delete
-  # whatever happened to match at land time, which is the same class as the
-  # `ls | head -1` archive guess v1.1 removed and the BRE gate v1.3 removed.
-  # ⚠️ AND A MISSING TARGET IS A REFUSAL, NOT A NO-OP. If the file is already
-  # gone the spec is describing a repo that does not exist, and landing it
-  # would record a deletion that never happened.
-  local deleted=0
-  while IFS= read -r line; do
-    local target="$(_spec_path "$(_spec_rest "$line" "DEL")")"
-    [ -z "$target" ] && continue
-    if [ ! -e "$repo/$target" ]; then
-      die "DEL $target — not present in $repo. The spec describes a repo this is not."
-      return 1
-    fi
-    git rm -q -- "$target" || { die "DEL $target failed"; return 1; }
-    deleted=$((deleted+1))
-  done < <(grep '^DEL ' "$spec" 2>/dev/null || true)
-  [ "$deleted" -gt 0 ] && echo "  removed $deleted file(s) named by DEL"
-
   if [ -f "$repo/tests/gen_file_map.py" ]; then
     python3 tests/gen_file_map.py >/dev/null 2>&1 || { die "FILE MAP regeneration failed"; return 1; }
     pb_step "file map"; pb_clear

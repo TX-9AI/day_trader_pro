@@ -1,6 +1,13 @@
 #!/usr/bin/env python3
 """
-tools/gen_handoff.py  v1.5
+tools/gen_handoff.py  v1.6
+v1.6  2026-11-08  r532 / OTV4DEP.1 — THE HANDOFF POINTS A FRESH THREAD AT OTV5, NOT THE FROZEN TREE. The reading list
+      (WORKING_AGREEMENT, GENESIS, BACKLOG), the GENESIS row count and the OPEN ROWS list all read
+      ~/options-trader-v4/docs, frozen since otv4 r500: a new thread was told to read the predecessor's contract and
+      backlog. They now read ${DTP_OTV5_DIR:-~/OTV5}/docs. REPOS lists OTV5 first, then dtp, then otv4 named as
+      frozen (it still holds dtp's own ledger rows, which is why it is listed at all). OPEN ROWS follows OTV5's state
+      column: PART 1 rows whose state is 🔲 (open) are listed, ◐ (built, proof owed) are counted; the v1.5 parse looked
+      for otv4's ⬜ and would list nothing on OTV5. BRIEF stays verbatim (the operator's words; edit only on restatement).
 v1.5  2026-09-20  r410 — THE TURNOVER MEASURES ITSELF, AND HANDS OVER THE
       TOOLS INSTEAD OF DESCRIBING THEM. Operator, after watching a thread
       struggle through its own onboarding: *"make a point to amend the
@@ -145,15 +152,16 @@ import os
 import subprocess
 import sys
 
-OTV4 = os.path.expanduser("~/options-trader-v4")
+OTV4 = os.path.expanduser("~/options-trader-v4")          # frozen since otv4 r500; listed, never read for docs
+OTV5 = os.environ.get("DTP_OTV5_DIR", os.path.expanduser("~/OTV5"))   # v1.6: the trading tree the docs come from
 DTP = os.path.expanduser("~/day_trader_pro")
 
 # The three documents the reading list budgets for. Named once, so the sizes
 # printed to a fresh thread are MEASURED off these paths rather than recalled
 # (see `_tok`).
-WA_MD = os.path.join(OTV4, "docs", "WORKING_AGREEMENT.md")
-GEN_MD = os.path.join(OTV4, "docs", "GENESIS.md")
-BKL_MD = os.path.join(OTV4, "docs", "BACKLOG.md")
+WA_MD = os.path.join(OTV5, "docs", "WORKING_AGREEMENT.md")
+GEN_MD = os.path.join(OTV5, "docs", "GENESIS.md")
+BKL_MD = os.path.join(OTV5, "docs", "BACKLOG.md")
 
 # The operator's standing brief, VERBATIM. It states who this is and what the
 # layering is; it is not generated and must not drift. Edit it here only when
@@ -212,7 +220,7 @@ def fleet_block(skip):
 TRANSCRIPTS = "~/.claude/projects/-home-ubuntu-options-trader-v4/*.jsonl"
 
 
-def _genesis_rows(path: str = "/home/ubuntu/options-trader-v4/docs/GENESIS.md") -> str:
+def _genesis_rows(path: str = GEN_MD) -> str:
     """The ledger's real row count, COUNTED rather than remembered.
 
     🔴 THIS LINE USED TO BE THE LITERAL 418 AND THE LEDGER HELD 375. Nobody
@@ -326,11 +334,13 @@ def main():
     print(BRIEF)
     print()
     print("Task: THIS is a continuation of that work. You are running ON the control box —")
-    print("both repos are already here, at the paths below.")
+    print("the repos are already here, at the paths below.")
     print()
     print("REPOS")
-    print(repo_line(OTV4, "otv4"))
+    print(repo_line(OTV5, "OTV5"))
     print(repo_line(DTP, "dtp"))
+    print(repo_line(OTV4, "otv4"))
+    print("         FROZEN since otv4 r500: read for history and for dtp's ledger rows only.")
     print()
     print("FLEET")
     print(fleet)
@@ -479,20 +489,33 @@ def main():
     # as outstanding work. 🔴 grades how bad a thing is; the third column carries
     # ⬜ for open and a revision number for done. A handoff that reports finished
     # work as open is the manufactured-answer failure this file exists to avoid.
-    rows = open(os.path.join(OTV4, "docs", "BACKLOG.md"), encoding="utf-8").read()
-    openrows = []
+    # v1.6 — OTV5's backlog: PART 1 holds every open and unproven row, and its state cell starts 🔲 (open) or
+    # ◐ (built, proof owed). The title is the item column; the state is read from the third column.
+    rows = open(BKL_MD, encoding="utf-8").read()
+    openrows, built, in_part1 = [], 0, False
     for ln in rows.splitlines():
-        if not ln.startswith("| **"):
+        if ln.startswith("## PART"):
+            in_part1 = ln.startswith("## PART 1")
+            continue
+        if not in_part1 or not ln.startswith("| **"):
             continue
         cols = ln.split("|")
-        if len(cols) > 3 and "⬜" in cols[3]:
-            openrows.append((cols[1].strip().strip("*"), cols[2].strip()))
-    print(f"OPEN ROWS — {len(openrows)} carrying ⬜ in the status column")
+        if len(cols) <= 3:
+            continue
+        item = cols[2].strip()
+        # the state cell (check_ledger_parity reads it) is the third column; a row written without one carries its
+        # state at the head of the item text instead.
+        state = cols[3].strip() if len(cols) > 4 and cols[3].strip()[:1] in "🔲◐⬜✅⬛" else item
+        if state.startswith("🔲") or state.startswith("⬜"):
+            openrows.append((cols[1].strip().strip("*"), item))
+        elif state.startswith("◐"):
+            built += 1
+    print(f"OPEN ROWS — {len(openrows)} open (🔲) in PART 1, plus {built} built with proof owed (◐)")
     print("  The newest are listed; the rest are in BACKLOG. This is a POINTER, not a")
     print("  substitute for reading it.")
     for rid, title in openrows[:14]:
         clean = title.replace("**", "").replace("🔴", "").replace("⚠️", "")
-        clean = clean.replace("🔑", "").replace("⬜", "").strip()
+        clean = clean.replace("🔑", "").replace("⬜", "").replace("🔲", "").strip()
         print(f"  {rid:9s} {clean[:104]}")
     if not openrows:
         print("  (none found — verify by hand; an empty list is more likely a parse")
