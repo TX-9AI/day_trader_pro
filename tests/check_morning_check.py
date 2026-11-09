@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_morning_check.py  v1.0
+day_trader_pro/tests/check_morning_check.py  v1.1
+v1.1  2026-11-08  dtp r542 / CAP.6 — M14 the 09:50 run's daily-candle check (tools/morning_check v1.1), on a fake bucket;
+      M5/M6 inject a green daily check so they still test only the shadow rows.
 v1.0  2026-11-08  dtp r539 / TIMER.1 — the morning check (tools/morning_check.py) replaces three session crons.
 No box, no Telegram: the fleet, ssh, journal, router and calendar are fakes, except M10-M12, which run the REAL
 shipped command lines through bash on this host and a real throwaway git repo.
@@ -19,6 +21,9 @@ shipped command lines through bash on this host and a real throwaway git repo.
   M11  the real OTV5 shadow_rule_status.py, shipped the same way, prints one parseable SHADOW_STATUS
   M12  docs_only_behind on a real repo: docs-only -> True, a code file -> False
   M13  delivery: router alive -> the router outbox only; router dead -> straight to Telegram, marked, never silent
+  M14  daily candles (hunt run): all present -> no red and "daily candles ok" in the line; a missing raw/candles daily,
+       a raw/candles_full 1d older than 4 sessions, and (from 2026-11-10) a 1d_eth without the previous session are
+       each RED by symbol; a pre-r98 object filed under dt=<session - 1> still counts; before 11-10 no 1d_eth check
 """
 import json
 import os
@@ -123,7 +128,8 @@ def run_shadow(step, recs, states=None):
     posts = []
     states = states or {s: "running" for s in recs}
     rc = M.main(["--step", step, "--day", DAY], post_fn=lambda k, t: posts.append((k, t)), route_alive_fn=lambda: True,
-                trading_fn=lambda d: True, fleet_fn=fleet_of(states), map_fn=mapper(recs, "SHADOW_STATUS"), script="print(1)", report_dir=TMP)
+                trading_fn=lambda d: True, fleet_fn=fleet_of(states), map_fn=mapper(recs, "SHADOW_STATUS"), script="print(1)", report_dir=TMP,
+                bars_fn=lambda d, s: ([], [], []))
     return rc, posts
 
 
@@ -220,6 +226,63 @@ r2 = M.deliver("critical", "MORNING CHECK RED", post_fn=lambda k, t: via_d.appen
                send_fn=sent.append)
 ck("M13", r1 == "router" and via_r == ["info"] and r2 == "direct" and via_d == [] and len(sent) == 1
    and sent[0].startswith("🔴 MORNING CHECK RED") and "router is not alive" in sent[0], "%s %s %r" % (r1, r2, sent))
+
+# M14 — the daily candles in the bucket
+import gzip as _gz, io as _io
+from datetime import date as _date
+
+
+def _ms(d):
+    return M._utc_ms(d)
+
+
+def _csv(times):
+    return _gz.compress(("event_symbol,time,close\n" + "".join("X,%d,1\n" % t for t in times)).encode())
+
+
+class FakeS3:
+    def __init__(self, objs):
+        self.objs = objs
+
+    def list_objects_v2(self, Bucket, Prefix, ContinuationToken=None):
+        return {"Contents": [{"Key": k} for k in sorted(self.objs) if k.startswith(Prefix)], "IsTruncated": False}
+
+    def get_object(self, Bucket, Key):
+        return {"Body": _io.BytesIO(self.objs[Key])}
+
+
+def bucket(day_prev, syms, old_label=(), stale_full=(), no_eth=(), missing_feed=()):
+    o = {}
+    from datetime import timedelta
+    for s in syms + ["VIX"]:
+        if s not in missing_feed:
+            dt = day_prev - timedelta(days=1) if s in old_label else day_prev
+            o["raw/candles/dt=%s/sym=%s/interval=1d/%d-abc.json" % (dt, s, _ms(day_prev))] = b"{}"
+        full_last = _date(2026, 10, 1) if s in stale_full else day_prev - timedelta(days=2)
+        o["raw/candles_full/interval=1d/sym=%s/pulled=2026-11-01.csv.gz" % s] = _csv([_ms(_date(2026, 9, 1))])
+        o["raw/candles_full/interval=1d/sym=%s/pulled=%s.csv.gz" % (s, day_prev)] = _csv([_ms(full_last)])
+        if s not in no_eth:
+            o["raw/candles_full/interval=1d_eth/sym=%s/pulled=%s.csv.gz" % (s, day_prev)] = _csv([_ms(day_prev)])
+    return o
+
+
+wk = lambda d: d.weekday() < 5
+# Tuesday 11-10: previous session Monday 11-09; four back = Wed 11-04
+pv = _date(2026, 11, 9)
+r_ok, _n, l_ok = M.daily_bars_check("2026-11-10", ["AMD", "SPX"], FakeS3(bucket(pv, ["AMD", "SPX"], old_label=("SPX",))), wk)
+r_bad, _n, _l = M.daily_bars_check("2026-11-10", ["AMD", "SPX", "NVDA"], FakeS3(bucket(
+    pv, ["AMD", "SPX", "NVDA"], missing_feed=("AMD",), stale_full=("SPX",), no_eth=("NVDA",))), wk)
+r_pre, _n, _l = M.daily_bars_check("2026-11-09", ["AMD"], FakeS3(bucket(_date(2026, 11, 6), ["AMD"], no_eth=("AMD", "VIX"))), wk)
+posts14 = []
+rc14 = M.main(["--step", "hunt", "--day", DAY], post_fn=lambda k, t: posts14.append((k, t)), route_alive_fn=lambda: True,
+              trading_fn=lambda d: True, fleet_fn=fleet_of({"AMD": "running"}), map_fn=mapper(good, "SHADOW_STATUS"),
+              script="print(1)", report_dir=TMP, bars_fn=lambda d, s: (["AMD: raw/candles has no daily bar"], [], []))
+ck("M14", r_ok == [] and len(l_ok) == 3
+   and any(r.startswith("AMD: raw/candles has no daily bar") for r in r_bad)
+   and any(r.startswith("SPX: raw/candles_full 1d newest bar 2026-10-01") for r in r_bad)
+   and any(r.startswith("NVDA: raw/candles_full 1d_eth has no 2026-11-09") for r in r_bad) and len(r_bad) == 3
+   and r_pre == [] and rc14 == 1 and posts14[0][0] == "critical" and "daily candles RED 1" in posts14[0][1],
+   "ok %r | bad %r | pre %r | rc %s %r" % (r_ok, r_bad, r_pre, rc14, posts14[:1]))
 
 print()
 if FAILS:

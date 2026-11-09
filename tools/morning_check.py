@@ -1,6 +1,17 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/morning_check.py — v1.0
+day_trader_pro/tools/morning_check.py — v1.1
+v1.1  2026-11-08  dtp r542 / CAP.6 — THE 09:50 RUN ALSO CHECKS THE DAILY CANDLES. The earnings study found the warehouse's
+      daily bars "ending 11-04" and nothing had noticed: raw/candles_full had no forward capture, and TastyTrade serves
+      the equity RTH daily two sessions late (OTV5 r98 adds capture_all candles-recent at 16:12 ET). Now, for every
+      fleet symbol and VIX, the hunt run reads the bucket (list + one small get per symbol, read-only):
+        - raw/candles holds the PREVIOUS session's daily bar (under dt=<session>, or dt=<session - 1> for objects pushed
+          before OTV5 r98, which filed a daily bar under the evening before) - missing is RED;
+        - raw/candles_full interval=1d: the newest pulled object reaches a session no older than 4 sessions back
+          (TastyTrade publishes the RTH daily two sessions late) - older is RED;
+        - raw/candles_full interval=1d_eth (from 2026-11-10, the first morning after candles-recent's first run): the
+          newest pulled object holds the previous session - missing is RED (last night's capture did not run).
+      A capture that stalls now pages the next morning instead of waiting for a study to trip over it.
 v1.0  2026-11-08  dtp r539 / TIMER.1 — ONE MORNING CHECK ON A TIMER, NOT THREE CHECKS IN A CLAUDE SESSION.
       The operator, 2026-11-08: "On the timers, yes consolidate, clean up and optimize." The 09:19 wake verify and
       the 09:50 / 11:10 shadow-rule checks were session crons: a session restart wiped them, silently. They are
@@ -13,7 +24,7 @@ v1.0  2026-11-08  dtp r539 / TIMER.1 — ONE MORNING CHECK ON A TIMER, NOT THREE
                        are named. Control: the 09:16 dtp-dxlink-assign run (a NOT WRITTEN is red) and the alert
                        router alive.
         hunt  (09:50)  OTV5 tools/shadow_rule_status.py shipped to every running box (read-only, since 09:30):
-                       HUNT_OR_EM rows / mix / RED per box.
+                       HUNT_OR_EM rows / mix / RED per box. And the daily candles in the bucket (v1.1).
         park  (11:10)  the same, PARK_SMA50 since 11:00 (equity and index split), and the HUNT_OR_EM count again.
       The operator 2026-11-08 on the log-only rules: "I want immediate feedback that it's really logging." So
       EVERY run sends one line to the operator through control's alert router (post_status): kind "critical" when
@@ -34,7 +45,7 @@ from datetime import datetime
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-__version__ = "1.0"
+__version__ = "1.1"
 
 OTV5 = os.environ.get("DTP_OTV5_TREE", os.path.expanduser("~/OTV5"))
 REPORT_DIR = os.environ.get("DTP_MORNING_CHECK_DIR", os.path.expanduser("~/reviews/morning_check"))
@@ -204,7 +215,96 @@ def step_wake(day, fleet_fn=None, map_fn=None, journal_fn=None, alive_fn=None, m
     return reds, notes, lines, one
 
 
-def step_shadow(day, step, fleet_fn=None, map_fn=None, script=None):
+BUCKET = os.environ.get("OT_S3_BUCKET", "vertigo-warehouse-tx9ai")
+ETH_CHECK_FROM = "2026-11-10"          # the first morning after OTV5 r98's candles-recent first runs (11-09 16:12 ET)
+
+
+def _sessions_before(day, n, trading_fn=None):
+    """The n trading sessions before `day` (newest first), as dates."""
+    from datetime import timedelta
+    if trading_fn is None:
+        import market_calendar
+        trading_fn = market_calendar.is_trading_day
+    d, out = datetime.strptime(day, "%Y-%m-%d").date(), []
+    while len(out) < n:
+        d -= timedelta(days=1)
+        if trading_fn(d):
+            out.append(d)
+    return out
+
+
+def _utc_ms(d):
+    from datetime import timezone
+    return int(datetime(d.year, d.month, d.day, tzinfo=timezone.utc).timestamp() * 1000)
+
+
+def _d(ms):
+    from datetime import timezone
+    return datetime.fromtimestamp(ms / 1000, timezone.utc).date()
+
+
+def daily_bars_check(day, syms, s3=None, trading_fn=None):
+    """-> (reds, notes, lines) for the daily candles in the bucket (v1.1). Read-only: list, plus one get per symbol."""
+    import csv, gzip, io
+    from datetime import timedelta
+    if s3 is None:
+        import boto3
+        s3 = boto3.client("s3", region_name=os.environ.get("DTP_REGION", "us-east-2"))
+    prev = _sessions_before(day, 4, trading_fn)
+    p_ms, p4_ms = _utc_ms(prev[0]), _utc_ms(prev[3])
+
+    def keys(prefix):
+        out, tok = [], None
+        while True:
+            kw = {"Bucket": BUCKET, "Prefix": prefix}
+            if tok:
+                kw["ContinuationToken"] = tok
+            r = s3.list_objects_v2(**kw)
+            out += [o["Key"] for o in r.get("Contents", [])]
+            if not r.get("IsTruncated"):
+                return out
+            tok = r.get("NextContinuationToken")
+
+    def newest_bar(label, sym):
+        ks = sorted(k for k in keys("raw/candles_full/interval=%s/sym=%s/" % (label, sym)) if "/pulled=" in k)
+        if not ks:
+            return None, None
+        body = s3.get_object(Bucket=BUCKET, Key=ks[-1])["Body"].read()
+        rows = list(csv.DictReader(io.StringIO(gzip.decompress(body).decode())))
+        ts = [int(float(r["time"])) for r in rows if (r.get("time") or "").strip()]
+        return (max(ts) if ts else None), ks[-1].rsplit("pulled=", 1)[-1][:10]
+
+    reds, notes, lines = [], [], []
+    for sym in list(dict.fromkeys(list(syms) + ["VIX"])):
+        tops = []
+        for dt in (prev[0], prev[0] - timedelta(days=1)):
+            for k in keys("raw/candles/dt=%s/sym=%s/interval=1d/" % (dt.isoformat(), sym)):
+                try:
+                    tops.append(int(k.rsplit("/", 1)[-1].split("-", 1)[0]))
+                except ValueError:
+                    pass
+        feed_ok = any(t >= p_ms for t in tops)
+        if not feed_ok:
+            reds.append("%s: raw/candles has no daily bar for the %s session" % (sym, prev[0]))
+        full, pulled = newest_bar("1d", sym)
+        full_ok = full is not None and full >= p4_ms
+        if not full_ok:
+            reds.append("%s: raw/candles_full 1d newest bar %s (pulled %s) is older than 4 sessions (%s)" % (
+                sym, _d(full) if full else "none", pulled or "never", prev[3]))
+        eth_txt = "-"
+        if day >= ETH_CHECK_FROM:
+            eth, epulled = newest_bar("1d_eth", sym)
+            eth_txt = str(_d(eth)) if eth else "none"
+            if eth is None or eth < p_ms:
+                reds.append("%s: raw/candles_full 1d_eth has no %s session (newest %s, pulled %s): last night's "
+                            "capture_all candles-recent did not run" % (sym, prev[0], eth_txt, epulled or "never"))
+        lines.append("%-5s daily  feed %s  full_1d %s  1d_eth %s" % (
+            sym, "ok" if feed_ok else "MISSING", _d(full) if full else "none",
+            eth_txt))
+    return reds, notes, lines
+
+
+def step_shadow(day, step, fleet_fn=None, map_fn=None, script=None, bars_fn=None):
     since = "09:30" if step == "hunt" else "11:00"
     if script is None:
         with open(os.path.join(OTV5, "tools", "shadow_rule_status.py"), "rb") as fh:
@@ -238,6 +338,16 @@ def step_shadow(day, step, fleet_fn=None, map_fn=None, script=None):
             notes.append("%s: %s" % (sym, str(e)[:120]))
     if not answered:
         reds.append("no box answered")
+    daily_red = []
+    if step == "hunt":
+        try:
+            b_reds, b_notes, b_lines = (bars_fn or daily_bars_check)(day, [s for s, _st in recs])
+        except Exception as exc:                                            # noqa: BLE001
+            b_reds, b_notes, b_lines = ["daily candles check failed: %s: %s" % (type(exc).__name__, str(exc)[:120])], [], []
+        reds += b_reds
+        notes += b_notes
+        lines += b_lines
+        daily_red = b_reds
     rules = ["HUNT_OR_EM"] if step == "hunt" else ["PARK_SMA50", "HUNT_OR_EM"]
     for rule in rules:
         mix = tot.get(rule, collections.Counter())
@@ -251,6 +361,8 @@ def step_shadow(day, step, fleet_fn=None, map_fn=None, script=None):
                                                  " ".join("%s %d" % kv for kv in sorted(mix.items())) or "none yet")
     head = "MORNING CHECK %s %s: " % ("09:50" if step == "hunt" else "11:10", step)
     body = "; ".join(fmt(r) for r in rules)
+    if step == "hunt":
+        body += " | daily candles %s" % ("RED %d" % len(daily_red) if daily_red else "ok")
     if step == "park":
         body += " | PARK equity %s, index %s" % (
             " ".join("%s %d" % kv for kv in sorted(split["equity"].items())) or "-",
