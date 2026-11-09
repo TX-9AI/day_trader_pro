@@ -1,6 +1,15 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/eod_conductor_v2.py — v2.14
+day_trader_pro/eod_conductor_v2.py — v2.15
+v2.15 2026-11-08 — dtp r543 / CAP.6 — STOP_SERVICES ALSO STARTS OTV5's capture_all candles-recent ON EACH VERIFIED BOX.
+      raw/candles_full (every Candle field: vwap, bid/ask volume, imp_volatility, OI) had no forward capture, and
+      TastyTrade publishes the equity RTH daily two sessions late, so OTV5 r98/r99 re-pull a lookback once a day. It opens a
+      DXLink stream, and MEASURED 11-08 with candle-feed still up 10 of 13 boxes were refused at the user-session limit;
+      with both units stopped 13 of 13 pulled. This is the one moment both are stopped on a box that is still up, so the
+      same ssh command that stops them starts it - DETACHED (setsid nohup, stdin from /dev/null, output to the box's
+      logs/capture_all.log) and BOUNDED (timeout 300 s), so the purge and the halt never wait for it. A takedown that
+      stops the machine first cuts it short; the next night's lookback covers the day. Verified boxes only, like the stop.
+      Gate tests/check_conductor_capture.py.
 v2.14 2026-10-31 — dtp r517 / SER.1 — A SERIES BACKLOG IS READ, SHOWN AND NEVER WAVED THROUGH AS DRIFT. OTV5 s3_push v5.4 drains each series table to the MAX(ts_epoch) it found at the start of --verify and prints `  SERIES_LAG <ns|table> series_lag_s=N` per table before the DRAIN line, grading SHORT while any lag is above 0. On 2026-10-30 SPX and QQQ quote_series stopped in S3 at 13:53 and 14:38 ET while their VERIFY lines read OK short=0. SERIES_LAG_RE / series_lag() parse those lines (none = an older pusher = "?"); the VERIFY line carries series_lag_s and names each table behind; takedown() HOLDS a lagging box before the COUNTER DRIFT pass, which would otherwise have taken it down. A held box's s3-push timer is re-armed by rearm() and keeps shipping. Gate tests/check_series_tail.py T1-T4. Operator: "yes to all of the prepared solutions" (2026-10-31).
 v2.13 2026-10-26 — dtp r513 / STRM.1 — THE DRAIN WRITES THE DAY'S OHLC FILE BEFORE IT VERIFIES. The box's candle-logger.timer
       fires at 16:05 ±30 s and QUIESCE stops it at about the same moment, so on 2026-10-26 nine of fourteen boxes never wrote
@@ -378,6 +387,15 @@ def drain_and_verify(symbols, dry: bool) -> dict:
 
 
 # ── STEP 4 — TAKE DOWN, PER BOX, ONLY ON ITS OWN VERIFICATION. ──────────────
+# v2.15 (CAP.6): started by stop_services once optionsbot AND candle-feed are stopped - detached and bounded, so nothing
+# downstream waits for it. capture_all refuses by itself while either unit is active.
+# ⚠️ THE WHOLE BACKGROUND LIST IS REDIRECTED, not just its last command: a backgrounded `cd && ... &` subshell keeps the
+# ssh channel's stdout open until its child exits, so the conductor's ssh would wait out the capture (gate K4).
+CAPTURE_CMD = ("( cd ~/options-trader && mkdir -p logs && exec setsid nohup timeout --kill-after=10 300 "
+               "venv/bin/python tools/capture_all.py candles-recent >> logs/capture_all.log 2>&1 ) "
+               "< /dev/null > /dev/null 2>&1 & echo CAPTURE started")
+
+
 def stop_services(ok: list, dry: bool) -> dict:
     """Stop the writers on the verified boxes, so the reclaim can do its job.
 
@@ -399,12 +417,12 @@ def stop_services(ok: list, dry: bool) -> dict:
         return out
     if dry:
         _log("STOP", f"[dry] would stop optionsbot + candle-feed on "
-                     f"{len(ok)} verified box(es) before the purge")
+                     f"{len(ok)} verified box(es) before the purge, and start capture_all candles-recent")
         return out
     _log("STOP", f"releasing the stores on {len(ok)} verified box(es)")
     cmd = ("sudo systemctl stop optionsbot candle-feed 2>&1; "
            "echo STOPPED $(systemctl is-active optionsbot) "
-           "$(systemctl is-active candle-feed)")
+           "$(systemctl is-active candle-feed); " + CAPTURE_CMD)
     for sym, ip, _st in fleet.get_fleet(list(ok)):
         rc, text, err = ssh_util.ssh_run(ip, cmd, timeout=VERIFY_TIMEOUT_S)
         line = (text or err or "").strip().replace("\n", " | ")
