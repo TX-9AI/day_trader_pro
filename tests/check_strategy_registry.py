@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
-tests/check_strategy_registry.py  v1.4
+tests/check_strategy_registry.py  v1.5
+v1.5  2026-11-09  r544 / RETIRE.5 — HISTORY_CODES gains GEXPinButterfly -> GEXB: OTV5 r103 removes the GEX pin butterfly, so
+      R11 wants it out of REGISTRY and R12 wants its old rows still decoded. R11 was red on f779abb (the fly DORMANT in
+      OTV5 r97's TABLE, still listed LIVE here); green on strategy_registry v1.8.
 v1.4  2026-10-31  r519 — PARK REGISTERED; RETIRED STRATEGIES DECODE BUT ARE NOT LISTED. The operator, on R5: "No to
       PARC & it was never an active strategy. Also, don't list the retired strategies either. They're no longer
       relevant to this repo." R2 now also scans the OTV5 tree (DTP_OTV5_DIR, default ~/OTV5) - every name it
@@ -60,7 +63,8 @@ NOT_REGISTERED = ("PARC",)
 # v1.4 — the codes the retired strategies have always printed. R12 pins them: a month of S3 rows decodes through these.
 HISTORY_CODES = {"ORBStrategy": "ORBS", "VOLT": "VOLT", "ATPButterfly": "ATPB", "SweepCreditSpread": "SWPT",
                  "TrendCreditSpread": "TCST", "OpeningRangeCreditSpread": "ORCS", "IronCondorStrategy": "CNDR",
-                 "SweepReversal": "SWPR", "ContinuationStrategy": "CONT"}
+                 "SweepReversal": "SWPR", "ContinuationStrategy": "CONT",
+                 "GEXPinButterfly": "GEXB"}   # v1.5 (r544, RETIRE.5): the GEX pin fly is history
 
 # 📊 MEASURED from the SOFI box 2026-09-25, not assumed: the strategy names
 # TEST declares. If TEST adds one, R2 goes red until it is registered — which

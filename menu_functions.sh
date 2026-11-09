@@ -1,4 +1,6 @@
-# day_trader_pro/menu_functions.sh — v1.80
+# day_trader_pro/menu_functions.sh — v1.81
+# v1.81 (2026-11-09) - dtp r544 / RETIRE.5. Stop forensics defaults to RunawayContinuation, a live plan with a premium
+#   stop: the GEX pin butterfly it defaulted to is removed (OTV5 r103) and had no stop since r73. --strat is still asked.
 # v1.80 (2026-11-08) - dtp r536 / CHK.12. Three confirms (the fresh-thread, resume-thread and pick-thread tmux
 #   kills) compared their answer against lowercase `y` only, the r283 defect test_confirm_and_cap C3 exists to
 #   catch; they now call `_yes`, so Y and yes confirm too. Nothing else changes.
@@ -1870,7 +1872,8 @@ mi_sensor_stop_forensics() {
     echo "  Reads the S3 warehouse; boxes stay off."
     read -rp "  START (YYYY-MM-DD): " D1
     read -rp "  END   (ENTER = same day): " D2
-    read -rp "  Strategy (ENTER = GEXPinButterfly): " ST
+    read -rp "  Strategy (ENTER = RunawayContinuation): " ST
+    [ -z "$ST" ] && ST="RunawayContinuation"          # v1.81 (r544): the GEX fly is removed
     [ -z "$D2" ] && D2="$D1"
     ARGS=""
     [ -n "$D1" ] && ARGS="--from $D1 --to $D2"

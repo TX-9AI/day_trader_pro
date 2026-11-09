@@ -1,4 +1,4 @@
-NIGHTLY POST-RTH REVIEW (day_trader_pro tools/nightly_review.prompt v1.2, dtp r537 / SWEEP.7; v1.1 dtp r525 / RPT.37; v1.0 dtp r524 / RPT.36)
+NIGHTLY POST-RTH REVIEW (day_trader_pro tools/nightly_review.prompt v1.3, dtp r544 / RETIRE.5; v1.2 dtp r537 / SWEEP.7; v1.1 dtp r525 / RPT.37; v1.0 dtp r524 / RPT.36)
 
 You are writing the nightly post-RTH review for ONE trading session of the OTV5 paper fleet (14 boxes). You run
 unattended under a systemd timer: nobody is watching, nobody can answer a question, and you must finish by the
@@ -19,8 +19,8 @@ THE RULES (the operator's; they are not negotiable here)
   rule change, a sit-out or a study off one or two days. Put a bad day in the distribution instead.
 - The trading code is frozen for the benchmark (10-26..11-27): a change is only for something BROKEN (not to spec,
   or malfunctioning). Your job on each trade is to say TO SPEC or BROKEN, with the evidence.
-- Do not list retired strategies. The live plans are RunawayContinuation, Breakout, LiquidityHunt (Hunt),
-  GEXPinButterfly (GEX fly) and PARK. PARC is dead.
+- Do not list retired strategies. The live plans are RunawayContinuation, Breakout, LiquidityHunt (Hunt) and
+  PARK. PARC is dead. The GEX pin butterfly is removed (OTV5 r103); its trades before 11-09 are window history only.
 - No columns dropped from any CSV. Every CSV write goes through review_kit (it REPLACES the day's rows, so a re-run
   never double-appends). Never append to a tracking CSV with >> or by hand.
 - Use they/them for the operator.
@@ -60,8 +60,7 @@ THE FORMAT: follow the PRIOR review (RUN PARAMETERS) section for section. In ord
      peak open (from mfe_premium), the exit reason quoted, and the verdict TO SPEC or BROKEN. Check each exit
      against its plan's rule as the PRIOR review does (PARK: lock arms at +60% and exits at +20%, the |delta| <= 0.30
      floor from 11:30, the 15:45 close, no premium stop, entry laddered to the mark and never worse; the decay stop
-     arms at +5% and exits on a 30% fade, PARK and the GEX fly exempt; the GEX fly holds to the close and is off at
-     VIX >= 20). Entries at the mark: compare entry_premium with entry_bid/entry_ask from the warehouse row.
+     arms at +5% and exits on a 30% fade, PARK exempt). Entries at the mark: compare entry_premium with entry_bid/entry_ask from the warehouse row.
   6. "## Went well" and "## Went not well": short, specific, with dollars. A bad day in context: its rank among the
      window's days for that setup, and how often a day like it appears.
   7. "## Broken behaviour": "None." or each item with the evidence and whether it needs the operator.

@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/review_kit.py — v1.1
+day_trader_pro/tools/review_kit.py — v1.2
+v1.2  2026-11-09  dtp r544 / RETIRE.5 — T3's label is said plainly: the GEX pin butterfly is removed (OTV5 r103), so
+      "T3 no GEXPin/PARK" now drops PARK and the fly's window history (its last trade 2026-11-03). The key stays
+      byte-identical (it is ~/reviews/scripts/theories.py's label and theories.csv's t3_ev column); no number moves.
 v1.1  2026-11-07  dtp r525 / RPT.37 — TWO NIGHTLY TRACKS: GIVEBACK WITHOUT PARK, AND HUNT BY CALL AND PUT. The operator,
       2026-11-07: "Yes, to 2 & 3" (the Saturday recap: the giveback ratio both with and without PARK's green-to-red
       trades - 49% overall, nearer 40% without; and Hunt calls +$6,842 / 71% win against puts -$196 / 39%).
@@ -288,7 +291,8 @@ def cmd_window(cut, write=True):
         upsert(os.path.join(REVIEWS, "theories.csv"), w["cut"], THEORY_HDR, [
             "%s,%d,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f" % (
                 w["cut"], w["n"], w["ev"], _ev(th, "T1 no SPX"), _ev(th, "T2 no entries after 10:01"),
-                _ev(th, "T3 no GEXPin/PARK"), _ev(th, "T1+T2"), _ev(th, "T1+T3"), _ev(th, "T1+T2+T3"))])
+                _ev(th, "T3 no GEXPin/PARK"),   # v1.2: the fly is history (OTV5 r103) - T3 = no PARK, no fly history
+                _ev(th, "T1+T2"), _ev(th, "T1+T3"), _ev(th, "T1+T2+T3"))])
         print("  window_ev.csv and theories.csv: row %s replaced" % w["cut"])
     return w
 

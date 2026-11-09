@@ -46,7 +46,7 @@
 | `raw/session_summary` | 14,977 | 0.036 | 76 | 2026-08-24 | 2026-11-08 | `push_series` | Summary events (prev-day close) |
 | `raw/shadow` | 325,957 | 0.285 | 15 | 2026-08-24 | 2026-09-11 | `push_jsonl_tree <- ~/options-trader/data/shadow` | sweep-precursor velocity primitives |
 | `raw/signal_journal` | 3,068,281 | 1.656 | 98 | 2026-07-20 | 2026-11-08 | `push_jsonl_tree <- ~/options-trader/data/signal_journal` | per-event signal journal |
-| `raw/surface_series` | 60,270 | 12.948 | 68 | 2026-08-24 | 2026-11-08 | `push_series ns=dseries` | charm, vanna, GEX |
+| `raw/surface_series` | 60,270 | 12.948 | 68 | 2026-08-24 | 2026-11-08 | `push_series ns=dseries` | charm, vanna, GEX (kept after the GEX fly's removal, OTV5 r103) |
 | `raw/theo_series` | 117 | 0.024 | 2 | 2026-08-24 | 2026-08-25 | `push_series` | TheoPrice — writer retained, unsubscribed at r118 |
 | `raw/trades` | 22,022 | 0.069 | 85 | 2026-07-06 | 2026-11-06 | `push_trades <- trades.db` | closed + open trade rows, per box |
 | `study/candles_1d` | 28 | 0.001 | 0 |  |  | `daily_candles_study/box_study_upload.py (box role)` | cleaned 1d candles for studies; never read by a bot |

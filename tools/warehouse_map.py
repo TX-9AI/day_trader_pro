@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-# day_trader_pro/tools/warehouse_map.py — v1.6
+# day_trader_pro/tools/warehouse_map.py — v1.7
+# v1.7 (2026-11-09) — dtp r544 / RETIRE.5 (OTV5 r103). raw/surface_series says it stays after the GEX pin butterfly's
+#   removal: the surface capture (charm, vanna, GEX) is kept; the pin gate and the studies read it. Nothing else changes.
 # v1.6 (2026-11-08) — dtp r541 / CAP.1 (OTV5 r94). Five MEANING rows for the capture prefixes: raw/market_metrics,
 #   raw/chain_rest, raw/chain_listing, raw/corporate_events, raw/candles_full (OTV5 tools/capture_all.py). The operator,
 #   2026-11-08: "If they offer it, we better be downloading it. Non-negotiable. It all goes to the fucking warehouse."
@@ -126,7 +128,7 @@ MEANING = {
                         "pitchfork state per tenor, with reject reasons"),
     "raw/indicator_series": ("push_series ns=dseries",
                              "ADX / ATR / EMA / VWAP accumulators"),
-    "raw/surface_series": ("push_series ns=dseries", "charm, vanna, GEX"),
+    "raw/surface_series": ("push_series ns=dseries", "charm, vanna, GEX (kept after the GEX fly's removal, OTV5 r103)"),
     # ── DERIVED_TABLES: derived_store.db lifecycle, CDC by rowid ────────
     # ⚠️ THESE CARRY THE `derived_` PREFIX IN THE KEY. That is the mistake v1.0
     # made seven times over.
