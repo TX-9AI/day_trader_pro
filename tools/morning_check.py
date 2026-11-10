@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/morning_check.py — v1.1
+day_trader_pro/tools/morning_check.py — v1.2
+v1.2  2026-11-09  dtp r545 / CAP.7 — THE 09:50 RUN ALSO ASKS WHETHER LAST NIGHT'S OPTION-CANDLE CAPTURE RAN. On 11-09 the
+      conductor said "CAPTURE started" on 14 boxes and nothing ran (its log was root-owned). OTV5 r104's option-candles
+      writes one manifest per box per run (raw/option_candles_runs/dt=<ET day>/sym=<box>/); from 2026-11-11 a box symbol
+      with no manifest dated the previous session (or the night after it) is RED. The day's option candles are kept by
+      TastyTrade only for weeks (the quote candles about two), so a capture that stops has to page the next morning.
 v1.1  2026-11-08  dtp r542 / CAP.6 — THE 09:50 RUN ALSO CHECKS THE DAILY CANDLES. The earnings study found the warehouse's
       daily bars "ending 11-04" and nothing had noticed: raw/candles_full had no forward capture, and TastyTrade serves
       the equity RTH daily two sessions late (OTV5 r98 adds capture_all candles-recent at 16:12 ET). Now, for every
@@ -217,6 +222,7 @@ def step_wake(day, fleet_fn=None, map_fn=None, journal_fn=None, alive_fn=None, m
 
 BUCKET = os.environ.get("OT_S3_BUCKET", "vertigo-warehouse-tx9ai")
 ETH_CHECK_FROM = "2026-11-10"          # the first morning after OTV5 r98's candles-recent first runs (11-09 16:12 ET)
+OPT_CHECK_FROM = "2026-11-11"          # the first morning after OTV5 r104's option-candles first runs (the 11-10 close)
 
 
 def _sessions_before(day, n, trading_fn=None):
@@ -298,9 +304,17 @@ def daily_bars_check(day, syms, s3=None, trading_fn=None):
             if eth is None or eth < p_ms:
                 reds.append("%s: raw/candles_full 1d_eth has no %s session (newest %s, pulled %s): last night's "
                             "capture_all candles-recent did not run" % (sym, prev[0], eth_txt, epulled or "never"))
-        lines.append("%-5s daily  feed %s  full_1d %s  1d_eth %s" % (
+        opt_txt = "-"
+        if day >= OPT_CHECK_FROM and sym != "VIX":
+            runs = [k for dt in (prev[0], prev[0] + timedelta(days=1))
+                    for k in keys("raw/option_candles_runs/dt=%s/sym=%s/" % (dt.isoformat(), sym))]
+            opt_txt = "%d run(s)" % len(runs)
+            if not runs:
+                reds.append("%s: no option-candles run after the %s close (raw/option_candles_runs): last night's "
+                            "capture_all option-candles did not run" % (sym, prev[0]))
+        lines.append("%-5s daily  feed %s  full_1d %s  1d_eth %s  options %s" % (
             sym, "ok" if feed_ok else "MISSING", _d(full) if full else "none",
-            eth_txt))
+            eth_txt, opt_txt))
     return reds, notes, lines
 
 

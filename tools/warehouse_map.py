@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-# day_trader_pro/tools/warehouse_map.py — v1.7
+# day_trader_pro/tools/warehouse_map.py — v1.8
+# v1.8 (2026-11-09) — dtp r545 / CAP.7 (OTV5 r104). raw/candles_full also holds OPTION contracts
+#   (sym=.<ROOT><YYMMDD><C|P><strike>): the 11-09 backfills (the raw/chain_snapshots gap 07-24..08-20 + QQQ 09-23 + SOFI
+#   before 09-25 at 1d/1h, 5m from 08-11; 1m 09-25..11-09 for every front expiry) and, every night from the 11-10 close,
+#   capture_all option-candles: interval=1m_bid / 1m_ask / 1m_mark (dxFeed's price=bid/ask/mark candles, the only
+#   historical quote series) and 1m / 5m / 1h / 1d, key pulled=<day>_opt. New row raw/option_candles_runs: one manifest
+#   per box per run (dtp morning_check pages a box without one).
 # v1.7 (2026-11-09) — dtp r544 / RETIRE.5 (OTV5 r103). raw/surface_series says it stays after the GEX pin butterfly's
 #   removal: the surface capture (charm, vanna, GEX) is kept; the pin gate and the studies read it. Nothing else changes.
 # v1.6 (2026-11-08) — dtp r541 / CAP.1 (OTV5 r94). Five MEANING rows for the capture prefixes: raw/market_metrics,
@@ -173,9 +179,17 @@ MEANING = {
                           "the nested option chain itself: expiries, strikes, settlement, roots"),
     "raw/corporate_events": ("OTV5 tools/capture_all.py events (optbot-capture-events 16:25 ET)",
                              "kind=earnings / dividends history per equity, kind=risk_free"),
-    "raw/candles_full": ("OTV5 tools/capture_all.py candles (one-off backfills, a stopped bot only)",
+    "raw/candles_full": ("OTV5 tools/capture_all.py candles (one-off backfills, a stopped bot only), candles-recent "
+                         "(pulled=<day>_recent) and option-candles (pulled=<day>_opt), nightly after the close",
                          "DXLink Candle with EVERY field: vwap, bid/ask volume, imp_volatility, open "
-                         "interest, count - raw/candles keeps OHLCV only; futures and the VIX family too"),
+                         "interest, count - raw/candles keeps OHLCV only; futures and the VIX family too; "
+                         "option contracts too (sym=.<ROOT><YYMMDD><C|P><strike>, the box's front-expiry chain within "
+                         "15% of spot): 1m / 5m / 1h / 1d trade candles and interval=1m_bid / 1m_ask / 1m_mark, "
+                         "dxFeed's quote candles - the only historical bid/ask there is (kept by TastyTrade about two "
+                         "weeks; 1m about six, 5m about ninety days)"),
+    "raw/option_candles_runs": ("OTV5 tools/capture_all.py option-candles, one manifest per box per night",
+                                "what each night's option-candle run asked: series, owed days, contracts, seconds; "
+                                "dtp morning_check reads it to page a box whose capture did not run"),
     # ── outside raw/: fleet state, studies and one-off probes ───────────
     "fleet/dxlink_nodes": ("share_dxlink_nodes (OTV5 s3_push v5.6, FEED.13)",
                            "each box's dxlink node book, merged fleet-wide"),

@@ -1,6 +1,18 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/eod_conductor_v2.py — v2.15
+day_trader_pro/eod_conductor_v2.py — v2.16
+v2.16 2026-11-09 — dtp r545 / CAP.7 — 🔴 THE CAPTURE HAD NEVER STARTED, AND NOW IT IS ASKED WHETHER IT DID. v2.15 appended
+      to logs/capture_all.log as ubuntu, but OTV5's capture timers write that file through systemd's
+      StandardOutput=append:, which systemd opens as root, so it is root:root 0644: the redirect failed, the subshell's
+      error went to /dev/null, and on 11-09 the log said "CAPTURE started" for 14 boxes while no box wrote a single
+      pulled=2026-11-09_recent object (reproduced on UNH 11-09 evening; with a writable log the same command runs). Now:
+      (1) its OWN log, logs/capture_nightly.log, which no unit writes; (2) candles-recent, then OTV5 r104's option-candles
+      (the day's option candles, which TastyTrade keeps only weeks); (3) the command checks the capture is RUNNING two
+      seconds later and says "CAPTURE running" or "CAPTURE NOT RUNNING" - "started" proved nothing; (4) the takedown
+      waits for a running capture, up to CAPTURE_WAIT_S (900 s), polling every 30 s, before it stops the machines: the
+      SPX and QQQ chains need longer than the purge (measured 11-09: about 9 s a 60-contract stream). Bounded: when the
+      budget is spent the boxes are stopped anyway and named; an unanswered box counts as done. The unit allows 7200 s.
+      Gates tests/check_conductor_capture.py v1.1 K1-K7.
 v2.15 2026-11-08 — dtp r543 / CAP.6 — STOP_SERVICES ALSO STARTS OTV5's capture_all candles-recent ON EACH VERIFIED BOX.
       raw/candles_full (every Candle field: vwap, bid/ask volume, imp_volatility, OI) had no forward capture, and
       TastyTrade publishes the equity RTH daily two sessions late, so OTV5 r98/r99 re-pull a lookback once a day. It opens a
@@ -387,13 +399,55 @@ def drain_and_verify(symbols, dry: bool) -> dict:
 
 
 # ── STEP 4 — TAKE DOWN, PER BOX, ONLY ON ITS OWN VERIFICATION. ──────────────
-# v2.15 (CAP.6): started by stop_services once optionsbot AND candle-feed are stopped - detached and bounded, so nothing
-# downstream waits for it. capture_all refuses by itself while either unit is active.
+# v2.15 (CAP.6): started by stop_services once optionsbot AND candle-feed are stopped - detached and bounded.
+# capture_all refuses by itself while either unit is active. v2.16 (CAP.7): its own log, option-candles after
+# candles-recent, a running check, and the takedown waits for it (bounded, wait_for_capture).
 # ⚠️ THE WHOLE BACKGROUND LIST IS REDIRECTED, not just its last command: a backgrounded `cd && ... &` subshell keeps the
 # ssh channel's stdout open until its child exits, so the conductor's ssh would wait out the capture (gate K4).
-CAPTURE_CMD = ("( cd ~/options-trader && mkdir -p logs && exec setsid nohup timeout --kill-after=10 300 "
-               "venv/bin/python tools/capture_all.py candles-recent >> logs/capture_all.log 2>&1 ) "
-               "< /dev/null > /dev/null 2>&1 & echo CAPTURE started")
+CAPTURE_LOG = "logs/capture_nightly.log"   # v2.16: never capture_all.log, which systemd creates root-owned
+CAPTURE_CMD = ("( cd ~/options-trader && mkdir -p logs && exec setsid nohup sh -c '"
+               "timeout --kill-after=10 300 venv/bin/python tools/capture_all.py candles-recent; "
+               "timeout --kill-after=10 1500 venv/bin/python tools/capture_all.py option-candles' "
+               ">> " + CAPTURE_LOG + " 2>&1 ) < /dev/null > /dev/null 2>&1 & "
+               "CP=$!; sleep 2; kill -0 $CP 2>/dev/null && echo CAPTURE running || echo CAPTURE NOT RUNNING")
+# ⚠️ THE RUNNING CHECK ASKS ABOUT THE PID, NOT pgrep: the remote `bash -c` carrying this very command has
+# "tools/capture_all.py" in its own command line, so any pgrep that matches the capture matches the asker too (found by
+# K5). The background subshell execs into setsid -> nohup -> sh with the SAME pid (no job control: not a group leader),
+# so $! lives exactly as long as the night's capture; a failed redirect ends it at once.
+CAPTURE_WAIT_S = 900                 # seconds the takedown waits for a running capture (no knob: defaults live in code)
+CAPTURE_POLL_S = 30
+CAPTURE_PROBE = ("pgrep -f '[c]apture_all.py (candles-recent|option-candles)' > /dev/null "
+                 "&& echo CAPTURING || echo IDLE")
+
+
+def wait_for_capture(ok: list, dry: bool, budget=None, poll=None, sleep=time.sleep, clock=time.monotonic) -> list:
+    """v2.16 (CAP.7) — hold the takedown while a verified box is still capturing, up to `budget` seconds.
+
+    Returns the boxes still capturing when the budget ran out ([] when all finished). ⚠️ BOUNDED, AND IT NEVER
+    HOLDS A BOX UP: when the budget is spent the caller stops them anyway (the capture resumes at the next close).
+    ⚠️ AN UNANSWERED BOX COUNTS AS DONE - a box whose ssh is wedged must not keep the fleet up.
+    """
+    budget = CAPTURE_WAIT_S if budget is None else budget
+    poll = CAPTURE_POLL_S if poll is None else poll
+    if not ok or dry or budget <= 0:
+        return []
+    t0 = clock()
+    boxes = [(s, ip) for s, ip, _st in fleet.get_fleet(list(ok)) if ip]
+    while boxes:
+        res = ssh_util.ssh_map(boxes, CAPTURE_PROBE, timeout=30)
+        busy = [s for s, _ip in boxes if "CAPTURING" in ((res.get(s) or (1, "", ""))[1] or "")]
+        waited = int(clock() - t0)
+        if not busy:
+            _log("CAPTURE", f"every verified box has finished its capture ({waited}s waited)")
+            return []
+        if clock() - t0 >= budget:
+            _log("CAPTURE", f"budget {budget}s spent - stopping anyway; still capturing: {', '.join(busy)} "
+                            f"(it resumes at the next close)")
+            return busy
+        _log("CAPTURE", f"waiting on {len(busy)} box(es) still capturing: {', '.join(busy)} ({waited}s of {budget}s)")
+        sleep(poll)
+        boxes = [(s, ip) for s, ip in boxes if s in busy]
+    return []
 
 
 def stop_services(ok: list, dry: bool) -> dict:
@@ -417,7 +471,8 @@ def stop_services(ok: list, dry: bool) -> dict:
         return out
     if dry:
         _log("STOP", f"[dry] would stop optionsbot + candle-feed on "
-                     f"{len(ok)} verified box(es) before the purge, and start capture_all candles-recent")
+                     f"{len(ok)} verified box(es) before the purge, and start capture_all candles-recent "
+                     f"+ option-candles")
         return out
     _log("STOP", f"releasing the stores on {len(ok)} verified box(es)")
     cmd = ("sudo systemctl stop optionsbot candle-feed 2>&1; "
@@ -712,6 +767,11 @@ def takedown(results: dict, dry: bool, enabled: bool) -> tuple:
     # Operator, 2026-08-27: *"immediately after the s3 drain is confirmed &
     # BEFORE the go down command."* `ok` is exactly that list.
     purge_verified(ok, dry)
+
+    # ── v2.16 (CAP.7) — LET THE NIGHT'S CAPTURE FINISH, BOUNDED ────────
+    # The capture started at stop_services runs beside the purge; the SPX and QQQ option chains outlast it. Bounded by
+    # CAPTURE_WAIT_S; a box still capturing at the bound is stopped anyway and resumes at the next close.
+    wait_for_capture(ok, dry)
 
     if ok:
         # ⚠️ STOP BY INSTANCE ID, NOT BY SSH. A box whose sshd is wedged still

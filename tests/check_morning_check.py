@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_morning_check.py  v1.1
+day_trader_pro/tests/check_morning_check.py  v1.2
+v1.2  2026-11-09  dtp r545 / CAP.7 — M15 last night's option-candles manifest per box symbol (tools/morning_check v1.2).
 v1.1  2026-11-08  dtp r542 / CAP.6 — M14 the 09:50 run's daily-candle check (tools/morning_check v1.1), on a fake bucket;
       M5/M6 inject a green daily check so they still test only the shadow rows.
 v1.0  2026-11-08  dtp r539 / TIMER.1 — the morning check (tools/morning_check.py) replaces three session crons.
@@ -283,6 +284,20 @@ ck("M14", r_ok == [] and len(l_ok) == 3
    and any(r.startswith("NVDA: raw/candles_full 1d_eth has no 2026-11-09") for r in r_bad) and len(r_bad) == 3
    and r_pre == [] and rc14 == 1 and posts14[0][0] == "critical" and "daily candles RED 1" in posts14[0][1],
    "ok %r | bad %r | pre %r | rc %s %r" % (r_ok, r_bad, r_pre, rc14, posts14[:1]))
+
+# M15 — v1.2: last night's option-candles manifest per box symbol (from 2026-11-11; VIX has none)
+pv15 = _date(2026, 11, 10)
+b15 = bucket(pv15, ["AMD", "SPX", "NVDA"])
+b15["raw/option_candles_runs/dt=2026-11-10/sym=AMD/162201.json.gz"] = b"{}"
+b15["raw/option_candles_runs/dt=2026-11-11/sym=SPX/000512.json.gz"] = b"{}"      # a run that crossed midnight ET
+b15["raw/option_candles_runs/dt=2026-11-06/sym=NVDA/162201.json.gz"] = b"{}"     # stale: not last night
+r15, _n, l15 = M.daily_bars_check("2026-11-11", ["AMD", "SPX", "NVDA"], FakeS3(b15), wk)
+r15pre, _n, _l = M.daily_bars_check("2026-11-10", ["AMD"], FakeS3(bucket(pv, ["AMD"])), wk)
+ck("M15", [r for r in r15 if "option-candles" in r] == [
+       "NVDA: no option-candles run after the 2026-11-10 close (raw/option_candles_runs): last night's capture_all "
+       "option-candles did not run"]
+   and not any("VIX" in r for r in r15) and r15pre == [] and any("options 1 run(s)" in l for l in l15),
+   "%r | pre %r | %r" % (r15, r15pre, l15[:2]))
 
 print()
 if FAILS:
