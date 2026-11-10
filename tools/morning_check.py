@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/morning_check.py — v1.2
+day_trader_pro/tools/morning_check.py — v1.3
+v1.3  2026-11-10  dtp r547 (§5 hygiene) — THE BUCKET COMES FROM config.WAREHOUSE_BUCKET. v1.2 carried its own literal
+      default, which check_const_parity P2 (CONST.1, r535) reports red; the value and the OT_S3_BUCKET override are the same.
 v1.2  2026-11-09  dtp r545 / CAP.7 — THE 09:50 RUN ALSO ASKS WHETHER LAST NIGHT'S OPTION-CANDLE CAPTURE RAN. On 11-09 the
       conductor said "CAPTURE started" on 14 boxes and nothing ran (its log was root-owned). OTV5 r104's option-candles
       writes one manifest per box per run (raw/option_candles_runs/dt=<ET day>/sym=<box>/); from 2026-11-11 a box symbol
@@ -220,7 +222,8 @@ def step_wake(day, fleet_fn=None, map_fn=None, journal_fn=None, alive_fn=None, m
     return reds, notes, lines, one
 
 
-BUCKET = os.environ.get("OT_S3_BUCKET", "vertigo-warehouse-tx9ai")
+import config  # noqa: E402
+BUCKET = config.WAREHOUSE_BUCKET   # CONST.1: one bucket literal, in config.py (check_const_parity P2)
 ETH_CHECK_FROM = "2026-11-10"          # the first morning after OTV5 r98's candles-recent first runs (11-09 16:12 ET)
 OPT_CHECK_FROM = "2026-11-11"          # the first morning after OTV5 r104's option-candles first runs (the 11-10 close)
 
