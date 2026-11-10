@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_conductor_capture.py — v1.1
+day_trader_pro/tests/check_conductor_capture.py — v1.2
+v1.2  2026-11-09  dtp r546 / CAP.7 — K8 the capture wait's budget: 1800 s, cut to the 16:40 ET deadline (self_close fires at
+      16:45 on a box still up), 0 past it; K2/K6 re-stated for the 2100 s option-candles bound and the 1800 s wait.
 v1.1  2026-11-09  dtp r545 / CAP.7 — the capture never started on 11-09 (its log, capture_all.log, is root-owned: systemd's
       StandardOutput=append: creates it). K2 its own log capture_nightly.log and never capture_all.log, option-candles
       after candles-recent; K4 says "CAPTURE running"; K5 the 11-09 failure reproduced (an unwritable capture_all.log
@@ -58,7 +60,7 @@ def main():
                   < c.index("capture_all.py option-candles") for c in cmds))
     ck("K1", k1, repr(cmds[:1]))
     c0 = cmds[0] if cmds else ""
-    k2 = (all(t in c0 for t in ("setsid nohup", "timeout --kill-after=10 300", "timeout --kill-after=10 1500",
+    k2 = (all(t in c0 for t in ("setsid nohup", "timeout --kill-after=10 300", "timeout --kill-after=10 2100",
                                 ") < /dev/null > /dev/null 2>&1 &", ">> logs/capture_nightly.log"))
           and "capture_all.log" not in c0)
     ck("K2", k2, c0)
@@ -161,8 +163,16 @@ def main():
     calls.clear()
     r_dry = C.wait_for_capture(["AMD"], True, sleep=sleep, clock=clock)
     ck("K6", r_ok == [] and shrink and r_cap == ["AMD"] and sum(slept) <= 90 and r_mute == [] and r_dry == []
-       and calls == [] and C.CAPTURE_WAIT_S == 900,
+       and calls == [] and C.CAPTURE_WAIT_S == 1800,
        f"ok={r_ok} shrink={shrink} cap={r_cap} slept={slept} mute={r_mute} dry={r_dry} calls={calls}")
+
+    # K8 — the deadline
+    from datetime import datetime as _dtm
+    tz = C.ettime.now_et().tzinfo
+    b1 = C._capture_budget(_dtm(2026, 11, 10, 16, 15, 0, tzinfo=tz))
+    b2 = C._capture_budget(_dtm(2026, 11, 10, 16, 5, 0, tzinfo=tz))
+    b3 = C._capture_budget(_dtm(2026, 11, 10, 16, 41, 0, tzinfo=tz))
+    ck("K8", b1 == 1500 and b2 == 1800 and b3 == 0 and C.CAPTURE_DEADLINE_ET == (16, 40), f"{b1} {b2} {b3}")
 
     # K7 — the takedown order
     order = []

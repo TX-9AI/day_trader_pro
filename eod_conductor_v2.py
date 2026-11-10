@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/eod_conductor_v2.py — v2.16
+day_trader_pro/eod_conductor_v2.py — v2.17
+v2.17 2026-11-09 — dtp r546 / CAP.7 — THE CAPTURE WAIT RUNS TO A DEADLINE, NOT A FIXED 900 s. Measured the night r545 landed
+      (OTV5 r105, one stream per box because the account's session limit is shared by 14 boxes): SPX's front chain is
+      about 570 contracts a day, 4-5 minutes a series, seven series - longer than 900 s after the purge. The wait now runs
+      up to CAPTURE_WAIT_S (1800 s) but never past CAPTURE_DEADLINE_ET (16:40 ET): self_close fires at 16:45 on any box
+      still up and would start a second capture and halt the box under it ("16:45 IS CHOSEN SO THE TWO CAN NEVER RACE").
+      A box still capturing at the deadline is stopped and resumes at the next close. Gate check_conductor_capture v1.2 K8.
 v2.16 2026-11-09 — dtp r545 / CAP.7 — 🔴 THE CAPTURE HAD NEVER STARTED, AND NOW IT IS ASKED WHETHER IT DID. v2.15 appended
       to logs/capture_all.log as ubuntu, but OTV5's capture timers write that file through systemd's
       StandardOutput=append:, which systemd opens as root, so it is root:root 0644: the redirect failed, the subshell's
@@ -407,17 +413,25 @@ def drain_and_verify(symbols, dry: bool) -> dict:
 CAPTURE_LOG = "logs/capture_nightly.log"   # v2.16: never capture_all.log, which systemd creates root-owned
 CAPTURE_CMD = ("( cd ~/options-trader && mkdir -p logs && exec setsid nohup sh -c '"
                "timeout --kill-after=10 300 venv/bin/python tools/capture_all.py candles-recent; "
-               "timeout --kill-after=10 1500 venv/bin/python tools/capture_all.py option-candles' "
+               "timeout --kill-after=10 2100 venv/bin/python tools/capture_all.py option-candles' "
                ">> " + CAPTURE_LOG + " 2>&1 ) < /dev/null > /dev/null 2>&1 & "
                "CP=$!; sleep 2; kill -0 $CP 2>/dev/null && echo CAPTURE running || echo CAPTURE NOT RUNNING")
 # ⚠️ THE RUNNING CHECK ASKS ABOUT THE PID, NOT pgrep: the remote `bash -c` carrying this very command has
 # "tools/capture_all.py" in its own command line, so any pgrep that matches the capture matches the asker too (found by
 # K5). The background subshell execs into setsid -> nohup -> sh with the SAME pid (no job control: not a group leader),
 # so $! lives exactly as long as the night's capture; a failed redirect ends it at once.
-CAPTURE_WAIT_S = 900                 # seconds the takedown waits for a running capture (no knob: defaults live in code)
+CAPTURE_WAIT_S = 1800                # seconds the takedown waits for a running capture (no knob: defaults live in code)
+CAPTURE_DEADLINE_ET = (16, 40)       # ... and never past 16:40 ET: self_close fires at 16:45 on a box still up (v2.17)
 CAPTURE_POLL_S = 30
 CAPTURE_PROBE = ("pgrep -f '[c]apture_all.py (candles-recent|option-candles)' > /dev/null "
                  "&& echo CAPTURING || echo IDLE")
+
+
+def _capture_budget(now_et=None) -> int:
+    """Seconds the capture wait may spend: CAPTURE_WAIT_S, cut to the 16:40 ET deadline (0 when past it)."""
+    now = now_et or ettime.now_et()
+    dl = now.replace(hour=CAPTURE_DEADLINE_ET[0], minute=CAPTURE_DEADLINE_ET[1], second=0, microsecond=0)
+    return max(0, min(CAPTURE_WAIT_S, int((dl - now).total_seconds())))
 
 
 def wait_for_capture(ok: list, dry: bool, budget=None, poll=None, sleep=time.sleep, clock=time.monotonic) -> list:
@@ -427,7 +441,7 @@ def wait_for_capture(ok: list, dry: bool, budget=None, poll=None, sleep=time.sle
     HOLDS A BOX UP: when the budget is spent the caller stops them anyway (the capture resumes at the next close).
     ⚠️ AN UNANSWERED BOX COUNTS AS DONE - a box whose ssh is wedged must not keep the fleet up.
     """
-    budget = CAPTURE_WAIT_S if budget is None else budget
+    budget = _capture_budget() if budget is None else budget
     poll = CAPTURE_POLL_S if poll is None else poll
     if not ok or dry or budget <= 0:
         return []
