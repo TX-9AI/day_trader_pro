@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
-# day_trader_pro/tools/saturday_brief.sh — v1.9
+# day_trader_pro/tools/saturday_brief.sh — v2.0
+# v2.0 (2026-11-11) — dtp r549 / SAT.8 (the operator, 2026-11-11: "What about just waking more boxes at the 0300 to
+#   run these studies in parallel?"). The session now starts tools/study_dispatch.py, which runs the study queue on
+#   the boxes. This wrapper EXPORTS STUDY_DISPATCH_DEADLINE_ET (the session's own deadline) so the dispatcher's
+#   boxes are killed, cleaned and stopped before the session is, and after the session ends it runs
+#   `study_dispatch.py cleanup` (only boxes claimed by study_dispatch; it refuses inside the trading window) so a
+#   session killed at its deadline cannot leave a recruited box running or claimed.
 # v1.9 (2026-11-08) — dtp r539 / TIMER.1 (the operator, 2026-11-08: "consolidate, clean up and optimize"). Comment
 #   only: the layer table below named 07:17 / 08:47 / 11:17 UTC; the installed crontab fires the brief Sat 08:00 UTC,
 #   the watchdog Sat 12:45 UTC and the canary Wed 07:17 UTC, and the in-session layer was removed (the crontab's
@@ -415,6 +421,7 @@ mkdir -p "$WEEKLY" "$WORK" || { echo "  ⚠️ cannot create $WORK" | tee -a "$L
 touch "$MARKER"
 trap 'rm -f "$MARKER"' EXIT
 _deadline_hm="$(TZ=America/New_York date -d "@$(( $(date +%s) + BUDGET_S ))" +%H:%M)"
+export STUDY_DISPATCH_DEADLINE_ET="$_deadline_hm"   # SAT.8: the box studies end before the session does
 timeout "$BUDGET_S" "$CLAUDE_BIN" -p $ISOLATE "$(cat "$PROMPT_FILE")
 
 RUN PARAMETERS (from the wrapper; use them exactly):
@@ -428,6 +435,12 @@ RUN PARAMETERS (from the wrapper; use them exactly):
 rc=$?
 
 rm -f "$MARKER"
+# SAT.8: the safety net. Only boxes claimed by study_dispatch; a no-op when the session cleaned up itself.
+_SD="$(dirname "$(readlink -f "$0")")/study_dispatch.py"
+if [ -z "${SATURDAY_BRIEF_CLAUDE:-}" ] && [ -f "$_SD" ]; then
+  timeout 900 /home/ubuntu/day_trader_pro/venv/bin/python "$_SD" cleanup >> "$LOG" 2>&1 \
+    || echo "  ⚠️ study_dispatch cleanup rc=$? — see $LOG" | tee -a "$LOG"
+fi
 if [ -f "$OUT" ]; then
   echo "  ✅ brief written: $OUT ($(wc -l < "$OUT") lines)" | tee -a "$LOG"
   echo "$(date -u +%FT%TZ) PRODUCED fallback lines=$(wc -l < "$OUT") $OUT" >> "$LEDGER"

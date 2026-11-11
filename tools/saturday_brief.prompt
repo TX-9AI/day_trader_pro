@@ -37,19 +37,30 @@ THE BRIEF HAS SEVEN SECTIONS, IN THIS ORDER, EACH ONE STANDING ON ITS OWN:
          `~/reviews/studies/noprog_<this Friday>.md`'s D10-vs-BASE table, its five P1-P5 lines and its verdict
          verbatim, with no edits to the bar and no softened FAIL; if the run fails, list it under NOT MEASURED.
          A PASS goes to section 7 as an operator decision (a trading change under the freeze).
-       · THE STUDY QUEUE (standing, every week): /home/ubuntu/reviews/WEEKEND_STUDIES.md. Run each item
-         marked OPEN, in queue order, blind, exactly as the file's "HOW AN ITEM IS RUN" block says:
-         write ~/reviews/studies/<ID>_<YYYYMMDD>/SEAL.txt with a UTC timestamp BEFORE any outcome is
-         computed, tune only on the unsealed days, freeze the rule in FROZEN.json, and run it ONCE on the
-         sealed days. For each item report the blind n, EV a trade with its 95% interval, the window EV
-         with its interval, and PASS or FAIL against the item's own bar, unedited. Its TUNE or TRIM
-         verdict goes to section 7 as an operator decision. Then update the item in WEEKEND_STUDIES.md
-         (Status DONE with a one-line result and the study folder, or FORWARD with its pre-registration).
-         That file is the only file outside BRIEF and WORK you may edit.
-         Run the queue AFTER sections 1-5 are written, one heavy job at a time through
-         `flock /tmp/claude-heavy.lock /home/ubuntu/bin/heavy` (control has 3.8 GB and has run out of
-         memory before), each with a timeout. Stop starting new items 45 minutes before the DEADLINE.
-         Every OPEN item not finished goes to NOT MEASURED by its ID and stays OPEN for next week.
+       · THE STUDY QUEUE (standing, every week): /home/ubuntu/reviews/WEEKEND_STUDIES.md. It runs ON THE BOXES,
+         IN PARALLEL (dtp tools/study_dispatch.py, SAT.8): one OPEN item (a sub-item such as WS.6a is its own)
+         per stopped box, CRM never, each a bounded headless study agent that writes SEAL.txt with a UTC
+         timestamp BEFORE any outcome, freezes the rule in FROZEN.json, and runs it ONCE on the sealed days.
+         START IT right after the box reads (see THE BOXES), before the long control-side work:
+           cd /home/ubuntu/day_trader_pro && nohup ./venv/bin/python tools/study_dispatch.py run \
+             --out <WORK>/study_dispatch > <WORK>/study_dispatch.log 2>&1 &
+         It takes the deadline from the wrapper (STUDY_DISPATCH_DEADLINE_ET), claims its boxes, wakes and stops
+         them itself, stops idle boxes, copies each SEAL.txt to control the moment it appears, pulls each study
+         to ~/reviews/studies/<ID>_<YYYYMMDD>/, cleans every box (session killed, files and transcripts
+         removed, S3 scratch deleted), and marks each item DONE or FORWARD in WEEKEND_STUDIES.md. You do not
+         edit that file.
+         COLLECT IT after sections 1-5 are written:
+           cd /home/ubuntu/day_trader_pro && ./venv/bin/python tools/study_dispatch.py wait --out <WORK>/study_dispatch
+         It blocks until every item finishes or the deadline nears, then prints the table. Quote, per item: the
+         blind n, EV a trade with its 95% interval, the window EV with its interval, and PASS or FAIL against the
+         item's own bar, unedited. Each TUNE or TRIM recommendation goes to section 7 as an operator decision,
+         and every line of the summary's NOT MEASURED list goes to yours by ID (those items stay OPEN).
+         FALLBACK, only if the dispatch refused or failed before launching anything (no state.json, or its log
+         ends in REFUSED or ERROR): run OPEN items on control yourself, blind as above (seal in
+         ~/reviews/studies/<ID>_<YYYYMMDD>/SEAL.txt first, run ONCE), one heavy job at a time through
+         `flock /tmp/claude-heavy.lock /home/ubuntu/bin/heavy` (control has 3.8 GB and has run out of memory
+         before), each with a timeout, no new item in the last 45 minutes before the DEADLINE; update the
+         item's Status yourself; list the dispatch failure and every unfinished item under NOT MEASURED.
          Queued items do not count against the cap of five NEW proposals.
   ## 7. RECOMMENDATIONS
        ranked, each with the decision needed from the operator.
@@ -75,12 +86,16 @@ THE BOXES: READ-ONLY, AND NO CREDENTIALS, EVER.
   · Never print an environment or a unit: no `systemctl show` without a property filter, no
     `systemctl cat`, `env`, /proc/*/environ, .env, ~/.flash_creds or bootstrap. Service state
     comes from `systemctl is-active <unit>` only. botlog_scan redacts on the box. Keep it that way.
-  · Wake and stop the fleet ONLY with wake_and_bake. The fleet count comes from the instance map:
+  · Wake and stop the fleet ONLY with wake_and_bake (study_dispatch.py powers only the boxes it claims). The fleet count comes from the instance map:
       WAKE   cd /home/ubuntu/day_trader_pro && ./venv/bin/python wake_and_bake.py --wake-only --yes
       CLOSE  cd /home/ubuntu/day_trader_pro && ./venv/bin/python wake_and_bake.py --shutdown-only --yes
-    Do the box reads (sections 2 and 3) right after the wake, then CLOSE before the long control-side
-    work. YOU MUST CLOSE THE FLEET BEFORE YOU FINISH, INCLUDING ON FAILURE. Then quote the
-    "N/N reached 'stopped'" line. If you cannot quote it, say so at the top of NOT MEASURED.
+    Do the box reads (sections 2 and 3) right after the wake, then START the study dispatch (section 6).
+    Do NOT CLOSE while it runs: CLOSE would stop the boxes running studies. It stops the boxes it does not
+    use and the ones it finishes with; its own power calls go through ec2ops, the logged chokepoint.
+    At the end: run `study_dispatch.py wait`, then `./venv/bin/python tools/study_dispatch.py cleanup`
+    (it touches only its own claimed boxes), then CLOSE. YOU MUST CLOSE THE FLEET BEFORE YOU FINISH,
+    INCLUDING ON FAILURE. Then quote the "N/N reached 'stopped'" line. If you cannot quote it, say so at
+    the top of NOT MEASURED.
   · Never wake during 09:30-16:00 ET. If you are run by hand then, the box reads are NOT MEASURED.
 
 YOU LAND NOTHING AND YOU SEND NOTHING. No git commit, no push, no tools/deploy.sh, no land.sh,
@@ -90,7 +105,7 @@ in WORK, update the study queue's item status (section 6), and stop. Study folde
 ~/reviews/studies/, as the queue says.
 
 TIME: you have until the DEADLINE below (about 07:30 ET). Run the long jobs (the checker sweep,
-the exit replay) in the background with nohup, a timeout and an rc line, and write sections as
+the exit replay, the study dispatch) in the background with nohup, a timeout and an rc line, and write sections as
 their inputs arrive. A brief with three sections done and four in NOT MEASURED is better than
 no file at all.
 

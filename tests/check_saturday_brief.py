@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_saturday_brief.py  v1.5
+day_trader_pro/tests/check_saturday_brief.py  v1.6
+v1.6  2026-11-11  dtp r549 / SAT.8. S21/S21b/S21c: the study queue runs on the boxes. The prompt starts
+      tools/study_dispatch.py after the box reads, collects it with `wait`, runs `cleanup`, and does not CLOSE while
+      it runs; the spec names the same; the wrapper exports STUDY_DISPATCH_DEADLINE_ET and runs the cleanup after
+      the session. S20 still holds (the control fallback keeps the heavy lock).
 v1.5  2026-11-11  dtp r548 / SAT.7. S20/S20b: the prompt and the spec name the study queue ~/reviews/WEEKEND_STUDIES.md and
       its rules (seal first, run once, the heavy lock, unfinished items to NOT MEASURED).
 v1.4  2026-11-08  dtp r527 / SAT.6 (the 11-07 brief R9). S5 was RED in the 11-07 sweep, rc=0: the sweep ran while
@@ -483,6 +487,19 @@ ck("S20", _q in p and "SEAL.txt" in p and "ONCE" in p and "claude-heavy.lock" in
    "the prompt runs the study queue blind (seal, run once), through the heavy lock, unfinished to NOT MEASURED")
 ck("S20b", "WEEKEND_STUDIES.md" in spec and "SEAL.txt" in spec and "claude-heavy.lock" in spec,
    "the spec names the same study queue and its rules")
+
+# S21 (v1.6, dtp r549 / SAT.8): THE STUDY QUEUE RUNS ON THE BOXES. The operator, 2026-11-11: "What about just
+# waking more boxes at the 0300 to run these studies in parallel?"
+_q6 = p.split("THE STUDY QUEUE", 1)[-1][:4000]
+ck("S21", "tools/study_dispatch.py run" in _q6 and "study_dispatch.py wait" in _q6 and "FALLBACK" in _q6
+   and "Do NOT CLOSE while it runs" in p and "study_dispatch.py cleanup" in p,
+   "the prompt starts the box dispatch after the reads, collects it, cleans up, and does not CLOSE while it runs")
+ck("S21b", "study_dispatch.py" in spec and "CLOSED only after" in spec and "box_claims" in spec,
+   "the spec names the box dispatch, its claims, and the late CLOSE")
+_shs = open(SH).read()
+ck("S21c", 'export STUDY_DISPATCH_DEADLINE_ET="$_deadline_hm"' in _shs and '"$_SD" cleanup' in _shs
+   and _shs.index("export STUDY_DISPATCH_DEADLINE_ET") < _shs.index('timeout "$BUDGET_S"'),
+   "the wrapper hands the deadline to the dispatcher before the session and runs its cleanup after")
 
 print()
 if FAILS:

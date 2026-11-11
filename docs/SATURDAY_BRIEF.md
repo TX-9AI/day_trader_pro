@@ -1,4 +1,6 @@
-# THE SATURDAY BRIEF — spec v2.5
+# THE SATURDAY BRIEF — spec v2.6
+
+**v2.6 · 2026-11-11 · dtp r549 (SAT.8)**: the study queue runs ON THE BOXES, IN PARALLEL. `tools/study_dispatch.py` gives each OPEN item (a sub-item such as WS.6a is its own) its own stopped box (never CRM, never a box someone else claimed) and a bounded headless study agent there; it copies each SEAL.txt to control the moment it appears, pulls each study to `~/reviews/studies/<ID>_<YYYYMMDD>/`, validates it (seal unchanged, SEAL ≤ FROZEN ≤ RESULT), cleans and stops every box, and marks the queue. The brief starts it after the box reads and collects it in §6; the fleet is CLOSED only after it finishes. r548 ran the queue on control in about 30 minutes; this runs up to one item per box for about three hours. The operator, 2026-11-11: "What about just waking more boxes at the 0300 to run these studies in parallel?"
 
 **v2.5 · 2026-11-11 · dtp r548 (SAT.7)**: §6 runs the standing study queue `~/reviews/WEEKEND_STUDIES.md` every week. Each OPEN item is run blind (seal first, freeze, run once), after sections 1–5, one heavy job at a time, and stops 45 minutes before the deadline. Unfinished items go to NOT MEASURED and stay OPEN. The verdicts (TUNE or TRIM) go to §7. The operator, 2026-11-10: "Make sure you add whatever we want to study to the 0300 weekend activity."
 
@@ -88,11 +90,12 @@ Each section starts with its headline in one or two sentences and stands on its 
 | 03:00 | read the spec, last week's brief, OTV5 `docs/BACKLOG.md` (open rows), `docs/GENESIS.md` tail; set the window | down |
 | 03:05 | **WAKE** | up |
 | 03:10 | section 2 (bot-log scan), section 3 box reads (code, services, disk, box-vs-S3 trades) | up |
-| ~03:45 | **CLOSE** and verify `N/N reached 'stopped'` | down |
-| 03:45 | checker sweep (about 25 min) and the R suite (the exit replay takes about 25 min) in the background | down |
-| 04:15 | section 1 from S3, the bundles and `~/reviews/` | down |
-| 05:15 | sections 4 and 5 (read the trees) | down |
-| 06:15 | section 6 (bars written first, cheap studies run; then the study queue, one heavy job at a time, no new item after DEADLINE − 45 min), section 7 | down |
+| ~03:45 | **START the study dispatch** (`study_dispatch.py run`, nohup): one OPEN queue item per box; it stops the boxes it does not use | study boxes up |
+| 03:45 | checker sweep (about 25 min) and the R suite (the exit replay takes about 25 min) in the background | study boxes up |
+| 04:15 | section 1 from S3, the bundles and `~/reviews/` | study boxes up |
+| 05:15 | sections 4 and 5 (read the trees) | study boxes up |
+| 06:15 | section 6 (bars written first, cheap studies run; then `study_dispatch.py wait` collects the queue), section 7 | study boxes finish by DEADLINE − 25 min |
+| ≤ 07:05 | `study_dispatch.py cleanup`, then **CLOSE** and verify `N/N reached 'stopped'` | down |
 | ≤ 07:15 | the file is written; then INDEX and NOT MEASURED are finished | down |
 
     WAKE   cd /home/ubuntu/day_trader_pro && ./venv/bin/python wake_and_bake.py --wake-only --yes
@@ -320,21 +323,36 @@ Evidence comes from the counterfactual half of the R suite (OTV5 `tests/`, dtp v
 The exit replay's positive control comes first. If replayed trades do not reconcile, every alternative is
 suspect, and the study says so. When the two tools disagree, report the disagreement; do not pick one.
 
-**The study queue (standing, every week, v2.5):** `~/reviews/WEEKEND_STUDIES.md` holds the studies the
+**The study queue (standing, every week, v2.6):** `~/reviews/WEEKEND_STUDIES.md` holds the studies the
 operator and the sessions have agreed to run, each with its hypothesis, data, seal rule and pass bar written
-before testing. The brief runs every item marked OPEN, in queue order, blind:
-- Write `~/reviews/studies/<ID>_<YYYYMMDD>/SEAL.txt`, timestamped, before any outcome.
-- Tune only on the unsealed days, freeze the rule in `FROZEN.json`, and run it once.
-- Report the blind n, EV a trade with its 95% interval, the window EV with its interval, and PASS or FAIL against
-  the item's own bar, unedited. The TUNE or TRIM verdict goes to §7.
-- Update the item's Status in the file: DONE with a result line, or FORWARD with its pre-registration. That file
-  is the one file outside BRIEF and WORK the brief may edit.
+before testing. Every item marked OPEN is run blind, and since v2.6 they run ON THE BOXES, IN PARALLEL
+(`tools/study_dispatch.py`, SAT.8):
+- The brief starts `study_dispatch.py run` right after the box reads. It refuses inside the trading window
+  (Mon–Fri 08:45–16:50 ET). One OPEN item per box; a sub-item such as WS.6a is its own item. CRM is never used,
+  and a box with someone else's claim in `~/reviews/box_claims` is skipped. It writes its own claim per box, and
+  every power call goes through ec2ops under `flock /tmp/claude-fleet.lock`. Unused, unclaimed boxes are stopped.
+- On each box it stops optionsbot and candle-feed and runs a bounded headless `claude -p` study agent (the
+  research token is read from SSM with the box's own role; never printed, never copied from control). The agent
+  reads the warehouse with the box's own role, writes nothing outside its work dir and never writes S3.
+- The agent writes `SEAL.txt` (with a `SEALED_AT` UTC line) before any outcome, then `FROZEN.json`, then runs once
+  and writes `RESULT.json` last. The dispatcher copies `SEAL.txt` to control the moment it appears; a result is
+  accepted only if the seal is unchanged and SEAL ≤ FROZEN ≤ RESULT. The study lands in
+  `~/reviews/studies/<ID>_<YYYYMMDD>/`, with the control copy as `SEAL.control.txt`.
+- Cleanup on every exit path, including timeout and failure: the session is killed, `~/study_<run>` and the run's
+  `~/.claude/projects` transcripts are removed, S3 scratch is deleted, the box is stopped and the claim released.
+  A freed box takes the next queued item while at least 45 minutes remain. Every box is killed 25 minutes before
+  the deadline. The wrapper exports the deadline (`STUDY_DISPATCH_DEADLINE_ET`) and runs `study_dispatch.py
+  cleanup` after the session as a safety net.
+- The dispatcher marks each item DONE or FORWARD in the queue file; invalid or unfinished items stay OPEN and are
+  listed in its summary's NOT MEASURED. The brief collects it with `study_dispatch.py wait` in §6: per item the
+  blind n, EV a trade with its 95% interval, the window EV with its interval, and PASS or FAIL against the item's
+  own bar, unedited. The TUNE or TRIM verdict goes to §7. The fleet is CLOSED only after the dispatcher finishes.
+- Fallback, only if the dispatch refused or failed before launching anything: the brief runs OPEN items on
+  control, blind as above, one heavy job at a time through `flock /tmp/claude-heavy.lock /home/ubuntu/bin/heavy`,
+  no new item in the last 45 minutes before the deadline, and lists the failure under NOT MEASURED.
 
-The queue runs after sections 1–5 are written, one heavy job at a time through
-`flock /tmp/claude-heavy.lock /home/ubuntu/bin/heavy`, and no new item starts in the last 45 minutes before the
-deadline. Unfinished items go to NOT MEASURED by ID and stay OPEN. Queued items don't count against the cap of five
-new proposals. Sessions add items by appending to the file (IDs WS.<n>, never reused); nothing in this spec needs
-to change when they do.
+Queued items don't count against the cap of five new proposals. Sessions add items by appending to the file
+(IDs WS.<n>, never reused); nothing in this spec needs to change when they do.
 
 **Standing studies (kept from the old Saturday rows):**
 - **GIVE.2, fleet:** exits that give back profit. 1.4's giveback is its weekly input, and the exit families
