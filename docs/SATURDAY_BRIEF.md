@@ -1,4 +1,6 @@
-# THE SATURDAY BRIEF — spec v2.7
+# THE SATURDAY BRIEF — spec v2.8
+
+**v2.8 · 2026-11-11 · dtp r551 (CASH.1)**: §1.8's sizing rule corrected to the code (OTV5 `size_for`): Breakout's risk count has the at-least-1 floor, max(1, floor(base / ((entry − stop premium) × 100))), and without a usable stop premium it falls back to the geometry count max(1, floor(width / distance)) instead of NOT MEASURED; the deploy cap is named off (`OT_SIZE_ON_RISK` default). r550's text would have refused Breakout trades the bot takes. The operator said yes to the fix, 2026-11-11.
 
 **v2.7 · 2026-11-11 · dtp r550 (CASH.1)**: §1.8, the QQQ cash size table, every Saturday until the cash start (last run 12-05; from 2026-12-07 the brief skips it). Every QQQ trade since 10-26 is re-sized under A) base $250 / ramp max $500 and B) base $500 / ramp max $750, the per-trade cap at the ramp max. Report only; the operator sets the size, ramp and cap themselves at activation. The operator, 2026-11-11: "On the weekend prior, let's do a table of $250/$500 & $500/$750 with a cap at the ramp max", then "I think adding it to the Saturday brief is probably sufficient & just brief it every weekend until the date arrives".
 
@@ -180,14 +182,24 @@ equal to the ramp max (`OT_ORB_BUDGET_USD`) in both:
 | A | $250 | $500 |
 | B | $500 | $750 |
 
-The sizing rule is OTV5 `risk/risk_manager.py` `size_for`. Hunt, Runaway and PARK take the budget rule,
-floor(base / (entry × 100)). Breakout ramps (`_size_geometry`, scaling on): min(floor(base / ((entry − stop premium)
-× 100)), floor(ramp max / (entry × 100))). One contract over the budget is **refused** (`insufficient_capital`, or
-the ramp-max refusal for Breakout), never rounded down to one. Each kept trade's P&L and fee scale by new contracts / actual
+The sizing rule is OTV5 `risk/risk_manager.py` `size_for`, as the code runs it today. The grade multiplier is 1.0,
+and `OT_SIZE_ON_RISK` is off by default, so there is no deploy cap and no risk-to-stop denominator.
+
+| Setup | Rule | Contracts | Refused when |
+|---|---|---|---|
+| Hunt, Runaway, PARK | `_size_budget` | floor(base / (entry × 100)) | under 1 (`insufficient_capital`) |
+| Breakout | `_size_geometry` (the ramp) | min(by_risk, by_budget) | by_budget under 1 (the ramp-max refusal) |
+
+For Breakout, by_budget = floor(ramp max / (entry × 100)), and by_risk = **max(1,** floor(base / ((entry − stop
+premium) × 100))**)** when 0 < stop premium < entry; without a usable stop premium, by_risk is the geometry count
+max(1, floor(width / distance)), with width = `orb_range_high` − `orb_range_low` and distance = |`underlying_entry` −
+`underlying_stop`|. A stop wider than the range (distance > width) sizes min(by_risk, by_budget) with a usable stop
+premium, and 1 contract without one. Every input is on the warehouse trade row (`load_trades`). A refused trade is
+never rounded up to one contract. Each kept trade's P&L and fee scale by new contracts / actual
 contracts. Report, per scheme and per setup (Hunt, Runaway, Breakout, PARK): entries traded vs refused; contracts
 min / median / max; the re-sized P&L with fees beside it, never in it; EV per trade with a day-bootstrap 95%
 interval; the worst day; the largest single-trade loss. Lead with each scheme's window EV and its interval. A
-Breakout trade without a stop premium goes to NOT MEASURED by trade_id. **Report only:** the operator sets the size,
+Breakout trade with neither a usable stop premium nor width and distance goes to NOT MEASURED by trade_id. **Report only:** the operator sets the size,
 the ramp and the cap themselves when they activate cash. It is not a study (never in `WEEKEND_STUDIES.md`) and it
 makes no recommendation in §7.
 

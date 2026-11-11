@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_saturday_brief.py  v1.7
+day_trader_pro/tests/check_saturday_brief.py  v1.8
+v1.8  2026-11-11  dtp r551 / CASH.1. S22c: the cash table's sizing rule matches OTV5 size_for. Breakout's risk count
+      carries the at-least-1 floor and falls back to the geometry count without a usable stop premium; r550's text
+      (no floor, NOT MEASURED without a stop premium) would have refused Breakout trades the bot takes. S22/S22b now
+      read "never rounded up to 1" (a refused trade is one under 1 contract).
 v1.7  2026-11-11  dtp r550 / CASH.1. S22/S22b: the QQQ cash size table runs every Saturday until 2026-12-07 and then
       skips itself. The prompt and the spec name both schemes ($250/$500 and $500/$750, cap = the ramp max), the
       refusal (never rounded to 1), fees beside EV, the date stop, and REPORT ONLY; the item stays out of the study queue.
@@ -509,15 +513,29 @@ ck("S21c", 'export STUDY_DISPATCH_DEADLINE_ET="$_deadline_hm"' in _shs and '"$_S
 _c = p.split("THE QQQ CASH SIZE TABLE", 1)[-1][:2500] if "THE QQQ CASH SIZE TABLE" in p else ""
 _c1 = p.find("THE QQQ CASH SIZE TABLE")
 ck("S22", bool(_c) and "on or after 2026-12-07, skip it" in _c and "$250, ramp max $500" in _c
-   and "$500, ramp max $750" in _c and "cap = the ramp max" in _c and "never rounded down to 1" in _c
+   and "$500, ramp max $750" in _c and "cap = the ramp max" in _c and "never rounded up to 1" in _c
    and "fees beside it (never in it)" in _c and "REPORT ONLY" in _c and "~/reviews/trades/*.csv" in _c
    and p.find("## 1. TRADING SUMMARY") < _c1 < p.find("## 2. ISSUES FROM THE BOT LOGS"),
    "the prompt's section 1 sizes QQQ under both schemes until 2026-12-07, refuses not floors, report only")
 _c8 = spec.split("**1.8 The QQQ cash size table", 1)[-1][:3000] if "**1.8 The QQQ cash size table" in spec else ""
 ck("S22b", bool(_c8) and "On or after 2026-12-07 the brief skips this item" in _c8 and "| A | $250 | $500 |" in _c8
-   and "| B | $500 | $750 |" in _c8 and "never rounded down to one" in _c8 and "Report only:" in _c8
+   and "| B | $500 | $750 |" in _c8 and "never rounded up to one" in _c8 and "Report only:" in _c8
    and spec.find("\n## 1. TRADING SUMMARY") < spec.find("**1.8 The QQQ cash size table") < spec.find("\n## 2. ISSUES FROM THE BOT LOGS"),
    "the spec's 1.8 names the same two schemes, the refusal, the date stop and report only")
+# S22c (v1.8, dtp r551): THE SIZING RULE IS THE CODE'S. OTV5 _size_geometry floors Breakout's risk count at 1 and
+# falls back to geometry; r550 wrote min(floor(...), floor(...)) with no floor and sent a missing stop to NOT MEASURED.
+_flat = lambda t: re.sub(r"\s+", " ", t)
+_cf, _c8f = _flat(_c), _flat(_c8)
+ck("S22c", "by_risk = max(1, floor(base / ((entry - stop premium) x 100))) when 0 < stop premium < entry" in _cf
+   and "else the geometry count max(1, floor(width / distance))" in _cf
+   and "by_budget = floor(ramp max / (entry x 100)); under 1 the trade is REFUSED" in _cf
+   and "Hunt, Runaway and PARK take _size_budget: floor(base / (entry x 100))" in _cf
+   and "OT_SIZE_ON_RISK is off by default" in _cf
+   and "min(floor(base / ((entry - stop premium) x 100))" not in _cf
+   and "with no stop premium goes to NOT MEASURED" not in _cf
+   and "by_risk = **max(1,** floor(base / ((entry − stop premium) × 100))**)**" in _c8f
+   and "max(1, floor(width / distance))" in _c8f and "without a stop premium goes to NOT MEASURED" not in _c8f,
+   "the cash table sizes Breakout as size_for does: risk count floored at 1, geometry fallback, refused only over the ramp max")
 
 print()
 if FAILS:

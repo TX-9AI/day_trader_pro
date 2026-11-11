@@ -21,17 +21,24 @@ THE BRIEF HAS SEVEN SECTIONS, IN THIS ORDER, EACH ONE STANDING ON ITS OWN:
          every QQQ trade in ~/reviews/trades/*.csv dated 2026-10-26 through this Friday (OTV4TEST rows out) and
          re-size each entry under two schemes, with the per-trade cap = the ramp max (OT_ORB_BUDGET_USD) in both:
            A) base OT_RISK_USD $250, ramp max $500        B) base OT_RISK_USD $500, ramp max $750
-         The rule (OTV5 risk/risk_manager.py size_for): Hunt, Runaway and PARK size floor(base / (entry x 100));
-         Breakout ramps, min(floor(base / ((entry - stop premium) x 100)), floor(ramp max / (entry x 100))), with
-         the stop premium from the warehouse trade row (load_trades, stop_premium). One contract over the budget is
-         REFUSED (insufficient_capital, or the ramp-max refusal for Breakout), never rounded down to 1. Scale each kept
-         trade's P&L and fee by new contracts / actual contracts.
+         The rule is OTV5 risk/risk_manager.py size_for, as the code runs it today. The grade multiplier is 1.0, and
+         OT_SIZE_ON_RISK is off by default, so there is no deploy cap and no risk-to-stop denominator.
+         Hunt, Runaway and PARK take _size_budget: floor(base / (entry x 100)). Under 1 contract the trade is REFUSED
+         (insufficient_capital), never rounded up to 1.
+         Breakout takes _size_geometry, which ramps. by_budget = floor(ramp max / (entry x 100)); under 1 the trade
+         is REFUSED (the ramp-max refusal). Otherwise contracts = min(by_risk, by_budget), where:
+           by_risk = max(1, floor(base / ((entry - stop premium) x 100))) when 0 < stop premium < entry,
+                     else the geometry count max(1, floor(width / distance))
+           width = orb_range_high - orb_range_low, distance = |underlying_entry - underlying_stop|
+         A stop wider than the range (distance > width) sizes min(by_risk, by_budget) when there is a usable stop
+         premium, and 1 contract without one. Every input comes from the warehouse trade row (load_trades).
+         Scale each kept trade's P&L and fee by new contracts / actual contracts.
          Report, per scheme and per setup (Hunt, Runaway, Breakout, PARK): entries traded vs refused, contracts
          min/median/max, the re-sized P&L with fees beside it (never in it), EV a trade with a day-bootstrap 95%
          interval, the worst day, and the largest single-trade loss. Lead with each scheme's window EV and its
-         interval. A Breakout trade with no stop premium goes to NOT MEASURED by trade_id. REPORT ONLY: the operator
-         sets the size, the ramp and the cap themselves when they activate cash. It is not a study (never in
-         WEEKEND_STUDIES.md) and it makes no recommendation in section 7.
+         interval. A Breakout trade with neither a usable stop premium nor width and distance goes to NOT MEASURED
+         by trade_id. REPORT ONLY: the operator sets the size, the ramp and the cap themselves when they activate
+         cash. It is not a study (never in WEEKEND_STUDIES.md) and it makes no recommendation in section 7.
   ## 2. ISSUES FROM THE BOT LOGS
        tools/botlog_scan.py over every box's bot.log for the week: new ERROR/CRITICAL/Traceback
        signatures first, then count jumps, restarts, blind/stale feed episodes, gate refusals
