@@ -1,4 +1,6 @@
-# THE SATURDAY BRIEF — spec v2.4
+# THE SATURDAY BRIEF — spec v2.5
+
+**v2.5 · 2026-11-11 · dtp r548 (SAT.7)**: §6 runs the standing study queue `~/reviews/WEEKEND_STUDIES.md` every week. Each OPEN item is run blind (seal first, freeze, run once), after sections 1–5, one heavy job at a time, and stops 45 minutes before the deadline. Unfinished items go to NOT MEASURED and stay OPEN. The verdicts (TUNE or TRIM) go to §7. The operator, 2026-11-10: "Make sure you add whatever we want to study to the 0300 weekend activity."
 
 **v2.4 · 2026-11-08 · dtp r538 (RETIRE.3)** — §1.5: the TCS shadow is gone (OTV5 r88 deleted it; the operator, 2026-11-08: "Delete"), so the section reads only the PARK late-day shadow, through `_envelopes` on `check_name`; §5's remnant note no longer keeps the TCS.
 
@@ -90,7 +92,7 @@ Each section starts with its headline in one or two sentences and stands on its 
 | 03:45 | checker sweep (about 25 min) and the R suite (the exit replay takes about 25 min) in the background | down |
 | 04:15 | section 1 from S3, the bundles and `~/reviews/` | down |
 | 05:15 | sections 4 and 5 (read the trees) | down |
-| 06:15 | section 6 (bars written first, cheap studies run), section 7 | down |
+| 06:15 | section 6 (bars written first, cheap studies run; then the study queue, one heavy job at a time, no new item after DEADLINE − 45 min), section 7 | down |
 | ≤ 07:15 | the file is written; then INDEX and NOT MEASURED are finished | down |
 
     WAKE   cd /home/ubuntu/day_trader_pro && ./venv/bin/python wake_and_bake.py --wake-only --yes
@@ -317,6 +319,22 @@ Evidence comes from the counterfactual half of the R suite (OTV5 `tests/`, dtp v
 
 The exit replay's positive control comes first. If replayed trades do not reconcile, every alternative is
 suspect, and the study says so. When the two tools disagree, report the disagreement; do not pick one.
+
+**The study queue (standing, every week, v2.5):** `~/reviews/WEEKEND_STUDIES.md` holds the studies the
+operator and the sessions have agreed to run, each with its hypothesis, data, seal rule and pass bar written
+before testing. The brief runs every item marked OPEN, in queue order, blind:
+- Write `~/reviews/studies/<ID>_<YYYYMMDD>/SEAL.txt`, timestamped, before any outcome.
+- Tune only on the unsealed days, freeze the rule in `FROZEN.json`, and run it once.
+- Report the blind n, EV a trade with its 95% interval, the window EV with its interval, and PASS or FAIL against
+  the item's own bar, unedited. The TUNE or TRIM verdict goes to §7.
+- Update the item's Status in the file: DONE with a result line, or FORWARD with its pre-registration. That file
+  is the one file outside BRIEF and WORK the brief may edit.
+
+The queue runs after sections 1–5 are written, one heavy job at a time through
+`flock /tmp/claude-heavy.lock /home/ubuntu/bin/heavy`, and no new item starts in the last 45 minutes before the
+deadline. Unfinished items go to NOT MEASURED by ID and stay OPEN. Queued items don't count against the cap of five
+new proposals. Sessions add items by appending to the file (IDs WS.<n>, never reused); nothing in this spec needs
+to change when they do.
 
 **Standing studies (kept from the old Saturday rows):**
 - **GIVE.2, fleet:** exits that give back profit. 1.4's giveback is its weekly input, and the exit families

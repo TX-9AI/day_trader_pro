@@ -8,6 +8,7 @@ READ FIRST, IN THIS ORDER:
   3. /home/ubuntu/OTV5/docs/GENESIS.md                   the last 12 rows
   4. /home/ubuntu/OTV5/docs/BACKLOG.md                   PART 1 (open rows), section H in full
   5. PRIOR (below)                                       last week's brief, to diff against
+  6. /home/ubuntu/reviews/WEEKEND_STUDIES.md             the study queue that section 6 runs
 
 THE BRIEF HAS SEVEN SECTIONS, IN THIS ORDER, EACH ONE STANDING ON ITS OWN:
   ## 1. TRADING SUMMARY
@@ -36,6 +37,20 @@ THE BRIEF HAS SEVEN SECTIONS, IN THIS ORDER, EACH ONE STANDING ON ITS OWN:
          `~/reviews/studies/noprog_<this Friday>.md`'s D10-vs-BASE table, its five P1-P5 lines and its verdict
          verbatim, with no edits to the bar and no softened FAIL; if the run fails, list it under NOT MEASURED.
          A PASS goes to section 7 as an operator decision (a trading change under the freeze).
+       · THE STUDY QUEUE (standing, every week): /home/ubuntu/reviews/WEEKEND_STUDIES.md. Run each item
+         marked OPEN, in queue order, blind, exactly as the file's "HOW AN ITEM IS RUN" block says:
+         write ~/reviews/studies/<ID>_<YYYYMMDD>/SEAL.txt with a UTC timestamp BEFORE any outcome is
+         computed, tune only on the unsealed days, freeze the rule in FROZEN.json, and run it ONCE on the
+         sealed days. For each item report the blind n, EV a trade with its 95% interval, the window EV
+         with its interval, and PASS or FAIL against the item's own bar, unedited. Its TUNE or TRIM
+         verdict goes to section 7 as an operator decision. Then update the item in WEEKEND_STUDIES.md
+         (Status DONE with a one-line result and the study folder, or FORWARD with its pre-registration).
+         That file is the only file outside BRIEF and WORK you may edit.
+         Run the queue AFTER sections 1-5 are written, one heavy job at a time through
+         `flock /tmp/claude-heavy.lock /home/ubuntu/bin/heavy` (control has 3.8 GB and has run out of
+         memory before), each with a timeout. Stop starting new items 45 minutes before the DEADLINE.
+         Every OPEN item not finished goes to NOT MEASURED by its ID and stays OPEN for next week.
+         Queued items do not count against the cap of five NEW proposals.
   ## 7. RECOMMENDATIONS
        ranked, each with the decision needed from the operator.
   Put an INDEX on top (one headline line per section) and a NOT MEASURED list at the foot.
@@ -71,7 +86,8 @@ THE BOXES: READ-ONLY, AND NO CREDENTIALS, EVER.
 YOU LAND NOTHING AND YOU SEND NOTHING. No git commit, no push, no tools/deploy.sh, no land.sh,
 no Telegram or pager (§17: the alert path is for emergencies, and a weekly report is not one).
 The operator approves every land. You write ONE markdown file at BRIEF, keep your working files
-in WORK, and stop.
+in WORK, update the study queue's item status (section 6), and stop. Study folders go under
+~/reviews/studies/, as the queue says.
 
 TIME: you have until the DEADLINE below (about 07:30 ET). Run the long jobs (the checker sweep,
 the exit replay) in the background with nohup, a timeout and an rc line, and write sections as

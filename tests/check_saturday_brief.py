@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_saturday_brief.py  v1.4
+day_trader_pro/tests/check_saturday_brief.py  v1.5
+v1.5  2026-11-11  dtp r548 / SAT.7. S20/S20b: the prompt and the spec name the study queue ~/reviews/WEEKEND_STUDIES.md and
+      its rules (seal first, run once, the heavy lock, unfinished items to NOT MEASURED).
 v1.4  2026-11-08  dtp r527 / SAT.6 (the 11-07 brief R9). S5 was RED in the 11-07 sweep, rc=0: the sweep ran while
       the real brief held the LIVE in-flight marker, the wrapper stood down on it, and the refusal was never
       reached. Worse, S7 touched that same live marker to "6 hours ago" and then left it — a sweep during a
@@ -470,6 +472,17 @@ ck("S18b", f"TREES   the trees this brief reports on" in _hp2 and f"OTV5 {_h5}" 
    and os.path.join(_wk, "saturday_2026-11-07_work") in _hp2,
    "the real run's parameters carry the OTV5 and dtp HEADs and the prior _work path")
 shutil.rmtree(_f, ignore_errors=True)
+
+# S20 (v1.5, dtp r548 / SAT.7): THE STUDY QUEUE. The operator, 2026-11-10: "Make sure you add whatever we want
+# to study to the 0300 weekend activity." The prompt and the spec both name ~/reviews/WEEKEND_STUDIES.md, tell the
+# session to seal before testing and run once, run the queue through the heavy lock, and send unfinished items to
+# NOT MEASURED.
+_q = "/home/ubuntu/reviews/WEEKEND_STUDIES.md"
+ck("S20", _q in p and "SEAL.txt" in p and "ONCE" in p and "claude-heavy.lock" in p
+   and "NOT MEASURED" in p.split("THE STUDY QUEUE", 1)[-1][:2000],
+   "the prompt runs the study queue blind (seal, run once), through the heavy lock, unfinished to NOT MEASURED")
+ck("S20b", "WEEKEND_STUDIES.md" in spec and "SEAL.txt" in spec and "claude-heavy.lock" in spec,
+   "the spec names the same study queue and its rules")
 
 print()
 if FAILS:
