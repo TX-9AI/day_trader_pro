@@ -1,4 +1,6 @@
-# THE SATURDAY BRIEF — spec v2.6
+# THE SATURDAY BRIEF — spec v2.7
+
+**v2.7 · 2026-11-11 · dtp r550 (CASH.1)**: §1.8, the QQQ cash size table, every Saturday until the cash start (last run 12-05; from 2026-12-07 the brief skips it). Every QQQ trade since 10-26 is re-sized under A) base $250 / ramp max $500 and B) base $500 / ramp max $750, the per-trade cap at the ramp max. Report only; the operator sets the size, ramp and cap themselves at activation. The operator, 2026-11-11: "On the weekend prior, let's do a table of $250/$500 & $500/$750 with a cap at the ramp max", then "I think adding it to the Saturday brief is probably sufficient & just brief it every weekend until the date arrives".
 
 **v2.6 · 2026-11-11 · dtp r549 (SAT.8)**: the study queue runs ON THE BOXES, IN PARALLEL. `tools/study_dispatch.py` gives each OPEN item (a sub-item such as WS.6a is its own) its own stopped box (never CRM, never a box someone else claimed) and a bounded headless study agent there; it copies each SEAL.txt to control the moment it appears, pulls each study to `~/reviews/studies/<ID>_<YYYYMMDD>/`, validates it (seal unchanged, SEAL ≤ FROZEN ≤ RESULT), cleans and stops every box, and marks the queue. The brief starts it after the box reads and collects it in §6; the fleet is CLOSED only after it finishes. r548 ran the queue on control in about 30 minutes; this runs up to one item per box for about three hours. The operator, 2026-11-11: "What about just waking more boxes at the 0300 to run these studies in parallel?"
 
@@ -164,6 +166,30 @@ is average win over |average loss|. Say so beside any R figure.
 
 `fit_readiness.py` is run (dtp, `--from/--to`). Its output is used **only** to name a setup that crossed a
 fittability line this week. Its "READY" counts signal rows, not trades (D7), so it is never reported as readiness.
+
+
+**1.8 The QQQ cash size table (every Saturday until 2026-12-07; the last run is 12-05).** The operator, 2026-11-11:
+"On the weekend prior, let's do a table of $250/$500 & $500/$750 with a cap at the ramp max", and "just brief it
+every weekend until the date arrives". **On or after 2026-12-07 the brief skips this item and does not mention it.**
+Source: every QQQ trade in `~/reviews/trades/*.csv` from 2026-10-26 through the Friday (OTV4TEST rows out), with
+Breakout's stop premium from the warehouse trade row (`load_trades`, `stop_premium`). Two schemes, the per-trade cap
+equal to the ramp max (`OT_ORB_BUDGET_USD`) in both:
+
+| Scheme | Base (`OT_RISK_USD`) | Ramp max = cap (`OT_ORB_BUDGET_USD`) |
+|---|---|---|
+| A | $250 | $500 |
+| B | $500 | $750 |
+
+The sizing rule is OTV5 `risk/risk_manager.py` `size_for`. Hunt, Runaway and PARK take the budget rule,
+floor(base / (entry × 100)). Breakout ramps (`_size_geometry`, scaling on): min(floor(base / ((entry − stop premium)
+× 100)), floor(ramp max / (entry × 100))). One contract over the budget is **refused** (`insufficient_capital`, or
+the ramp-max refusal for Breakout), never rounded down to one. Each kept trade's P&L and fee scale by new contracts / actual
+contracts. Report, per scheme and per setup (Hunt, Runaway, Breakout, PARK): entries traded vs refused; contracts
+min / median / max; the re-sized P&L with fees beside it, never in it; EV per trade with a day-bootstrap 95%
+interval; the worst day; the largest single-trade loss. Lead with each scheme's window EV and its interval. A
+Breakout trade without a stop premium goes to NOT MEASURED by trade_id. **Report only:** the operator sets the size,
+the ramp and the cap themselves when they activate cash. It is not a study (never in `WEEKEND_STUDIES.md`) and it
+makes no recommendation in §7.
 
 ---
 

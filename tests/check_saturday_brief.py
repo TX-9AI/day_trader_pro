@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_saturday_brief.py  v1.6
+day_trader_pro/tests/check_saturday_brief.py  v1.7
+v1.7  2026-11-11  dtp r550 / CASH.1. S22/S22b: the QQQ cash size table runs every Saturday until 2026-12-07 and then
+      skips itself. The prompt and the spec name both schemes ($250/$500 and $500/$750, cap = the ramp max), the
+      refusal (never rounded to 1), fees beside EV, the date stop, and REPORT ONLY; the item stays out of the study queue.
 v1.6  2026-11-11  dtp r549 / SAT.8. S21/S21b/S21c: the study queue runs on the boxes. The prompt starts
       tools/study_dispatch.py after the box reads, collects it with `wait`, runs `cleanup`, and does not CLOSE while
       it runs; the spec names the same; the wrapper exports STUDY_DISPATCH_DEADLINE_ET and runs the cleanup after
@@ -500,6 +503,21 @@ _shs = open(SH).read()
 ck("S21c", 'export STUDY_DISPATCH_DEADLINE_ET="$_deadline_hm"' in _shs and '"$_SD" cleanup' in _shs
    and _shs.index("export STUDY_DISPATCH_DEADLINE_ET") < _shs.index('timeout "$BUDGET_S"'),
    "the wrapper hands the deadline to the dispatcher before the session and runs its cleanup after")
+
+# S22 (v1.7, dtp r550 / CASH.1): THE QQQ CASH SIZE TABLE. The operator, 2026-11-11: "On the weekend prior, let's do a
+# table of $250/$500 & $500/$750 with a cap at the ramp max", then "just brief it every weekend until the date arrives".
+_c = p.split("THE QQQ CASH SIZE TABLE", 1)[-1][:2500] if "THE QQQ CASH SIZE TABLE" in p else ""
+_c1 = p.find("THE QQQ CASH SIZE TABLE")
+ck("S22", bool(_c) and "on or after 2026-12-07, skip it" in _c and "$250, ramp max $500" in _c
+   and "$500, ramp max $750" in _c and "cap = the ramp max" in _c and "never rounded down to 1" in _c
+   and "fees beside it (never in it)" in _c and "REPORT ONLY" in _c and "~/reviews/trades/*.csv" in _c
+   and p.find("## 1. TRADING SUMMARY") < _c1 < p.find("## 2. ISSUES FROM THE BOT LOGS"),
+   "the prompt's section 1 sizes QQQ under both schemes until 2026-12-07, refuses not floors, report only")
+_c8 = spec.split("**1.8 The QQQ cash size table", 1)[-1][:3000] if "**1.8 The QQQ cash size table" in spec else ""
+ck("S22b", bool(_c8) and "On or after 2026-12-07 the brief skips this item" in _c8 and "| A | $250 | $500 |" in _c8
+   and "| B | $500 | $750 |" in _c8 and "never rounded down to one" in _c8 and "Report only:" in _c8
+   and spec.find("\n## 1. TRADING SUMMARY") < spec.find("**1.8 The QQQ cash size table") < spec.find("\n## 2. ISSUES FROM THE BOT LOGS"),
+   "the spec's 1.8 names the same two schemes, the refusal, the date stop and report only")
 
 print()
 if FAILS:
