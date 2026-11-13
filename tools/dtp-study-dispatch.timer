@@ -1,0 +1,12 @@
+[Unit]
+Description=weekend study queue on the boxes: Friday 17:15 ET, deadline Saturday 02:30 ET (dtp r552 / SAT.9)
+
+[Timer]
+OnCalendar=Fri *-*-* 17:15:00 America/New_York
+AccuracySec=30s
+# No catch-up: a run started after downtime would collide with the 03:00 Saturday brief, which starts the
+# queue itself when Friday's run is missing (saturday_brief.prompt §6 fallback).
+Persistent=false
+
+[Install]
+WantedBy=timers.target

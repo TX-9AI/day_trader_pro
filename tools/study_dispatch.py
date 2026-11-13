@@ -1,6 +1,24 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/study_dispatch.py  v1.0
+day_trader_pro/tools/study_dispatch.py  v1.1
+v1.1  2026-11-13  dtp r552 / SAT.9 — THE QUEUE RUNS FRIDAY NIGHT, AND AN ITEM CAN WAIT FOR OTHERS. The operator,
+      2026-11-13: "Yes, don't wait until Sunday to do that study. Add it to the rest" (the studies start Friday
+      17:15 ET from the control timer dtp-study-dispatch, tools/friday_studies.sh, deadline Saturday 02:30 ET, so
+      the 03:00 brief digests finished results). Four changes:
+      · `- Depends: WS.1, WS.2` on an item: it launches only after every item it names has finished (in this run,
+        or already closed in the queue), on the box the last one frees (or a freshly claimed box when none is
+        active). Its brief carries each dependency's verdict, outcome, one line, recommendation and study folder,
+        and the folders ship in its kit. When no dependency PASSED it is marked DONE "nothing passed, not run"
+        and no box is used. A dependency still OPEN at the end (failed, invalid, not started) leaves it OPEN,
+        NOT MEASURED, with the reason.
+      · THE MIDNIGHT BACKSTOP. Every box halts itself at 00:00 ET (OTV5 warehouse/midnight_halt.py) unless
+        ~/options-trader/data/NO_MIDNIGHT_HALT exists. A Friday-night study runs across midnight, so runner.sh
+        writes that flag (content "study_dispatch", only when no flag exists) and the cleanup removes it only when
+        its content is ours: an operator's own hold is never touched.
+      · THE POWER AUDIT. dtp-power-audit (hourly 17:05-08:05 ET, --notify) pages on any box up outside the
+        window. Every box this run claims is acknowledged in its ack file (logs/power_ack.txt, "SYM DAY
+        study_dispatch <run>") for each ET day it is held, so a study box does not page; an ack covers one day.
+      · `--max-run-min N` (default 180) is the per-item cap.
 v1.0  2026-11-11  dtp r549 / SAT.8 — THE SATURDAY STUDY QUEUE RUNS ON THE BOXES, IN PARALLEL.
       The operator, 2026-11-11, on the queue not fitting the brief's time: "What about just waking more boxes at
       the 0300 to run these studies in parallel?" r548 ran ~/reviews/WEEKEND_STUDIES.md on control after
@@ -8,7 +26,8 @@ v1.0  2026-11-11  dtp r549 / SAT.8 — THE SATURDAY STUDY QUEUE RUNS ON THE BOXE
       This tool gives every OPEN item (a sub-item such as WS.6a counts as its own) its own stopped box and a
       bounded headless `claude -p` study agent there, then collects, validates, cleans and stops.
 
-WHAT IT DOES (`run`, started by the Saturday brief with nohup right after its wake and box reads):
+WHAT IT DOES (`run`, started Friday 17:15 ET by the control timer dtp-study-dispatch via tools/friday_studies.sh
+since v1.1; the Saturday brief starts it itself only as a fallback):
   1. REFUSES during RTH (Mon-Fri 08:45-16:50 ET, the box-research-recruits window).
   2. Parses the queue. One OPEN item per box; CRM is NEVER used; a box with someone else's claim in
      ~/reviews/box_claims is skipped. It writes its own claim (O_EXCL) for every box it takes.
@@ -29,7 +48,8 @@ WHAT IT DOES (`run`, started by the Saturday brief with nohup right after its wa
      state.json + summary.md in --out, which `wait` prints for the brief's sections 6 and 7.
 
 COMMANDS:
-  run      [--deadline HH:MM] [--out DIR] [--queue F] [--only SYM,..] [--max N] [--no-update-queue] [--no-stop-idle]
+  run      [--deadline HH:MM] [--out DIR] [--queue F] [--only SYM,..] [--max N] [--max-run-min M]
+           [--no-update-queue] [--no-stop-idle]
   wait     [--deadline HH:MM] [--out DIR]      block until `run` finishes (or the deadline), print the summary
   status   [--out DIR]
   cleanup  [--run RUN_ID]                      clean + stop + release every box claimed by study_dispatch
@@ -105,6 +125,11 @@ def deadline_dt(hhmm, base):
 _SEC = re.compile(r"^### (WS\.\d+)\b.*$", re.M)
 _SUB = re.compile(r"^- \*\*(WS\.\d+[a-z])\b", re.M)
 _STATUS = re.compile(r"^- Status: (.*)$", re.M)
+_DEPENDS = re.compile(r"^- Depends: (.*)$", re.M)
+_ID = re.compile(r"WS\.\d+[a-z]?")
+_FOLDER = re.compile(r"\((/[^()]*?/studies/[^()\s]+)\)")
+BOX_HOLD_FLAG = "/home/ubuntu/options-trader/data/NO_MIDNIGHT_HALT"   # OTV5 warehouse/midnight_halt.py HOLD_FLAG
+HOLD_MARK = "study_dispatch"
 _SUBSTATUS = re.compile(r"\s*\[Status: ([^\]]*)\]\s*$")
 
 
@@ -124,9 +149,12 @@ def parse_queue(text):
         st = _STATUS.search(body)
         status = st.group(1).strip() if st else "OPEN"
         title = m.group(0)[4:].strip()
+        dp = _DEPENDS.search(body)
+        depends = _ID.findall(dp.group(1)) if dp else []
         subs = list(_SUB.finditer(body))
         if not subs:
-            items.append({"id": m.group(1), "title": title, "status": status, "text": body, "parent": None})
+            items.append({"id": m.group(1), "title": title, "status": status, "text": body, "parent": None,
+                          "depends": depends})
             continue
         shared = body[: subs[0].start()].rstrip()
         for j, s in enumerate(subs):
@@ -135,7 +163,7 @@ def parse_queue(text):
             ss = _SUBSTATUS.search(sub_txt.splitlines()[0])
             sub_status = ss.group(1).strip() if ss else ("OPEN" if status.startswith("OPEN") else status)
             items.append({"id": s.group(1), "title": f"{title} / {s.group(1)}", "status": sub_status,
-                          "text": shared + "\n" + sub_txt, "parent": m.group(1)})
+                          "text": shared + "\n" + sub_txt, "parent": m.group(1), "depends": depends})
     return items
 
 
@@ -210,6 +238,8 @@ class RealOps:
         self.fleet_mod, self.ssh_util, self.ec2ops, self.reg, self.config = \
             fleet, ssh_util, ec2ops, instance_registry, config
         self.bucket = getattr(config, "WAREHOUSE_BUCKET", "")
+        # the power audit's acknowledgement file (tools/fleet_power_audit.py ACK_PATH); fakes have none
+        self.ack_path = os.environ.get("OT_POWER_ACK", os.path.join(DTP, "logs", "power_ack.txt"))
 
     def fleet(self):
         return self.fleet_mod.get_fleet()
@@ -256,6 +286,10 @@ RUN_S="${1:-3600}"
 echo "START $(date -u +%FT%TZ)" > status.txt
 echo $$ > runner.pid
 sudo -n systemctl stop optionsbot candle-feed >/dev/null 2>&1; echo "SERVICES_STOPPED rc=$?" >> status.txt
+# v1.1: the box halts itself at 00:00 ET unless this flag exists (OTV5 midnight_halt.py). Ours only if none is there;
+# the cleanup removes it only when it still says study_dispatch.
+HOLD=/home/ubuntu/options-trader/data/NO_MIDNIGHT_HALT
+if [ ! -e "$HOLD" ] && [ -d "$(dirname "$HOLD")" ]; then echo "study_dispatch $(date -u +%FT%TZ)" > "$HOLD" && echo "HOLD_SET" >> status.txt; fi
 PY=$(ls /home/ubuntu/options-trader/venv/bin/python3 /home/ubuntu/*/venv/bin/python3 2>/dev/null | head -1)
 TOK=$("$PY" -c 'import boto3;print(boto3.client("ssm",region_name="us-east-2").get_parameter(Name="/otv5/claude_research_token",WithDecryption=True)["Parameter"]["Value"])' 2>/dev/null)
 if [ -z "$TOK" ]; then echo "NO_TOKEN" >> status.txt; echo "exit=97 $(date -u +%FT%TZ)" >> status.txt; exit 0; fi
@@ -366,6 +400,8 @@ def cleanup_cmd(run_id, bucket):
     return (f"pkill -TERM -u ubuntu -f '[c]laude -p' ; sleep 2 ; pkill -KILL -u ubuntu -f '[c]laude -p' ; "
             f"for f in {root}/*/runner.pid; do [ -f \"$f\" ] && kill \"$(cat \"$f\")\" 2>/dev/null; done ; "
             f"rm -rf {root} ; rm -rf /home/ubuntu/.claude/projects/-home-ubuntu-study-{run_id}* ; {s3} ; "
+            f"if [ -f {BOX_HOLD_FLAG} ] && head -c 14 {BOX_HOLD_FLAG} | grep -q '^{HOLD_MARK}'; then "
+            f"rm -f {BOX_HOLD_FLAG} && echo HOLD_CLEARED; fi ; "
             f"echo CLEAN_DONE ; ls -d {root} /home/ubuntu/.claude/projects/-home-ubuntu-study-{run_id}* 2>/dev/null"
             f" | sed 's/^/LEFT /'")
 
@@ -403,8 +439,12 @@ def validate(dest, seal_sha, mtimes):
 # ── the dispatcher ──────────────────────────────────────────────────────────────────────────────────────────
 class Dispatcher:
     def __init__(self, ops, deadline, out, queue_path=None, claims_dir=None, studies=None,
-                 update_queue=True, stop_idle=True, only=None, max_boxes=None, bucket=None, run_id=None):
+                 update_queue=True, stop_idle=True, only=None, max_boxes=None, bucket=None, run_id=None,
+                 max_run_s=None):
         self.ops, self.deadline, self.out = ops, deadline, out
+        self.max_run_s = int(max_run_s or MAX_RUN_S)
+        self.ack_path = getattr(ops, "ack_path", None)
+        self._acked = set()                            # (sym, ET day) already written to the power-audit ack file
         # resolved at call time, never bound at import: a caller (or a test) that repoints the module paths wins
         self.queue_path = queue_path or QUEUE
         self.claims_dir = claims_dir or CLAIMS
@@ -432,6 +472,115 @@ class Dispatcher:
     def left_s(self):
         return (self.deadline - self.ops.now()).total_seconds() - MARGIN_S
 
+    # v1.1: dependencies ("- Depends: WS.1, WS.2")
+    def dep_state(self, dep, pending, active):
+        """-> (state, result, folder). state: 'waiting' | 'pass' | 'closed' (finished, not a PASS) | 'broken'."""
+        if any(it["id"] == dep for it in pending) or any(a["item"]["id"] == dep for a in active.values()):
+            return "waiting", None, None
+        st = self.state["items"].get(dep)
+        if st is not None:                            # it was in this run
+            res = st.get("result") or {}
+            if st["status"] == "DONE":
+                ok = str(res.get("verdict", "")).upper() == "PASS"
+                return ("pass" if ok else "closed"), res, st.get("folder")
+            if st["status"] == "FORWARD":
+                return "closed", res, st.get("folder")
+            return "broken", res, st.get("status")
+        q = getattr(self, "queue_items", {}).get(dep)
+        if q is None:
+            return "broken", None, "not in the queue"
+        status = q["status"]
+        m = re.match(r"DONE \S+ — (\w+)", status)
+        fm = _FOLDER.search(status)
+        folder = fm.group(1) if fm else None
+        if m:
+            return ("pass" if m.group(1).upper() == "PASS" else "closed"), {"verdict": m.group(1).upper(),
+                                                                          "one_line": status}, folder
+        if status.upper().startswith(("DONE", "FORWARD")):
+            return "closed", {"one_line": status}, folder
+        return "broken", None, f"still {status.split(' ', 1)[0]} and not in this run"
+
+    def ready(self, it, pending, active):
+        return all(self.dep_state(d, pending, active)[0] in ("pass", "closed") for d in it.get("depends") or [])
+
+    def next_ready(self, pending, active):
+        for it in pending:
+            if self.ready(it, pending, active):
+                return it
+        return None
+
+    def blocked_reason(self, it, pending, active):
+        bad = []
+        for d in it.get("depends") or []:
+            s, _r, why = self.dep_state(d, pending, active)
+            if s == "waiting":
+                bad.append(f"{d} did not finish in this run")
+            elif s == "broken":
+                bad.append(f"{d}: {why}")
+        return "; ".join(bad)
+
+    def resolve_dependents(self, pending, active):
+        """A dependent item whose dependencies are all closed: none passed -> DONE without a box; else its text
+        gains the dependencies' results and folders. A broken dependency (failed, invalid) blocks it."""
+        for it in list(pending):
+            deps = it.get("depends") or []
+            if not deps or it.get("_resolved"):
+                continue
+            states = {d: self.dep_state(d, pending, active) for d in deps}
+            if any(s[0] == "waiting" for s in states.values()):
+                continue
+            if any(s[0] == "broken" for s in states.values()):
+                pending.remove(it)
+                why = self.blocked_reason(it, pending, active)
+                self.state["items"][it["id"]]["status"] = f"NOT RUN ({why})"
+                self.state["not_measured"].append(f"{it['id']}: not run — {why}")
+                self.log(f"{it['id']}: not run — {why}")
+                continue
+            if not any(s[0] == "pass" for s in states.values()):
+                pending.remove(it)
+                line = f"nothing passed, not run (dependencies {', '.join(deps)}: none PASSED)"
+                self.state["items"][it["id"]].update({"status": "DONE", "result": {
+                    "id": it["id"], "verdict": "NONE", "outcome": "NONE", "one_line": line}})
+                self.log(f"{it['id']}: {line}")
+                if self.update_queue:
+                    text = open(self.queue_path).read()
+                    new = set_status(text, it["id"], f"DONE {self.ops.now():%Y-%m-%d} — {line}")
+                    if new != text:
+                        open(self.queue_path + ".tmp", "w").write(new)
+                        os.replace(self.queue_path + ".tmp", self.queue_path)
+                continue
+            lines = ["", "DEPENDENCY RESULTS (from this queue; use the PASSED ones, as the item says):"]
+            for d, (s, res, folder) in states.items():
+                res = res or {}
+                lines.append(f"- {d}: {'PASS' if s == 'pass' else 'not a pass'} — verdict {res.get('verdict', '?')}, "
+                             f"outcome {res.get('outcome', '?')}: {res.get('one_line', '')}")
+                if res.get("recommendation"):
+                    lines.append(f"  recommendation: {res['recommendation']}")
+                if folder:
+                    lines.append(f"  folder: ~/reviews/studies/{os.path.basename(folder.rstrip('/'))} "
+                                 f"(shipped in ../ctx/studies/{os.path.basename(folder.rstrip('/'))})")
+            it["text"] = it["text"] + "\n" + "\n".join(lines)
+            it["_resolved"] = True
+            self.state["items"][it["id"]]["dependencies"] = {d: s[0] for d, s in states.items()}
+
+    # v1.1: the power audit's acks, one per box per ET day held
+    def ack_boxes(self):
+        if not self.ack_path:
+            return
+        day = f"{self.ops.now():%Y-%m-%d}"
+        held = [s for s, b in self.state["boxes"].items() if b.get("claimed") and not b.get("released")]
+        new = [s for s in held if (s, day) not in self._acked]
+        if not new:
+            return
+        try:
+            os.makedirs(os.path.dirname(self.ack_path), exist_ok=True)
+            with open(self.ack_path, "a", encoding="utf-8") as fh:
+                for s in new:
+                    fh.write(f"{s} {day} {OWNER} {self.run_id} (study box, released at the end of the run)\n")
+                    self._acked.add((s, day))
+        except OSError as e:
+            self.log(f"power-audit ack not written ({e}); the hourly audit may page for these boxes")
+
     # the run
     def run(self):
         if in_rth(self.ops.now()):
@@ -442,33 +591,58 @@ class Dispatcher:
             return 2
         text = open(self.queue_path).read()
         how = how_block(text)
+        self.queue_items = {it["id"]: it for it in parse_queue(text)}
         pending = open_items(parse_queue(text))
         for it in pending:
             self.state["items"][it["id"]] = {"status": "QUEUED", "title": it["title"]}
+            if it.get("depends"):
+                self.state["items"][it["id"]]["depends"] = it["depends"]
         self.log(f"run {self.run_id}: {len(pending)} OPEN item(s): {', '.join(i['id'] for i in pending) or 'none'}")
-        boxes = self.pick_boxes(len(pending))
         active = {}                                   # sym -> {item, ip, started, seal_sha}
+        self.pending = pending                        # launch() takes its item off this list
+        self.resolve_dependents(pending, active)
+        boxes = self.pick_boxes(sum(1 for it in pending if self.ready(it, pending, active)))
         try:
             for sym, ip in boxes:
-                if not pending:
+                nxt = self.next_ready(pending, active)
+                if nxt is None or self.left_s() < MIN_RUN_S:
                     break
-                if self.left_s() < MIN_RUN_S:
-                    break
-                self.launch(sym, ip, pending.pop(0), how, active)
+                self.launch(sym, ip, nxt, how, active)
+            for sym, b in list(self.state["boxes"].items()):   # a claimed box that got no item goes back
+                if b.get("claimed") and not b.get("released") and sym not in active:
+                    self.clean_box(sym, b["ip"])
+                    self.retire(sym)
             for it in pending:
                 self.state["items"][it["id"]]["status"] = "QUEUED"
             self.save()
-            while active:
+            while active or (self.next_ready(pending, active) is not None and self.left_s() >= MIN_RUN_S):
+                if not active:                         # a dependent item is ready but every box was retired
+                    nxt = self.next_ready(pending, active)
+                    got = self.pick_boxes(1)
+                    if not got:
+                        break
+                    self.launch(got[0][0], got[0][1], nxt, how, active)
+                    continue
                 self.ops.sleep(POLL_S)
+                self.ack_boxes()
                 for sym in list(active):
                     done = self.poll(sym, active[sym])
                     if done or self.left_s() <= 0:
                         a = active.pop(sym)
                         self.finish(sym, a, timed_out=not done)
-                        if pending and self.left_s() >= MIN_RUN_S:
-                            self.launch(sym, a["ip"], pending.pop(0), how, active, fresh=False)
+                        self.resolve_dependents(pending, active)
+                        nxt = self.next_ready(pending, active)
+                        if nxt is not None and self.left_s() >= MIN_RUN_S:
+                            self.launch(sym, a["ip"], nxt, how, active, fresh=False)
                         else:
                             self.retire(sym)
+            for it in list(pending):                   # dependencies that never closed: say why, stay OPEN
+                if it.get("depends"):
+                    why = self.blocked_reason(it, pending, active)
+                    if why:
+                        pending.remove(it)
+                        self.state["items"][it["id"]]["status"] = f"NOT RUN ({why})"
+                        self.state["not_measured"].append(f"{it['id']}: not run — {why}")
         except Exception as e:                         # every exit path cleans up
             self.log(f"ERROR {type(e).__name__}: {e} — cleaning every box this run took")
             for sym in list(active):
@@ -519,12 +693,15 @@ class Dispatcher:
         if idle and self.stop_idle:
             self.log(f"stopping {len(idle)} idle unclaimed box(es): {', '.join(idle)}")
             self.ops.stop(idle)
+        self.ack_boxes()
         self.save()
         return [(s, ip) for s, ip, _st in chosen]
 
     def launch(self, sym, ip, item, how, active, fresh=True):
         iid = item["id"]
-        run_s = int(min(MAX_RUN_S, self.left_s()))
+        if item in getattr(self, "pending", []):
+            self.pending.remove(item)
+        run_s = int(min(self.max_run_s, self.left_s()))
         st = self.state["items"][iid]
         st.update({"status": "RUNNING", "box": sym, "started": self.ops.now().isoformat(), "run_s": run_s})
         self.log(f"launch {iid} on {sym} ({run_s // 60} min)")
@@ -727,6 +904,7 @@ def main(argv=None):
     ap.add_argument("--queue", default=QUEUE)
     ap.add_argument("--only", default="")
     ap.add_argument("--max", type=int, default=None)
+    ap.add_argument("--max-run-min", type=int, default=MAX_RUN_S // 60, help="per-item cap in minutes")
     ap.add_argument("--run", default=None)
     ap.add_argument("--no-update-queue", action="store_true")
     ap.add_argument("--no-stop-idle", action="store_true")
@@ -735,7 +913,8 @@ def main(argv=None):
     if a.cmd == "plan":
         items = open_items(parse_queue(open(a.queue).read()))
         for it in items:
-            print(f"{it['id']}: {it['title']}")
+            dep = f"  (after {', '.join(it['depends'])})" if it.get("depends") else ""
+            print(f"{it['id']}: {it['title']}{dep}")
         print(f"{len(items)} OPEN item(s)")
         return 0
     if a.cmd in ("wait", "status"):
@@ -759,7 +938,8 @@ def main(argv=None):
         return cleanup_all(ops, a.run)
     d = Dispatcher(ops, deadline_dt(a.deadline, ops.now()), out, queue_path=a.queue,
                    update_queue=not a.no_update_queue, stop_idle=not a.no_stop_idle,
-                   only=set(x for x in a.only.split(",") if x) or None, max_boxes=a.max)
+                   only=set(x for x in a.only.split(",") if x) or None, max_boxes=a.max,
+                   max_run_s=a.max_run_min * 60)
     return d.run()
 
 

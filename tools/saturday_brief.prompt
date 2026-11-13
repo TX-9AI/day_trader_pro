@@ -61,25 +61,31 @@ THE BRIEF HAS SEVEN SECTIONS, IN THIS ORDER, EACH ONE STANDING ON ITS OWN:
          verbatim, with no edits to the bar and no softened FAIL; if the run fails, list it under NOT MEASURED.
          A PASS goes to section 7 as an operator decision (a trading change under the freeze).
        · THE STUDY QUEUE (standing, every week): /home/ubuntu/reviews/WEEKEND_STUDIES.md. It runs ON THE BOXES,
-         IN PARALLEL (dtp tools/study_dispatch.py, SAT.8): one OPEN item (a sub-item such as WS.6a is its own)
-         per stopped box, CRM never, each a bounded headless study agent that writes SEAL.txt with a UTC
-         timestamp BEFORE any outcome, freezes the rule in FROZEN.json, and runs it ONCE on the sealed days.
-         START IT right after the box reads (see THE BOXES), before the long control-side work:
-           cd /home/ubuntu/day_trader_pro && nohup ./venv/bin/python tools/study_dispatch.py run \
-             --out <WORK>/study_dispatch > <WORK>/study_dispatch.log 2>&1 &
-         It takes the deadline from the wrapper (STUDY_DISPATCH_DEADLINE_ET), claims its boxes, wakes and stops
-         them itself, stops idle boxes, copies each SEAL.txt to control the moment it appears, pulls each study
-         to ~/reviews/studies/<ID>_<YYYYMMDD>/, cleans every box (session killed, files and transcripts
-         removed, S3 scratch deleted), and marks each item DONE or FORWARD in WEEKEND_STUDIES.md. You do not
-         edit that file.
-         COLLECT IT after sections 1-5 are written:
+         IN PARALLEL (dtp tools/study_dispatch.py, SAT.8), AND SINCE SAT.9 IT RUNS FRIDAY NIGHT: the control timer
+         dtp-study-dispatch (tools/friday_studies.sh) started it Friday 17:15 ET into <WORK>/study_dispatch (log
+         <WORK>/study_dispatch.log) with the deadline Saturday 02:30 ET, so its results are finished when you start.
+         One OPEN item (a sub-item such as WS.6a is its own) per stopped box, CRM never, each a bounded headless study
+         agent that writes SEAL.txt with a UTC timestamp BEFORE any outcome, freezes the rule in FROZEN.json, and runs
+         it ONCE on the sealed days. An item with a `- Depends:` line (e.g. WS.9, the combined Hunt gate) ran in a
+         second round after the items it names; with none of them PASSED it is DONE "nothing passed, not run".
+         The dispatcher pulled each study to ~/reviews/studies/<ID>_<YYYYMMDD>/, cleaned and stopped every box, and
+         marked each item DONE or FORWARD in WEEKEND_STUDIES.md. You do not edit that file.
+         COLLECT IT (sections 6 and 7 are built on it; read it early, it is already finished):
            cd /home/ubuntu/day_trader_pro && ./venv/bin/python tools/study_dispatch.py wait --out <WORK>/study_dispatch
-         It blocks until every item finishes or the deadline nears, then prints the table. Quote, per item: the
-         blind n, EV a trade with its 95% interval, the window EV with its interval, and PASS or FAIL against the
-         item's own bar, unedited. Each TUNE or TRIM recommendation goes to section 7 as an operator decision,
-         and every line of the summary's NOT MEASURED list goes to yours by ID (those items stay OPEN).
-         FALLBACK, only if the dispatch refused or failed before launching anything (no state.json, or its log
-         ends in REFUSED or ERROR): run OPEN items on control yourself, blind as above (seal in
+         It prints the table. Quote, per item: the blind n, EV a trade with its 95% interval, the window EV with its
+         interval, and PASS or FAIL against the item's own bar, unedited. Each TUNE or TRIM recommendation goes to
+         section 7 as an operator decision, and every line of the summary's NOT MEASURED list goes to yours by ID
+         (those items stay OPEN). Say in section 6 when Friday's run started and finished (its state.json).
+         FALLBACK 1, only if Friday's run is missing or broken (no <WORK>/study_dispatch/state.json, or its log ends
+         in REFUSED or ERROR, or its state.json has no "finished"): say so at the top of NOT MEASURED, then START it
+         yourself right after the box reads (see THE BOXES), before the long control-side work, into its own folder:
+           cd /home/ubuntu/day_trader_pro && nohup ./venv/bin/python tools/study_dispatch.py run \
+             --out <WORK>/study_dispatch_sat > <WORK>/study_dispatch_sat.log 2>&1 &
+         It takes the deadline from the wrapper (STUDY_DISPATCH_DEADLINE_ET), claims its boxes, wakes and stops
+         them itself, and cleans every box. Collect it after sections 1-5 are written with `study_dispatch.py wait
+         --out <WORK>/study_dispatch_sat`; it blocks until every item finishes or the deadline nears.
+         FALLBACK 2, only if that dispatch also refused or failed before launching anything (no state.json, or its
+         log ends in REFUSED or ERROR): run OPEN items on control yourself, blind as above (seal in
          ~/reviews/studies/<ID>_<YYYYMMDD>/SEAL.txt first, run ONCE), one heavy job at a time through
          `flock /tmp/claude-heavy.lock /home/ubuntu/bin/heavy` (control has 3.8 GB and has run out of memory
          before), each with a timeout, no new item in the last 45 minutes before the DEADLINE; update the
@@ -112,11 +118,12 @@ THE BOXES: READ-ONLY, AND NO CREDENTIALS, EVER.
   · Wake and stop the fleet ONLY with wake_and_bake (study_dispatch.py powers only the boxes it claims). The fleet count comes from the instance map:
       WAKE   cd /home/ubuntu/day_trader_pro && ./venv/bin/python wake_and_bake.py --wake-only --yes
       CLOSE  cd /home/ubuntu/day_trader_pro && ./venv/bin/python wake_and_bake.py --shutdown-only --yes
-    Do the box reads (sections 2 and 3) right after the wake, then START the study dispatch (section 6).
-    Do NOT CLOSE while it runs: CLOSE would stop the boxes running studies. It stops the boxes it does not
-    use and the ones it finishes with; its own power calls go through ec2ops, the logged chokepoint.
-    At the end: run `study_dispatch.py wait`, then `./venv/bin/python tools/study_dispatch.py cleanup`
-    (it touches only its own claimed boxes), then CLOSE. YOU MUST CLOSE THE FLEET BEFORE YOU FINISH,
+    Do the box reads (sections 2 and 3) right after the wake. Friday night's study dispatch has finished and
+    stopped its boxes (section 6); only when section 6's FALLBACK 1 applies, START the study dispatch now.
+    If you started it, do NOT CLOSE while it runs: CLOSE would stop the boxes running studies. It stops the boxes
+    it does not use and the ones it finishes with; its own power calls go through ec2ops, the logged chokepoint.
+    At the end: run `study_dispatch.py wait` (if you started one), then
+    `./venv/bin/python tools/study_dispatch.py cleanup` (only its own claimed boxes; run it either way), then CLOSE. YOU MUST CLOSE THE FLEET BEFORE YOU FINISH,
     INCLUDING ON FAILURE. Then quote the "N/N reached 'stopped'" line. If you cannot quote it, say so at
     the top of NOT MEASURED.
   · Never wake during 09:30-16:00 ET. If you are run by hand then, the box reads are NOT MEASURED.

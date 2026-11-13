@@ -1,0 +1,12 @@
+[Unit]
+Description=day_trader_pro weekend study queue, Friday night (dtp r552 / SAT.9) - NOT INSTALLED BY THE LAND
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/day_trader_pro
+# The script refuses off Friday evening, waits for the conductor, and ends by Saturday 02:30 ET plus its cleanup.
+ExecStart=/bin/bash /home/ubuntu/day_trader_pro/tools/friday_studies.sh
+TimeoutStartSec=39600

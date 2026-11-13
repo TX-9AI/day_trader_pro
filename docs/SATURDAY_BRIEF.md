@@ -1,4 +1,6 @@
-# THE SATURDAY BRIEF — spec v2.8
+# THE SATURDAY BRIEF — spec v2.9
+
+**v2.9 · 2026-11-13 · dtp r552 (SAT.9)**: the study queue runs FRIDAY NIGHT. The control timer `dtp-study-dispatch` (`tools/friday_studies.sh`, Friday 17:15 ET, after the 16:05 conductor and the 16:40 nightly review; not Persistent) runs `study_dispatch.py` into this brief's `<WORK>/study_dispatch` with the deadline Saturday 02:30 ET, so the 03:00 brief collects finished results instead of starting them. An item may name `- Depends:` items (WS.9, the combined Hunt gate): it runs in a second round after them, with their results and folders, and is DONE "nothing passed, not run" when none passed. Study boxes hold the midnight halt (a hold flag the cleanup removes only when it is the dispatcher's) and are acknowledged to the hourly power audit. The brief starts the dispatch itself only when Friday's run is missing or broken. The operator, 2026-11-13: "Yes, don't wait until Sunday to do that study. Add it to the rest".
 
 **v2.8 · 2026-11-11 · dtp r551 (CASH.1)**: §1.8's sizing rule corrected to the code (OTV5 `size_for`): Breakout's risk count has the at-least-1 floor, max(1, floor(base / ((entry − stop premium) × 100))), and without a usable stop premium it falls back to the geometry count max(1, floor(width / distance)) instead of NOT MEASURED; the deploy cap is named off (`OT_SIZE_ON_RISK` default). r550's text would have refused Breakout trades the bot takes. The operator said yes to the fix, 2026-11-11.
 
@@ -94,11 +96,11 @@ Each section starts with its headline in one or two sentences and stands on its 
 | 03:00 | read the spec, last week's brief, OTV5 `docs/BACKLOG.md` (open rows), `docs/GENESIS.md` tail; set the window | down |
 | 03:05 | **WAKE** | up |
 | 03:10 | section 2 (bot-log scan), section 3 box reads (code, services, disk, box-vs-S3 trades) | up |
-| ~03:45 | **START the study dispatch** (`study_dispatch.py run`, nohup): one OPEN queue item per box; it stops the boxes it does not use | study boxes up |
+| ~03:45 | Friday night's study dispatch is finished (Fri 17:15 → Sat 02:30 ET); read its summary. Only if it is missing or broken, **START the study dispatch** (`study_dispatch.py run`, nohup, `<WORK>/study_dispatch_sat`) | down (study boxes up only on the fallback) |
 | 03:45 | checker sweep (about 25 min) and the R suite (the exit replay takes about 25 min) in the background | study boxes up |
 | 04:15 | section 1 from S3, the bundles and `~/reviews/` | study boxes up |
 | 05:15 | sections 4 and 5 (read the trees) | study boxes up |
-| 06:15 | section 6 (bars written first, cheap studies run; then `study_dispatch.py wait` collects the queue), section 7 | study boxes finish by DEADLINE − 25 min |
+| 06:15 | section 6 (bars written first, cheap studies run; the queue's results from `study_dispatch.py wait`), section 7 | fallback study boxes finish by DEADLINE − 25 min |
 | ≤ 07:05 | `study_dispatch.py cleanup`, then **CLOSE** and verify `N/N reached 'stopped'` | down |
 | ≤ 07:15 | the file is written; then INDEX and NOT MEASURED are finished | down |
 
@@ -364,8 +366,22 @@ suspect, and the study says so. When the two tools disagree, report the disagree
 **The study queue (standing, every week, v2.6):** `~/reviews/WEEKEND_STUDIES.md` holds the studies the
 operator and the sessions have agreed to run, each with its hypothesis, data, seal rule and pass bar written
 before testing. Every item marked OPEN is run blind, and since v2.6 they run ON THE BOXES, IN PARALLEL
-(`tools/study_dispatch.py`, SAT.8):
-- The brief starts `study_dispatch.py run` right after the box reads. It refuses inside the trading window
+(`tools/study_dispatch.py`, SAT.8), and since v2.9 on FRIDAY NIGHT (SAT.9):
+- The control timer `dtp-study-dispatch` runs `tools/friday_studies.sh` Friday 17:15 ET (not Persistent; the script
+  refuses off Friday evening and waits for the conductor). It runs `study_dispatch.py run --deadline 02:30 --out
+  <WORK>/study_dispatch` for Saturday's WORK, then `study_dispatch.py cleanup`; ledger `~/friday_studies.ledger`.
+  The brief collects it. Only when it is missing or broken (no `state.json`, a log ending in REFUSED or ERROR, or
+  no "finished") does the brief start `study_dispatch.py run` itself, right after the box reads, into
+  `<WORK>/study_dispatch_sat`, and say so at the top of NOT MEASURED.
+- An item with a `- Depends: WS.a, WS.b` line runs in a second round: only after every item it names has finished
+  (in this run or closed earlier in the queue), on the box the last one frees, with each dependency's verdict, one
+  line, recommendation and study folder in its brief and kit. When none of them PASSED it is marked DONE "nothing
+  passed, not run" and uses no box; a dependency that failed or is invalid leaves it OPEN and NOT MEASURED.
+- Every box halts itself at 00:00 ET (OTV5 `midnight_halt.py`) unless `~/options-trader/data/NO_MIDNIGHT_HALT`
+  exists: the runner writes that flag (content `study_dispatch`, only if none exists) and the cleanup removes it only
+  when it is the dispatcher's. Each held box is acknowledged in `logs/power_ack.txt` for each ET day, so the hourly
+  power audit does not page for a study box.
+- The dispatcher refuses inside the trading window
   (Mon–Fri 08:45–16:50 ET). One OPEN item per box; a sub-item such as WS.6a is its own item. CRM is never used,
   and a box with someone else's claim in `~/reviews/box_claims` is skipped. It writes its own claim per box, and
   every power call goes through ec2ops under `flock /tmp/claude-fleet.lock`. Unused, unclaimed boxes are stopped.
@@ -384,8 +400,9 @@ before testing. Every item marked OPEN is run blind, and since v2.6 they run ON 
 - The dispatcher marks each item DONE or FORWARD in the queue file; invalid or unfinished items stay OPEN and are
   listed in its summary's NOT MEASURED. The brief collects it with `study_dispatch.py wait` in §6: per item the
   blind n, EV a trade with its 95% interval, the window EV with its interval, and PASS or FAIL against the item's
-  own bar, unedited. The TUNE or TRIM verdict goes to §7. The fleet is CLOSED only after the dispatcher finishes.
-- Fallback, only if the dispatch refused or failed before launching anything: the brief runs OPEN items on
+  own bar, unedited. The TUNE or TRIM verdict goes to §7. When the brief started the dispatch (the fallback), the fleet
+  is CLOSED only after the dispatcher finishes.
+- Last fallback, only if the brief's own dispatch also refused or failed before launching anything: the brief runs OPEN items on
   control, blind as above, one heavy job at a time through `flock /tmp/claude-heavy.lock /home/ubuntu/bin/heavy`,
   no new item in the last 45 minutes before the deadline, and lists the failure under NOT MEASURED.
 

@@ -1,6 +1,13 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_study_dispatch.py  v1.0
+day_trader_pro/tests/check_study_dispatch.py  v1.1
+v1.1  2026-11-13  dtp r552 / SAT.9. D1-D6 the `- Depends:` second round (parsed; waits for its dependencies and runs
+      on the box the last one frees, with their results and folders in its brief and kit; none passed -> DONE without
+      a box; a broken dependency -> NOT RUN, stays OPEN, NOT MEASURED; a dependency already closed in the queue counts;
+      a dependent ready with no active box claims a fresh one), M1-M2 the midnight-halt hold flag (set only when
+      absent, cleared only when ours), AK1-AK2 the power-audit acks (one per box per ET day held, none on a fake
+      without an ack file), T1-T3 the Friday wrapper and its units (bash -n, systemd-analyze verify, Fri 17:15 ET,
+      the deadline, the conductor wait, the weekday guard, --dry touches nothing).
 v1.0  2026-11-11  dtp r549 / SAT.8. tools/study_dispatch.py, driven against a FAKE fleet and FAKE ssh (no box, no
       AWS, no token): queue parsing (sub-items are their own items), status rewrites, the RTH refusal (nothing
       touched), assignment (CRM never used, someone else's claim respected, own claims written and released, idle
@@ -82,6 +89,7 @@ class FakeOps:
         self.bucket = "test-bucket"
         self.ip2sym = {ip: s for s, ip, _ in fleet}
         self.items_on = {}
+        self.pass_items = set()
 
     def fleet(self):
         return list(self._fleet)
@@ -160,7 +168,8 @@ class FakeOps:
             if self._b(ip) == "changed_seal":
                 seal += "edited later\n"
             res = {"id": iid, "n": 12, "ev": 41.5, "ci": [-10, 90], "window_ev": 20, "window_ci": [-5, 50],
-                   "fees_per_trade": 6.0, "verdict": "FAIL", "outcome": "TRIM", "forward_to": "",
+                   "fees_per_trade": 6.0, "verdict": "PASS" if iid in self.pass_items else "FAIL",
+                   "outcome": "TUNE" if iid in self.pass_items else "TRIM", "forward_to": "",
                    "one_line": "the rule did not beat the baseline", "recommendation": "trim it", "data_gaps": []}
             files = {"work/FROZEN.json": "{}", "work/RESULT.json": json.dumps(res), "work/README.md": "m"}
             if self._b(ip) != "noseal":
@@ -175,10 +184,10 @@ class FakeOps:
         return 1, "", "no such file"
 
 
-def env(fleet, behaviour=None, t0=None, deadline_h=4, raise_on_poll=False, claims=None, **kw):
+def env(fleet, behaviour=None, t0=None, deadline_h=4, raise_on_poll=False, claims=None, queue=None, **kw):
     root = tempfile.mkdtemp(prefix="cksd_")
     q = os.path.join(root, "WEEKEND_STUDIES.md")
-    open(q, "w").write(QUEUE)
+    open(q, "w").write(queue or QUEUE)
     studies = os.path.join(root, "reviews", "studies")
     os.makedirs(os.path.join(studies, "hunt_direction_1109"))
     open(os.path.join(studies, "hunt_direction_1109", "BLIND_RESULT.md"), "w").write("prior result")
@@ -362,6 +371,136 @@ ck("K3", any(k.endswith("ctx/WEEKEND_STUDIES.md") for k in kit) and any(k.endswi
    and any("hunt_direction_1109/BLIND_RESULT.md" in k for k in kit),
    "the kit ships the queue, the reviews CSVs and the prior study the item names")
 shutil.rmtree(root)
+
+# ── v1.1 ─────────────────────────────────────────────────────────────────────────────────────────────────────
+DQUEUE = QUEUE.replace("""---
+
+## DONE""", """### WS.9 — Combined gate
+- Status: OPEN (added 2026-11-13)
+- Depends: WS.1, WS.6a, WS.6b
+- Why: combine what passed.
+
+---
+
+## DONE""")
+ck("D1", [i.get("depends") for i in sd.parse_queue(DQUEUE) if i["id"] == "WS.9"] == [["WS.1", "WS.6a", "WS.6b"]]
+   and all(not i.get("depends") for i in sd.parse_queue(DQUEUE) if i["id"] != "WS.9"),
+   "a `- Depends:` line is parsed into the item's dependency list, and only that item has one")
+
+# D2 the second round: waits, then runs on a freed box with the results in its brief and the folders in its kit
+root, q, cl, st, ops, d = env([("BBB", "10.0.0.2", "stopped"), ("DDD", "10.0.0.4", "stopped")], queue=DQUEUE)
+ops.pass_items = {"WS.1"}
+d.run()
+pushes = [c for c in ops.calls if c[0] == "push"]
+order = [c[2].split("/")[-1].split(".tar.gz")[0] for c in pushes]
+k9 = next(k for kits in ops.kits.values() for k in kits if any(n.startswith("WS.9/") for n in k))
+b9 = next(v for n, v in k9.items() if n.endswith("brief.txt"))
+ck("D2", order[-1] == "WS.9" and len(order) == 4
+   and [c for c in ops.calls if c[0] == "start"] == [("start", ("BBB", "DDD"), "")]
+   and d.state["items"]["WS.9"]["status"] == "DONE",
+   f"WS.9 launches last, after all three dependencies, on a box already held (launch order {order})")
+ck("D3", "DEPENDENCY RESULTS" in b9 and "- WS.1: PASS" in b9 and "- WS.6a: not a pass" in b9
+   and "studies/WS.1_20261114" in b9 and any("ctx/studies/WS.1_20261114/RESULT.json" in n for n in k9)
+   and not os.listdir(cl),
+   "its brief names each dependency's verdict and folder, the folders ship in its kit, every claim is released")
+shutil.rmtree(root)
+
+# D4 none passed: DONE without a box
+root, q, cl, st, ops, d = env([("BBB", "10.0.0.2", "stopped")], queue=DQUEUE, max_boxes=1)
+d.run()
+order = [c[2].split("/")[-1].split(".tar.gz")[0] for c in ops.calls if c[0] == "push"]
+ck("D4", "WS.9" not in order and d.state["items"]["WS.9"]["status"] == "DONE"
+   and "DONE 2026-11-14 — nothing passed, not run" in open(q).read() and not os.listdir(cl),
+   "when no dependency PASSED the item is marked DONE 'nothing passed, not run' and never gets a box")
+shutil.rmtree(root)
+
+# D5 a broken dependency: NOT RUN, stays OPEN, NOT MEASURED
+root, q, cl, st, ops, d = env([("BBB", "10.0.0.2", "stopped")], queue=DQUEUE, behaviour={"BBB": "noseal"}, max_boxes=1)
+d.run()
+ws9q = open(q).read().split("### WS.9")[1]
+ck("D5", d.state["items"]["WS.9"]["status"].startswith("NOT RUN") and "- Status: OPEN (added 2026-11-13)" in ws9q
+   and any(x.startswith("WS.9: not run") for x in d.state["not_measured"]),
+   "a dependency that ends INVALID leaves the dependent OPEN, NOT RUN, and on the NOT MEASURED list with the reason")
+shutil.rmtree(root)
+
+# D6 dependencies already closed in the queue: ready at the start, claims its own box
+CQ = DQUEUE.replace("- Status: OPEN (added 2026-11-10)\n- Why: shorts lose.",
+                    "- Status: DONE 2026-11-13 — PASS, TUNE: skip works (/home/x/reviews/studies/WS.1_20261113)\n- Why: shorts lose.")
+CQ = CQ.replace("- Depends: WS.1, WS.6a, WS.6b", "- Depends: WS.1, WS.2")
+root, q, cl, st, ops, d = env([("BBB", "10.0.0.2", "stopped"), ("DDD", "10.0.0.4", "stopped")], queue=CQ)
+os.makedirs(os.path.join(st, "WS.1_20261113"))
+open(os.path.join(st, "WS.1_20261113", "RESULT.json"), "w").write("{}")
+d.run()
+k9 = next(k for kits in ops.kits.values() for k in kits if any(n.startswith("WS.9/") for n in k))
+b9 = next(v for n, v in k9.items() if n.endswith("brief.txt"))
+ck("D6", d.state["items"]["WS.9"]["status"] == "DONE" and "- WS.1: PASS" in b9 and "- WS.2: not a pass" in b9
+   and any("ctx/studies/WS.1_20261113/RESULT.json" in n for n in k9),
+   "dependencies closed in an earlier run count, from the queue's own status lines and folders")
+shutil.rmtree(root)
+
+# M1-M2 the midnight-halt hold flag
+ck("M1", 'if [ ! -e "$HOLD" ]' in sd.RUNNER and "/home/ubuntu/options-trader/data/NO_MIDNIGHT_HALT" in sd.RUNNER
+   and 'echo "study_dispatch' in sd.RUNNER, "the runner writes the midnight-halt hold flag only when none exists")
+_cc = sd.cleanup_cmd("sdT", "b")
+_box = tempfile.mkdtemp(prefix="cksd_m_")
+import subprocess as _sp
+def _clear(content):
+    f = os.path.join(_box, "NO_MIDNIGHT_HALT")
+    if content is not None:
+        open(f, "w").write(content)
+    i0 = _cc.index("if [ -f " + sd.BOX_HOLD_FLAG)
+    cmd = _cc[i0:_cc.index("HOLD_CLEARED; fi") + len("HOLD_CLEARED; fi")]
+    _sp.run(["bash", "-c", cmd.replace(sd.BOX_HOLD_FLAG, f)], capture_output=True)
+    return os.path.exists(f)
+ck("M2", _clear("study_dispatch 2026-11-13T22:20:00Z\n") is False and _clear("operator: keep up tonight\n") is True,
+   "the cleanup removes the hold flag only when its content is study_dispatch's, never an operator's own hold")
+shutil.rmtree(_box)
+
+# AK1-AK2 power-audit acks
+root, q, cl, st, ops, d = env([("BBB", "10.0.0.2", "stopped")], t0=datetime(2026, 11, 13, 23, 50, tzinfo=ET),
+                               deadline_h=4, max_boxes=1)
+ops.behaviour = {"BBB": "hang"}
+d.ack_path = os.path.join(root, "power_ack.txt")
+d.run()
+acks = open(d.ack_path).read().splitlines()
+ck("AK1", "BBB 2026-11-13 study_dispatch sdTEST" in "\n".join(acks) and "BBB 2026-11-14 study_dispatch sdTEST" in "\n".join(acks)
+   and len(acks) == 2, f"a held box is acknowledged once per ET day it is held, across midnight ({len(acks)} lines)")
+shutil.rmtree(root)
+root, q, cl, st, ops, d = env([("BBB", "10.0.0.2", "stopped")], max_boxes=1)
+ck("AK2", d.ack_path is None, "a fake without an ack file writes no ack (tests never touch the real file)")
+shutil.rmtree(root)
+
+# T1-T3 the Friday wrapper and its units
+TOOLS = os.path.join(os.path.dirname(HERE), "tools")
+fs = os.path.join(TOOLS, "friday_studies.sh")
+src = open(fs).read()
+ck("T1", _sp.run(["bash", "-n", fs]).returncode == 0 and "--deadline" in src and "02:30" in src
+   and "study_dispatch.py" in src and "saturday_${SAT}_work" in src and 'OUT="$WORK/study_dispatch"' in src
+   and "dtp-eod-conductor.service" in src and "Fri" in src,
+   "friday_studies.sh parses, runs the dispatch into the Saturday brief's WORK with the 02:30 deadline, waits for the "
+   "conductor and refuses off Friday evening")
+_tmp = tempfile.mkdtemp(prefix="cksd_t_")
+r = _sp.run(["bash", fs, "--dry"], capture_output=True, text=True,
+            env=dict(os.environ, FRIDAY_STUDIES_WEEKLY=_tmp, FRIDAY_STUDIES_LEDGER=os.path.join(_tmp, "l"),
+                     FRIDAY_STUDIES_NOW="2026-11-13 17:15"))
+r2 = _sp.run(["bash", fs, "--dry"], capture_output=True, text=True,
+             env=dict(os.environ, FRIDAY_STUDIES_WEEKLY=_tmp, FRIDAY_STUDIES_LEDGER=os.path.join(_tmp, "l"),
+                      FRIDAY_STUDIES_NOW="2026-11-14 05:00"))
+ck("T2", r.returncode == 0 and "saturday_2026-11-14_work/study_dispatch" in r.stdout and "deadline 02:30" in r.stdout
+   and not os.path.exists(os.path.join(_tmp, "saturday_2026-11-14_work"))
+   and r2.returncode == 0 and "SKIPPED" in r2.stdout,
+   f"--dry names Saturday's WORK and the deadline and touches nothing; off Friday evening it skips ({r.stdout.strip()[-120:]!r})")
+shutil.rmtree(_tmp)
+tm = open(os.path.join(TOOLS, "dtp-study-dispatch.timer")).read()
+sv = open(os.path.join(TOOLS, "dtp-study-dispatch.service")).read()
+v = _sp.run(["systemd-analyze", "verify", os.path.join(TOOLS, "dtp-study-dispatch.service")], capture_output=True, text=True)
+cal = _sp.run(["systemd-analyze", "calendar", "Fri *-*-* 17:15:00 America/New_York"], capture_output=True, text=True)
+ck("T3", "OnCalendar=Fri *-*-* 17:15:00 America/New_York" in tm and "Persistent=false" in tm
+   and "friday_studies.sh" in sv and "Environment" not in sv and "TimeoutStartSec=" in sv
+   and "Fri" in cal.stdout and not [ln for ln in (v.stdout + v.stderr).splitlines()
+                                    if "dtp-study-dispatch" in ln and "ExecStart" not in ln and "WorkingDirectory" not in ln],
+   "the timer fires Fri 17:15 ET, never catches up after downtime (it would collide with the 03:00 brief), "
+   "and the service carries no environment block")
 
 print()
 if FAILS:

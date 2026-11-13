@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_saturday_brief.py  v1.8
+day_trader_pro/tests/check_saturday_brief.py  v1.9
+v1.9  2026-11-13  dtp r552 / SAT.9. S21 restated and S23/S23b/S23c added: the study queue runs Friday night. The
+      prompt collects <WORK>/study_dispatch (started Fri 17:15 ET by dtp-study-dispatch, deadline Sat 02:30) before it
+      would start anything, starts the dispatch itself only as FALLBACK 1 into <WORK>/study_dispatch_sat, does not
+      CLOSE while a dispatch it started runs, and names the `- Depends:` second round; the spec v2.9 names the timer,
+      the deadline, the fallback, the second round, the midnight hold and the power-audit acks; the wrapper passes
+      STUDIES (the Friday folder and whether its state.json exists) before the session starts.
 v1.8  2026-11-11  dtp r551 / CASH.1. S22c: the cash table's sizing rule matches OTV5 size_for. Breakout's risk count
       carries the at-least-1 floor and falls back to the geometry count without a usable stop premium; r550's text
       (no floor, NOT MEASURED without a stop premium) would have refused Breakout trades the bot takes. S22/S22b now
@@ -498,15 +504,34 @@ ck("S20b", "WEEKEND_STUDIES.md" in spec and "SEAL.txt" in spec and "claude-heavy
 # S21 (v1.6, dtp r549 / SAT.8): THE STUDY QUEUE RUNS ON THE BOXES. The operator, 2026-11-11: "What about just
 # waking more boxes at the 0300 to run these studies in parallel?"
 _q6 = p.split("THE STUDY QUEUE", 1)[-1][:4000]
-ck("S21", "tools/study_dispatch.py run" in _q6 and "study_dispatch.py wait" in _q6 and "FALLBACK" in _q6
-   and "Do NOT CLOSE while it runs" in p and "study_dispatch.py cleanup" in p,
-   "the prompt starts the box dispatch after the reads, collects it, cleans up, and does not CLOSE while it runs")
+ck("S21", "tools/study_dispatch.py run" in _q6 and "study_dispatch.py wait" in _q6 and "FALLBACK 1" in _q6
+   and "do NOT CLOSE while it runs" in p and "study_dispatch.py cleanup" in p,
+   "the prompt collects the box dispatch, starts it only as a fallback, cleans up, and does not CLOSE while one it "
+   "started runs")
 ck("S21b", "study_dispatch.py" in spec and "CLOSED only after" in spec and "box_claims" in spec,
    "the spec names the box dispatch, its claims, and the late CLOSE")
 _shs = open(SH).read()
 ck("S21c", 'export STUDY_DISPATCH_DEADLINE_ET="$_deadline_hm"' in _shs and '"$_SD" cleanup' in _shs
    and _shs.index("export STUDY_DISPATCH_DEADLINE_ET") < _shs.index('timeout "$BUDGET_S"'),
    "the wrapper hands the deadline to the dispatcher before the session and runs its cleanup after")
+
+# S23 (v1.9, dtp r552 / SAT.9): THE QUEUE RUNS FRIDAY NIGHT. The operator, 2026-11-13: "Yes, don't wait until Sunday to
+# do that study. Add it to the rest".
+_qf = re.sub(r"\s+", " ", _q6)
+ck("S23", "dtp-study-dispatch" in _qf and "friday_studies.sh" in _qf and "Friday 17:15 ET" in _qf
+   and "Saturday 02:30 ET" in _qf and "wait --out <WORK>/study_dispatch " in _qf
+   and "--out <WORK>/study_dispatch_sat > <WORK>/study_dispatch_sat.log" in _qf and "- Depends:" in _qf and "nothing passed, not run" in _qf
+   and _qf.find("COLLECT IT") < _qf.find("FALLBACK 1") < _qf.find("tools/study_dispatch.py run") < _qf.find("FALLBACK 2"),
+   "the prompt collects Friday's run first, starts its own only as FALLBACK 1 into its own folder, and names the second round")
+_sf = re.sub(r"\s+", " ", spec)
+ck("S23b", "spec v2.9" in spec and "dtp-study-dispatch" in _sf and "--deadline 02:30" in _sf and "not Persistent" in _sf
+   and "NO_MIDNIGHT_HALT" in _sf and "power_ack.txt" in _sf and "- Depends: WS.a, WS.b" in _sf
+   and "study_dispatch_sat" in _sf,
+   "the spec v2.9 names the Friday timer, the deadline, the fallback folder, the second round, the hold flag and the acks")
+_shs = open(SH).read()
+ck("S23c", '$WORK/study_dispatch — $_fri' in _shs and 'if [ -f "$WORK/study_dispatch/state.json" ]' in _shs
+   and _shs.index('_fri="state.json present') < _shs.index('timeout "$BUDGET_S"'),
+   "the wrapper tells the session where Friday's run is and whether it happened, before the session starts")
 
 # S22 (v1.7, dtp r550 / CASH.1): THE QQQ CASH SIZE TABLE. The operator, 2026-11-11: "On the weekend prior, let's do a
 # table of $250/$500 & $500/$750 with a cap at the ramp max", then "just brief it every weekend until the date arrives".
