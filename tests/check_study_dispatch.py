@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_study_dispatch.py  v1.1
+day_trader_pro/tests/check_study_dispatch.py  v1.2
+v1.2  2026-11-13  dtp r553 / SAT.9. K4: the launch command, run for real under bash through a pipe the way ssh holds
+      it, returns within seconds while the runner keeps running (v1.1's AND-list `&` held the pipe until the runner
+      ended; red on v1.1).
 v1.1  2026-11-13  dtp r552 / SAT.9. D1-D6 the `- Depends:` second round (parsed; waits for its dependencies and runs
       on the box the last one frees, with their results and folders in its brief and kit; none passed -> DONE without
       a box; a broken dependency -> NOT RUN, stays OPEN, NOT MEASURED; a dependency already closed in the queue counts;
@@ -501,6 +504,27 @@ ck("T3", "OnCalendar=Fri *-*-* 17:15:00 America/New_York" in tm and "Persistent=
                                     if "dtp-study-dispatch" in ln and "ExecStart" not in ln and "WorkingDirectory" not in ln],
    "the timer fires Fri 17:15 ET, never catches up after downtime (it would collide with the 03:00 brief), "
    "and the service carries no environment block")
+
+# K4 the launch returns while the runner runs (run for real, through a pipe, as ssh holds it)
+import subprocess as _sp2, time as _t2
+_lr = tempfile.mkdtemp(prefix="cksd_k4_")
+_kd = os.path.join(_lr, "kit", "WS.1")
+os.makedirs(_kd)
+open(os.path.join(_kd, "runner.sh"), "w").write('echo "START x" > status.txt; sleep 20; echo done > done.txt\n')
+with tarfile.open(os.path.join(_lr, "WS.1.tar.gz"), "w:gz") as _t:
+    _t.add(_kd, arcname="WS.1")
+_c = sd.launch_cmd(_lr, "WS.1", 30).replace("bash -l runner.sh", "bash runner.sh")
+_t0 = _t2.time()
+try:
+    _r = _sp2.run(["bash", "-c", _c], capture_output=True, text=True, timeout=15)
+    _el, _out = _t2.time() - _t0, _r.stdout
+except _sp2.TimeoutExpired:
+    _el, _out = 99, ""
+_alive = not os.path.exists(os.path.join(_lr, "WS.1", "done.txt"))
+ck("K4", _el < 10 and "START" in _out and _alive and "&&" in _c and " & " not in _c,
+   f"the launch returns in {_el:.1f} s with the runner still running and nothing backgrounded with '&'")
+_sp2.run(["pkill", "-f", "sleep 20"], capture_output=True)
+shutil.rmtree(_lr, ignore_errors=True)
 
 print()
 if FAILS:

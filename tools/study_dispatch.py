@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/study_dispatch.py  v1.1
+day_trader_pro/tools/study_dispatch.py  v1.2
+v1.2  2026-11-13  dtp r553 / SAT.9 — THE LAUNCH RETURNS. The first Friday run (17:15 ET) timed out launching WS.1 on
+      AMD and WS.2 on AMZN after 120 s each: the launch command ended an AND-list with `... && nohup setsid bash
+      runner.sh > runner.log 2>&1 < /dev/null &`, and bash backgrounds the whole list in a subshell that holds ssh's
+      stdout until the runner ends (seen on AMZN: the subshell alive beside runner.sh). The failed launch then cleaned
+      the box and took the next item, so every item would have failed. launch_cmd() now starts the runner with
+      `setsid -f` and no `&`; tests/check_study_dispatch.py K4 runs it for real under bash with a runner that sleeps.
 v1.1  2026-11-13  dtp r552 / SAT.9 — THE QUEUE RUNS FRIDAY NIGHT, AND AN ITEM CAN WAIT FOR OTHERS. The operator,
       2026-11-13: "Yes, don't wait until Sunday to do that study. Add it to the rest" (the studies start Friday
       17:15 ET from the control timer dtp-study-dispatch, tools/friday_studies.sh, deadline Saturday 02:30 ET, so
@@ -385,6 +391,16 @@ def build_kit(item, how, run_id, bucket, minutes, kit_dir, queue_path, studies=N
     return tgz
 
 
+def launch_cmd(root, iid, run_s):
+    """v1.2: the runner is started by `setsid -f` (it forks; nothing is backgrounded with `&`). v1.0/v1.1 ended an
+    AND-list with `... && nohup setsid bash runner.sh > runner.log ... &`: bash backgrounds the WHOLE list in a subshell
+    that keeps ssh's stdout open until the runner ends, so ssh never returned and every launch timed out at 120 s
+    (2026-11-13 17:15, the first Friday run)."""
+    return (f"cd {root} && tar xzf {iid}.tar.gz && rm -f {iid}.tar.gz && cd {iid} || exit 1; "
+            f"nohup setsid -f bash -l runner.sh {run_s} > runner.log 2>&1 < /dev/null; sleep 3; "
+            f"cat {root}/{iid}/status.txt 2>/dev/null")
+
+
 def box_root(run_id):
     return f"/home/ubuntu/study_{run_id}"
 
@@ -715,10 +731,7 @@ class Dispatcher:
             rc, out, err = self.ops.push(ip, tgz, f"study_{self.run_id}/{iid}.tar.gz")
             if rc != 0:
                 raise RuntimeError(f"push rc={rc} {err.strip()[:200]}")
-            rc, out, err = self.ops.ssh(ip, (
-                f"cd {root} && tar xzf {iid}.tar.gz && rm -f {iid}.tar.gz && cd {iid} && "
-                f"nohup setsid bash -l runner.sh {run_s} > runner.log 2>&1 < /dev/null & sleep 3; "
-                f"cat {root}/{iid}/status.txt 2>/dev/null"), timeout=120)
+            rc, out, err = self.ops.ssh(ip, launch_cmd(root, iid, run_s), timeout=120)
             if rc != 0 or "START" not in out:
                 raise RuntimeError(f"runner did not start rc={rc} {(out + err).strip()[:200]}")
             active[sym] = {"item": item, "ip": ip, "seal_sha": None, "started": self.ops.now()}
