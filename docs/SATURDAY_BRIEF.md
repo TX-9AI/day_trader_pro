@@ -1,4 +1,6 @@
-# THE SATURDAY BRIEF — spec v2.9
+# THE SATURDAY BRIEF — spec v2.10
+
+**v2.10 · 2026-11-14 · dtp r554 (the brief 2026-11-14 §4, items 1 and carried 7)**: the Friday timer spec v2.9 names is installed by the operator (`sudo bash tools/install_study_dispatch.sh`), not by the land; until it is, the brief's fallback runs the queue. 2026-11-13's two Friday runs were started by hand from the control Claude session (SAT.9). The Output row no longer says the 09-26..10-31 briefs "still sit" in `handoffs/`: every brief is in `~/reviews/weekly/`.
 
 **v2.9 · 2026-11-13 · dtp r552 (SAT.9)**: the study queue runs FRIDAY NIGHT. The control timer `dtp-study-dispatch` (`tools/friday_studies.sh`, Friday 17:15 ET, after the 16:05 conductor and the 16:40 nightly review; not Persistent) runs `study_dispatch.py` into this brief's `<WORK>/study_dispatch` with the deadline Saturday 02:30 ET, so the 03:00 brief collects finished results instead of starting them. An item may name `- Depends:` items (WS.9, the combined Hunt gate): it runs in a second round after them, with their results and folders, and is DONE "nothing passed, not run" when none passed. Study boxes hold the midnight halt (a hold flag the cleanup removes only when it is the dispatcher's) and are acknowledged to the hourly power audit. The brief starts the dispatch itself only when Friday's run is missing or broken. The operator, 2026-11-13: "Yes, don't wait until Sunday to do that study. Add it to the rest".
 
@@ -37,7 +39,7 @@ this spec. Backlog row: **SAT.4** (OTV5 `docs/BACKLOG.md`, section I — "The bo
 |---|---|
 | Start | cron, Saturday 08:00 UTC: 03:00 EST (04:00 EDT from March); the watchdog at 12:45 UTC, after the deadline. `tools/saturday_brief.sh` runs it. (Installed with SAT.4; before that the crontab read 07:17 UTC) |
 | Deadline | **07:30 ET.** The wrapper kills the session then (`timeout`, rc 124). Have the file written well before that |
-| Output | `~/reviews/weekly/saturday_<YYYY-MM-DD>.md`, beside the daily reviews. It is **not** written to `options-trader-v4/handoffs/` (gitignored; `check_scratch_purge` P12). The briefs of 09-26 to 10-31 still sit there until they are moved |
+| Output | `~/reviews/weekly/saturday_<YYYY-MM-DD>.md`, beside the daily reviews. It is **not** written to `options-trader-v4/handoffs/` (gitignored; `check_scratch_purge` P12). Every brief since 09-19 is in `~/reviews/weekly/`; `handoffs/` holds none |
 | Working files | `~/reviews/weekly/saturday_<date>_work/`: `sweep/`, `botlog/`, `disk.json`, tool outputs. **Next week diffs against these**, so keep them |
 | Prior | the wrapper passes last week's brief and its `_work/` folder |
 | Delivery | nothing is sent. When the operator asks, the session shows the **index** first, then **one section at a time**, in order, as they ask for each one |
@@ -368,7 +370,9 @@ operator and the sessions have agreed to run, each with its hypothesis, data, se
 before testing. Every item marked OPEN is run blind, and since v2.6 they run ON THE BOXES, IN PARALLEL
 (`tools/study_dispatch.py`, SAT.8), and since v2.9 on FRIDAY NIGHT (SAT.9):
 - The control timer `dtp-study-dispatch` runs `tools/friday_studies.sh` Friday 17:15 ET (not Persistent; the script
-  refuses off Friday evening and waits for the conductor). It runs `study_dispatch.py run --deadline 02:30 --out
+  refuses off Friday evening and waits for the conductor). **The timer is installed by the operator
+  (`sudo bash tools/install_study_dispatch.sh`); the land does not install it, and until then the brief's fallback runs
+  the queue.** (2026-11-13's two Friday runs were started by hand from the control Claude session; SAT.9.) It runs `study_dispatch.py run --deadline 02:30 --out
   <WORK>/study_dispatch` for Saturday's WORK, then `study_dispatch.py cleanup`; ledger `~/friday_studies.ledger`.
   The brief collects it. Only when it is missing or broken (no `state.json`, a log ending in REFUSED or ERROR, or
   no "finished") does the brief start `study_dispatch.py run` itself, right after the box reads, into

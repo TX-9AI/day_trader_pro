@@ -62,8 +62,11 @@ THE BRIEF HAS SEVEN SECTIONS, IN THIS ORDER, EACH ONE STANDING ON ITS OWN:
          A PASS goes to section 7 as an operator decision (a trading change under the freeze).
        · THE STUDY QUEUE (standing, every week): /home/ubuntu/reviews/WEEKEND_STUDIES.md. It runs ON THE BOXES,
          IN PARALLEL (dtp tools/study_dispatch.py, SAT.8), AND SINCE SAT.9 IT RUNS FRIDAY NIGHT: the control timer
-         dtp-study-dispatch (tools/friday_studies.sh) started it Friday 17:15 ET into <WORK>/study_dispatch (log
-         <WORK>/study_dispatch.log) with the deadline Saturday 02:30 ET, so its results are finished when you start.
+         dtp-study-dispatch (tools/friday_studies.sh), once the operator has installed it (sudo bash
+         tools/install_study_dispatch.sh; until then the brief's fallback runs the queue, or a session starts it by hand),
+         starts it Friday 17:15 ET into <WORK>/study_dispatch (log <WORK>/study_dispatch.log) with the deadline
+         Saturday 02:30 ET, so its results are finished when you start. Say which started it: the wrapper's line and
+         ~/friday_studies.ledger tell you; do not credit the timer when it is not installed.
          One OPEN item (a sub-item such as WS.6a is its own) per stopped box, CRM never, each a bounded headless study
          agent that writes SEAL.txt with a UTC timestamp BEFORE any outcome, freezes the rule in FROZEN.json, and runs
          it ONCE on the sealed days. An item with a `- Depends:` line (e.g. WS.9, the combined Hunt gate) ran in a
