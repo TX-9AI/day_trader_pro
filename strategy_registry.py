@@ -1,4 +1,8 @@
-# day_trader_pro/strategy_registry.py — v1.8
+# day_trader_pro/strategy_registry.py — v1.9
+# v1.9 (2026-11-14) — dtp r556 / WS.3 TRIM. Breakout leaves REGISTRY for HISTORICAL: OTV5 r110 makes it DORMANT with no
+#   switch and takes it off the roster (the operator, 2026-11-14: "Concur"; WS.3: the fitted gates failed blind, window
+#   EV -$11.73/trade [-59.33, +41.68], n=120). Its code BRKO stays, so its warehouse rows (to 2026-11-13) decode as
+#   before; the OTV5 code is kept for a revisit. check_strategy_registry R11 pins the move.
 # v1.8 (2026-11-09) — dtp r544 / RETIRE.5. GEXPinButterfly leaves REGISTRY for HISTORICAL: OTV5 r97 cut it (DORMANT from
 #   2026-11-09) and OTV5 r103 removes its code (the operator, 2026-11-08: "I concur on both, in that order"). Its code
 #   GEXB stays, so its warehouse rows (to 2026-11-03) decode as before. check_strategy_registry R11 (red since r97) is
@@ -189,7 +193,6 @@ LIVE, RETIRED = "live", "retired"
 REGISTRY = {
     "RunawayContinuation":  ("RWAY", LIVE,    (MAIN, TEST, OTV5), None),
     "LiquidityHunt":        ("HUNT", LIVE,    (TEST, OTV5),       None),
-    "Breakout":             ("BRKO", LIVE,    (TEST, OTV5),       None),
     # r519 — OTV5's PARK (strategy/park.py, the 11:00 debit held to 15:45). Was the unregistered "?PAR".
     "PARK":                 ("PARK", LIVE,    (OTV5,),            None),
 }
@@ -205,6 +208,7 @@ HISTORICAL = {
     "VOLT":                 ("VOLT", (TEST,),      None, "off 2026-10-02 (ROSTER.1, OTV4TEST r187); STRK.1 retired with it"),
     "ATPButterfly":         ("ATPB", (TEST,),      None, "off 2026-10-02, operator: \"Turn off the ATP\""),
     "GEXPinButterfly":      ("GEXB", (MAIN, TEST, OTV5), None, "cut 2026-11-09 (OTV5 r97), code removed OTV5 r103; operator: \"I concur on both, in that order\""),
+    "Breakout":             ("BRKO", (TEST, OTV5),       None, "dormant from 2026-11-16 (OTV5 r110, WS.3 TRIM; code kept); operator: \"Concur\""),
     "SweepCreditSpread":    ("SWPT", (MAIN, TEST), None, "retired 2026-10-03, operator: \"Retire the sweep & TCS\""),
     # TCS: retired as a trade 2026-10-03; its OTV5 r57 log-only shadow was deleted by OTV5 r88 (RETIRE.3, 2026-11-08,
     # operator: "Delete") without ever booking a row. The code stays to decode its historical trades.

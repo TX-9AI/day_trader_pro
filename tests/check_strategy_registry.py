@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-tests/check_strategy_registry.py  v1.5
+tests/check_strategy_registry.py  v1.6
+v1.6  2026-11-14  r556 / WS.3 TRIM — HISTORY_CODES gains Breakout -> BRKO: OTV5 r110 makes Breakout DORMANT (off the roster), so R11 wants it out of REGISTRY and R12 wants its rows still decoded. Red on db948ac at R11 once OTV5 r110 is HEAD (Breakout listed, not active).
 v1.5  2026-11-09  r544 / RETIRE.5 — HISTORY_CODES gains GEXPinButterfly -> GEXB: OTV5 r103 removes the GEX pin butterfly, so
       R11 wants it out of REGISTRY and R12 wants its old rows still decoded. R11 was red on f779abb (the fly DORMANT in
       OTV5 r97's TABLE, still listed LIVE here); green on strategy_registry v1.8.
@@ -64,7 +65,8 @@ NOT_REGISTERED = ("PARC",)
 HISTORY_CODES = {"ORBStrategy": "ORBS", "VOLT": "VOLT", "ATPButterfly": "ATPB", "SweepCreditSpread": "SWPT",
                  "TrendCreditSpread": "TCST", "OpeningRangeCreditSpread": "ORCS", "IronCondorStrategy": "CNDR",
                  "SweepReversal": "SWPR", "ContinuationStrategy": "CONT",
-                 "GEXPinButterfly": "GEXB"}   # v1.5 (r544, RETIRE.5): the GEX pin fly is history
+                 "GEXPinButterfly": "GEXB",   # v1.5 (r544, RETIRE.5): the GEX pin fly is history
+                 "Breakout": "BRKO"}          # v1.6 (WS.3 TRIM): Breakout is dormant, its rows decode
 
 # 📊 MEASURED from the SOFI box 2026-09-25, not assumed: the strategy names
 # TEST declares. If TEST adds one, R2 goes red until it is registered — which
