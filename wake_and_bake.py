@@ -1,4 +1,10 @@
-# day_trader_pro/wake_and_bake.py — v1.10
+# day_trader_pro/wake_and_bake.py — v1.11
+# v1.11 (2026-11-14) — dtp r559 / B5.6 (the 11-14 Saturday brief section 5 item 6). stage_pyclear is DELETED: its
+#   docstring said "used by --shutdown-only", but that mode stopped clearing __pycache__ on 2026-07-18 (1edfc41, the
+#   EMERGENCY STOP: no pycache, no EOD) and nothing has called it since. PYCLEAR stays: RESTART_CMD runs it. The
+#   unused eod_report import goes with it (the same change left it unread). The --shutdown-only lines of the module
+#   help and its argparse help= still said pycache + EOD report: corrected below, the old words struck, not silently
+#   rewritten. No behaviour change. Gate tests/check_dead_defs_gone.py.
 # v1.10 (2026-11-08) — dtp r535 / CONST.1 — _in_rth reads market_calendar: a holiday is not RTH, a half day closes 13:00.
 # v1.9 (2026-10-11) — r479 / OPS.22 — zone "US/Eastern" -> "America/New_York": the legacy link tzdata 2026c moved out of the default install. Same rules; no behaviour change.
 # v1.8 (2026-10-03) — dtp r457 / OPS.64 — asks the INSTANCE MAP for which boxes exist (instance_registry.discover()/fleet_members()), not config.UNIVERSE, so a retired (untagged) box needs no list edit. The list is the printed fallback. The expected count is len(fleet_members()).
@@ -105,6 +111,12 @@ Modes:
                     happen, final SHUTDOWN is skipped.
   --shutdown-only   PING → clear __pycache__ on every reachable box → hand off
                     to eod_report.run() (P&L rollup + orderly fleet stop).
+                    ⚠️ CORRECTION 2026-11-14: THE TWO LINES ABOVE ARE WRONG
+                    SINCE 2026-07-18. --shutdown-only is the EMERGENCY STOP:
+                    it stops every box by instance id with no ping, no
+                    pycache clear and no EOD/P&L harvest (the nightly
+                    eod_report timer owns P&L). It stops EVERY box in the
+                    map unless --only names them.
 
 Safety:
   * Refuses to run during RTH (09:30-16:00 ET, Mon-Fri) unless --force, ONLY for
@@ -120,7 +132,7 @@ CLI:
   python wake_and_bake.py --yes             # 1-click, no prompt
   python wake_and_bake.py --wake-only       # just wake the fleet
   python wake_and_bake.py --bake-only       # ping + sync files, NO restart (RTH-safe)
-  python wake_and_bake.py --shutdown-only   # pycache clear + EOD report + stop
+  python wake_and_bake.py --shutdown-only   # EMERGENCY STOP by instance id (no pycache, no EOD)
   python wake_and_bake.py --leave-running   # full run, skip final shutdown
   python wake_and_bake.py --dry-run         # show the plan, mutate nothing
   python wake_and_bake.py --mock            # offline synthetic fleet
@@ -168,7 +180,6 @@ from zoneinfo import ZoneInfo
 
 import config
 import ec2ops
-import eod_report
 import instance_registry
 import market_calendar
 import notify
@@ -406,25 +417,6 @@ def verify_convergence(heads, repos, fails, expected):
     else:
         note = "git NOT converged"
     return ok, lines, note
-
-
-def stage_pyclear(mapping, symbols, dry):
-    """Standalone __pycache__ purge (used by --shutdown-only)."""
-    if dry:
-        _log("PYCLEAR", f"[dry-run] would run on {len(symbols)} box(es): {PYCLEAR}")
-        return []
-    if config.MOCK_AWS:
-        _log("PYCLEAR", f"[mock] all {len(symbols)} boxes -> CLEARED")
-        return []
-    bad = []
-    for sym in sorted(symbols):
-        rc, out, err = _exec(mapping[sym].get("private_ip", ""), PYCLEAR)
-        if rc != 0 or "CLEARED" not in out:
-            bad.append(sym)
-            _log("PYCLEAR", f"{sym:<5} 🚨 {err.strip()[:40] or f'rc={rc}'}")
-        else:
-            _log("PYCLEAR", f"{sym:<5} ✅ cleared")
-    return bad
 
 
 def stage_restart(mapping, symbols, dry):
@@ -717,7 +709,7 @@ def main(argv):
                        help="fleet already awake: PING + git sync + VERIFY; "
                             "syncs files and does NOT restart (RTH-safe)")
     modes.add_argument("--shutdown-only", action="store_true",
-                       help="pycache clear, then a clean fleet stop (NO EOD/P&L harvest)")
+                       help="EMERGENCY STOP: stop the boxes by instance id now (no pycache clear, NO EOD/P&L harvest, RTH-exempt); every box unless --only")
     args = p.parse_args(argv[1:])
 
     if args.mock:

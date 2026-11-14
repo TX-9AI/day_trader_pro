@@ -1,4 +1,7 @@
-# day_trader_pro/orchestrator.py — v0.8.1
+# day_trader_pro/orchestrator.py — v0.8.2
+# v0.8.2 (2026-11-14) — dtp r559 / B5.6 (the 11-14 Saturday brief section 5 item 6). _fmt_score is DELETED: no
+#   caller anywhere in dtp, OTV5, the units, the timers or the prompts. No behaviour change.
+#   Gate tests/check_dead_defs_gone.py.
 # v0.8.1 (2026-10-25) — (CTL.1) — THE PARITY LINE'S CONTROL TWIN IS `~/OTV5`. CONTROL_REPO defaulted to
 #   `~/options-trader-v3`, which does not exist on control, so `_fleet_parity` never found a `.git`, never asked
 #   origin, and every wake's parity line read "vs consensus" - a fleet uniformly behind origin read as 14/14 in step.
@@ -533,17 +536,6 @@ def _push_brief_flags(resolved, reached, brief_strength):
 
 def _short(iid):
     return iid[-5:] if iid else "?????"
-
-
-def _fmt_score(r, strength=None):
-    """Compact 'str +0.92 sc 88' from a ranked row (+ optional brief strength)."""
-    parts = []
-    st = r.get("strength") if r.get("strength") is not None else strength
-    if st is not None:
-        parts.append(f"str {st:+.2f}")
-    if r.get("score") is not None:
-        parts.append(f"sc {r['score']}")
-    return " ".join(parts) if parts else "n/a"
 
 
 def _format_ack(wake_list, baseline, resolved, missing, reached, dry_run):

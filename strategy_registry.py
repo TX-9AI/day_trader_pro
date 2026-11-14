@@ -1,4 +1,7 @@
-# day_trader_pro/strategy_registry.py — v1.10
+# day_trader_pro/strategy_registry.py — v1.11
+# v1.11 (2026-11-14) — dtp r559 / B5.6 (the 11-14 Saturday brief section 5 item 6). lineages_for is DELETED: no
+#   caller anywhere. The lineage data it read (REGISTRY[n][2], HISTORICAL[n][1]) stays; resolve_lineage and
+#   box_lineage are the readers. No behaviour change. Gate tests/check_dead_defs_gone.py.
 # v1.10 (2026-11-14) — dtp (OGAP.1). OGAP (OTV5 strategy/ogap.py, Park's friend's opening-gap trade, QQQ paper) joins REGISTRY as
 #   "OGAP": it is an ACTIVE HOUR plan in OTV5's plan_state.TABLE, so check_strategy_registry R11 needs it here.
 # v1.9 (2026-11-14) — dtp r556 / WS.3 TRIM. Breakout leaves REGISTRY for HISTORICAL: OTV5 r110 makes it DORMANT with no
@@ -274,15 +277,6 @@ def status(name) -> str:
     if e:
         return e[1]
     return RETIRED if n in HISTORICAL else UNKNOWN
-
-
-def lineages_for(name):
-    n = str(name or "").strip()
-    e = REGISTRY.get(n)
-    if e:
-        return e[2]
-    h = HISTORICAL.get(n)
-    return h[1] if h else ()
 
 
 def superseded_by(name):
