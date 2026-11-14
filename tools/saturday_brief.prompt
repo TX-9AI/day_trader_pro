@@ -41,6 +41,22 @@ THE BRIEF HAS SEVEN SECTIONS, IN THIS ORDER, EACH ONE STANDING ON ITS OWN:
          interval. A Breakout trade with neither a usable stop premium nor width and distance goes to NOT MEASURED
          by trade_id. REPORT ONLY: the operator sets the size, the ramp and the cap themselves when they activate
          cash. It is not a study (never in WEEKEND_STUDIES.md) and it makes no recommendation in section 7.
+       · OGAP (standing, every Saturday from 2026-11-16; OTV5 OGAP.1, Park's friend's opening-gap trade, QQQ paper only). Its OWN
+         line: never in the 10-26..11-27 window EV, the theories or "ex worst setup". Every OGAP row to date in
+         ~/reviews/trades/*.csv (strategy "OGAP"): n, W-L, P&L on Park's basis (ask in, bid out: the AM.1 exec columns
+         when the rows carry them, else entry_ask / exit_bid) with the mark basis beside it, fees beside, never in;
+         EV a row with a day-bootstrap 95% interval; signal before vs after 10:00; calls vs puts; exit reasons; the
+         gate-G shadows (data/counterfactual/ogap_shadow.jsonl, plan check ogap_gateg_shadow), labelled SHADOW, never
+         in EV; and the status of the bars (OTV5 docs/OGAP_SPEC.md §11: 12 rows, 4 straight losers, the clock tag).
+       · OGAP VS PARK (standing, every Saturday; the operator 2026-11-14: "compare them"). Like for like: INDEX rows
+         only (QQQ, SPX), the AM.1 exec basis (ask in, bid out) with the mark beside it, each row scaled to $500 of
+         premium outlay (P&L x 500 / (entry premium x contracts x 100)), fees beside, never in EV. Per setup: n, EV a
+         trade with a day-bootstrap 95% interval, the worst day, the largest loss. Overlap days (both fired the same
+         session): the count, the share on the same side, and the correlation of daily P&L on the days both traded.
+         THE DECISION RULE, fixed 2026-11-14, stated verbatim every week: "Decide when each has >= 20 index trades,
+         or at 2026-12-31, whichever comes first. Keep the better one if their daily P&L correlation is >= 0.5.
+         Keep both if both have EV > 0 and correlation < 0.5. Keep neither if neither clears zero." Until that point
+         is reached it is REPORT ONLY: say how many index trades each has, and make no recommendation in section 7.
   ## 2. ISSUES FROM THE BOT LOGS
        tools/botlog_scan.py over every box's bot.log for the week: new ERROR/CRITICAL/Traceback
        signatures first, then count jumps, restarts, blind/stale feed episodes, gate refusals

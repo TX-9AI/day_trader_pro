@@ -1,4 +1,6 @@
-# THE SATURDAY BRIEF — spec v2.12
+# THE SATURDAY BRIEF — spec v2.13
+
+**v2.13 · 2026-11-14 · dtp (OGAP.1)**: §1.9, OGAP on its own line every Saturday (Park's friend's opening-gap trade, QQQ paper, OTV5 OGAP.1; never in the window EV or the theories), and §1.10, OGAP VS PARK like for like (index rows, the exec basis, $500 of outlay a row) with a decision rule fixed today and stated verbatim each week, report only until its point. The operator, 2026-11-14: "let's design & paper trade the OGAP on QQQ" and "compare them".
 
 **v2.12 · 2026-11-14 · dtp r557 (AM.1's reporting half)**: §1's EV benchmark leads with the EXECUTABLE basis (bought at the ask, sold at the bid; window_ev.csv `realized_exec`, `ev_exec_per_trade`, `ev_exec_lo/hi`, theories.csv `*_exec_ev`, from OTV5 r111's `pnl_exec_usd` and `~/reviews/exec_basis_backfill.csv` for earlier rows) with the mark beside it, the spread cost on its own line, and every unpriced trade named (never priced at the mark). Paper books the mark both ways, which no live fill gets. Fees stay beside, never in EV. The operator, 2026-11-14: "fix the top 10 today".
 
@@ -210,6 +212,25 @@ interval; the worst day; the largest single-trade loss. Lead with each scheme's 
 Breakout trade with neither a usable stop premium nor width and distance goes to NOT MEASURED by trade_id. **Report only:** the operator sets the size,
 the ramp and the cap themselves when they activate cash. It is not a study (never in `WEEKEND_STUDIES.md`) and it
 makes no recommendation in §7.
+
+**1.9 OGAP, its own line (every Saturday from 2026-11-16).** OTV5 OGAP.1 (OTV5 `docs/OGAP_SPEC.md`): Park's friend's
+opening-gap trade, a faithful paper copy on the QQQ box only. The operator, 2026-11-14: "let's design & paper trade the OGAP on
+QQQ". It is NEVER in the 10-26..11-27 window EV, the theories or "ex worst setup" (dtp `tools/review_kit.py`
+`load_window` leaves it out). Report every OGAP row to date (strategy `OGAP` in `~/reviews/trades/*.csv`): n, W-L, the
+P&L on Park's basis (ask in, bid out: the AM.1 exec columns where the rows carry them, else `entry_ask` / `exit_bid`)
+with the mark basis beside it, fees beside and never in; EV a row with a day-bootstrap 95% interval; signals before vs
+after 10:00; calls vs puts; exit reasons; the gate-G shadows (`data/counterfactual/ogap_shadow.jsonl`, plan check
+`ogap_gateg_shadow`), labelled SHADOW and never in EV; the status of the bars (OGAP_SPEC §11).
+
+**1.10 OGAP vs PARK (every Saturday).** The operator, 2026-11-14: "compare them". Like for like: index rows only (QQQ,
+SPX), the AM.1 exec basis (ask in, bid out) with the mark beside it, each row scaled to $500 of premium outlay (P&L x
+500 / (entry premium x contracts x 100)), fees beside, never in EV. Per setup: n, EV a trade with a day-bootstrap 95%
+interval, the worst day, the largest loss. Overlap days (both fired the same session): the count, the share on the same
+side, and the correlation of daily P&L on the days both traded. **The decision rule, fixed 2026-11-14 and stated
+verbatim every week:** "Decide when each has >= 20 index trades, or at 2026-12-31, whichever comes first. Keep the
+better one if their daily P&L correlation is >= 0.5. Keep both if both have EV > 0 and correlation < 0.5. Keep neither
+if neither clears zero." Until that point is reached it is REPORT ONLY: the brief says how many index trades each has
+and makes no recommendation in §7.
 
 ---
 

@@ -21,6 +21,8 @@ THE RULES (the operator's; they are not negotiable here)
   or malfunctioning). Your job on each trade is to say TO SPEC or BROKEN, with the evidence.
 - Do not list retired strategies. The live plans are RunawayContinuation, LiquidityHunt (Hunt) and PARK. Breakout
   is DORMANT from 2026-11-16 (OTV5 r110, WS.3 TRIM); its trades to 11-13 are window history only. PARC is dead. The GEX pin butterfly is removed (OTV5 r103); its trades before 11-09 are window history only.
+  OGAP (OTV5 OGAP.1, Park's friend's opening-gap trade, QQQ paper only) is on its OWN line: never in the window EV or the
+  theories (review_kit leaves it out); report its row(s), Park's basis (ask in, bid out) beside the mark, and its exit reason.
 - No columns dropped from any CSV. Every CSV write goes through review_kit (it REPLACES the day's rows, so a re-run
   never double-appends). Never append to a tracking CSV with >> or by hand.
 - Use they/them for the operator.

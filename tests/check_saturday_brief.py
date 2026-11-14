@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_saturday_brief.py  v1.11
+day_trader_pro/tests/check_saturday_brief.py  v1.12
+v1.12 2026-11-14  dtp (OGAP.1). S26/S26b: section 1 reports OGAP on its own line (never in the window EV or the
+      theories) and OGAP VS PARK like for like (index rows, the exec basis, $500 of outlay a row, overlap days and the
+      daily-P&L correlation), with the decision rule fixed 2026-11-14 quoted verbatim in the prompt and the spec v2.13,
+      report only until its point. The operator, 2026-11-14: "let's design & paper trade the OGAP on QQQ", "compare them".
 v1.11 2026-11-14  dtp r557 / AM.1. S25: §1 and spec v2.12 lead the EV benchmark with the executable basis.
 v1.10 2026-11-14  dtp r555 / AM.9. S24: the prompt and spec v2.11 say the seal is the dispatcher's, control proves the
       order (FROZEN seen an earlier poll than RESULT), and the on-control fallback logs each sha in CONTROL_LOG.txt.
@@ -527,7 +531,7 @@ ck("S23", "dtp-study-dispatch" in _qf and "friday_studies.sh" in _qf and "Friday
    and _qf.find("COLLECT IT") < _qf.find("FALLBACK 1") < _qf.find("tools/study_dispatch.py run") < _qf.find("FALLBACK 2"),
    "the prompt collects Friday's run first, starts its own only as FALLBACK 1 into its own folder, and names the second round")
 _sf = re.sub(r"\s+", " ", spec)
-ck("S23b", "spec v2.9" in spec and "dtp-study-dispatch" in _sf and "--deadline 02:30" in _sf and "not Persistent" in _sf
+ck("S23b", ("spec v2.9" in spec or re.search(r"spec v[3-9]\.\d+", spec) is not None) and "dtp-study-dispatch" in _sf and "--deadline 02:30" in _sf and "not Persistent" in _sf
    and "NO_MIDNIGHT_HALT" in _sf and "power_ack.txt" in _sf and "- Depends: WS.a, WS.b" in _sf
    and "study_dispatch_sat" in _sf,
    "the spec v2.9 names the Friday timer, the deadline, the fallback folder, the second round, the hold flag and the acks")
@@ -539,7 +543,7 @@ ck("S24", "the SEAL is the dispatcher's" in _qf and "earlier poll than RESULT.js
 # S25 (v1.11, dtp r557 / AM.1): §1's EV benchmark leads with the executable basis, the mark beside
 _p1 = re.sub(r"\s+", " ", p.split("## 1. TRADING SUMMARY", 1)[-1][:1500])
 ck("S25", "LED BY THE EXECUTABLE BASIS" in _p1 and "ev_exec_per_trade" in _p1 and "the mark beside it" in _p1
-   and "exec_unpriced_n" in _p1 and "spec v2.12" in spec and "EXECUTABLE basis" in spec,
+   and "exec_unpriced_n" in _p1 and re.search(r"spec v2\.(1[2-9]|[2-9][0-9])|spec v[3-9]\.", spec) is not None and "EXECUTABLE basis" in spec,
    "the prompt's §1 and spec v2.12 lead the EV benchmark with the executable basis and keep the mark beside")
 _shs = open(SH).read()
 ck("S23c", '$WORK/study_dispatch — $_fri' in _shs and 'if [ -f "$WORK/study_dispatch/state.json" ]' in _shs
@@ -574,6 +578,23 @@ ck("S22c", "by_risk = max(1, floor(base / ((entry - stop premium) x 100))) when 
    and "by_risk = **max(1,** floor(base / ((entry − stop premium) × 100))**)**" in _c8f
    and "max(1, floor(width / distance))" in _c8f and "without a stop premium goes to NOT MEASURED" not in _c8f,
    "the cash table sizes Breakout as size_for does: risk count floored at 1, geometry fallback, refused only over the ramp max")
+
+# S26 (v1.12, OGAP.1): OGAP ON ITS OWN LINE, AND OGAP VS PARK. The operator, 2026-11-14: "let's design & paper trade the
+# OGAP on QQQ" (its own line, outside the benchmark) and "compare them" (a rule fixed now, stated verbatim weekly).
+_RULE = ("Decide when each has >= 20 index trades, or at 2026-12-31, whichever comes first. Keep the better one if their "
+         "daily P&L correlation is >= 0.5. Keep both if both have EV > 0 and correlation < 0.5. Keep neither if neither "
+         "clears zero.")
+_pf, _sf = _flat(p), _flat(spec)
+_o1, _o2 = p.find("· OGAP (standing"), p.find("· OGAP VS PARK")
+ck("S26", 0 < p.find("## 1. TRADING SUMMARY") < _o1 < _o2 < p.find("## 2. ISSUES FROM THE BOT LOGS")
+   and "never in the 10-26..11-27 window EV, the theories" in _pf and "labelled SHADOW, never in EV" in _pf
+   and "INDEX rows only (QQQ, SPX)" in _pf and "each row scaled to $500 of premium outlay" in _pf
+   and "the correlation of daily P&L" in _pf and _RULE in _pf and "REPORT ONLY" in _pf[_pf.find("OGAP VS PARK"):],
+   "the prompt's section 1 has OGAP on its own line and OGAP VS PARK with the fixed rule, report only")
+ck("S26b", "# THE SATURDAY BRIEF — spec v2.13" in spec and "**1.9 OGAP, its own line" in spec
+   and "**1.10 OGAP vs PARK" in spec and _RULE in _sf and "REPORT ONLY" in _sf[_sf.find("1.10 OGAP vs PARK"):]
+   and spec.find("**1.9 OGAP") < spec.find("**1.10 OGAP vs PARK") < spec.find("\n## 2. ISSUES FROM THE BOT LOGS"),
+   "the spec v2.13 carries 1.9 and 1.10 with the same rule, verbatim")
 
 print()
 if FAILS:

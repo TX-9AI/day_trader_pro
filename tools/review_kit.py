@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/review_kit.py — v1.4
+day_trader_pro/tools/review_kit.py — v1.5
+v1.5  2026-11-14  dtp (OGAP.1) — OGAP IS ON ITS OWN LINE. The operator, 2026-11-14: "let's design & paper trade the OGAP on
+      QQQ" (D3: its own line, outside the 10-26..11-27 benchmark). load_window leaves strategy OGAP out, so window_ev.csv,
+      theories.csv and "ex worst setup" are byte-identical on every day OGAP did not trade; `window` prints one OGAP line
+      (n, total, EV a row, fees beside) after the theories. Nothing else changes.
 v1.4  2026-11-14  dtp r557 / AM.1's reporting half — THE WINDOW LEADS WITH THE EXECUTABLE BASIS (buy at the ask, sell at
       the bid), THE MARK BESIDE IT. The operator, 2026-11-14: "fix the top 10 today" (the amnesty bucket's AM.1: paper
       books the mark both ways, so the EV benchmark carries no spread cost). OTV5 r111 adds four trade columns
@@ -111,6 +115,7 @@ GIVEBACK_HDR_V1 = "date,trades,giveback_usd,peak_open_usd,realized_on_green_usd,
 GIVEBACK_HDR = GIVEBACK_HDR_V1 + (",giveback_pct,giveback_ex_park_usd,peak_open_ex_park_usd,giveback_ex_park_pct,"
                                   "green_to_red_ex_park_n,green_to_red_ex_park_usd")          # v1.1: six appended
 PARK = "PARK"
+OGAP = "OGAP"          # v1.5 (OGAP.1): its own line
 HUNT = "LiquidityHunt"
 HUNT_HDR = ("date,side,n,net,win_pct,ev_per_trade,fees,fees_est,cum_n,cum_net,cum_win_pct,cum_ev_per_trade,cum_fees,"
             "cum_fees_est")
@@ -247,6 +252,8 @@ def load_window(cut):
         for r in csv.DictReader(open(f)):
             if r.get("pnl_usd") in (None, "") or not r.get("entry_time"):
                 continue
+            if r.get("strategy") == OGAP:              # v1.5 (OGAP.1): its own line, never in the benchmark
+                continue
             x = T.norm(r["sym"], r["strategy"], r["pnl_usd"], r["entry_time"])
             if not (WINDOW_START <= x["day"] <= cut):
                 continue
@@ -264,6 +271,22 @@ def load_window(cut):
                 x["fee"], x["est"] = est_fee(r["sym"], r["contracts"]), True
             rows.append(x)
     return rows
+
+
+def ogap_rows(cut):
+    """v1.5 (OGAP.1) - every OGAP row through `cut` (its own line), in load_window's shape."""
+    T = _theories()
+    out = []
+    for f in sorted(glob.glob(os.path.join(REVIEWS, "trades", "20*.csv"))):
+        for r in csv.DictReader(open(f)):
+            if r.get("strategy") != OGAP or r.get("pnl_usd") in (None, "") or not r.get("entry_time"):
+                continue
+            x = T.norm(r["sym"], r["strategy"], r["pnl_usd"], r["entry_time"])
+            if x["day"] > cut:
+                continue
+            x["fee"] = float(r["fee"]) if r.get("fee") not in (None, "") else est_fee(r["sym"], r["contracts"])
+            out.append(x)
+    return out
 
 
 def boot(rows, n=BOOT_N, seed=BOOT_SEED, key="pnl"):
@@ -393,6 +416,11 @@ def cmd_window(cut, write=True):
         OUTLIER_DAY, n0, t0, (t0 / n0 if n0 else 0), POST_DECAY, n1, t1, (t1 / n1 if n1 else 0)))
     for lab, (n, ev, tot) in th.items():
         print("  %-38s n=%4d EV %+8.2f total %+10.2f" % (lab, n, ev, tot))
+    og = ogap_rows(w["cut"])
+    if og:
+        _t = sum(x["pnl"] for x in og)
+        print("  OGAP (its own line, never in the window): n=%d total %+.2f EV %+.2f a row, fees beside %.2f" % (
+            len(og), _t, _t / len(og), sum(x["fee"] for x in og)))
     if write:
         wp, tp = os.path.join(REVIEWS, "window_ev.csv"), os.path.join(REVIEWS, "theories.csv")
         migrate_header(wp, WINDOW_HDR_V1, WINDOW_HDR)

@@ -1,4 +1,6 @@
-# day_trader_pro/strategy_registry.py — v1.9
+# day_trader_pro/strategy_registry.py — v1.10
+# v1.10 (2026-11-14) — dtp (OGAP.1). OGAP (OTV5 strategy/ogap.py, Park's friend's opening-gap trade, QQQ paper) joins REGISTRY as
+#   "OGAP": it is an ACTIVE HOUR plan in OTV5's plan_state.TABLE, so check_strategy_registry R11 needs it here.
 # v1.9 (2026-11-14) — dtp r556 / WS.3 TRIM. Breakout leaves REGISTRY for HISTORICAL: OTV5 r110 makes it DORMANT with no
 #   switch and takes it off the roster (the operator, 2026-11-14: "Concur"; WS.3: the fitted gates failed blind, window
 #   EV -$11.73/trade [-59.33, +41.68], n=120). Its code BRKO stays, so its warehouse rows (to 2026-11-13) decode as
@@ -195,6 +197,8 @@ REGISTRY = {
     "LiquidityHunt":        ("HUNT", LIVE,    (TEST, OTV5),       None),
     # r519 — OTV5's PARK (strategy/park.py, the 11:00 debit held to 15:45). Was the unregistered "?PAR".
     "PARK":                 ("PARK", LIVE,    (OTV5,),            None),
+    # OGAP.1 (2026-11-14) — OTV5's OGAP (strategy/ogap.py), Park's friend's ORB-GAP, QQQ paper only.
+    "OGAP":                 ("OGAP", LIVE,    (OTV5,),            None),
 }
 
 # ── retired: a DECODE TABLE for rows already written, NOT a list ───────────
