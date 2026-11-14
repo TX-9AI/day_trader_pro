@@ -68,8 +68,7 @@ THE BRIEF HAS SEVEN SECTIONS, IN THIS ORDER, EACH ONE STANDING ON ITS OWN:
          Saturday 02:30 ET, so its results are finished when you start. Say which started it: the wrapper's line and
          ~/friday_studies.ledger tell you; do not credit the timer when it is not installed.
          One OPEN item (a sub-item such as WS.6a is its own) per stopped box, CRM never, each a bounded headless study
-         agent that writes SEAL.txt with a UTC timestamp BEFORE any outcome, freezes the rule in FROZEN.json, and runs
-         it ONCE on the sealed days. An item with a `- Depends:` line (e.g. WS.9, the combined Hunt gate) ran in a
+         agent; since r555 the SEAL is the dispatcher's, and a result counts only if control saw FROZEN.json an earlier poll than RESULT.json. An item with a `- Depends:` line (e.g. WS.9, the combined Hunt gate) ran in a
          second round after the items it names; with none of them PASSED it is DONE "nothing passed, not run".
          The dispatcher pulled each study to ~/reviews/studies/<ID>_<YYYYMMDD>/, cleaned and stopped every box, and
          marked each item DONE or FORWARD in WEEKEND_STUDIES.md. You do not edit that file.
@@ -88,8 +87,10 @@ THE BRIEF HAS SEVEN SECTIONS, IN THIS ORDER, EACH ONE STANDING ON ITS OWN:
          them itself, and cleans every box. Collect it after sections 1-5 are written with `study_dispatch.py wait
          --out <WORK>/study_dispatch_sat`; it blocks until every item finishes or the deadline nears.
          FALLBACK 2, only if that dispatch also refused or failed before launching anything (no state.json, or its
-         log ends in REFUSED or ERROR): run OPEN items on control yourself, blind as above (seal in
-         ~/reviews/studies/<ID>_<YYYYMMDD>/SEAL.txt first, run ONCE), one heavy job at a time through
+         log ends in REFUSED or ERROR): run OPEN items on control yourself, blind by the queue's HOW block
+         (~/reviews/studies/<ID>_<YYYYMMDD>/SEAL.txt first, then at once `<UTC> SEAL <sha256>` appended to CONTROL_LOG.txt
+         in that folder; FROZEN.json next, logged the same way, before any sealed-day outcome; then the run ONCE;
+         SEAL.txt and FROZEN.json never change after, and a code fix is appended to AMENDMENTS.txt), one heavy job at a time through
          `flock /tmp/claude-heavy.lock /home/ubuntu/bin/heavy` (control has 3.8 GB and has run out of memory
          before), each with a timeout, no new item in the last 45 minutes before the DEADLINE; update the
          item's Status yourself; list the dispatch failure and every unfinished item under NOT MEASURED.

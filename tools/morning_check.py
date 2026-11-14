@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/morning_check.py — v1.3
+day_trader_pro/tools/morning_check.py — v1.4
+v1.4  2026-11-14  dtp r555 / AM.12 — now_et() goes through dtp ettime.now_et (always aware); the naive
+      fallback to a zoneless clock is gone (test_ettime T4).
 v1.3  2026-11-10  dtp r547 (§5 hygiene) — THE BUCKET COMES FROM config.WAREHOUSE_BUCKET. v1.2 carried its own literal
       default, which check_const_parity P2 (CONST.1, r535) reports red; the value and the OT_S3_BUCKET override are the same.
 v1.2  2026-11-09  dtp r545 / CAP.7 — THE 09:50 RUN ALSO ASKS WHETHER LAST NIGHT'S OPTION-CANDLE CAPTURE RAN. On 11-09 the
@@ -91,7 +93,11 @@ print("WAKE_STATUS " + json.dumps(o))
 
 
 def now_et():
-    return datetime.now(ET) if ET else datetime.now()
+    """AM.12: through the ET boundary helper (dtp ettime.now_et, always aware); no naive fallback."""
+    if ROOT not in sys.path:
+        sys.path.insert(0, ROOT)
+    import ettime
+    return ettime.now_et()
 
 
 def pick_step(dt):

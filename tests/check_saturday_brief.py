@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_saturday_brief.py  v1.9
+day_trader_pro/tests/check_saturday_brief.py  v1.10
+v1.10 2026-11-14  dtp r555 / AM.9. S24: the prompt and spec v2.11 say the seal is the dispatcher's, control proves the
+      order (FROZEN seen an earlier poll than RESULT), and the on-control fallback logs each sha in CONTROL_LOG.txt.
 v1.9  2026-11-13  dtp r552 / SAT.9. S21 restated and S23/S23b/S23c added: the study queue runs Friday night. The
       prompt collects <WORK>/study_dispatch (started Fri 17:15 ET by dtp-study-dispatch, deadline Sat 02:30) before it
       would start anything, starts the dispatch itself only as FALLBACK 1 into <WORK>/study_dispatch_sat, does not
@@ -528,6 +530,11 @@ ck("S23b", "spec v2.9" in spec and "dtp-study-dispatch" in _sf and "--deadline 0
    and "NO_MIDNIGHT_HALT" in _sf and "power_ack.txt" in _sf and "- Depends: WS.a, WS.b" in _sf
    and "study_dispatch_sat" in _sf,
    "the spec v2.9 names the Friday timer, the deadline, the fallback folder, the second round, the hold flag and the acks")
+# S24 (v1.10, dtp r555 / AM.9): THE SEAL IS THE DISPATCHER'S, AND THE ON-CONTROL FALLBACK LOGS ITS ORDER.
+ck("S24", "the SEAL is the dispatcher's" in _qf and "earlier poll than RESULT.json" in _qf
+   and "CONTROL_LOG.txt" in _qf and "AMENDMENTS.txt" in _qf
+   and "spec v2.11" in spec and "never self-attested" in _sf and "FROZEN.ack" in _sf and "CONTROL_LOG.txt" in _sf,
+   "the prompt and spec v2.11: the dispatcher writes the seal, control proves the order, the fallback logs each sha")
 _shs = open(SH).read()
 ck("S23c", '$WORK/study_dispatch — $_fri' in _shs and 'if [ -f "$WORK/study_dispatch/state.json" ]' in _shs
    and _shs.index('_fri="state.json present') < _shs.index('timeout "$BUDGET_S"'),

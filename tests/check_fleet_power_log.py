@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """
-tests/check_fleet_power_log.py  v1.3
+tests/check_fleet_power_log.py  v1.4
+v1.4  2026-11-14  AM.11 (brief 11-14 R8) — P6 TAKES ITS ACK FILE FROM SCRATCH TOO. It read the live
+      logs/power_ack.txt, where Friday's study dispatch had acked SPX for 11-13, and went red on that.
 v1.3  2026-09-26  r439 / OPS.49 — P7 READ THE OPERATOR'S LIVE ACK FILE.
       `fleet_power_audit` defaults `--ack-file` to `logs/power_ack.txt`, and P7
       never overrode it. That file holds a REAL, DATED ack for AAL on
@@ -176,7 +178,10 @@ def main():
             "SPX": {"instance_id": "i-abc123", "state": "running"},
             "QQQ": {"instance_id": "i-def456", "state": "stopped"}}
         try:
-            rc = fpa.main(["--log", led])
+            # v1.4 (AM.11): the ack file goes into scratch, as P7 does. P6 read the LIVE
+            # logs/power_ack.txt: on 2026-11-14 it held the Friday dispatcher's SPX ack for 11-13, which
+            # suppressed this fixture's SPX box and turned P6 red on the operator's state, not the code's.
+            rc = fpa.main(["--log", led, "--ack-file", os.path.join(tmp2, "ack.txt")])
         finally:
             fpa._now_et, fpa.ec2ops.describe_by_tag = real_now, real_desc
         ck("P6", rc == 1,

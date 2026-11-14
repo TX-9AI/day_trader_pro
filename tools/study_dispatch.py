@@ -1,7 +1,27 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/study_dispatch.py  v1.2
-v1.2  2026-11-13  dtp r553 / SAT.9 — THE LAUNCH RETURNS. The first Friday run (17:15 ET) timed out launching WS.1 on
+day_trader_pro/tools/study_dispatch.py  v1.3
+v1.3  2026-11-14  dtp r555 / AM.9 + brief R4 — THE SEAL IS THE DISPATCHER'S, AND THE ORDER IS PROVEN ON CONTROL.
+      The operator, 2026-11-14: "Yes" (R4) and "fix the top 10 today" (the amnesty bucket). Up to v1.2 the agent
+      wrote SEAL.txt, FROZEN.json and RESULT.json itself and the order was read from box mtimes: WS.3 was refused
+      for writing FROZEN before SEAL, WS.6d's honest append to its seal moved the mtime, and mtimes are settable.
+      · The dispatcher writes SEAL.txt (SEALED_AT in UTC, ITEM_SHA256, the item text as sealed) on CONTROL before the
+        kit ships; the kit carries the same file, read-only on the box. The control copy and its sha are the seal of
+        record. The agent never writes it.
+      · The agent writes FROZEN.json first. The first poll that sees it pulls it to control (FROZEN.control.json),
+        records its sha and the CONTROL time, and drops FROZEN.ack in the agent's work dir; the agent waits for that
+        ack before it scores a sealed day.
+      · A result is accepted only if: the SEAL that comes back is byte-identical to control's; FROZEN.json was seen on
+        control at a poll BEFORE the one that first saw RESULT.json; the FROZEN.json that comes back is the one
+        control recorded; seal < frozen < result on control's clock. Box mtimes are recorded, never trusted.
+      · Code fixes after the freeze are appended to AMENDMENTS.txt (counted in state.json); SEAL and FROZEN never
+        change.
+      · The runner passes --permission-mode acceptEdits --add-dir <work> (WS.6d: "the FROZEN.json write was refused
+        by the session's permission layer").
+      · now_et() goes through dtp ettime (AM.12): no naive fallback.
+      NOT DONE: the sealed-day market data is not embargoed (the agent reads the warehouse itself); the ack makes
+      the honest order provable, it does not stop a dishonest agent from peeking.
+v1.2v1.2  2026-11-13  dtp r553 / SAT.9 — THE LAUNCH RETURNS. The first Friday run (17:15 ET) timed out launching WS.1 on
       AMD and WS.2 on AMZN after 120 s each: the launch command ended an AND-list with `... && nohup setsid bash
       runner.sh > runner.log 2>&1 < /dev/null &`, and bash backgrounds the whole list in a subshell that holds ssh's
       stdout until the runner ends (seen on AMZN: the subshell alive beside runner.sh). The failed launch then cleaned
@@ -43,10 +63,13 @@ since v1.1; the Saturday brief starts it itself only as a fallback):
      runner.sh, ctx/ (~/reviews/*.csv, the queue file, the prior study folders the item names, text only).
      runner.sh stops optionsbot and candle-feed, reads the research token from SSM with the box's venv boto3
      (never printed, never copied from control), and runs `timeout N claude -p` with stdin closed.
-  5. Polls. The moment SEAL.txt appears it is copied to control with its sha256, so the seal lives on control
-     before any outcome exists. A finished item is pulled to ~/reviews/studies/<ID>_<YYYYMMDD>/ and validated:
-     SEAL.txt unchanged since it was first seen, and SEAL.txt older than FROZEN.json older than RESULT.json
-     (box mtimes). RESULT.json must carry n, ev, ci, window_ev, window_ci, verdict, outcome.
+  5. v1.3: SEAL.txt is written by the dispatcher on control (into ~/reviews/studies/<ID>_<YYYYMMDD>/) BEFORE the
+     kit ships, and ships read-only. Polls: the first that sees FROZEN.json pulls it to control (FROZEN.control.json),
+     records its sha and control's time, and writes FROZEN.ack for the agent; the first that sees RESULT.json is
+     recorded too. A finished item is pulled and validated on control's records: the returned SEAL.txt and
+     FROZEN.json byte-identical to control's, FROZEN seen at an earlier poll than RESULT, seal < frozen < result on
+     control's clock (box mtimes are never trusted). RESULT.json must carry n, ev, ci, window_ev, window_ci,
+     verdict, outcome. AMENDMENTS.txt (append-only) is allowed and noted.
   6. CLEANUP ON EVERY EXIT PATH (finish, timeout, failure, exception): kill the claude session, remove
      ~/study_<run> and ~/.claude/projects/-home-ubuntu-study-<run>*, delete s3://<bucket>/study_dispatch/<run>/,
      stop the box, release the claim. A freed box takes the next queued item while time allows.
@@ -77,7 +100,8 @@ import tarfile
 import tempfile
 import time
 from contextlib import contextmanager
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+UTC = timezone.utc
 
 try:
     from zoneinfo import ZoneInfo
@@ -108,7 +132,11 @@ RESULT_KEYS = ("n", "ev", "ci", "window_ev", "window_ci", "verdict", "outcome")
 
 # ── time ────────────────────────────────────────────────────────────────────────────────────────────────────
 def now_et():
-    return datetime.now(ET) if ET else datetime.now()
+    """AM.12: through the ET boundary helper (dtp ettime.now_et, always aware); no naive fallback."""
+    if DTP not in sys.path:
+        sys.path.insert(0, DTP)
+    import ettime
+    return ettime.now_et()
 
 
 def in_rth(dt):
@@ -301,8 +329,10 @@ TOK=$("$PY" -c 'import boto3;print(boto3.client("ssm",region_name="us-east-2").g
 if [ -z "$TOK" ]; then echo "NO_TOKEN" >> status.txt; echo "exit=97 $(date -u +%FT%TZ)" >> status.txt; exit 0; fi
 CL=$(command -v claude || echo "$HOME/.local/bin/claude")
 mkdir -p work && cd work || exit 1
+chmod a-w SEAL.txt 2>/dev/null; [ -f SEAL.txt ] && echo "SEAL_PRESENT" >> ../status.txt
 env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN="$TOK" timeout "$RUN_S" "$CL" -p "$(cat ../brief.txt)" \
-  --max-turns 300 --allowedTools "Bash,Read,Write,Edit,Glob,Grep" </dev/null > ../claude_out.txt 2>&1
+  --max-turns 300 --allowedTools "Bash,Read,Write,Edit,Glob,Grep" --permission-mode acceptEdits --add-dir "$PWD" \
+  </dev/null > ../claude_out.txt 2>&1
 rc=$?
 unset TOK
 echo "exit=$rc $(date -u +%FT%TZ)" >> ../status.txt
@@ -326,13 +356,21 @@ RULES (the operator's; not negotiable):
   "/home/ubuntu/options-trader/tests"); from warehouse_source import mainline.
 - Stream; do not materialise large data. This box has little memory. Use nice -n 10 for long python runs.
 - Fees go BESIDE EV, never inside it. Lead with the window EV and its interval. Say n every time.
-- Blind discipline, exactly as the HOW block below says. Write SEAL.txt FIRST, with a UTC timestamp line
-  ("SEALED_AT <ISO-8601 UTC>"), the sealed days and the pass bar copied from the item, BEFORE you compute any
-  outcome. Then FROZEN.json (the frozen rule), then the single blind run. Never re-tune after the blind run.
+- Blind discipline. THE SEAL IS ALREADY WRITTEN: SEAL.txt in your directory was written by the dispatcher on control
+  ("SEALED_AT <UTC>", the item's hash and text) before you started. It is read-only. Never edit, move or rewrite it;
+  where the HOW block below says "write SEAL.txt", that step is done for you.
+  1. Tune only on the unsealed days, then write FROZEN.json FIRST, BEFORE you compute or look at any outcome on a
+     sealed day: the frozen rule, the sealed days and the pass bar (copied from the item).
+  2. WAIT for the file FROZEN.ack to appear beside it (the dispatcher writes it once control holds FROZEN.json's
+     hash; check every 15 s, up to 10 minutes). If it never appears, write RESULT.json with "verdict": "INCOMPLETE".
+  3. Then the single blind run on the sealed days, and RESULT.json last. Never re-tune after the blind run.
+  4. FROZEN.json never changes after the ack. A code fix after it (a crash, never a rule change) is APPENDED as one
+     line to AMENDMENTS.txt: "<UTC> <what changed and why>".
 - You have about {minutes} minutes. If you cannot finish, still write RESULT.json with "verdict": "INCOMPLETE".
 
 FILES YOU MUST WRITE in {work}:
-  SEAL.txt, FROZEN.json, README.md (short: method, data, caveats), and LAST of all RESULT.json:
+  FROZEN.json (then wait for FROZEN.ack), README.md (short: method, data, caveats), AMENDMENTS.txt only if
+  needed, and LAST of all RESULT.json:
   {{"id": "{item_id}", "n": <blind n>, "ev": <blind EV per trade>, "ci": [lo, hi], "window_ev": <EV per trade
    over the window>, "window_ci": [lo, hi], "fees_per_trade": <beside EV>, "verdict": "PASS"|"FAIL"|"FORWARD"|
    "INCOMPLETE", "outcome": "TUNE"|"TRIM"|"KEEP"|"NONE", "forward_to": "<YYYY-MM-DD or empty>",
@@ -348,6 +386,16 @@ YOUR ITEM ({item_id}):
 """
 
 
+def make_seal(item, run_id, sealed_at_utc):
+    """v1.3 (AM.9): the seal of record, written by the dispatcher on control before the agent exists."""
+    body = item["text"]
+    return (f"SEALED_AT {sealed_at_utc}\n"
+            f"SEALED_BY study_dispatch run {run_id}, on control, before the agent started\n"
+            f"ITEM {item['id']}\n"
+            f"ITEM_SHA256 {hashlib.sha256(body.encode()).hexdigest()}\n"
+            f"--- the item as sealed (its sealed days and pass bar are the pre-registration) ---\n{body}\n")
+
+
 def build_brief(item, how, run_id, bucket, minutes, work):
     return BRIEF_HEAD.format(run_id=run_id, work=work, bucket=bucket or "(config.WAREHOUSE_BUCKET)",
                              minutes=minutes, item_id=item["id"], how=how, item=item["text"])
@@ -360,11 +408,14 @@ def _prior_dirs(item_text, studies=None):
     return sorted(n for n in names if os.path.isdir(os.path.join(studies, n)))
 
 
-def build_kit(item, how, run_id, bucket, minutes, kit_dir, queue_path, studies=None):
-    """Write brief.txt, runner.sh and ctx/ into kit_dir and return a .tar.gz path."""
+def build_kit(item, how, run_id, bucket, minutes, kit_dir, queue_path, studies=None, seal_text=None):
+    """Write brief.txt, runner.sh, work/SEAL.txt (v1.3) and ctx/ into kit_dir and return a .tar.gz path."""
     studies = studies or STUDIES
     work = f"/home/ubuntu/study_{run_id}/{item['id']}/work"
     os.makedirs(os.path.join(kit_dir, "ctx", "studies"), exist_ok=True)
+    if seal_text is not None:
+        os.makedirs(os.path.join(kit_dir, "work"), exist_ok=True)
+        open(os.path.join(kit_dir, "work", "SEAL.txt"), "w").write(seal_text)
     open(os.path.join(kit_dir, "brief.txt"), "w").write(build_brief(item, how, run_id, bucket, minutes, work))
     open(os.path.join(kit_dir, "runner.sh"), "w").write(RUNNER)
     total = 0
@@ -426,8 +477,17 @@ def file_sha(p):
     return hashlib.sha256(open(p, "rb").read()).hexdigest() if os.path.exists(p) else None
 
 
-def validate(dest, seal_sha, mtimes):
-    """-> (ok, reason, result). mtimes: {name: epoch} as seen on the box before the pull."""
+def _t(x):
+    try:
+        return datetime.fromisoformat(x) if x else None
+    except (TypeError, ValueError):
+        return None
+
+
+def validate(dest, seal_sha, proof=None):
+    """-> (ok, reason, result). v1.3 (AM.9): the order is proven from CONTROL's records, never box mtimes.
+    proof: {seal_at, frozen_sha, frozen_at, result_at, frozen_with_result} as the dispatcher recorded them."""
+    proof = proof or {}
     rp = os.path.join(dest, "RESULT.json")
     if not os.path.exists(rp):
         return False, "no RESULT.json", None
@@ -440,15 +500,23 @@ def validate(dest, seal_sha, mtimes):
     missing = [k for k in RESULT_KEYS if k not in res]
     if missing:
         return False, f"RESULT.json lacks {missing}", res
-    if seal_sha is None or not os.path.exists(os.path.join(dest, "SEAL.txt")):
-        return False, "no SEAL.txt was seen before the result", res
-    if file_sha(os.path.join(dest, "SEAL.txt")) != seal_sha:
-        return False, "SEAL.txt changed after it was first copied to control", res
-    if "SEALED_AT" not in open(os.path.join(dest, "SEAL.txt")).read():
+    sp = os.path.join(dest, "SEAL.txt")
+    if seal_sha is None or not os.path.exists(sp):
+        return False, "no SEAL.txt came back from the box", res
+    if file_sha(sp) != seal_sha:
+        return False, "SEAL.txt changed after the dispatcher wrote it", res
+    if "SEALED_AT" not in open(sp).read():
         return False, "SEAL.txt has no SEALED_AT timestamp line", res
-    s, f, r = mtimes.get("SEAL.txt"), mtimes.get("FROZEN.json"), mtimes.get("RESULT.json")
-    if not (s and f and r and s <= f <= r):
-        return False, f"file order is not SEAL <= FROZEN <= RESULT (mtimes {s}, {f}, {r})", res
+    if not proof.get("frozen_sha"):
+        return False, "no FROZEN.json was seen on control before the result", res
+    if proof.get("frozen_with_result"):
+        return False, "FROZEN.json and RESULT.json first appeared at the same poll: the order cannot be shown", res
+    if file_sha(os.path.join(dest, "FROZEN.json")) != proof["frozen_sha"]:
+        return False, "FROZEN.json changed after control recorded it", res
+    s, f, r = _t(proof.get("seal_at")), _t(proof.get("frozen_at")), _t(proof.get("result_at"))
+    if not (s and f and r and s < f < r):
+        return False, (f"control's order is not SEAL < FROZEN < RESULT ({proof.get('seal_at')}, "
+                       f"{proof.get('frozen_at')}, {proof.get('result_at')})"), res
     return True, "ok", res
 
 
@@ -723,7 +791,18 @@ class Dispatcher:
         self.log(f"launch {iid} on {sym} ({run_s // 60} min)")
         kit = tempfile.mkdtemp(prefix=f"sd_{iid}_", dir=self.out)
         try:
-            tgz = build_kit(item, how, self.run_id, self.bucket, run_s // 60, kit, self.queue_path, self.studies)
+            # v1.3 (AM.9): the seal of record is written HERE, on control, before anything ships
+            now = self.ops.now()
+            sealed_at = now.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ") if now.tzinfo else now.isoformat()
+            seal_text = make_seal(item, self.run_id, sealed_at)
+            dest = self.dest(iid)
+            os.makedirs(dest, exist_ok=True)
+            open(os.path.join(dest, "SEAL.txt"), "w").write(seal_text)
+            seal_sha = file_sha(os.path.join(dest, "SEAL.txt"))
+            st.update({"seal_on_control": now.isoformat(), "seal_sha": seal_sha})
+            self.log(f"{iid}: SEAL.txt written on control ({seal_sha[:12]})")
+            tgz = build_kit(item, how, self.run_id, self.bucket, run_s // 60, kit, self.queue_path, self.studies,
+                            seal_text=seal_text)
             root = box_root(self.run_id)
             rc, out, err = self.ops.ssh(ip, f"mkdir -p {root} && echo OK", timeout=120)
             if rc != 0:
@@ -734,7 +813,8 @@ class Dispatcher:
             rc, out, err = self.ops.ssh(ip, launch_cmd(root, iid, run_s), timeout=120)
             if rc != 0 or "START" not in out:
                 raise RuntimeError(f"runner did not start rc={rc} {(out + err).strip()[:200]}")
-            active[sym] = {"item": item, "ip": ip, "seal_sha": None, "started": self.ops.now()}
+            active[sym] = {"item": item, "ip": ip, "seal_sha": seal_sha, "started": self.ops.now(),
+                           "proof": {"seal_at": st["seal_on_control"]}}
         except Exception as e:
             st["status"] = f"FAILED_TO_LAUNCH ({e})"
             self.state["not_measured"].append(f"{iid}: failed to launch on {sym}: {e}")
@@ -753,25 +833,38 @@ class Dispatcher:
         return os.path.join(self.studies, f"{iid}_{self.day}")
 
     def poll(self, sym, a):
+        """v1.3 (AM.9): record, on control's clock, the first poll that sees FROZEN.json (pulled and hashed, then
+        acked to the agent) and the first that sees RESULT.json. Box mtimes are kept for the record only."""
         iid, ip = a["item"]["id"], a["ip"]
         d = self._box_dir(iid)
         rc, out, _err = self.ops.ssh(ip, f"cat {d}/status.txt 2>/dev/null; echo ---; "
                                          f"cd {d}/work 2>/dev/null && stat -c '%n %Y' SEAL.txt FROZEN.json "
-                                         f"RESULT.json 2>/dev/null", timeout=60)
+                                         f"RESULT.json AMENDMENTS.txt 2>/dev/null", timeout=60)
         if rc != 0:
             return False
         status, _, stats = out.partition("---")
         mt = {ln.split()[0]: int(ln.split()[1]) for ln in stats.split("\n") if len(ln.split()) == 2}
         a["mtimes"] = mt
-        if a["seal_sha"] is None and "SEAL.txt" in mt:
+        pr = a.setdefault("proof", {})
+        st = self.state["items"][iid]
+        now = self.ops.now().isoformat()
+        if "FROZEN.json" in mt and not pr.get("frozen_sha"):
             dest = self.dest(iid)
             os.makedirs(dest, exist_ok=True)
-            rc2, _o, _e = self.ops.pull(ip, f"{d.replace('/home/ubuntu/', '')}/work/SEAL.txt",
-                                        os.path.join(dest, "SEAL.txt"))
-            if rc2 == 0:
-                a["seal_sha"] = file_sha(os.path.join(dest, "SEAL.txt"))
-                self.state["items"][iid]["seal_on_control"] = self.ops.now().isoformat()
-                self.log(f"{iid}: SEAL.txt copied to control ({a['seal_sha'][:12]})")
+            fc = os.path.join(dest, "FROZEN.control.json")
+            rc2, _o, _e = self.ops.pull(ip, f"{d.replace('/home/ubuntu/', '')}/work/FROZEN.json", fc)
+            if rc2 == 0 and os.path.exists(fc):
+                pr["frozen_sha"], pr["frozen_at"] = file_sha(fc), now
+                if "RESULT.json" in mt:
+                    pr["frozen_with_result"] = True
+                self.ops.ssh(ip, f"echo 'FROZEN_RECEIVED {now} {pr['frozen_sha']}' > {d}/work/FROZEN.ack", timeout=60)
+                st.update({"frozen_on_control": now, "frozen_sha": pr["frozen_sha"]})
+                self.log(f"{iid}: FROZEN.json recorded on control ({pr['frozen_sha'][:12]}), ack sent")
+        if "RESULT.json" in mt and not pr.get("result_at"):
+            pr["result_at"] = now
+            st["result_seen_on_control"] = now
+        if "AMENDMENTS.txt" in mt:
+            st["amendments"] = True
         return "exit=" in status
 
     def finish(self, sym, a, timed_out):
@@ -793,7 +886,7 @@ class Dispatcher:
             if rc == 0 and os.path.exists(tmp):
                 seal_keep = os.path.join(self.out, f"{iid}.SEAL.control")
                 if os.path.exists(os.path.join(dest, "SEAL.txt")):
-                    shutil.copy2(os.path.join(dest, "SEAL.txt"), seal_keep)
+                    shutil.move(os.path.join(dest, "SEAL.txt"), seal_keep)   # the box's copy must come back itself
                 with tarfile.open(tmp) as t:
                     for m in t.getmembers():
                         if m.name.startswith("/") or ".." in m.name or not (m.isfile() or m.isdir()):
@@ -806,7 +899,8 @@ class Dispatcher:
                 if os.path.exists(seal_keep):         # the control copy is the seal of record
                     shutil.copy2(seal_keep, os.path.join(dest, "SEAL.control.txt"))
                     os.remove(seal_keep)
-        ok, why, res = validate(dest, a.get("seal_sha"), a.get("mtimes", {}))
+        ok, why, res = validate(dest, a.get("seal_sha"), a.get("proof", {}))
+        st["box_mtimes"] = a.get("mtimes", {})
         st.update({"folder": dest, "finished": self.ops.now().isoformat(), "timed_out": timed_out})
         if ok:
             verdict = str(res.get("verdict")).upper()

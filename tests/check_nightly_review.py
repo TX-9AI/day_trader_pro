@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_nightly_review.py  v1.2
+day_trader_pro/tests/check_nightly_review.py  v1.3
+v1.3  2026-11-14  AM.10 — N13 the blank-fee estimate caps equity commission at $10 a leg (OTV5 tests/fees.py); SPX uncapped.
 v1.2  2026-11-08  dtp r537 / SWEEP.7 — THE REVIEW'S SCRATCH LIVES IN ITS OWN DIR ON DISK AND IS REMOVED.
   N12 the wrapper for real with a fake claude that writes scratch to $TMPDIR: TMPDIR is a fresh
       <WORK_ROOT>/<day>-<epoch>-<pid> dir (never /tmp), the RUN PARAMETERS name it, and it is gone after a run that
@@ -439,6 +440,13 @@ pforbid = "WORK directory" in pr12 and "Never" in pr12 and "write to /tmp" in pr
 ck("N12", in_root and default_disk and named and gone_ok and pruned and gone_fail and pforbid and left == ["2026-11-05-2000", "notes"],
    "tmpdir_in_root=%s default_on_disk=%s named=%s gone_after_produced=%s pruned_stale_only=%s gone_after_failed=%s prompt=%s left=%s rc=%s/%s"
    % (in_root, default_disk, named, gone_ok, pruned, gone_fail, pforbid, left, g.returncode, h.returncode))
+
+# N13 (v1.3, AM.10): a blank-fee row's estimate caps the equity commission at $10 a leg, as OTV5's fee model does
+_e = getattr(K, "est_fee", None)
+n13 = bool(_e) and abs(_e("SOFI", 87) - 31.75) < 1e-9 and abs(_e("AMD", 4) - 5.00) < 1e-9 \
+    and abs(_e("AMD", 12) - 13.00) < 1e-9 and abs(_e("SPX", 10) - 24.70) < 1e-9
+ck("N13", n13, "blank-fee estimate: SOFI 87 -> 31.75 (capped), AMD 4 -> 5.00, AMD 12 -> 13.00, SPX 10 -> 24.70 (no cap)"
+   + ("" if _e else " - review_kit has no est_fee"))
 
 shutil.rmtree(TMP, ignore_errors=True)
 print()

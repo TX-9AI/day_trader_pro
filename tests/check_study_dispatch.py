@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_study_dispatch.py  v1.2
+day_trader_pro/tests/check_study_dispatch.py  v1.3
+v1.3  2026-11-14  dtp r555 / AM.9 + brief R4. S1-S6: the dispatcher writes the seal on control and ships the same bytes;
+      FROZEN.json is recorded on control and acked; a result is refused when FROZEN and RESULT first appear at the same
+      poll, when no FROZEN was seen, or when FROZEN changed; box mtimes decide nothing (the fake's FROZEN mtime is
+      older than SEAL's, WS.3's refusal shape, and the item is accepted); the runner grants writes in the work dir.
 v1.2  2026-11-13  dtp r553 / SAT.9. K4: the launch command, run for real under bash through a pipe the way ssh holds
       it, returns within seconds while the runner keeps running (v1.1's AND-list `&` held the pipe until the runner
       ended; red on v1.1).
@@ -129,18 +133,20 @@ class FakeOps:
         if "status.txt 2>/dev/null; echo ---" in cmd:
             if self.raise_on_poll:
                 raise RuntimeError("boom")
-            n = self.polls[sym] = self.polls.get(sym, 0) + 1
+            _k = (sym, self.items_on.get(sym))                    # v1.3: per item, so a reused box starts over
+            n = self.polls[_k] = self.polls.get(_k, 0) + 1
             b = self._b(ip)
             st = "START x\n"
-            stats = ""
-            if b != "noseal" and n >= 1:
-                stats += "SEAL.txt 100\n"
-            if b in ("ok", "changed_seal") and n >= 2:
+            stats = "SEAL.txt 100\n"
+            # v1.3: FROZEN.json's box mtime is set OLDER than SEAL's on purpose: box mtimes must not decide anything
+            if b in ("ok", "changed_seal", "changed_frozen", "noseal") and n >= 1:
+                stats += "FROZEN.json 50\n"
+            if b in ("ok", "changed_seal", "changed_frozen", "noseal", "nofrozen") and n >= 2:
                 st += "exit=0 x\n"
-                stats += "FROZEN.json 200\nRESULT.json 300\n"
-            if b == "noseal" and n >= 2:
+                stats += "RESULT.json 300\n"
+            if b == "same_poll" and n >= 2:
                 st += "exit=0 x\n"
-                stats += "FROZEN.json 200\nRESULT.json 300\n"
+                stats += "FROZEN.json 50\nRESULT.json 300\n"
             return 0, st + "---\n" + stats, ""
         if "tar czf" in cmd:
             return 0, "", ""
@@ -163,18 +169,19 @@ class FakeOps:
         sym = self.ip2sym[ip]
         self.calls.append(("pull", sym, remote))
         iid = self.items_on.get(sym, "WS.1")
-        if remote.endswith("SEAL.txt"):
-            open(local, "w").write(f"SEALED_AT 2026-11-14T08:32:00Z\nsealed days: 11-10..11-13 ({iid})\n")
+        if remote.endswith("FROZEN.json"):
+            open(local, "w").write('{"rule": "x"}')
             return 0, "", ""
         if remote.endswith(".pull.tgz"):
-            seal = f"SEALED_AT 2026-11-14T08:32:00Z\nsealed days: 11-10..11-13 ({iid})\n"
+            seal = self.kits[sym][-1][f"{iid}/work/SEAL.txt"]      # the dispatcher's seal, as shipped
             if self._b(ip) == "changed_seal":
                 seal += "edited later\n"
             res = {"id": iid, "n": 12, "ev": 41.5, "ci": [-10, 90], "window_ev": 20, "window_ci": [-5, 50],
                    "fees_per_trade": 6.0, "verdict": "PASS" if iid in self.pass_items else "FAIL",
                    "outcome": "TUNE" if iid in self.pass_items else "TRIM", "forward_to": "",
                    "one_line": "the rule did not beat the baseline", "recommendation": "trim it", "data_gaps": []}
-            files = {"work/FROZEN.json": "{}", "work/RESULT.json": json.dumps(res), "work/README.md": "m"}
+            frozen = '{"rule": "y"}' if self._b(ip) == "changed_frozen" else '{"rule": "x"}'
+            files = {"work/FROZEN.json": frozen, "work/RESULT.json": json.dumps(res), "work/README.md": "m"}
             if self._b(ip) != "noseal":
                 files["work/SEAL.txt"] = seal
             with tarfile.open(local, "w:gz") as t:
@@ -525,6 +532,40 @@ ck("K4", _el < 10 and "START" in _out and _alive and "&&" in _c and " & " not in
    f"the launch returns in {_el:.1f} s with the runner still running and nothing backgrounded with '&'")
 _sp2.run(["pkill", "-f", "sleep 20"], capture_output=True)
 shutil.rmtree(_lr, ignore_errors=True)
+
+# ── v1.3 (AM.9 + brief R4): the seal is the dispatcher's; the order is proven on control ───────────────────────
+root, q, cl, st, ops, d = env([("BBB", "10.0.0.2", "stopped")], max_boxes=1)
+d.run()
+k = ops.kits["BBB"][0]
+ks = k.get("WS.1/work/SEAL.txt", "")
+f1 = os.path.join(st, "WS.1_20261114")
+ctl = open(os.path.join(f1, "SEAL.control.txt")).read() if os.path.exists(os.path.join(f1, "SEAL.control.txt")) else ""
+it = next(i for i in sd.parse_queue(QUEUE) if i["id"] == "WS.1")
+import hashlib as _hl
+w1 = d.state["items"]["WS.1"]
+ck("S1", ks and ks == ctl and "SEALED_AT 2026-11-14T08:" in ks and f"ITEM_SHA256 {_hl.sha256(it['text'].encode()).hexdigest()}" in ks
+   and "Hunt shorts" in ks and w1["status"] == "DONE"
+   and w1["seal_on_control"] < w1["frozen_on_control"] < w1["result_seen_on_control"]
+   and os.path.exists(os.path.join(f1, "FROZEN.control.json")),
+   "the dispatcher writes SEAL.txt on control (UTC, the item's sha and text) and ships the same bytes; control "
+   "records seal < frozen < result and keeps FROZEN.control.json; a FROZEN box mtime older than SEAL's is ignored")
+ck("S2", any(c[0] == "ssh" and "FROZEN.ack" in c[2] and "FROZEN_RECEIVED" in c[2] for c in ops.calls),
+   "the first poll that sees FROZEN.json acks it to the agent (FROZEN.ack) after control holds its hash")
+shutil.rmtree(root)
+for _b, _want, _n in (("same_poll", "same poll", "S3"), ("nofrozen", "no FROZEN.json was seen", "S4"),
+                      ("changed_frozen", "FROZEN.json changed after control recorded it", "S5")):
+    root, q, cl, st, ops, d = env([("BBB", "10.0.0.2", "stopped")], behaviour={"BBB": _b}, max_boxes=1)
+    d.run()
+    _s = d.state["items"]["WS.1"]["status"]
+    ck(_n, _s.startswith("INVALID") and _want in _s and "OPEN (added" in open(q).read().split("### WS.2")[0],
+       f"{_b}: not accepted ({_s[:90]}); the item stays OPEN")
+    shutil.rmtree(root)
+_v = sd.validate.__code__.co_varnames[:sd.validate.__code__.co_argcount]
+ck("S6", "mtimes" not in _v and "--permission-mode acceptEdits" in sd.RUNNER and '--add-dir "$PWD"' in sd.RUNNER
+   and "chmod a-w SEAL.txt" in sd.RUNNER and "THE SEAL IS ALREADY WRITTEN" in sd.BRIEF_HEAD
+   and "FROZEN.ack" in sd.BRIEF_HEAD and "AMENDMENTS.txt" in sd.BRIEF_HEAD and "Write SEAL.txt FIRST" not in sd.BRIEF_HEAD,
+   "validate takes no box mtimes; the runner makes the seal read-only and grants writes in the work dir (WS.6d); "
+   "the brief says the seal is written, to wait for the ack, and to append amendments")
 
 print()
 if FAILS:

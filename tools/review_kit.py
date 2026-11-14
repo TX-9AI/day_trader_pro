@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/review_kit.py — v1.2
+day_trader_pro/tools/review_kit.py — v1.3
+v1.3  2026-11-14  dtp r555 / AM.10 — A BLANK-FEE ROW'S ESTIMATE CAPS EQUITY COMMISSION AT $10 A LEG (est_fee), as OTV5
+      tests/fees.py does; SPX stays uncapped. 87 SOFI contracts were estimated $108.75 against about $31 real.
 v1.2  2026-11-09  dtp r544 / RETIRE.5 — T3's label is said plainly: the GEX pin butterfly is removed (OTV5 r103), so
       "T3 no GEXPin/PARK" now drops PARK and the fly's window history (its last trade 2026-11-03). The key stays
       byte-identical (it is ~/reviews/scripts/theories.py's label and theories.csv's t3_ev column); no number moves.
@@ -72,6 +74,18 @@ DUE_AFTER_MIN = 40               # the review is due 40 min after the close (16:
 LOOKBACK_DAYS = 7
 BOOT_N, BOOT_SEED = 20000, 7
 FEE_EST, FEE_EST_SPX = 1.25, 2.47
+FEE_EST_EQUITY_COMMISSION, FEE_EST_EQUITY_CAP = 1.00, 10.00   # AM.10: the card caps equity commission per leg
+
+
+def est_fee(sym, contracts):
+    """A blank-fee row's estimate. AM.10 (2026-11-14): equity options cap the $1.00/contract opening commission
+    at $10 a leg (OTV5 tests/fees.py EQUITY_COMMISSION_CAP_PER_LEG); the rest of FEE_EST (clearing, ORF, TAF, SEC)
+    stays per contract. SPX is a broad-based index option: no cap. v<=r553 charged 87 SOFI contracts $108.75
+    against about $31 real."""
+    c = float(contracts)
+    if str(sym).upper() == "SPX":
+        return c * FEE_EST_SPX
+    return min(c * FEE_EST_EQUITY_COMMISSION, FEE_EST_EQUITY_CAP) + c * (FEE_EST - FEE_EST_EQUITY_COMMISSION)
 TRADE_COLS = ["sym", "trade_id", "strategy", "direction", "contracts", "entry_premium", "exit_premium", "pnl_usd",
               "entry_time", "exit_time", "exit_reason", "fee", "mfe_premium"]
 WINDOW_HDR = "date,trades,realized,fees,ev_per_trade,ev_ex_worst_setup,worst_setup,ev_ex_worst_symbol,worst_symbol"
@@ -210,8 +224,7 @@ def load_window(cut):
             if r.get("fee") not in (None, ""):
                 x["fee"], x["est"] = float(r["fee"]), False
             else:
-                c = float(r["contracts"])
-                x["fee"], x["est"] = c * (FEE_EST_SPX if r["sym"] == "SPX" else FEE_EST), True
+                x["fee"], x["est"] = est_fee(r["sym"], r["contracts"]), True
             rows.append(x)
     return rows
 
@@ -404,7 +417,7 @@ def hunt_rows(cut):
             if r.get("fee") not in (None, ""):
                 fee, est = float(r["fee"]), False
             else:
-                fee, est = float(r["contracts"]) * (FEE_EST_SPX if r.get("sym") == "SPX" else FEE_EST), True
+                fee, est = est_fee(r.get("sym"), r["contracts"]), True
             out.append(dict(day=day, side=side, pnl=float(r["pnl_usd"]), fee=fee, est=est))
     return out
 

@@ -1,4 +1,6 @@
-# THE SATURDAY BRIEF — spec v2.10
+# THE SATURDAY BRIEF — spec v2.11
+
+**v2.11 · 2026-11-14 · dtp r555 (AM.9, the brief 2026-11-14 R4)**: the study seal is the dispatcher's. `study_dispatch.py` v1.3 writes each item's `SEAL.txt` on control before the agent starts, records and acks `FROZEN.json` on control, and accepts a result only on control's own record of the order (box mtimes decide nothing); fixes after the freeze go to `AMENDMENTS.txt`. The prompt's FALLBACK 2 on control logs each file's sha256 and UTC time in `CONTROL_LOG.txt`. The operator, 2026-11-14: "Yes" (R4) and "fix the top 10 today".
 
 **v2.10 · 2026-11-14 · dtp r554 (the brief 2026-11-14 §4, items 1 and carried 7)**: the Friday timer spec v2.9 names is installed by the operator (`sudo bash tools/install_study_dispatch.sh`), not by the land; until it is, the brief's fallback runs the queue. 2026-11-13's two Friday runs were started by hand from the control Claude session (SAT.9). The Output row no longer says the 09-26..10-31 briefs "still sit" in `handoffs/`: every brief is in `~/reviews/weekly/`.
 
@@ -392,10 +394,16 @@ before testing. Every item marked OPEN is run blind, and since v2.6 they run ON 
 - On each box it stops optionsbot and candle-feed and runs a bounded headless `claude -p` study agent (the
   research token is read from SSM with the box's own role; never printed, never copied from control). The agent
   reads the warehouse with the box's own role, writes nothing outside its work dir and never writes S3.
-- The agent writes `SEAL.txt` (with a `SEALED_AT` UTC line) before any outcome, then `FROZEN.json`, then runs once
-  and writes `RESULT.json` last. The dispatcher copies `SEAL.txt` to control the moment it appears; a result is
-  accepted only if the seal is unchanged and SEAL ≤ FROZEN ≤ RESULT. The study lands in
-  `~/reviews/studies/<ID>_<YYYYMMDD>/`, with the control copy as `SEAL.control.txt`.
+- Since v2.11 (dtp r555, AM.9) the seal is never self-attested. The DISPATCHER writes `SEAL.txt` (a `SEALED_AT` UTC
+  line, `ITEM_SHA256`, the item's text) on control before the kit ships, and the box copy is read-only. The agent
+  writes `FROZEN.json` before any sealed-day outcome; the first poll that sees it pulls it to control
+  (`FROZEN.control.json`), records its sha and control's time, and writes `FROZEN.ack`, which the agent waits for
+  before the single blind run; `RESULT.json` comes last. A result is accepted only if the returned SEAL and FROZEN
+  are byte-identical to control's, FROZEN was seen at an earlier poll than RESULT, and seal < frozen < result on
+  control's clock. Box mtimes are recorded, never trusted. A code fix after the freeze is appended to
+  `AMENDMENTS.txt`; SEAL and FROZEN never change. The study lands in `~/reviews/studies/<ID>_<YYYYMMDD>/`, with the
+  control copy as `SEAL.control.txt`. On control (FALLBACK 2) the session follows the queue's HOW block: SEAL, then
+  FROZEN, each logged with its sha256 and UTC time in `CONTROL_LOG.txt` as it is written.
 - Cleanup on every exit path, including timeout and failure: the session is killed, `~/study_<run>` and the run's
   `~/.claude/projects` transcripts are removed, S3 scratch is deleted, the box is stopped and the claim released.
   A freed box takes the next queued item while at least 45 minutes remain. Every box is killed 25 minutes before
