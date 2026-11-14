@@ -1,4 +1,4 @@
-NIGHTLY POST-RTH REVIEW (day_trader_pro tools/nightly_review.prompt v1.4, dtp r556 / WS.3 TRIM; v1.3 dtp r544 / RETIRE.5; v1.2 dtp r537 / SWEEP.7; v1.1 dtp r525 / RPT.37; v1.0 dtp r524 / RPT.36)
+NIGHTLY POST-RTH REVIEW (day_trader_pro tools/nightly_review.prompt v1.5, dtp r557 / AM.1; v1.4 dtp r556 / WS.3 TRIM; v1.3 dtp r544 / RETIRE.5; v1.2 dtp r537 / SWEEP.7; v1.1 dtp r525 / RPT.37; v1.0 dtp r524 / RPT.36)
 
 You are writing the nightly post-RTH review for ONE trading session of the OTV5 paper fleet (14 boxes). You run
 unattended under a systemd timer: nobody is watching, nobody can answer a question, and you must finish by the
@@ -32,9 +32,10 @@ THE RULES (the operator's; they are not negotiable here)
 THE MECHANICAL HALF (run these first, in this order; quote their figures, do not recompute them another way)
   K=/home/ubuntu/day_trader_pro/tools/review_kit.py   (python: /home/ubuntu/day_trader_pro/venv/bin/python)
   1. python $K trades DAY        -> ~/reviews/trades/DAY.csv from the warehouse (fees from the fee model)
-  2. python $K window DAY        -> the window block (EV, 95% day-bootstrap, fees beside, ex worst setup/symbol,
-                                    without 10-26, post-decay, every theories.py filter); upserts window_ev.csv and
-                                    theories.csv
+  2. python $K window DAY        -> the window block, EXECUTABLE BASIS FIRST (bought at the ask, sold at the bid:
+                                    n priced, realized, EV, 95% day-bootstrap, ex worst setup/symbol, every theory,
+                                    the trades it could not price named), then the same AT THE MARK beside it (fees
+                                    beside, without 10-26, post-decay); upserts window_ev.csv and theories.csv
   3. python $K giveback DAY      -> the day's giveback, overall AND without PARK (v1.1); upserts giveback.csv
   4. python $K hunt DAY          -> Hunt by side (call = long, put = short), the day and the window to date, fees
                                     beside (v1.1); upserts hunt_side.csv
@@ -43,8 +44,11 @@ THE MECHANICAL HALF (run these first, in this order; quote their figures, do not
 THE FORMAT: follow the PRIOR review (RUN PARAMETERS) section for section. In order:
   1. Title "# OTV5 daily review — <Weekday> DAY", one paragraph: the fleet's OTV5 HEAD (git -C ~/OTV5 rev-parse
      --short HEAD), anything known about the session, the data sources (all read-only), and how fees were priced.
-  2. "## The window first": the window table (window to DAY: trades, realized, EV a trade, fees beside; the 95%
-     interval; ex worst setup; ex worst symbol; without 10-26; post-decay), then the theories table sorted by EV,
+  2. "## The window first": the window table LED BY THE EXECUTABLE BASIS (dtp r557, AM.1: paper books the mark both
+     ways, which no live fill gets): for each figure the executable value first and the mark beside it (window to
+     DAY: trades, realized, EV a trade, fees beside and never inside; the 95% interval; ex worst setup; ex worst
+     symbol; without 10-26; post-decay), the spread cost (executable minus mark) on one line, and every trade with no
+     executable price named (never priced at the mark); then the theories table sorted by the executable EV, the mark beside,
      then two or three plain lines on what moved (which theory leads, every interval that spans zero), then the PARK
      window split index vs equity (n, total, EV, a day-bootstrap interval for each).
   3. "## The day": trades, gross P&L, fees beside; giveback and green-to-red, each overall AND without PARK (the

@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_nightly_review.py  v1.3
+day_trader_pro/tests/check_nightly_review.py  v1.4
+v1.4  2026-11-14  AM.1 — N14 the window leads with the executable basis (row, else back-fill; unpriced named, never the
+      mark); window_ev.csv and theories.csv migrate with every old cell kept; the trade CSV keeps its 13 columns first.
 v1.3  2026-11-14  AM.10 — N13 the blank-fee estimate caps equity commission at $10 a leg (OTV5 tests/fees.py); SPX uncapped.
 v1.2  2026-11-08  dtp r537 / SWEEP.7 — THE REVIEW'S SCRATCH LIVES IN ITS OWN DIR ON DISK AND IS REMOVED.
   N12 the wrapper for real with a fake claude that writes scratch to $TMPDIR: TMPDIR is a fresh
@@ -440,6 +442,55 @@ pforbid = "WORK directory" in pr12 and "Never" in pr12 and "write to /tmp" in pr
 ck("N12", in_root and default_disk and named and gone_ok and pruned and gone_fail and pforbid and left == ["2026-11-05-2000", "notes"],
    "tmpdir_in_root=%s default_on_disk=%s named=%s gone_after_produced=%s pruned_stale_only=%s gone_after_failed=%s prompt=%s left=%s rc=%s/%s"
    % (in_root, default_disk, named, gone_ok, pruned, gone_fail, pforbid, left, g.returncode, h.returncode))
+
+# N14 (v1.4, AM.1's reporting half): the window leads with the executable basis, from the row or the back-fill; a row
+# with neither is counted and named, never priced at the mark; window_ev.csv / theories.csv migrate, old cells kept
+fx3 = tempfile.mkdtemp(prefix="nrev_exec_")
+shutil.copytree(os.path.join(fx, "scripts"), os.path.join(fx3, "scripts"))
+os.makedirs(os.path.join(fx3, "trades"))
+for day in ("2026-11-05", "2026-11-06"):
+    with open(os.path.join(fx3, "trades", day + ".csv"), "w", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=K.TRADE_COLS)
+        w.writeheader()
+        for i, (s_, st_, c, e, x, mf, p_, t, fee) in enumerate(rows):
+            if t[:10] == day:
+                w.writerow(dict(sym=s_, trade_id="t%d" % i, strategy=st_, direction="long", contracts=c,
+                                entry_premium=e, exit_premium=x, pnl_usd=p_, entry_time=t, exit_time=t,
+                                exit_reason="x", fee=fee, mfe_premium=mf,
+                                pnl_exec_usd=("-1050" if i == 0 else "")))
+with open(os.path.join(fx3, "exec_basis_backfill.csv"), "w") as fh:
+    fh.write("trade_id,pnl_exec_usd,priced,why_not\nt1,150,1,\nt2,,0,no quote at exit\nt0,999,1,\n")
+open(os.path.join(fx3, "window_ev.csv"), "w").write(K.WINDOW_HDR_V1 + "\n2026-11-04,1,10.00,1.00,10.00,0.00,X,0.00,Y\n")
+open(os.path.join(fx3, "theories.csv"), "w").write(K.THEORY_HDR_V1 + "\n2026-11-04,1,10.00,1,1,1,1,1,1\n")
+_old_rev = K.REVIEWS
+K.REVIEWS = fx3
+w14 = K.cmd_window("2026-11-06", write=True)
+e14 = w14["exec"]
+wl = open(os.path.join(fx3, "window_ev.csv")).read().splitlines()
+tl = open(os.path.join(fx3, "theories.csv")).read().splitlines()
+n14 = (e14["n"] == 2 and abs(e14["total"] + 900) < 1e-9 and abs(e14["ev"] + 450) < 1e-9
+       and sorted(t for t, _ in e14["unpriced"]) == ["t2", "t3"]
+       and any("no quote at exit" in why for _, why in e14["unpriced"])
+       and abs(w14["total"] + 620) < 1e-9 and abs(e14["mark_total"] + 800) < 1e-9
+       and wl[0] == K.WINDOW_HDR and wl[1] == "2026-11-04,1,10.00,1.00,10.00,0.00,X,0.00,Y" + "," * 10
+       and wl[2].startswith("2026-11-06,4,-620.00,") and wl[2].split(",")[9:12] == ["2", "-900.00", "-450.00"]
+       and wl[2].endswith(",2") and tl[0] == K.THEORY_HDR and tl[1].endswith("," * 8)
+       and tl[2].split(",")[9:11] == ["2", "-450.00"]
+       and "pnl_exec_usd" in K.TRADE_COLS and K.TRADE_COLS[:13] == ["sym", "trade_id", "strategy", "direction",
+       "contracts", "entry_premium", "exit_premium", "pnl_usd", "entry_time", "exit_time", "exit_reason", "fee",
+       "mfe_premium"])
+K.REVIEWS = _old_rev
+ck("N14", n14, "exec basis: the row's own pnl_exec_usd wins over the back-fill (t0 -1050, not 999), t1 from the "
+   "back-fill, t2 (not priced) and t3 (absent) named, never at the mark; mark -620 unchanged; both CSVs migrated "
+   "with the old cells kept; the trade CSV keeps its 13 columns first (exec n=%d total %.2f unpriced %s)"
+   % (e14["n"], e14["total"], e14["unpriced"]))
+shutil.rmtree(fx3, ignore_errors=True)
+
+# N15 (v1.4, AM.1): the nightly prompt leads the window with the executable basis and names unpriced trades
+_pr15 = re.sub(r"\s+", " ", read(os.path.join(TOOLS, "nightly_review.prompt")))
+ck("N15", "EXECUTABLE BASIS FIRST" in _pr15 and "LED BY THE EXECUTABLE BASIS" in _pr15
+   and "never priced at the mark" in _pr15 and "the mark beside" in _pr15,
+   "the nightly prompt: executable first, the mark beside, unpriced trades named")
 
 # N13 (v1.3, AM.10): a blank-fee row's estimate caps the equity commission at $10 a leg, as OTV5's fee model does
 _e = getattr(K, "est_fee", None)

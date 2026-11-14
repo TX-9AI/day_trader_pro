@@ -1,7 +1,18 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/review_kit.py — v1.3
-v1.3  2026-11-14  dtp r555 / AM.10 — A BLANK-FEE ROW'S ESTIMATE CAPS EQUITY COMMISSION AT $10 A LEG (est_fee), as OTV5
+day_trader_pro/tools/review_kit.py — v1.4
+v1.4  2026-11-14  dtp r557 / AM.1's reporting half — THE WINDOW LEADS WITH THE EXECUTABLE BASIS (buy at the ask, sell at
+      the bid), THE MARK BESIDE IT. The operator, 2026-11-14: "fix the top 10 today" (the amnesty bucket's AM.1: paper
+      books the mark both ways, so the EV benchmark carries no spread cost). OTV5 r111 adds four trade columns
+      (entry_exec_premium, exit_exec_premium, pnl_exec_usd, would_fill_live); history 10-26..r111 comes from
+      ~/reviews/exec_basis_backfill.csv (OTV5 tools/backfill_exec_basis.py, by trade_id). The trade CSVs carry the
+      four columns (appended; nothing dropped). `window` prints the executable figures FIRST (n priced, realized, EV,
+      its day-bootstrap interval, ex worst setup and symbol, every theory) and the mark beside; a row with no
+      executable price is counted and named, never priced at the mark. window_ev.csv and theories.csv gain their exec
+      columns AFTER the old ones (a file on the old header is migrated in place, every old cell kept). pnl_usd stays
+      the mark. Giveback stays on the mark: it compares the peak MARK with the booked mark, and there is no
+      executable peak to compare with.
+v1.3v1.3  2026-11-14  dtp r555 / AM.10 — A BLANK-FEE ROW'S ESTIMATE CAPS EQUITY COMMISSION AT $10 A LEG (est_fee), as OTV5
       tests/fees.py does; SPX stays uncapped. 87 SOFI contracts were estimated $108.75 against about $31 real.
 v1.2  2026-11-09  dtp r544 / RETIRE.5 — T3's label is said plainly: the GEX pin butterfly is removed (OTV5 r103), so
       "T3 no GEXPin/PARK" now drops PARK and the fly's window history (its last trade 2026-11-03). The key stays
@@ -87,9 +98,15 @@ def est_fee(sym, contracts):
         return c * FEE_EST_SPX
     return min(c * FEE_EST_EQUITY_COMMISSION, FEE_EST_EQUITY_CAP) + c * (FEE_EST - FEE_EST_EQUITY_COMMISSION)
 TRADE_COLS = ["sym", "trade_id", "strategy", "direction", "contracts", "entry_premium", "exit_premium", "pnl_usd",
-              "entry_time", "exit_time", "exit_reason", "fee", "mfe_premium"]
-WINDOW_HDR = "date,trades,realized,fees,ev_per_trade,ev_ex_worst_setup,worst_setup,ev_ex_worst_symbol,worst_symbol"
-THEORY_HDR = "date,baseline_n,baseline_ev,t1_ev,t2_ev,t3_ev,t1t2_ev,t1t3_ev,all3_ev"
+              "entry_time", "exit_time", "exit_reason", "fee", "mfe_premium",
+              # v1.4 (AM.1, OTV5 r111): the executable basis, appended; empty on rows before r111
+              "entry_exec_premium", "exit_exec_premium", "pnl_exec_usd", "would_fill_live"]
+EXEC_BACKFILL = os.path.join(REVIEWS, "exec_basis_backfill.csv")
+WINDOW_HDR_V1 = "date,trades,realized,fees,ev_per_trade,ev_ex_worst_setup,worst_setup,ev_ex_worst_symbol,worst_symbol"
+WINDOW_HDR = WINDOW_HDR_V1 + (",trades_exec,realized_exec,ev_exec_per_trade,ev_exec_lo,ev_exec_hi,ev_exec_ex_worst_setup,"
+                              "worst_setup_exec,ev_exec_ex_worst_symbol,worst_symbol_exec,exec_unpriced_n")
+THEORY_HDR_V1 = "date,baseline_n,baseline_ev,t1_ev,t2_ev,t3_ev,t1t2_ev,t1t3_ev,all3_ev"
+THEORY_HDR = THEORY_HDR_V1 + ",baseline_exec_n,baseline_exec_ev,t1_exec_ev,t2_exec_ev,t3_exec_ev,t1t2_exec_ev,t1t3_exec_ev,all3_exec_ev"
 GIVEBACK_HDR_V1 = "date,trades,giveback_usd,peak_open_usd,realized_on_green_usd,green_to_red_n,green_to_red_usd"
 GIVEBACK_HDR = GIVEBACK_HDR_V1 + (",giveback_pct,giveback_ex_park_usd,peak_open_ex_park_usd,giveback_ex_park_pct,"
                                   "green_to_red_ex_park_n,green_to_red_ex_park_usd")          # v1.1: six appended
@@ -211,8 +228,20 @@ def _theories():
     return theories
 
 
+def load_exec_backfill(path=None):
+    """v1.4: trade_id -> (pnl_exec_usd or None, why_not) from OTV5's back-fill CSV; {} when the file is absent."""
+    path = path or os.path.join(REVIEWS, "exec_basis_backfill.csv")    # resolved at call time (REVIEWS may move)
+    out = {}
+    if os.path.exists(path):
+        for r in csv.DictReader(open(path)):
+            ok = str(r.get("priced", "")).strip() == "1" and r.get("pnl_exec_usd") not in (None, "")
+            out[r["trade_id"]] = (float(r["pnl_exec_usd"]) if ok else None, r.get("why_not") or "not priced")
+    return out
+
+
 def load_window(cut):
     T = _theories()
+    bf = load_exec_backfill()
     rows = []
     for f in sorted(glob.glob(os.path.join(REVIEWS, "trades", "20*.csv"))):
         for r in csv.DictReader(open(f)):
@@ -221,6 +250,14 @@ def load_window(cut):
             x = T.norm(r["sym"], r["strategy"], r["pnl_usd"], r["entry_time"])
             if not (WINDOW_START <= x["day"] <= cut):
                 continue
+            # v1.4 (AM.1): the executable P&L from the row (OTV5 r111+), else the back-fill; never the mark
+            x["tid"] = r.get("trade_id") or ""
+            if r.get("pnl_exec_usd") not in (None, ""):
+                x["pnl_exec"], x["exec_why"] = float(r["pnl_exec_usd"]), ""
+            elif x["tid"] in bf:
+                x["pnl_exec"], x["exec_why"] = bf[x["tid"]]
+            else:
+                x["pnl_exec"], x["exec_why"] = None, "no executable price on the row or in the back-fill"
             if r.get("fee") not in (None, ""):
                 x["fee"], x["est"] = float(r["fee"]), False
             else:
@@ -229,12 +266,12 @@ def load_window(cut):
     return rows
 
 
-def boot(rows, n=BOOT_N, seed=BOOT_SEED):
+def boot(rows, n=BOOT_N, seed=BOOT_SEED, key="pnl"):
     """Day-bootstrap 95% interval of EV a trade (whole days resampled with replacement)."""
     days = sorted({x["day"] for x in rows})
     if len(days) < 2:
         return None, None
-    by = {d: [x["pnl"] for x in rows if x["day"] == d] for d in days}
+    by = {d: [x[key] for x in rows if x["day"] == d] for d in days}
     rnd = random.Random(seed)
     s = []
     for _ in range(n):
@@ -244,13 +281,15 @@ def boot(rows, n=BOOT_N, seed=BOOT_SEED):
     return s[int(.025 * n)], s[int(.975 * n)]
 
 
-def _ex_worst(rows, key):
+def _ex_worst(rows, key, val="pnl"):
     g = {}
     for x in rows:
-        g[x[key]] = g.get(x[key], 0.0) + x["pnl"]
+        g[x[key]] = g.get(x[key], 0.0) + x[val]
+    if not g:
+        return "", 0.0
     worst = min(g, key=g.get)
     rest = [x for x in rows if x[key] != worst]
-    return worst, (sum(x["pnl"] for x in rest) / len(rest) if rest else 0.0)
+    return worst, (sum(x[val] for x in rest) / len(rest) if rest else 0.0)
 
 
 def window(cut):
@@ -270,7 +309,24 @@ def window(cut):
         th[lab] = (len(p), (st.mean(p) if p else 0.0), sum(p))
     no = [x for x in rows if x["day"] != OUTLIER_DAY]
     pd = [x for x in rows if x["day"] >= POST_DECAY]
-    return dict(cut=cut, n=n, total=tot, ev=tot / n, lo=lo, hi=hi, fees=sum(x["fee"] for x in rows),
+    # v1.4 (AM.1): the executable basis, on the rows that carry it; the rest are counted and named
+    er = [x for x in rows if x.get("pnl_exec") is not None]
+    un = [(x["tid"], x["exec_why"]) for x in rows if x.get("pnl_exec") is None]
+    te = sum(x["pnl_exec"] for x in er)
+    elo, ehi = boot(er, key="pnl_exec") if er else (None, None)
+    ews, eevs = _ex_worst(er, "strat", "pnl_exec")
+    ewy, eevy = _ex_worst(er, "sym", "pnl_exec")
+    the = {}
+    for lab, f in T.FILTERS:
+        p = [x["pnl_exec"] for x in er if f(x)]
+        the[lab] = (len(p), (st.mean(p) if p else 0.0), sum(p))
+    exe = dict(n=len(er), total=te, mark_total=sum(x["pnl"] for x in er), ev=(te / len(er) if er else 0.0), lo=elo, hi=ehi, worst_setup=ews,
+               ev_ex_setup=eevs, worst_sym=ewy, ev_ex_sym=eevy, theories=the, unpriced=un,
+               no_outlier=(sum(1 for x in er if x["day"] != OUTLIER_DAY),
+                           sum(x["pnl_exec"] for x in er if x["day"] != OUTLIER_DAY)),
+               post_decay=(sum(1 for x in er if x["day"] >= POST_DECAY),
+                           sum(x["pnl_exec"] for x in er if x["day"] >= POST_DECAY)))
+    return dict(cut=cut, n=n, total=tot, ev=tot / n, lo=lo, hi=hi, fees=sum(x["fee"] for x in rows), exec=exe,
                 fees_est=sum(x["fee"] for x in rows if x["est"]), worst_setup=ws, ev_ex_setup=evs, worst_sym=wy,
                 ev_ex_sym=evy, theories=th, no_outlier=(len(no), sum(x["pnl"] for x in no)),
                 post_decay=(len(pd), sum(x["pnl"] for x in pd)), days=len({x["day"] for x in rows}))
@@ -280,13 +336,54 @@ def _ev(th, lab):
     return th[lab][1]
 
 
+def _f(v):
+    return "n/a" if v is None else "%+.2f" % v
+
+
+def _cell(v):
+    return "" if v is None else "%.2f" % v
+
+
+def migrate_header(path, v1, new):
+    """v1.4: a CSV on header v1 gains the columns `new` adds AFTER v1's, empty, every row kept as it was (the
+    giveback rule, generalised). Any other header that is not `new` is refused later by upsert."""
+    if not os.path.exists(path):
+        return False
+    lines = open(path).read().splitlines()
+    if not lines or lines[0] != v1:
+        return False
+    extra = "," * (new.count(",") - v1.count(","))
+    tmp = path + ".tmp"
+    with open(tmp, "w") as fh:
+        fh.write(new + "\n")
+        for l in lines[1:]:
+            if l and l.split(",", 1)[0][:1].isdigit():
+                fh.write(l + extra + "\n")
+    os.replace(tmp, path)
+    print("  %s: migrated to the v1.4 header (%d column(s) appended, %d rows kept)"
+          % (os.path.basename(path), new.count(",") - v1.count(","), len(lines) - 1))
+    return True
+
+
 def cmd_window(cut, write=True):
     w = window(cut)
     th = w["theories"]
-    lo = "n/a" if w["lo"] is None else "%+.2f" % w["lo"]
-    hi = "n/a" if w["hi"] is None else "%+.2f" % w["hi"]
-    print("window %s..%s: %d trades over %d days, realized %+.2f, EV %+.2f a trade, 95%% day-bootstrap [%s, %s]"
-          % (WINDOW_START, w["cut"], w["n"], w["days"], w["total"], w["ev"], lo, hi))
+    e = w["exec"]
+    lo, hi = _f(w["lo"]), _f(w["hi"])
+    # v1.4 (AM.1): the executable basis LEADS; the mark is beside it
+    print("window %s..%s EXECUTABLE BASIS (bought at the ask, sold at the bid): %d of %d trades priced, realized %+.2f,"
+          " EV %+.2f a trade, 95%% day-bootstrap [%s, %s]" % (WINDOW_START, w["cut"], e["n"], w["n"], e["total"], e["ev"],
+                                                              _f(e["lo"]), _f(e["hi"])))
+    print("  exec: ex worst setup (%s) %+.2f | ex worst symbol (%s) %+.2f | spread cost against the mark on the same"
+          " %d rows %+.2f" % (e["worst_setup"], e["ev_ex_setup"], e["worst_sym"], e["ev_ex_sym"], e["n"],
+                              e["total"] - e["mark_total"]))
+    if e["unpriced"]:
+        print("  exec NOT PRICED: %d trade(s), never priced at the mark: %s" % (
+            len(e["unpriced"]), "; ".join("%s (%s)" % (t or "?", why) for t, why in e["unpriced"][:20])))
+    for lab, (n, ev, tot) in e["theories"].items():
+        print("  exec %-33s n=%4d EV %+8.2f total %+10.2f" % (lab, n, ev, tot))
+    print("window %s..%s AT THE MARK (beside, for continuity): %d trades over %d days, realized %+.2f, EV %+.2f a"
+          " trade, 95%% day-bootstrap [%s, %s]" % (WINDOW_START, w["cut"], w["n"], w["days"], w["total"], w["ev"], lo, hi))
     print("  fees beside (never inside): %.2f, of which estimated %.2f" % (w["fees"], w["fees_est"]))
     print("  ex worst setup (%s) %+.2f | ex worst symbol (%s) %+.2f" % (w["worst_setup"], w["ev_ex_setup"],
                                                                          w["worst_sym"], w["ev_ex_sym"]))
@@ -297,15 +394,25 @@ def cmd_window(cut, write=True):
     for lab, (n, ev, tot) in th.items():
         print("  %-38s n=%4d EV %+8.2f total %+10.2f" % (lab, n, ev, tot))
     if write:
-        upsert(os.path.join(REVIEWS, "window_ev.csv"), w["cut"], WINDOW_HDR, [
+        wp, tp = os.path.join(REVIEWS, "window_ev.csv"), os.path.join(REVIEWS, "theories.csv")
+        migrate_header(wp, WINDOW_HDR_V1, WINDOW_HDR)
+        migrate_header(tp, THEORY_HDR_V1, THEORY_HDR)
+        et = e["theories"]
+        upsert(wp, w["cut"], WINDOW_HDR, [
             "%s,%d,%.2f,%.2f,%.2f,%.2f,%s,%.2f,%s" % (w["cut"], w["n"], w["total"], w["fees"], w["ev"],
                                                       w["ev_ex_setup"], w["worst_setup"], w["ev_ex_sym"],
-                                                      w["worst_sym"])])
-        upsert(os.path.join(REVIEWS, "theories.csv"), w["cut"], THEORY_HDR, [
+                                                      w["worst_sym"])
+            + ",%d,%.2f,%.2f,%s,%s,%.2f,%s,%.2f,%s,%d" % (e["n"], e["total"], e["ev"], _cell(e["lo"]), _cell(e["hi"]),
+                                                         e["ev_ex_setup"], e["worst_setup"], e["ev_ex_sym"],
+                                                         e["worst_sym"], len(e["unpriced"]))])
+        upsert(tp, w["cut"], THEORY_HDR, [
             "%s,%d,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f" % (
                 w["cut"], w["n"], w["ev"], _ev(th, "T1 no SPX"), _ev(th, "T2 no entries after 10:01"),
                 _ev(th, "T3 no GEXPin/PARK"),   # v1.2: the fly is history (OTV5 r103) - T3 = no PARK, no fly history
-                _ev(th, "T1+T2"), _ev(th, "T1+T3"), _ev(th, "T1+T2+T3"))])
+                _ev(th, "T1+T2"), _ev(th, "T1+T3"), _ev(th, "T1+T2+T3"))
+            + ",%d,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f" % (
+                e["n"], e["ev"], _ev(et, "T1 no SPX"), _ev(et, "T2 no entries after 10:01"),
+                _ev(et, "T3 no GEXPin/PARK"), _ev(et, "T1+T2"), _ev(et, "T1+T3"), _ev(et, "T1+T2+T3"))])
         print("  window_ev.csv and theories.csv: row %s replaced" % w["cut"])
     return w
 

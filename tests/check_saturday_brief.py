@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_saturday_brief.py  v1.10
+day_trader_pro/tests/check_saturday_brief.py  v1.11
+v1.11 2026-11-14  dtp r557 / AM.1. S25: §1 and spec v2.12 lead the EV benchmark with the executable basis.
 v1.10 2026-11-14  dtp r555 / AM.9. S24: the prompt and spec v2.11 say the seal is the dispatcher's, control proves the
       order (FROZEN seen an earlier poll than RESULT), and the on-control fallback logs each sha in CONTROL_LOG.txt.
 v1.9  2026-11-13  dtp r552 / SAT.9. S21 restated and S23/S23b/S23c added: the study queue runs Friday night. The
@@ -533,8 +534,13 @@ ck("S23b", "spec v2.9" in spec and "dtp-study-dispatch" in _sf and "--deadline 0
 # S24 (v1.10, dtp r555 / AM.9): THE SEAL IS THE DISPATCHER'S, AND THE ON-CONTROL FALLBACK LOGS ITS ORDER.
 ck("S24", "the SEAL is the dispatcher's" in _qf and "earlier poll than RESULT.json" in _qf
    and "CONTROL_LOG.txt" in _qf and "AMENDMENTS.txt" in _qf
-   and "spec v2.11" in spec and "never self-attested" in _sf and "FROZEN.ack" in _sf and "CONTROL_LOG.txt" in _sf,
+   and "**v2.11 ·" in spec and "never self-attested" in _sf and "FROZEN.ack" in _sf and "CONTROL_LOG.txt" in _sf,
    "the prompt and spec v2.11: the dispatcher writes the seal, control proves the order, the fallback logs each sha")
+# S25 (v1.11, dtp r557 / AM.1): §1's EV benchmark leads with the executable basis, the mark beside
+_p1 = re.sub(r"\s+", " ", p.split("## 1. TRADING SUMMARY", 1)[-1][:1500])
+ck("S25", "LED BY THE EXECUTABLE BASIS" in _p1 and "ev_exec_per_trade" in _p1 and "the mark beside it" in _p1
+   and "exec_unpriced_n" in _p1 and "spec v2.12" in spec and "EXECUTABLE basis" in spec,
+   "the prompt's §1 and spec v2.12 lead the EV benchmark with the executable basis and keep the mark beside")
 _shs = open(SH).read()
 ck("S23c", '$WORK/study_dispatch — $_fri' in _shs and 'if [ -f "$WORK/study_dispatch/state.json" ]' in _shs
    and _shs.index('_fri="state.json present') < _shs.index('timeout "$BUDGET_S"'),

@@ -1,4 +1,6 @@
-# THE SATURDAY BRIEF — spec v2.11
+# THE SATURDAY BRIEF — spec v2.12
+
+**v2.12 · 2026-11-14 · dtp r557 (AM.1's reporting half)**: §1's EV benchmark leads with the EXECUTABLE basis (bought at the ask, sold at the bid; window_ev.csv `realized_exec`, `ev_exec_per_trade`, `ev_exec_lo/hi`, theories.csv `*_exec_ev`, from OTV5 r111's `pnl_exec_usd` and `~/reviews/exec_basis_backfill.csv` for earlier rows) with the mark beside it, the spread cost on its own line, and every unpriced trade named (never priced at the mark). Paper books the mark both ways, which no live fill gets. Fees stay beside, never in EV. The operator, 2026-11-14: "fix the top 10 today".
 
 **v2.11 · 2026-11-14 · dtp r555 (AM.9, the brief 2026-11-14 R4)**: the study seal is the dispatcher's. `study_dispatch.py` v1.3 writes each item's `SEAL.txt` on control before the agent starts, records and acks `FROZEN.json` on control, and accepts a result only on control's own record of the order (box mtimes decide nothing); fixes after the freeze go to `AMENDMENTS.txt`. The prompt's FALLBACK 2 on control logs each file's sha256 and UTC time in `CONTROL_LOG.txt`. The operator, 2026-11-14: "Yes" (R4) and "fix the top 10 today".
 
