@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/test_warehouse_cache.py — v1.3
+# day_trader_pro/tests/test_warehouse_cache.py — v1.4
+# v1.4 (2026-11-15) — dtp r561 / B5.8. C6 reads tools/stop_report.py: its subject, tools/bfly_reach_probe.py, studied the
+#   GEX fly removed at OTV5 r103/r107 and is deleted. Same rule (a report via report_path, the cache closed in a
+#   finally), now pinned on a kept tool. No other check changes.
 # v1.3 (2026-09-02) — dtp r253. C10: `load()` listed only to `dt=` and
 #   ignored the `sym=` and `interval=` partitions, so one report queued
 #   48,305 GETs for ~39 MB. Scoping is checked by COUNTING fetches.
@@ -118,10 +121,11 @@ def main():
           rp.startswith(config.REPORTS_DIR) and "reports" in rp
           and not rp.startswith(scratch), rp)
 
-    # ── C6 — the probe writes there and nowhere else ────────────────────
-    src = open(os.path.join(_root, "tools", "bfly_reach_probe.py"),
+    # ── C6 — a live tool writes there and nowhere else ──────────────────
+    # (r561: was the GEX-fly probe, deleted with the fly; stop_report is a kept CLI on the same cache, with its own test, test_excursion_reports.)
+    src = open(os.path.join(_root, "tools", "stop_report.py"),
                encoding="utf-8").read()
-    check("C6 the probe writes via report_path and closes in a finally",
+    check("C6 stop_report writes via report_path and closes in a finally",
           "report_path(" in src and "finally:" in src and "cache.close()" in src)
 
     # ── C7 — query() REFUSES a result it cannot hold ────────────────────

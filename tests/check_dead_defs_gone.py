@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/check_dead_defs_gone.py — v1.0
+# day_trader_pro/tests/check_dead_defs_gone.py — v1.1
+# v1.1 (2026-11-15) — dtp r561 / B5.8 (the 11-14 Saturday brief section 5 item 8). THE THREE GEX-FLY STUDY TOOLS STAY GONE.
+#   tools/bfly_pin_study.py, tools/bfly_reach_probe.py and tools/pin_strength_study.py (825 lines) studied GEXPinButterfly,
+#   removed at OTV5 r103/r107; no menu item, timer, cron, prompt or study read them. r561 deletes them and their test
+#   tests/test_pin_strength.py, and re-points test_warehouse_cache C6 at tools/stop_report.py. BORN RED on r560 at D4.
+#   D4   the three tools and test_pin_strength.py are not in the tree, and no dtp module (tests included) names one of
+#        their files in a string (an import by path, a subprocess, a menu row)
+#   D4b  the kept tool C6 now reads, tools/stop_report.py (CLI; its own test is test_excursion_reports), is there and still writes via report_path and closes its cache
+#        in a finally
 # v1.0 (2026-11-14) — dtp r559 / B5.6 (the 11-14 Saturday brief section 5 item 6). THE THREE DEAD dtp DEFS STAY GONE.
 #   wake_and_bake.stage_pyclear (dead since the EMERGENCY STOP dropped its pycache clear, 2026-07-18, 1edfc41),
 #   orchestrator._fmt_score and strategy_registry.lineages_for had no caller anywhere in dtp, OTV5, the control units,
@@ -32,6 +40,14 @@ KEPT = {
     "orchestrator.py": ("_short", "_format_ack"),
     "strategy_registry.py": ("status", "superseded_by", "resolve_lineage", "box_lineage"),
 }
+# B5.8 (r561): files deleted whole. Named by FILE, because a module is reached by path (spec_from_file_location,
+# subprocess, the menu), not only by import.
+DELETED_FILES = (
+    "tools/bfly_pin_study.py",
+    "tools/bfly_reach_probe.py",
+    "tools/pin_strength_study.py",
+    "tests/test_pin_strength.py",
+)
 
 _fails = []
 
@@ -71,7 +87,7 @@ def _modules():
 
 
 def main():
-    print("check_dead_defs_gone — the three dead dtp defs stay gone (r559 / B5.6)")
+    print("check_dead_defs_gone — the dead dtp defs (r559 / B5.6) and the GEX-fly study tools (r561 / B5.8) stay gone")
 
     # D1 — no module defines a deleted name
     back = []
@@ -115,6 +131,39 @@ def main():
     h = (help_ or "").lower().replace("no pycache clear", "")
     check("D3 --shutdown-only help does not advertise a pycache clear",
           help_ is not None and "pycache" not in h, repr(help_))
+
+    # D4 — the B5.8 files are gone and nothing reaches them by file name
+    present = [f for f in DELETED_FILES if os.path.exists(os.path.join(ROOT, f))]
+    check("D4 the GEX-fly study tools and test_pin_strength.py are not in the tree", not present, ", ".join(present))
+    stems = [os.path.basename(f) for f in DELETED_FILES]
+    me = os.path.relpath(os.path.abspath(__file__), ROOT)
+    named = []
+    for d, ds, fs in os.walk(ROOT):
+        ds[:] = [x for x in ds if x not in (SKIP_DIRS - {"tests"})]
+        for f in fs:
+            if not f.endswith(".py"):
+                continue
+            rel = os.path.relpath(os.path.join(d, f), ROOT)
+            if rel == me:
+                continue
+            try:
+                tree = _tree(rel)
+            except SyntaxError:
+                continue
+            for n in ast.walk(tree):
+                if isinstance(n, ast.Constant) and isinstance(n.value, str):
+                    named += [f"{rel}:{n.lineno}:{st}" for st in stems if st in n.value]
+                elif isinstance(n, (ast.Import, ast.ImportFrom)):
+                    mods = [x.name for x in n.names] if isinstance(n, ast.Import) else [n.module or ""] + [x.name for x in n.names]
+                    named += [f"{rel}:{n.lineno}:{m}" for m in mods
+                              for st in stems if m.split(".")[-1] == st[:-3]]
+    check("D4 no dtp module names a deleted fly tool's file", not named, ", ".join(named))
+
+    # D4b — the live tool test_warehouse_cache C6 now reads
+    sp = os.path.join(ROOT, "tools", "stop_report.py")
+    src = open(sp, encoding="utf-8").read() if os.path.exists(sp) else ""
+    check("D4b tools/stop_report.py is there, writes via report_path and closes in a finally",
+          "report_path(" in src and "finally:" in src and "cache.close()" in src)
 
     print(f"check_dead_defs_gone: {'GREEN' if not _fails else 'RED'} ({len(_fails)} failed)")
     return 1 if _fails else 0
