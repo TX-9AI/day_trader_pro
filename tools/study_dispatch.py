@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/study_dispatch.py  v1.3
+day_trader_pro/tools/study_dispatch.py  v1.4
+v1.4  2026-11-15  dtp r562 / B5.9 (hygiene item 9, the 11-14 Saturday brief section 5) — ONE BOX PATH. The box's OTV5
+      clone was typed five times (the hold flag twice, the venv three times: runner.sh, the brief, the cleanup);
+      BOX_REPO is the one copy and BOX_VENV_BIN / BOX_HOLD_FLAG are built from it. runner.sh, the brief and the
+      cleanup command are byte-identical to v1.3. check_const_parity P10-P12 pin BOX_REPO to fleet.REMOTE_HOME_REL,
+      BOX_HOLD_FLAG to OTV5 midnight_halt.HOLD_FLAG's default, and friday_studies.sh's 1650 to RTH_END.
 v1.3  2026-11-14  dtp r555 / AM.9 + brief R4 — THE SEAL IS THE DISPATCHER'S, AND THE ORDER IS PROVEN ON CONTROL.
       The operator, 2026-11-14: "Yes" (R4) and "fix the top 10 today" (the amnesty bucket). Up to v1.2 the agent
       wrote SEAL.txt, FROZEN.json and RESULT.json itself and the order was read from box mtimes: WS.3 was refused
@@ -162,7 +167,9 @@ _STATUS = re.compile(r"^- Status: (.*)$", re.M)
 _DEPENDS = re.compile(r"^- Depends: (.*)$", re.M)
 _ID = re.compile(r"WS\.\d+[a-z]?")
 _FOLDER = re.compile(r"\((/[^()]*?/studies/[^()\s]+)\)")
-BOX_HOLD_FLAG = "/home/ubuntu/options-trader/data/NO_MIDNIGHT_HALT"   # OTV5 warehouse/midnight_halt.py HOLD_FLAG
+BOX_REPO = "/home/ubuntu/options-trader"     # v1.4: the box's OTV5 clone (/home/ubuntu + fleet.REMOTE_HOME_REL; P10)
+BOX_VENV_BIN = BOX_REPO + "/venv/bin"
+BOX_HOLD_FLAG = BOX_REPO + "/data/NO_MIDNIGHT_HALT"   # OTV5 warehouse/midnight_halt.py HOLD_FLAG's default (P11)
 HOLD_MARK = "study_dispatch"
 _SUBSTATUS = re.compile(r"\s*\[Status: ([^\]]*)\]\s*$")
 
@@ -322,9 +329,9 @@ echo $$ > runner.pid
 sudo -n systemctl stop optionsbot candle-feed >/dev/null 2>&1; echo "SERVICES_STOPPED rc=$?" >> status.txt
 # v1.1: the box halts itself at 00:00 ET unless this flag exists (OTV5 midnight_halt.py). Ours only if none is there;
 # the cleanup removes it only when it still says study_dispatch.
-HOLD=/home/ubuntu/options-trader/data/NO_MIDNIGHT_HALT
+HOLD=@@BOX_HOLD_FLAG@@
 if [ ! -e "$HOLD" ] && [ -d "$(dirname "$HOLD")" ]; then echo "study_dispatch $(date -u +%FT%TZ)" > "$HOLD" && echo "HOLD_SET" >> status.txt; fi
-PY=$(ls /home/ubuntu/options-trader/venv/bin/python3 /home/ubuntu/*/venv/bin/python3 2>/dev/null | head -1)
+PY=$(ls @@BOX_VENV_BIN@@/python3 /home/ubuntu/*/venv/bin/python3 2>/dev/null | head -1)
 TOK=$("$PY" -c 'import boto3;print(boto3.client("ssm",region_name="us-east-2").get_parameter(Name="/otv5/claude_research_token",WithDecryption=True)["Parameter"]["Value"])' 2>/dev/null)
 if [ -z "$TOK" ]; then echo "NO_TOKEN" >> status.txt; echo "exit=97 $(date -u +%FT%TZ)" >> status.txt; exit 0; fi
 CL=$(command -v claude || echo "$HOME/.local/bin/claude")
@@ -336,7 +343,7 @@ env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN="$TOK" 
 rc=$?
 unset TOK
 echo "exit=$rc $(date -u +%FT%TZ)" >> ../status.txt
-'''
+'''.replace("@@BOX_HOLD_FLAG@@", BOX_HOLD_FLAG).replace("@@BOX_VENV_BIN@@", BOX_VENV_BIN)
 
 BRIEF_HEAD = """You are a study-only research agent recruited onto one of Vertigo Capital's trading boxes for the Saturday
 study queue (run {run_id}). Nobody is watching and nobody can answer a question. Do the study, write the files,
@@ -349,11 +356,11 @@ RULES (the operator's; not negotiable):
 - READ ONLY outside your directory. No git, no systemctl, no sudo, no config or service changes, no edits to any
   file under ~/options-trader. Never write to S3. Never print or copy a token, credential or environment block.
 - Data: the S3 warehouse (bucket {bucket}) read with this box's own role, via
-  /home/ubuntu/options-trader/venv/bin/python and boto3. Market data is TastyTrade's (the warehouse). No
+  {box_venv_bin}/python and boto3. Market data is TastyTrade's (the warehouse). No
   yfinance, no other source. No TastyTrade calls from here: if data you need is missing, list it in RESULT.json
   "data_gaps" and carry on with what exists.
 - Filter the OTV4TEST fleet's rows out of every warehouse measurement: sys.path.insert(0,
-  "/home/ubuntu/options-trader/tests"); from warehouse_source import mainline.
+  "{box_repo}/tests"); from warehouse_source import mainline.
 - Stream; do not materialise large data. This box has little memory. Use nice -n 10 for long python runs.
 - Fees go BESIDE EV, never inside it. Lead with the window EV and its interval. Say n every time.
 - Blind discipline. THE SEAL IS ALREADY WRITTEN: SEAL.txt in your directory was written by the dispatcher on control
@@ -398,7 +405,8 @@ def make_seal(item, run_id, sealed_at_utc):
 
 def build_brief(item, how, run_id, bucket, minutes, work):
     return BRIEF_HEAD.format(run_id=run_id, work=work, bucket=bucket or "(config.WAREHOUSE_BUCKET)",
-                             minutes=minutes, item_id=item["id"], how=how, item=item["text"])
+                             minutes=minutes, item_id=item["id"], how=how, item=item["text"],
+                             box_venv_bin=BOX_VENV_BIN, box_repo=BOX_REPO)
 
 
 def _prior_dirs(item_text, studies=None):
@@ -462,7 +470,7 @@ def cleanup_cmd(run_id, bucket):
           "ks=[o['Key'] for p in c.get_paginator('list_objects_v2').paginate(Bucket=b,Prefix='study_dispatch/"
           + run_id + "/') for o in p.get('Contents',[])];"
           "[c.delete_object(Bucket=b,Key=k) for k in ks];print('S3_SCRATCH_DELETED',len(ks))")
-    s3 = (f"/home/ubuntu/options-trader/venv/bin/python -c {shlex.quote(py)} {shlex.quote(bucket)} 2>/dev/null "
+    s3 = (f"{BOX_VENV_BIN}/python -c {shlex.quote(py)} {shlex.quote(bucket)} 2>/dev/null "
           f"|| echo S3_SCRATCH_UNCHECKED") if bucket else "echo S3_SCRATCH_UNCHECKED"
     return (f"pkill -TERM -u ubuntu -f '[c]laude -p' ; sleep 2 ; pkill -KILL -u ubuntu -f '[c]laude -p' ; "
             f"for f in {root}/*/runner.pid; do [ -f \"$f\" ] && kill \"$(cat \"$f\")\" 2>/dev/null; done ; "

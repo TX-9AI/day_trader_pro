@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# day_trader_pro/tools/friday_studies.sh — v1.0
+# day_trader_pro/tools/friday_studies.sh — v1.1
+# v1.1 (2026-11-15) — dtp r562 / B5.9 (hygiene item 9). The 16:50 below is study_dispatch.RTH_END's, typed again
+#   because bash cannot import it; check_const_parity P12 fails the day the two differ. No behaviour change.
 # v1.0 (2026-11-13) — dtp r552 / SAT.9. THE WEEKEND STUDY QUEUE RUNS FRIDAY NIGHT. The operator, 2026-11-13: "Yes,
 #   don't wait until Sunday to do that study. Add it to the rest" (to: move the studies to Friday night so the
 #   Saturday brief digests finished results). Started by the control timer dtp-study-dispatch (Fri 17:15 ET, after
@@ -31,6 +33,7 @@ OUT="$WORK/study_dispatch"
 LOG="$WORK/study_dispatch.log"
 _ledger() { [ "$DRY" = 1 ] || echo "$(date -u +%FT%TZ) $*" >> "$LEDGER"; }
 
+# 1650 == tools/study_dispatch.py RTH_END (16, 50): pinned by tests/check_const_parity.py P12
 if [ "$DOW" != "5" ] || [ "$HM" -lt 1650 ]; then
   echo "SKIPPED: not Friday evening ET ($TODAY $HM, day $DOW); the 03:00 Saturday brief starts the queue itself if needed"
   _ledger "SKIPPED not-friday-evening $TODAY $HM"
