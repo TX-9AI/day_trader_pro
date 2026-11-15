@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_study_dispatch.py  v1.3
+day_trader_pro/tests/check_study_dispatch.py  v1.4
+v1.4  2026-11-15  dtp r563 / B5.10 — A1 RE-POINTED: CRM is an ordinary box (study_dispatch v1.5 drops NEVER_BOXES; the
+      operator, 2026-11-14). FLEET lists CRM last, running and unassigned, so A1b now requires it to be STOPPED like
+      any idle running box; A1 keeps "a box someone else claimed is left alone". A2-A4 unchanged.
 v1.3  2026-11-14  dtp r555 / AM.9 + brief R4. S1-S6: the dispatcher writes the seal on control and ships the same bytes;
       FROZEN.json is recorded on control and acked; a result is refused when FROZEN and RESULT first appear at the same
       poll, when no FROZEN was seen, or when FROZEN changed; box mtimes decide nothing (the fake's FROZEN mtime is
@@ -17,7 +20,7 @@ v1.1  2026-11-13  dtp r552 / SAT.9. D1-D6 the `- Depends:` second round (parsed;
       the deadline, the conductor wait, the weekday guard, --dry touches nothing).
 v1.0  2026-11-11  dtp r549 / SAT.8. tools/study_dispatch.py, driven against a FAKE fleet and FAKE ssh (no box, no
       AWS, no token): queue parsing (sub-items are their own items), status rewrites, the RTH refusal (nothing
-      touched), assignment (CRM never used, someone else's claim respected, own claims written and released, idle
+      touched), assignment (CRM an ordinary box since v1.4, someone else's claim respected, own claims written and released, idle
       boxes stopped), the happy path (seal copied to control first, folder pulled, queue marked DONE), cleanup on
       every failure path (launch failure, no seal, a changed seal, a hang past the deadline, an exception), the
       requeue of more items than boxes, cleanup_all touching only study_dispatch claims, and the box kit (the
@@ -214,7 +217,7 @@ def env(fleet, behaviour=None, t0=None, deadline_h=4, raise_on_poll=False, claim
 
 
 FLEET = [("AAA", "10.0.0.1", "stopped"), ("BBB", "10.0.0.2", "stopped"), ("CCC", "10.0.0.3", "running"),
-         ("CRM", "10.0.0.9", "running"), ("DDD", "10.0.0.4", "stopped"), ("EEE", "10.0.0.5", "running")]
+         ("DDD", "10.0.0.4", "stopped"), ("EEE", "10.0.0.5", "running"), ("CRM", "10.0.0.9", "running")]
 
 print("check_study_dispatch")
 
@@ -251,8 +254,9 @@ rc = d.run()
 touched = {c[1] if isinstance(c[1], str) else s for c in ops.calls for s in (c[1] if isinstance(c[1], tuple) else (c[1],))}
 starts = [c[1] for c in ops.calls if c[0] == "start"]
 stops = [s for c in ops.calls if c[0] == "stop" for s in c[1]]
-ck("A1", "CRM" not in touched and "AAA" not in touched,
-   "CRM is never woken, used or stopped, and a box someone else claimed is left alone")
+ck("A1", "AAA" not in touched, "a box someone else claimed is left alone")
+ck("A1b", "CRM" in stops and "CRM" not in ops.items_on,
+   "v1.4: CRM is an ordinary box - running, unclaimed and unassigned, it is stopped like EEE")
 ck("A2", starts == [("BBB", "DDD")] and set(ops.items_on) == {"BBB", "CCC", "DDD"},
    f"one item per box on unclaimed boxes; only the stopped chosen boxes are woken (start calls {starts})")
 ck("A3", "EEE" in stops and open(os.path.join(cl, "AAA")).read().startswith("park_cont"),

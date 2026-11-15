@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/check_dead_defs_gone.py — v1.1
+# day_trader_pro/tests/check_dead_defs_gone.py — v1.2
+# v1.2 (2026-11-15) — dtp r563 / B5.10 (the 11-14 Saturday brief section 5 item 10). BORN RED on r562 at D5 and D5b.
+#   D5   tools/study_dispatch.py names no NEVER_BOXES: CRM is an ordinary box (the operator, 2026-11-14)
+#   D5b  tools/checker_sweep.py's scratch env sets no OT_RESTING_DB / OT_RESTING_STOP_STATE (OTV5 r118 / r68 deleted
+#        their only readers) and still sets OT_TRADES_DB
 # v1.1 (2026-11-15) — dtp r561 / B5.8 (the 11-14 Saturday brief section 5 item 8). THE THREE GEX-FLY STUDY TOOLS STAY GONE.
 #   tools/bfly_pin_study.py, tools/bfly_reach_probe.py and tools/pin_strength_study.py (825 lines) studied GEXPinButterfly,
 #   removed at OTV5 r103/r107; no menu item, timer, cron, prompt or study read them. r561 deletes them and their test
@@ -164,6 +168,18 @@ def main():
     src = open(sp, encoding="utf-8").read() if os.path.exists(sp) else ""
     check("D4b tools/stop_report.py is there, writes via report_path and closes in a finally",
           "report_path(" in src and "finally:" in src and "cache.close()" in src)
+
+    # D5 — B5.10: CRM is an ordinary box, and the dead resting keys leave the scratch env
+    sd = _tree("tools/study_dispatch.py")
+    sd_names = {t.id for n in ast.walk(sd) for t in getattr(n, "targets", []) if isinstance(t, ast.Name)} \
+        | {n.id for n in ast.walk(sd) if isinstance(n, ast.Name)}
+    check("D5 study_dispatch has no NEVER_BOXES (CRM is an ordinary box, the operator 2026-11-14)",
+          "NEVER_BOXES" not in sd_names)
+    cs = _tree("tools/checker_sweep.py")
+    keys = {c.value for c in ast.walk(cs) if isinstance(c, ast.Constant) and isinstance(c.value, str)}
+    check("D5b checker_sweep sets no OT_RESTING_DB / OT_RESTING_STOP_STATE (their readers are deleted)",
+          not ({"OT_RESTING_DB", "OT_RESTING_STOP_STATE"} & keys) and "OT_TRADES_DB" in keys,
+          str(sorted({"OT_RESTING_DB", "OT_RESTING_STOP_STATE"} & keys)))
 
     print(f"check_dead_defs_gone: {'GREEN' if not _fails else 'RED'} ({len(_fails)} failed)")
     return 1 if _fails else 0

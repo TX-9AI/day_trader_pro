@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/checker_sweep.py — v1.2
+day_trader_pro/tools/checker_sweep.py — v1.3
+v1.3  2026-11-15  dtp r563 / B5.10 (hygiene item 10) — the scratch env no longer sets OT_RESTING_DB or OT_RESTING_STOP_STATE:
+      OTV5 r118 deleted the resting-offer store and r68 the resting stop, their only readers, and OTV5 r123 drops both
+      from land.sh and boot_sweep. Every other scratch store unchanged.
 v1.2  2026-11-08  dtp r537 / SWEEP.7 — the headline counts [env] reds APART: "N run, R red, E env red". The 11-08
       sweep printed "OTV5: 335 run, 3 red" where one was check_probe_intraday_candles failing on control because the
       dtp venv has no tastytrade (a box-side probe, already flagged [env] per file); the per-file RED lines are unchanged.
@@ -64,12 +67,10 @@ def scratch_env(s: str) -> dict:
         "TMPDIR": os.path.join(s, "tmp"),
         "OT_TRADES_DB": os.path.join(s, "trades.db"),
         "OT_DERIVED_DB": os.path.join(s, "derived_store.db"),
-        "OT_RESTING_DB": os.path.join(s, "resting_orders.db"),
         "OT_SIGNAL_JOURNAL_DIR": os.path.join(s, "signal_journal"),
         "OT_LOG_FILE": os.path.join(s, "bot.log"),
         "OT_COUNTERFACTUAL_DIR": os.path.join(s, "counterfactual"),
         "OT_FEED_DB": os.path.join(s, "feed_store.db"),
-        "OT_RESTING_STOP_STATE": os.path.join(s, "resting_stop_state.json"),
         "OT_WAREHOUSE_STATE": os.path.join(s, "warehouse_state"),
         "OT_PLAN_STATES_FILE": os.path.join(s, "plan_states.json"),
         "OT_HEARTBEAT_FILE": os.path.join(s, "BOT_HEARTBEAT"),

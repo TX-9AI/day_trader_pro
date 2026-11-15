@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/study_dispatch.py  v1.4
+day_trader_pro/tools/study_dispatch.py  v1.5
+v1.5  2026-11-15  dtp r563 / B5.10 (hygiene item 10) — CRM IS AN ORDINARY BOX. NEVER_BOXES and its two uses go: the
+      operator, 2026-11-14, on the Claude session on CRM: "I launched it once to prove to you it's installed by default.
+      It's not 'my session'". The dispatcher now treats CRM like any other box (claims still decide who is skipped).
 v1.4  2026-11-15  dtp r562 / B5.9 (hygiene item 9, the 11-14 Saturday brief section 5) — ONE BOX PATH. The box's OTV5
       clone was typed five times (the hold flag twice, the venv three times: runner.sh, the brief, the cleanup);
       BOX_REPO is the one copy and BOX_VENV_BIN / BOX_HOLD_FLAG are built from it. runner.sh, the brief and the
@@ -60,10 +63,10 @@ v1.0  2026-11-11  dtp r549 / SAT.8 — THE SATURDAY STUDY QUEUE RUNS ON THE BOXE
 WHAT IT DOES (`run`, started Friday 17:15 ET by the control timer dtp-study-dispatch via tools/friday_studies.sh
 since v1.1; the Saturday brief starts it itself only as a fallback):
   1. REFUSES during RTH (Mon-Fri 08:45-16:50 ET, the box-research-recruits window).
-  2. Parses the queue. One OPEN item per box; CRM is NEVER used; a box with someone else's claim in
+  2. Parses the queue. One OPEN item per box (v1.5: CRM is an ordinary box); a box with someone else's claim in
      ~/reviews/box_claims is skipped. It writes its own claim (O_EXCL) for every box it takes.
   3. Every power call (start / stop) goes through ec2ops (the one logged power chokepoint) under
-     flock /tmp/claude-fleet.lock. Unassigned, unclaimed, non-CRM boxes that are running are stopped.
+     flock /tmp/claude-fleet.lock. Unassigned, unclaimed boxes that are running are stopped.
   4. Ships a kit to ~/study_<run>/<ID>/ on the box: brief.txt (the item, the queue's HOW block, the rules),
      runner.sh, ctx/ (~/reviews/*.csv, the queue file, the prior study folders the item names, text only).
      runner.sh stops optionsbot and candle-feed, reads the research token from SSM with the box's venv boto3
@@ -122,7 +125,6 @@ CLAIMS = os.path.join(HOME, "reviews", "box_claims")
 FLEET_LOCK = "/tmp/claude-fleet.lock"
 DEFAULT_OUT = os.path.join(HOME, "study_dispatch_runs")
 OWNER = "study_dispatch"
-NEVER_BOXES = frozenset({"CRM"})          # runs the operator's tmux session: never woken, used or stopped
 RTH_START = (8, 45)                       # box-research-recruits: done by 08:45 ET ...
 RTH_END = (16, 50)                        # ... and from 16:50 ET after self-close
 MARGIN_S = 25 * 60                        # every box is killed this long before the deadline
@@ -759,7 +761,7 @@ class Dispatcher:
         fleet = self.ops.fleet()
         chosen, idle = [], []
         for sym, ip, st in fleet:
-            if sym in NEVER_BOXES or (self.only and sym not in self.only):
+            if self.only and sym not in self.only:
                 continue
             owner = claim_owner(sym, self.claims_dir)
             if owner is not None:
@@ -999,7 +1001,7 @@ def cleanup_all(ops, run_filter=None, claims_dir=None):
         if not owner.startswith(OWNER + " "):
             continue
         run_id = owner.split()[1]
-        if run_filter and run_id != run_filter or sym in NEVER_BOXES or sym not in ips:
+        if run_filter and run_id != run_filter or sym not in ips:
             continue
         d = Dispatcher(ops, ops.now() + timedelta(hours=1), tempfile.mkdtemp(prefix="sd_cleanup_"),
                        claims_dir=claims_dir, run_id=run_id, update_queue=False)

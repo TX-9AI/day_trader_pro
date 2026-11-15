@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""day_trader_pro/tests/test_plan_dupe_probe.py — v1.2
+"""day_trader_pro/tests/test_plan_dupe_probe.py — v1.3
+v1.3  2026-11-15  dtp r563 — fixture re-pointed (B5.10): P4's first strategy is LiquidityHunt, not the removed ORBStrategy; what the test proves is unchanged.
 v1.2  2026-09-05 — dtp r297. P5 pins that a restart wipe is reported but does
 not set the exit code. All 31 overlaps in the first real run were
 `WIPED_BY_RESTART` on one session, spanning five to six hours, because a wipe
@@ -159,7 +160,7 @@ def main():
     # ⚠️ P4 — AND DIFFERENT STRATEGIES ARE NEVER COMPARED. Two strategies live
     # at once on one symbol is normal; the ledger separates them on purpose.
     cross = [
-        _row("x1", "CRM", "ORBStrategy", "TRIGGERED", t, 259.38,
+        _row("x1", "CRM", "LiquidityHunt", "TRIGGERED", t, 259.38,
              closed=t + 900),
         _row("x2", "CRM", "RunawayContinuation", "TRIGGERED", t + 60, 259.38,
              closed=t + 800),

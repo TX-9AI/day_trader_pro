@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""day_trader_pro/tests/test_cdc_partition_key.py — v1.1
+"""day_trader_pro/tests/test_cdc_partition_key.py — v1.2
+v1.2  2026-11-15  dtp r563 — fixture re-pointed (B5.10): the plan_check row's strategy is LiquidityHunt, not the removed SweepCreditSpread; what the test proves is unchanged.
 v1.1  2026-09-05 — dtp r276. RE-DERIVED, NOT PATCHED. C2 asserted that the
 collapse key is 3-part `(sym, partition, _rid)` — which is the exact shape r276
 replaces, so leaving it would CERTIFY THE DEFECT ON EVERY RUN. That is the trap
@@ -67,7 +68,7 @@ def main():
         pk, keyed = wr.collapse_key(
             "plan_check", "QQQ", "2026-09-04",
             {"_rid": 1, "ts_epoch": 1788364800.0, "symbol": "QQQ",
-             "strategy": "SweepCreditSpread", "direction": "short",
+             "strategy": "LiquidityHunt", "direction": "short",
              "check_name": "age"})
         check("C2 a keyed table collapses on its PRIMARY KEY, not on _rid",
               keyed and "2026-09-04" not in str(pk) and 1 not in pk,

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""day_trader_pro/tests/test_natural_key.py — v1.1
+"""day_trader_pro/tests/test_natural_key.py — v1.2
+v1.2  2026-11-15  dtp r563 — fixture re-pointed (B5.10): the plan_check row's strategy is LiquidityHunt, not the removed SweepCreditSpread; what the test proves is unchanged.
 v1.1  2026-11-08  dtp r533 / OTV4DEP.2 — THE SCHEMAS ARE OTV5's, THE TREE THE BOXES RUN. N4 parsed the frozen
       ~/options-trader-v4 (frozen since otv4 r500); it now finds the OTV5 checkout (DTP_OTV5_DIR, default ~/OTV5, by
       the same strategy/plan.py marker). OTV4_ROOT is gone. Hygiene item 7 of the 11-07 brief.
@@ -114,7 +115,7 @@ def main():
     # and — because the box's store was rebuilt in between — two rowids.
     row_a = {"_rid": 1, "ts_epoch": 1788364800.0,   # 2026-09-02 12:00 ET
              "symbol": "QQQ",
-             "strategy": "SweepCreditSpread", "direction": "short",
+             "strategy": "LiquidityHunt", "direction": "short",
              "check_name": "age", "verdict": "FAIL"}
     row_b = dict(row_a, _rid=7, verdict="PASS")
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-tests/check_r_excludes_fees.py  v1.0
+tests/check_r_excludes_fees.py  v1.1
+v1.1  2026-11-15  dtp r563 — fixture re-pointed (B5.10, the 11-14 Saturday brief section 5 item 10): the example trade is RunawayContinuation, not the removed ORBStrategy; what the check proves is unchanged.
 v1.0  2026-09-25  r428 / OPS.52 — R IS GROSS OF FEES, BY RULING, AND R IS
       SIZE-INVARIANT, BY ARITHMETIC.
 
@@ -51,7 +52,7 @@ def _trade(contracts, entry, exit_, stop):
         "pnl_usd": (exit_ - entry) * contracts * 100,
         "max_loss": abs(entry - stop) * contracts * 100,
         "total_cost": entry * contracts * 100,
-        "strategy": "ORBStrategy",
+        "strategy": "RunawayContinuation",
         "symbol": "TEST",
     }
 

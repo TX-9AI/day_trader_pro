@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/test_trade_report_dedup.py — v1.1
+# day_trader_pro/tests/test_trade_report_dedup.py — v1.2
+# v1.2 (2026-11-15) — dtp r563 — fixture re-pointed (B5.10): the example trade is RunawayContinuation, not the removed ORBStrategy; what the test proves is unchanged.
 # v1.1 (2026-10-25) — S3.6. THE SANDBOX CARRIES trade_report's IMPORTS. It copied only trade_report.py
 #   and config.py; trade_report has since imported `ettime` (r287), `strategy_registry` and `fees_bridge`
 #   (r312), so every sandboxed run died with `ModuleNotFoundError: No module named 'ettime'` and cases A-C
@@ -42,7 +43,7 @@ D2 = "2026-08-27"
 
 def t(tid, day, pnl):
     return {"trade_id": tid, "symbol": "NVDA", "box": "NVDA",
-            "strategy": "ORBStrategy", "setup_type": "ORB Long",
+            "strategy": "RunawayContinuation", "setup_type": "ORB Long",
             "status": "closed", "entry_time": f"{day} 09:45:00",
             "exit_time": f"{day} 10:15:00", "paper_trade": 1,
             "entry_premium": 1.0, "exit_premium": 1.2, "contracts": 1,
