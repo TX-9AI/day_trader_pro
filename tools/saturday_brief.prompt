@@ -21,7 +21,7 @@ THE BRIEF HAS SEVEN SECTIONS, IN THIS ORDER, EACH ONE STANDING ON ITS OWN:
        · THE QQQ CASH SIZE TABLE (standing, every Saturday UNTIL the cash start 2026-12-07; the last run is
          Saturday 12-05). If this Saturday is on or after 2026-12-07, skip it and do not mention it. Otherwise take
          every QQQ trade in ~/reviews/trades/*.csv dated 2026-10-26 through this Friday (OTV4TEST rows out) and
-         re-size each entry under two schemes, with the per-trade cap = the ramp max (OT_ORB_BUDGET_USD) in both:
+         re-size each entry under two schemes, with the per-trade cap = the ramp max (OT_BREAKOUT_BUDGET_USD; OT_ORB_BUDGET_USD before OTV5 r125) in both:
            A) base OT_RISK_USD $250, ramp max $500        B) base OT_RISK_USD $500, ramp max $750
          The rule is OTV5 risk/risk_manager.py size_for, as the code runs it today. The grade multiplier is 1.0, and
          OT_SIZE_ON_RISK is off by default, so there is no deploy cap and no risk-to-stop denominator.

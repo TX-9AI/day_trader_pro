@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
-"""day_trader_pro/tests/orb_budget_fleet.py — v1.2
-SPOT AND THE RAMP TOP (OT_ORB_BUDGET_USD) ON EVERY RUNNING BOX.
+"""day_trader_pro/tests/orb_budget_fleet.py — v1.3
+SPOT AND THE RAMP TOP (OT_BREAKOUT_BUDGET_USD) ON EVERY RUNNING BOX.
+
+v1.3  2026-11-15 — dtp r564 / OTV5 r125 (HYG.28). The ramp top's key is OT_BREAKOUT_BUDGET_USD (was
+      OT_ORB_BUDGET_USD, named after the ORB trade retired at r76). The box program reads
+      config.BREAKOUT_BUDGET_USD, and config.ORB_BUDGET_USD on a box not yet on r125, so the report
+      is right on either side of the bake. The labels name the new key.
 
 v1.2  2026-11-08 — dtp r529 / MENU.1. The ORB trade is retired (OTV5 r76);
       OT_ORB_BUDGET_USD is the live Breakout ramp top (configure.sh item 7,
@@ -77,7 +82,7 @@ import json, os, subprocess, sys
 # configure.sh:97 writes and reads, and what rotate_env_remote.sh:65 reads.
 # Same reader, not a new mechanism.
 # ⚠️ INJECT AND IMPORT, rather than reimplementing the precedence. config.py
-# decides how OT_ORB_BUDGET_USD falls back to OT_RISK_USD and what the final
+# decides how OT_BREAKOUT_BUDGET_USD (then the old OT_ORB_BUDGET_USD) falls back to OT_RISK_USD and what the final
 # default is; duplicating that logic here is how the two drift apart.
 import shlex
 UNPARSED = [0]
@@ -111,8 +116,13 @@ except Exception as e:
     print("UNIT_UNREADABLE|%s" % e)
 
 try:
-    from config import (ORB_BUDGET_USD as B, ORB_BUDGET_IS_DEFAULT as D,
-                        LOG_FILE, INSTRUMENT as I, RISK_PER_TRADE_USD as R)
+    import config as _c
+    from config import LOG_FILE, INSTRUMENT as I, RISK_PER_TRADE_USD as R
+    # r564 (OTV5 r125): the new names first; a box still on r124 has only the old ones.
+    B = getattr(_c, "BREAKOUT_BUDGET_USD", None)
+    B = _c.ORB_BUDGET_USD if B is None else B
+    D = getattr(_c, "BREAKOUT_BUDGET_IS_DEFAULT", None)
+    D = _c.ORB_BUDGET_IS_DEFAULT if D is None else D
 except Exception as e:
     print("CONFIG_UNREADABLE|%s" % e)
     sys.exit(0)
@@ -149,7 +159,7 @@ def run(only, install_dir="~/options-trader"):
         print("  no running boxes.")
         return 1
 
-    print(f"\n  RAMP TOP (OT_ORB_BUDGET_USD) AND SPOT — {len(running)} running box(es)")
+    print(f"\n  RAMP TOP (OT_BREAKOUT_BUDGET_USD) AND SPOT — {len(running)} running box(es)")
     print(f"  {'sym':<6} {'spot':>9} {'ramp top':>9} {'top/spot':>9}  note")
     print("  " + "-" * 52)
 
@@ -202,7 +212,7 @@ def run(only, install_dir="~/options-trader"):
 
 
 def main(argv):
-    ap = argparse.ArgumentParser(description="Ramp TOP (OT_ORB_BUDGET_USD) and spot per box")
+    ap = argparse.ArgumentParser(description="Ramp TOP (OT_BREAKOUT_BUDGET_USD) and spot per box")
     ap.add_argument("--only", default=None,
                     help="comma-separated symbols (default: whole universe)")
     ap.add_argument("--install-dir", default="~/options-trader")

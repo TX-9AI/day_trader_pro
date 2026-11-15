@@ -1,4 +1,7 @@
-# THE SATURDAY BRIEF — spec v2.13
+# THE SATURDAY BRIEF — spec v2.14
+
+**v2.14 · 2026-11-15 · dtp r564 (HYG.28)**: §1.8 names the ramp max by its new key, `OT_BREAKOUT_BUDGET_USD` (OTV5 r125 renamed
+`OT_ORB_BUDGET_USD`, named after the retired ORB trade). Nothing else changes.
 
 **v2.13 · 2026-11-14 · dtp (OGAP.1)**: §1.9, OGAP on its own line every Saturday (Park's friend's opening-gap trade, QQQ paper, OTV5 OGAP.1; never in the window EV or the theories), and §1.10, OGAP VS PARK like for like (index rows, the exec basis, $500 of outlay a row) with a decision rule fixed today and stated verbatim each week, report only until its point. The operator, 2026-11-14: "let's design & paper trade the OGAP on QQQ" and "compare them".
 
@@ -185,9 +188,9 @@ fittability line this week. Its "READY" counts signal rows, not trades (D7), so 
 every weekend until the date arrives". **On or after 2026-12-07 the brief skips this item and does not mention it.**
 Source: every QQQ trade in `~/reviews/trades/*.csv` from 2026-10-26 through the Friday (OTV4TEST rows out), with
 Breakout's stop premium from the warehouse trade row (`load_trades`, `stop_premium`). Two schemes, the per-trade cap
-equal to the ramp max (`OT_ORB_BUDGET_USD`) in both:
+equal to the ramp max (`OT_BREAKOUT_BUDGET_USD`; `OT_ORB_BUDGET_USD` before OTV5 r125) in both:
 
-| Scheme | Base (`OT_RISK_USD`) | Ramp max = cap (`OT_ORB_BUDGET_USD`) |
+| Scheme | Base (`OT_RISK_USD`) | Ramp max = cap (`OT_BREAKOUT_BUDGET_USD`) |
 |---|---|---|
 | A | $250 | $500 |
 | B | $500 | $750 |

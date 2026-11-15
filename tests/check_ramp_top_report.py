@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_ramp_top_report.py  v1.0
+day_trader_pro/tests/check_ramp_top_report.py  v1.1
+v1.1  2026-11-15  dtp r564 / OTV5 r125 (HYG.28). T2/T6/T7 name OT_BREAKOUT_BUDGET_USD (the ramp top's new key). New T8: the
+      box program reads config.BREAKOUT_BUDGET_USD and falls back to config.ORB_BUDGET_USD, so a box on either side
+      of the r125 bake reports its real ramp top - run against a stub config of each shape.
 v1.0  2026-11-08  dtp r529 / MENU.1 (the 11-07 brief section 5 item 6 / R5 half; hygiene queue item 5). THE FLEET
       ITEM IS THE RAMP TOP, AND ITS UNIT READER READS THE UNITS THE FLEET HAS. The ORB trade is retired (OTV5 r76
       RETIRE.1); OT_ORB_BUDGET_USD is the live Breakout ramp top (configure.sh item 7 "Ramp TOP (MAX)"). The report's
@@ -15,6 +18,7 @@ v1.0  2026-11-08  dtp r529 / MENU.1 (the 11-07 brief section 5 item 6 / R5 half;
   T6  the registry label is "Ramp TOP (OT_ORB_BUDGET_USD) & spot", wired to mi_orb_budget_fleet, and no menu label
       names an "ORB budget"
   T7  the report's printed text says Ramp TOP and points at configure.sh item 7, never "ORB budget" or "-> 8"
+  T8  the box program reads BREAKOUT_BUDGET_USD, and ORB_BUDGET_USD on a box still on OTV5 r124 (r564)
 Run:  python3 tests/check_ramp_top_report.py
 """
 import os
@@ -52,8 +56,8 @@ def main():
 
     check("T1", unit_env("Environment=OT_RISK_USD=1050\n") == [("OT_RISK_USD", "1050")],
           unit_env("Environment=OT_RISK_USD=1050\n"))
-    got = unit_env('Environment="OT_ORB_BUDGET_USD=2500"\n')
-    check("T2", got == [("OT_ORB_BUDGET_USD", "2500")], got)
+    got = unit_env('Environment="OT_BREAKOUT_BUDGET_USD=2500"\n')
+    check("T2", got == [("OT_BREAKOUT_BUDGET_USD", "2500")], got)
     got = unit_env("Environment='OT_BOT_NAME=Options Trader'\n")
     check("T3", got == [("OT_BOT_NAME", "Options Trader")], got)
     got = unit_env('Environment="OT_A=1" OT_B=2 \'OT_C=x y\'\n')
@@ -63,15 +67,39 @@ def main():
     check("T5", got == [("OT_OK", "1")] and unparsed[0] == before + 1, (got, unparsed[0] - before))
 
     reg = open(REGISTRY).read()
-    check("T6", '"ITEM|Ramp TOP (OT_ORB_BUDGET_USD) & spot|mi_orb_budget_fleet"' in reg
+    check("T6", '"ITEM|Ramp TOP (OT_BREAKOUT_BUDGET_USD) & spot|mi_orb_budget_fleet"' in reg
           and "ITEM|ORB budget" not in reg, "registry label")
 
     src = open(SCRIPT).read()
     body = src[src.index("def run("):]
-    check("T7", "RAMP TOP (OT_ORB_BUDGET_USD) AND SPOT" in body and "configure.sh -> 7 (Ramp TOP)" in body
+    check("T7", "RAMP TOP (OT_BREAKOUT_BUDGET_USD) AND SPOT" in body and "configure.sh -> 7 (Ramp TOP)" in body
           and "ORB BUDGET" not in body and "ORB budget" not in body and "-> 8" not in body, "report text")
 
-    print(f"\n{'GREEN' if not FAILS else 'RED'}: {7 - len(FAILS)}/7")
+    # T8 (r564): the box program's config read works on a box either side of OTV5 r125.
+    import types
+    k8 = prog.find("try:\n    import config as _c")
+    seg = prog[k8:prog.index("spot = None")] if k8 >= 0 else ""
+    got8 = [] if seg else ["no config read with a fallback in BOX_PROGRAM"]
+    for shape in ([] if not seg else ({"BREAKOUT_BUDGET_USD": 3000.0, "BREAKOUT_BUDGET_IS_DEFAULT": False},
+                  {"ORB_BUDGET_USD": 2500.0, "ORB_BUDGET_IS_DEFAULT": True})):
+        stub = types.ModuleType("config")
+        stub.__dict__.update(shape, LOG_FILE="/x/bot.log", INSTRUMENT="QQQ", RISK_PER_TRADE_USD=1050.0)
+        saved = sys.modules.get("config")
+        sys.modules["config"] = stub
+        try:
+            ns8 = {"sys": sys}
+            exec(compile(seg, "BOX_PROGRAM", "exec"), ns8)
+            got8.append((ns8.get("B"), ns8.get("D")))
+        except SystemExit:
+            got8.append("exit")
+        finally:
+            if saved is None:
+                sys.modules.pop("config", None)
+            else:
+                sys.modules["config"] = saved
+    check("T8", got8 == [(3000.0, False), (2500.0, True)], got8)
+
+    print(f"\n{'GREEN' if not FAILS else 'RED'}: {8 - len(FAILS)}/8")
     return 1 if FAILS else 0
 
 

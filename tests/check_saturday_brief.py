@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_saturday_brief.py  v1.12
+day_trader_pro/tests/check_saturday_brief.py  v1.13
+v1.13 2026-11-15  dtp r564 (OTV5 HYG.28). S26b accepts spec v2.13 OR LATER (S23b's pattern): spec v2.14 renames the ramp
+      max's key in §1.8, and the pin on the exact version string made any later spec red. Same checks otherwise.
 v1.12 2026-11-14  dtp (OGAP.1). S26/S26b: section 1 reports OGAP on its own line (never in the window EV or the
       theories) and OGAP VS PARK like for like (index rows, the exec basis, $500 of outlay a row, overlap days and the
       daily-P&L correlation), with the decision rule fixed 2026-11-14 quoted verbatim in the prompt and the spec v2.13,
@@ -591,7 +593,8 @@ ck("S26", 0 < p.find("## 1. TRADING SUMMARY") < _o1 < _o2 < p.find("## 2. ISSUES
    and "INDEX rows only (QQQ, SPX)" in _pf and "each row scaled to $500 of premium outlay" in _pf
    and "the correlation of daily P&L" in _pf and _RULE in _pf and "REPORT ONLY" in _pf[_pf.find("OGAP VS PARK"):],
    "the prompt's section 1 has OGAP on its own line and OGAP VS PARK with the fixed rule, report only")
-ck("S26b", "# THE SATURDAY BRIEF — spec v2.13" in spec and "**1.9 OGAP, its own line" in spec
+_m26 = re.search(r"# THE SATURDAY BRIEF — spec v(\d+)\.(\d+)", spec)     # v1.13: v2.13 or any later spec
+ck("S26b", _m26 is not None and (int(_m26.group(1)), int(_m26.group(2))) >= (2, 13) and "**1.9 OGAP, its own line" in spec
    and "**1.10 OGAP vs PARK" in spec and _RULE in _sf and "REPORT ONLY" in _sf[_sf.find("1.10 OGAP vs PARK"):]
    and spec.find("**1.9 OGAP") < spec.find("**1.10 OGAP vs PARK") < spec.find("\n## 2. ISSUES FROM THE BOT LOGS"),
    "the spec v2.13 carries 1.9 and 1.10 with the same rule, verbatim")

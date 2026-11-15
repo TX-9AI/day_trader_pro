@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# day_trader_pro/menu_registry.sh — v1.27
+# day_trader_pro/menu_registry.sh — v1.28
+# v1.28 (2026-11-15) — dtp r564 / OTV5 r125 (HYG.28). The FLEET item reads "Ramp TOP (OT_BREAKOUT_BUDGET_USD) & spot": the
+#   ramp top's key was renamed from OT_ORB_BUDGET_USD. Same function, same script.
 # v1.27 (2026-11-08) — dtp r529 / MENU.1. The FLEET item "ORB budget & spot (every running box)" is "Ramp TOP
 #   (OT_ORB_BUDGET_USD) & spot": the ORB trade is retired (OTV5 r76 RETIRE.1) and that key is the live Breakout ramp
 #   top (configure.sh item 7 "Ramp TOP (MAX)"). Same function, same script; only what it is called changed.
@@ -255,7 +257,7 @@ MENU=(
   "ITEM|Fleet ping|mi_fleet_ping"
   "ITEM|Run command (all running)|mi_run_command_all_running"
   "ITEM|status.py + query.py      (one/all/some)|mi_status_py_query_py_one_all_some"
-  "ITEM|Ramp TOP (OT_ORB_BUDGET_USD) & spot|mi_orb_budget_fleet"
+  "ITEM|Ramp TOP (OT_BREAKOUT_BUDGET_USD) & spot|mi_orb_budget_fleet"
   "ITEM|Dry-run spool-up (real reads)|mi_dry_run_spool_up_real_reads"
 
   "SECTION|SENSORS (derived stores; read-only, one/all/some)"

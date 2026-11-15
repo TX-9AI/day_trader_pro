@@ -1,4 +1,6 @@
-# day_trader_pro/menu_functions.sh — v1.81
+# day_trader_pro/menu_functions.sh — v1.82
+# v1.82 (2026-11-15) - dtp r564 / OTV5 r125 (HYG.28). mi_orb_budget_fleet's label and comment name OT_BREAKOUT_BUDGET_USD,
+#   the ramp top's new key. No code changes.
 # v1.81 (2026-11-09) - dtp r544 / RETIRE.5. Stop forensics defaults to RunawayContinuation, a live plan with a premium
 #   stop: the GEX pin butterfly it defaulted to is removed (OTV5 r103) and had no stop since r73. --strat is still asked.
 # v1.80 (2026-11-08) - dtp r536 / CHK.12. Three confirms (the fresh-thread, resume-thread and pick-thread tmux
@@ -521,9 +523,9 @@ mi_status_py_query_py_one_all_some() {
 
 # Pull OHLC for a day       (one/all/some)
 
-# Ramp TOP (OT_ORB_BUDGET_USD) & spot
+# Ramp TOP (OT_BREAKOUT_BUDGET_USD) & spot
 mi_orb_budget_fleet() {
-    # r206, relabelled r529 — EACH BOX'S RAMP TOP (OT_ORB_BUDGET_USD, the Breakout
+    # r206, relabelled r529 and r564 — EACH BOX'S RAMP TOP (OT_BREAKOUT_BUDGET_USD, was OT_ORB_BUDGET_USD; the Breakout
     # ramp's ceiling; configure.sh item 7) BESIDE ITS SPOT. The ORB trade is retired.
     # 🔑 THIS CALLS THE SCRIPT, IT DOES NOT REIMPLEMENT IT. tests/
     # orb_budget_fleet.py is the one implementation, staged and proven against
