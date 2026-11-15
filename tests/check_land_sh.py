@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/check_land_sh.py — v1.13
+# day_trader_pro/tests/check_land_sh.py — v1.14
+# v1.14 (2026-11-14) — dtp r560 / LAND.11. SK1/SK1b/SK2 DRIVE A SPEC WHOSE FIRST CHECK DRAINS STDIN. At land.sh
+#   v1.19 every CHECK inherited the loop's stdin (the spec's CHECK lines), so a CHECK that reads stdin ate the rest
+#   and they were skipped silently (r559: 7 declared, 4 ran). SK1 the second CHECK still runs and the land says so;
+#   SK1b the fixture bites: the same world under a lander with the v1.19 loop restored never runs the second CHECK
+#   (without SK1b, SK1 could pass on a fixture that drains nothing); SK2 the v1.19 loop WITH the v1.20 count guard
+#   is REFUSED as CHECK COUNT MISMATCH and HEAD does not move. Born red on land.sh v1.19 at SK1 (the second CHECK never ran), SK1b (no v1.20 text to mutate) and SK2.
 # v1.13 (2026-10-25) — CHK.5. THE DEL SERIES IS DL1/DL1b/DL2/DL3, AND U1 PINS
 #   THAT EVERY ID IN THIS FILE IS UNIQUE. D1, D2 and D3 each named two
 #   assertions (the deploy.sh two-repo series and the r291 DEL series), so
@@ -1088,6 +1094,47 @@ def main():
         r = _land(home, stage)
         check("O4 one checkout and no ORIGIN -> lands as before (pre-v1.18 archives still land)",
               r.returncode == 0 and "r999" in _head(repo), f"rc={r.returncode} {_head(repo)}")
+
+    # ══ 🔴 SK1-SK2 (v1.14 / LAND.11) — A CHECK THAT READS STDIN CANNOT SKIP THE CHECKS AFTER IT ══════════════
+    SK_SPEC = [l for l in GOOD if not l.startswith("CHECK ")] + ["CHECK tests/eat.py", "CHECK tests/after.py"]
+    SK_CHK = {"tests/eat.py": "import sys\nsys.stdin.read()\n",
+              "tests/after.py": "import os\nopen(os.path.join(os.environ['HOME'], 'after_ran'), 'w').write('1')\n"}
+    _src = open(LAND, encoding="utf-8").read()
+    _old_loop = (_src.replace("read -r -u 3 line", "read -r line", 1)
+                     .replace("done 3< <(grep '^CHECK'", "done < <(grep '^CHECK'", 1)
+                     .replace('python3 "$chk" </dev/null )', 'python3 "$chk" )', 1))
+    _reverted = _old_loop.replace('if [ "$nchk" != "$ndecl" ]; then', "if false; then", 1)
+    _mut_ok = _old_loop != _src and _reverted != _old_loop and "read -r -u 3 line" not in _old_loop
+
+    with tempfile.TemporaryDirectory() as tmp:
+        home, repo, stage = _world(tmp, SK_SPEC, extra=SK_CHK)
+        r = _land(home, stage)
+        out = r.stdout + r.stderr
+        ran = os.path.exists(os.path.join(home, "after_ran"))
+        check("SK1 a first CHECK that drains stdin does not skip the second: it runs and the land passes",
+              r.returncode == 0 and ran and "check: tests/after.py PASS" in out
+              and "2 of 2 declared CHECK(s) ran" in out,
+              f"rc={r.returncode} after_ran={ran} {out[-200:]}")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        home, repo, stage = _world(tmp, SK_SPEC, extra=SK_CHK)
+        with open(os.path.join(stage, "land.sh"), "w", encoding="utf-8") as f:
+            f.write(_reverted)
+        r = _land(home, stage)
+        ran = os.path.exists(os.path.join(home, "after_ran"))
+        check("SK1b the fixture bites: under the v1.19 loop (no guard) the second CHECK never runs",
+              _mut_ok and not ran, f"mutation applied={_mut_ok} after_ran={ran} rc={r.returncode}")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        home, repo, stage = _world(tmp, SK_SPEC, extra=SK_CHK)
+        with open(os.path.join(stage, "land.sh"), "w", encoding="utf-8") as f:
+            f.write(_old_loop)
+        b1 = _head(repo)
+        r = _land(home, stage)
+        out = r.stdout + r.stderr
+        check("SK2 a lost CHECK is REFUSED by the count guard (CHECK COUNT MISMATCH), HEAD untouched",
+              _mut_ok and r.returncode != 0 and "CHECK COUNT MISMATCH" in out and _head(repo) == b1,
+              f"mutation applied={_mut_ok} rc={r.returncode} head_moved={_head(repo) != b1} {out[-200:]}")
 
     print()
     if _fails:

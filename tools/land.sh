@@ -1,5 +1,14 @@
 #!/usr/bin/env bash
-# day_trader_pro/tools/land.sh — v1.19
+# day_trader_pro/tools/land.sh — v1.20
+# v1.20 (2026-11-14) — dtp r560 / LAND.11. A CHECK CAN NO LONGER EAT THE CHECKS LISTED AFTER IT, AND A COUNT THAT
+#   DOES NOT MATCH REFUSES THE LAND. At v1.19 the CHECK loop read the spec's CHECK lines on stdin and every CHECK
+#   inherited that stdin, so a CHECK that reads stdin swallowed the remaining lines and the loop ended early with no
+#   message: tests/check_ssh_budget.py does (measured: 3 lines piped in, 0 left after it), and r559 declared 7 CHECKs
+#   and ran 4. Now (1) the loop reads the spec on fd 3, (2) each CHECK runs with stdin from /dev/null, and (3) after
+#   the loop the number of CHECKs that ran must equal the number the spec declares, or the land is REFUSED as
+#   CHECK COUNT MISMATCH (fail closed: any future way of losing a CHECK is caught by the count, not by its cause).
+#   Gate: tests/check_land_sh.py SK1/SK1b/SK2 (a first CHECK that drains stdin; the second must still run; a
+#   lander with the old loop is refused by the count). The operator's yes, 2026-11-14.
 # v1.19 (2026-11-08) — dtp r532 / OTV4DEP.1. DEL RUNS BEFORE THE CHECKS. At v1.18 the DEL block ran after the
 #   CHECK loop, so a delivery that removes a file ran its CHECKs with that file still on disk: r532's gate
 #   check_no_otv4_deps refused its own land on tools/build_level_history.py, the file the same spec deletes, and
@@ -742,7 +751,10 @@ land_one() {
   # proves nothing about runtime. Each CHECK runs with the repo as cwd, which
   # is how every checker in these trees expects to be invoked.
   local nchk=0 chk
-  while IFS= read -r line; do
+  # v1.20 (LAND.11) — THE SPEC IS READ ON FD 3 AND EVERY CHECK GETS /dev/null ON STDIN. A CHECK that reads stdin
+  # swallowed every CHECK line after it (r559: 7 declared, 4 ran, nothing said). The count guard after the loop
+  # catches any other way of losing one.
+  while IFS= read -r -u 3 line; do
     chk="$(_spec_rest "$line" "CHECK")"
     nchk=$((nchk+1))
     # 🔴 A CHECK MUST NOT INHERIT THIS DELIVERY'S OWN CONTROL VARIABLES, and
@@ -755,7 +767,7 @@ land_one() {
     # The general rule: a CHECK is arbitrary code and gets a clean slate of
     # everything that names this delivery.
     pb_step "$(basename "$chk")"
-    if ( cd "$repo" && env -u LAND_ARCHIVE -u LAND_STAGE python3 "$chk" ) >/dev/null 2>&1; then
+    if ( cd "$repo" && env -u LAND_ARCHIVE -u LAND_STAGE python3 "$chk" </dev/null ) >/dev/null 2>&1; then
       pb_clear
       echo "  check: $chk PASS"
     else
@@ -764,7 +776,16 @@ land_one() {
       echo "     re-run it yourself:  cd $repo && python3 $chk"
       die "A DECLARED CHECK DID NOT PASS"; return 1
     fi
-  done < <(grep '^CHECK' "$spec")
+  done 3< <(grep '^CHECK' "$spec")
+  # 🔴 v1.20 (LAND.11) — FAIL CLOSED ON THE COUNT. Counted with the loop's own pattern, so the two cannot disagree
+  # about what a CHECK line is.
+  local ndecl
+  ndecl=$(grep -c '^CHECK' "$spec" 2>/dev/null || true); ndecl=${ndecl:-0}
+  if [ "$nchk" != "$ndecl" ]; then
+    echo "  🔴 CHECK COUNT MISMATCH: the spec declares $ndecl CHECK(s) and $nchk ran — a declared CHECK was skipped"
+    die "CHECK COUNT MISMATCH — $ndecl declared, $nchk ran; nothing is landed"; return 1
+  fi
+  [ "$nchk" != "0" ] && echo "  checks: $nchk of $ndecl declared CHECK(s) ran and passed"
 
   # ⚠️ A CODE HALF WITH NO CHECK IS REFUSED. Detected from the payload rather
   # than trusted to the author: if this half ships a .py outside docs/ and
