@@ -1,4 +1,6 @@
-# THE SATURDAY BRIEF — spec v2.14
+# THE SATURDAY BRIEF — spec v2.15
+
+**v2.15 · 2026-11-16 · dtp r565 (O08)**: §1.11, RUNAWAY O08 WOULD-BE every Saturday (report only, never in the window EV or the theories): the Runaway trades from 2026-11-16 re-scored as if O08 were on (skip the entry when the contract's spread at entry, (`entry_ask` − `entry_bid`) / mid, is more than 5% of mid; the 11-16 Runaway variant study's one sealed-holdout finalist), kept vs skipped, the exec-basis Δ with its interval, every skipped $200+ winner named as a cost, and a decision note fixed today and stated verbatim each week. The operator, 2026-11-16: "Consider O08 as a candidate after we get more paper trades" and "Include its 'would be' in the weekend briefs." Not in the nightly review.
 
 **v2.14 · 2026-11-15 · dtp r564 (HYG.28)**: §1.8 names the ramp max by its new key, `OT_BREAKOUT_BUDGET_USD` (OTV5 r125 renamed
 `OT_ORB_BUDGET_USD`, named after the retired ORB trade). Nothing else changes.
@@ -234,6 +236,37 @@ verbatim every week:** "Decide when each has >= 20 index trades, or at 2026-12-3
 better one if their daily P&L correlation is >= 0.5. Keep both if both have EV > 0 and correlation < 0.5. Keep neither
 if neither clears zero." Until that point is reached it is REPORT ONLY: the brief says how many index trades each has
 and makes no recommendation in §7.
+
+**1.11 RUNAWAY O08 WOULD-BE (report only, never in the window EV or the theories; every Saturday from 2026-11-21).**
+The operator, 2026-11-16: "Consider O08 as a candidate after we get more paper trades" and "Include its 'would be'
+in the weekend briefs." O08 (SPRD5) is the one finalist of the 11-16 Runaway variant study
+(`~/reviews/studies/runaway_variants_20261116/REPORT.md` §4): **skip a RunawayContinuation entry when the chosen
+contract's bid-ask spread at entry is more than 5% of mid**, (`entry_ask` − `entry_bid`) / ((`entry_ask` +
+`entry_bid`) / 2) > 0.05. It passed the sealed holdout on 5 days (11-09..11-13); it never touched SPX or QQQ (their
+spreads were 0.4–1.2% of mid). No bot code runs it: the brief re-scores the paper record. It is not a study (never in
+`WEEKEND_STUDIES.md`), not a shadow, and never in `window_ev.csv`, `theories.csv` or "ex worst setup".
+Source: OTV5 `tests/warehouse_source.load_trades(dates)` for every day from **2026-11-16** (the forward record; the
+study's holdout ended 11-13) through the Friday, then `mainline()` (rule 10: the old OTV4TEST fleet's rows
+out, their count named), then `strategy == "RunawayContinuation"`, closed rows only. Columns: on the warehouse trade row
+(OTV5 `database/trade_logger.py`), `entry_bid` and `entry_ask` (the chosen contract's quote at entry, the study's
+inputs), `pnl_exec_usd` (the AM.1 exec basis, ask in, bid out), `symbol`, `direction`, `entry_time` (UTC; the ET
+day), `trade_id`; the fee is not on the warehouse row, so it is the `fee` column of the same trade_id in
+`~/reviews/trades/<day>.csv` (blank: dtp `tools/review_kit.est_fee(symbol, contracts)`, labelled estimated).
+A row is SKIPPED when the ratio above is > 0.05, KEPT when it is ≤ 0.05. A row with `entry_bid` or `entry_ask` missing, zero or crossed (bid > ask) is UNSCORED: named by trade_id, symbol and day, counted in neither
+column, never guessed. A row with no `pnl_exec_usd` is named UNPRICED and never priced at the mark. Report, for the
+week and cumulative from 11-16:
+- trades kept vs skipped (and unscored), by symbol, with the median spread % of mid per symbol;
+- the exec-basis P&L of ALL Runaway trades vs the O08-KEPT trades, and Δ = kept − all (= minus the skipped trades'
+  P&L), with a day-bootstrap 95% interval on Δ (resample the trading days with replacement, 10,000 draws, the day's
+  Δ being minus that day's skipped P&L); EV a trade for both books;
+- fees on their own line beside each book (all vs kept), never in EV or Δ;
+- the skipped trades listed (day, symbol, side, spread % of mid, `pnl_exec_usd`), with **every skipped winner of
+  $200 or more named as a cost** (the study's own three, NFLX 11-13 +$910, SOFI 11-05 +$366 and SOFI 11-13 +$261,
+  fall before the forward record and are not in these numbers);
+- index rows (SPX, QQQ) on their own line: O08 is expected to skip none, and any index skip is named.
+**The decision note, fixed 2026-11-16 and stated verbatim every week:** "Candidate only. Decided at the
+end-of-November edge weighing (11-27) or later when the operator asks; no code until their yes." Until then it is
+REPORT ONLY: the brief makes no recommendation on O08 in §7.
 
 ---
 

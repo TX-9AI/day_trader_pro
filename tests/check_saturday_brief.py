@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_saturday_brief.py  v1.13
+day_trader_pro/tests/check_saturday_brief.py  v1.14
+v1.14 2026-11-16  dtp r565 (O08). S27/S27b: section 1 reports the RUNAWAY O08 WOULD-BE (report only, never in the
+      window EV or the theories): Runaway trades from 2026-11-16 re-scored on entry_bid/entry_ask (skip above 5% of
+      mid), exec basis (pnl_exec_usd) all vs kept with a day-bootstrap interval, fees beside, skipped $200+ winners named
+      as a cost, unscored rows named, OTV4TEST out, and the decision note fixed 2026-11-16 quoted verbatim in the prompt
+      and the spec v2.15. The operator, 2026-11-16: "Include its 'would be' in the weekend briefs." Not the nightly review.
 v1.13 2026-11-15  dtp r564 (OTV5 HYG.28). S26b accepts spec v2.13 OR LATER (S23b's pattern): spec v2.14 renames the ramp
       max's key in §1.8, and the pin on the exact version string made any later spec red. Same checks otherwise.
 v1.12 2026-11-14  dtp (OGAP.1). S26/S26b: section 1 reports OGAP on its own line (never in the window EV or the
@@ -598,6 +603,30 @@ ck("S26b", _m26 is not None and (int(_m26.group(1)), int(_m26.group(2))) >= (2, 
    and "**1.10 OGAP vs PARK" in spec and _RULE in _sf and "REPORT ONLY" in _sf[_sf.find("1.10 OGAP vs PARK"):]
    and spec.find("**1.9 OGAP") < spec.find("**1.10 OGAP vs PARK") < spec.find("\n## 2. ISSUES FROM THE BOT LOGS"),
    "the spec v2.13 carries 1.9 and 1.10 with the same rule, verbatim")
+
+# S27 (v1.14, O08): THE RUNAWAY O08 WOULD-BE. The operator, 2026-11-16: "Consider O08 as a candidate after we get more
+# paper trades" and "Include its 'would be' in the weekend briefs." (weekend only: the nightly review does not carry it).
+_NOTE = ("Candidate only. Decided at the end-of-November edge weighing (11-27) or later when the operator asks; no code "
+         "until their yes.")
+_o3 = p.find("· RUNAWAY O08 WOULD-BE")
+_p3 = _pf[_pf.find("RUNAWAY O08 WOULD-BE"):]
+ck("S27", 0 < _o2 < _o3 < p.find("## 2. ISSUES FROM THE BOT LOGS")
+   and "REPORT ONLY, never in the window EV or the theories" in _p3 and "from 2026-11-16" in _p3
+   and "(entry_ask - entry_bid) / ((entry_ask + entry_bid) / 2) > 0.05" in _p3 and "pnl_exec_usd" in _p3
+   and "mainline()" in _p3 and "UNSCORED, named by trade_id, never guessed" in _p3
+   and "day-bootstrap 95% interval on the delta" in _p3 and "fees on their own line beside, never in EV" in _p3
+   and "every skipped winner of $200 or more named as a cost" in _p3 and _NOTE in _p3,
+   "the prompt's section 1 has the RUNAWAY O08 WOULD-BE with the fixed decision note, report only")
+_m27 = re.search(r"# THE SATURDAY BRIEF — spec v(\d+)\.(\d+)", spec)
+_s3 = _sf[_sf.find("**1.11 RUNAWAY O08 WOULD-BE"):]
+ck("S27b", _m27 is not None and (int(_m27.group(1)), int(_m27.group(2))) >= (2, 15)
+   and spec.find("**1.10 OGAP vs PARK") < spec.find("**1.11 RUNAWAY O08 WOULD-BE") < spec.find("\n## 2. ISSUES FROM THE BOT LOGS")
+   and "`entry_bid`" in _s3 and "`entry_ask`" in _s3 and "`pnl_exec_usd`" in _s3 and "**2026-11-16**" in _s3
+   and "> 0.05" in _s3 and "UNSCORED" in _s3 and "REPORT ONLY" in _s3 and _NOTE in _s3,
+   "the spec v2.15 carries 1.11 after 1.10 with the columns and the same decision note, verbatim")
+_NR = os.path.join(ROOT, "tools", "nightly_review.prompt")
+ck("S27c", os.path.exists(_NR) and "O08" not in open(_NR).read(),
+   "the nightly review does not carry the O08 would-be (the operator said weekend briefs)")
 
 print()
 if FAILS:
