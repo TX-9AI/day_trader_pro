@@ -1,13 +1,15 @@
-# THE SATURDAY BRIEF — spec v2.15
+# THE SATURDAY BRIEF — spec v2.16
 
-**v2.15 · 2026-11-16 · dtp r565 (O08)**: §1.11, RUNAWAY O08 WOULD-BE every Saturday (report only, never in the window EV or the theories): the Runaway trades from 2026-11-16 re-scored as if O08 were on (skip the entry when the contract's spread at entry, (`entry_ask` − `entry_bid`) / mid, is more than 5% of mid; the 11-16 Runaway variant study's one sealed-holdout finalist), kept vs skipped, the exec-basis Δ with its interval, every skipped $200+ winner named as a cost, and a decision note fixed today and stated verbatim each week. The operator, 2026-11-16: "Consider O08 as a candidate after we get more paper trades" and "Include its 'would be' in the weekend briefs." Not in the nightly review.
+**v2.16 · 2026-11-19 · dtp r566 (MARK.1)**: THE MARK IS THE ONLY BASIS. The operator, 2026-11-19: "I don't give a rat shit what the bid-ask is. Mark is the worst buy or sell we accept." and "I just want the brief to reflect how we actually trade—which is the ladder." The entry ladder never fills worse than the mark, so every headline, sentence, EV, interval, theory ranking, PARK / setup summary, §1.9, §1.10 and §1.11 is on `pnl_usd`, the ladder's fill (mark or better), and the theories are sorted by the mark EV. v2.12's executable lead, its spread-cost line and its unpriced list are withdrawn, and the brief never calls the mark a paper assumption or something live fills do not get. Columns are never dropped: the ask/bid figure (window_ev.csv / theories.csv `*_exec*`, `pnl_exec_usd`) may appear only as the last, trailing column of a data table, never in prose. Fees beside, never inside EV. In every table the total adds up from the rows shown, on one basis.
+
+**v2.15 · 2026-11-16 · dtp r565 (O08)**: §1.11, RUNAWAY O08 WOULD-BE every Saturday (report only, never in the window EV or the theories): the Runaway trades from 2026-11-16 re-scored as if O08 were on (skip the entry when the contract's spread at entry, (`entry_ask` − `entry_bid`) / mid, is more than 5% of mid; the 11-16 Runaway variant study's one sealed-holdout finalist), kept vs skipped, the Δ with its interval (at the mark since v2.16), every skipped $200+ winner named as a cost, and a decision note fixed today and stated verbatim each week. The operator, 2026-11-16: "Consider O08 as a candidate after we get more paper trades" and "Include its 'would be' in the weekend briefs." Not in the nightly review.
 
 **v2.14 · 2026-11-15 · dtp r564 (HYG.28)**: §1.8 names the ramp max by its new key, `OT_BREAKOUT_BUDGET_USD` (OTV5 r125 renamed
 `OT_ORB_BUDGET_USD`, named after the retired ORB trade). Nothing else changes.
 
-**v2.13 · 2026-11-14 · dtp (OGAP.1)**: §1.9, OGAP on its own line every Saturday (Park's friend's opening-gap trade, QQQ paper, OTV5 OGAP.1; never in the window EV or the theories), and §1.10, OGAP VS PARK like for like (index rows, the exec basis, $500 of outlay a row) with a decision rule fixed today and stated verbatim each week, report only until its point. The operator, 2026-11-14: "let's design & paper trade the OGAP on QQQ" and "compare them".
+**v2.13 · 2026-11-14 · dtp (OGAP.1)**: §1.9, OGAP on its own line every Saturday (Park's friend's opening-gap trade, QQQ paper, OTV5 OGAP.1; never in the window EV or the theories), and §1.10, OGAP VS PARK like for like (index rows, $500 of outlay a row; at the mark since v2.16) with a decision rule fixed today and stated verbatim each week, report only until its point. The operator, 2026-11-14: "let's design & paper trade the OGAP on QQQ" and "compare them".
 
-**v2.12 · 2026-11-14 · dtp r557 (AM.1's reporting half)**: §1's EV benchmark leads with the EXECUTABLE basis (bought at the ask, sold at the bid; window_ev.csv `realized_exec`, `ev_exec_per_trade`, `ev_exec_lo/hi`, theories.csv `*_exec_ev`, from OTV5 r111's `pnl_exec_usd` and `~/reviews/exec_basis_backfill.csv` for earlier rows) with the mark beside it, the spread cost on its own line, and every unpriced trade named (never priced at the mark). Paper books the mark both ways, which no live fill gets. Fees stay beside, never in EV. The operator, 2026-11-14: "fix the top 10 today".
+**v2.12 · 2026-11-14 · dtp r557 (AM.1's reporting half)**: §1's EV benchmark leads with the EXECUTABLE basis (bought at the ask, sold at the bid; window_ev.csv `realized_exec`, `ev_exec_per_trade`, `ev_exec_lo/hi`, theories.csv `*_exec_ev`, from OTV5 r111's `pnl_exec_usd` and `~/reviews/exec_basis_backfill.csv` for earlier rows) with the mark beside it, the spread cost on its own line, and every unpriced trade named (never priced at the mark). Fees stay beside, never in EV. **Withdrawn by v2.16: the mark is the only basis.** The operator, 2026-11-14: "fix the top 10 today".
 
 **v2.11 · 2026-11-14 · dtp r555 (AM.9, the brief 2026-11-14 R4)**: the study seal is the dispatcher's. `study_dispatch.py` v1.3 writes each item's `SEAL.txt` on control before the agent starts, records and acks `FROZEN.json` on control, and accepts a result only on control's own record of the order (box mtimes decide nothing); fixes after the freeze go to `AMENDMENTS.txt`. The prompt's FALLBACK 2 on control logs each file's sha256 and UTC time in `CONTROL_LOG.txt`. The operator, 2026-11-14: "Yes" (R4) and "fix the top 10 today".
 
@@ -139,6 +141,8 @@ window-to-date: trades, realized, fees, EV per trade, EV without the worst setup
 `~/reviews/theories.csv` (the operator's pre-cash theories, scored nightly by `~/reviews/scripts/theories.py`).
 Report: window-to-date EV and its two exclusions; the week's change in each; the theories table as of Friday, with
 its leader and its n. Show the pre-decay days (10-26..10-30) and the post-decay days (from 11-02) separately.
+**The basis is the mark (v2.16):** `realized` and `ev_per_trade` and the theories' `*_ev` columns, the theories
+sorted by the mark EV; the ask/bid columns of these files are trailing data only, never discussed.
 These files belong to the daily review. **Read them and never write them.** If a day's row is missing, that day goes
 in NOT MEASURED. Check each day's trades and realized figures against the bundles (1.2). Report a mismatch.
 
@@ -222,13 +226,12 @@ makes no recommendation in §7.
 opening-gap trade, a faithful paper copy on the QQQ box only. The operator, 2026-11-14: "let's design & paper trade the OGAP on
 QQQ". It is NEVER in the 10-26..11-27 window EV, the theories or "ex worst setup" (dtp `tools/review_kit.py`
 `load_window` leaves it out). Report every OGAP row to date (strategy `OGAP` in `~/reviews/trades/*.csv`): n, W-L, the
-P&L on Park's basis (ask in, bid out: the AM.1 exec columns where the rows carry them, else `entry_ask` / `exit_bid`)
-with the mark basis beside it, fees beside and never in; EV a row with a day-bootstrap 95% interval; signals before vs
+P&L at the mark (`pnl_usd`, the ladder's fill, mark or better), fees beside and never in; EV a row with a day-bootstrap 95% interval; signals before vs
 after 10:00; calls vs puts; exit reasons; the gate-G shadows (`data/counterfactual/ogap_shadow.jsonl`, plan check
 `ogap_gateg_shadow`), labelled SHADOW and never in EV; the status of the bars (OGAP_SPEC §11).
 
 **1.10 OGAP vs PARK (every Saturday).** The operator, 2026-11-14: "compare them". Like for like: index rows only (QQQ,
-SPX), the AM.1 exec basis (ask in, bid out) with the mark beside it, each row scaled to $500 of premium outlay (P&L x
+SPX), at the mark (`pnl_usd`, the ladder's fill, mark or better), each row scaled to $500 of premium outlay (P&L x
 500 / (entry premium x contracts x 100)), fees beside, never in EV. Per setup: n, EV a trade with a day-bootstrap 95%
 interval, the worst day, the largest loss. Overlap days (both fired the same session): the count, the share on the same
 side, and the correlation of daily P&L on the days both traded. **The decision rule, fixed 2026-11-14 and stated
@@ -249,18 +252,18 @@ Source: OTV5 `tests/warehouse_source.load_trades(dates)` for every day from **20
 study's holdout ended 11-13) through the Friday, then `mainline()` (rule 10: the old OTV4TEST fleet's rows
 out, their count named), then `strategy == "RunawayContinuation"`, closed rows only. Columns: on the warehouse trade row
 (OTV5 `database/trade_logger.py`), `entry_bid` and `entry_ask` (the chosen contract's quote at entry, the study's
-inputs), `pnl_exec_usd` (the AM.1 exec basis, ask in, bid out), `symbol`, `direction`, `entry_time` (UTC; the ET
+inputs), `pnl_usd` (the mark: the ladder's fill, mark or better), `symbol`, `direction`, `entry_time` (UTC; the ET
 day), `trade_id`; the fee is not on the warehouse row, so it is the `fee` column of the same trade_id in
 `~/reviews/trades/<day>.csv` (blank: dtp `tools/review_kit.est_fee(symbol, contracts)`, labelled estimated).
 A row is SKIPPED when the ratio above is > 0.05, KEPT when it is ≤ 0.05. A row with `entry_bid` or `entry_ask` missing, zero or crossed (bid > ask) is UNSCORED: named by trade_id, symbol and day, counted in neither
-column, never guessed. A row with no `pnl_exec_usd` is named UNPRICED and never priced at the mark. Report, for the
+column, never guessed. Report, for the
 week and cumulative from 11-16:
 - trades kept vs skipped (and unscored), by symbol, with the median spread % of mid per symbol;
-- the exec-basis P&L of ALL Runaway trades vs the O08-KEPT trades, and Δ = kept − all (= minus the skipped trades'
+- the P&L at the mark of ALL Runaway trades vs the O08-KEPT trades, and Δ = kept − all (= minus the skipped trades'
   P&L), with a day-bootstrap 95% interval on Δ (resample the trading days with replacement, 10,000 draws, the day's
   Δ being minus that day's skipped P&L); EV a trade for both books;
 - fees on their own line beside each book (all vs kept), never in EV or Δ;
-- the skipped trades listed (day, symbol, side, spread % of mid, `pnl_exec_usd`), with **every skipped winner of
+- the skipped trades listed (day, symbol, side, spread % of mid, `pnl_usd`), with **every skipped winner of
   $200 or more named as a cost** (the study's own three, NFLX 11-13 +$910, SOFI 11-05 +$366 and SOFI 11-13 +$261,
   fall before the forward record and are not in these numbers);
 - index rows (SPX, QQQ) on their own line: O08 is expected to skip none, and any index skip is named.

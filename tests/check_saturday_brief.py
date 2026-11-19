@@ -1,6 +1,13 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_saturday_brief.py  v1.14
+day_trader_pro/tests/check_saturday_brief.py  v1.15
+v1.15 2026-11-19  dtp r566 (MARK.1). THE MARK IS THE ONLY BASIS. The operator, 2026-11-19: "I don't give a rat shit what
+      the bid-ask is. Mark is the worst buy or sell we accept." S25 RESTATED (it pinned r557's executable lead): the
+      prompt's section 1 leads at the mark, sorts the theories by the mark EV, names the basis "the ladder's fill (mark
+      or better)", forbids a spread-cost line and exec figures in prose (trailing data column only), and carries none of
+      r557's lead text; spec v2.16 says the same. S28: OGAP, OGAP VS PARK and the O08 would-be are scored at the mark
+      (pnl_usd) in the prompt and in spec 1.9-1.11, with no "ask in, bid out", no pnl_exec_usd and no UNPRICED rule.
+      S27/S27b follow (pnl_usd, not pnl_exec_usd). Red on r565 at S25, S27, S27b and S28.
 v1.14 2026-11-16  dtp r565 (O08). S27/S27b: section 1 reports the RUNAWAY O08 WOULD-BE (report only, never in the
       window EV or the theories): Runaway trades from 2026-11-16 re-scored on entry_bid/entry_ask (skip above 5% of
       mid), exec basis (pnl_exec_usd) all vs kept with a day-bootstrap interval, fees beside, skipped $200+ winners named
@@ -547,11 +554,20 @@ ck("S24", "the SEAL is the dispatcher's" in _qf and "earlier poll than RESULT.js
    and "CONTROL_LOG.txt" in _qf and "AMENDMENTS.txt" in _qf
    and "**v2.11 ·" in spec and "never self-attested" in _sf and "FROZEN.ack" in _sf and "CONTROL_LOG.txt" in _sf,
    "the prompt and spec v2.11: the dispatcher writes the seal, control proves the order, the fallback logs each sha")
-# S25 (v1.11, dtp r557 / AM.1): §1's EV benchmark leads with the executable basis, the mark beside
-_p1 = re.sub(r"\s+", " ", p.split("## 1. TRADING SUMMARY", 1)[-1][:1500])
-ck("S25", "LED BY THE EXECUTABLE BASIS" in _p1 and "ev_exec_per_trade" in _p1 and "the mark beside it" in _p1
-   and "exec_unpriced_n" in _p1 and re.search(r"spec v2\.(1[2-9]|[2-9][0-9])|spec v[3-9]\.", spec) is not None and "EXECUTABLE basis" in spec,
-   "the prompt's §1 and spec v2.12 lead the EV benchmark with the executable basis and keep the mark beside")
+# S25 (v1.15, dtp r566 / MARK.1; restated from v1.11's executable lead): §1's EV benchmark is at the mark only
+_p1 = re.sub(r"\s+", " ", p.split("## 1. TRADING SUMMARY", 1)[-1][:1800])
+_m25 = re.search(r"# THE SATURDAY BRIEF — spec v(\d+)\.(\d+)", spec)
+_s25 = re.sub(r"\s+", " ", spec)
+ck("S25", "AT THE MARK, THE ONLY BASIS" in _p1 and "SORTED BY THE MARK EV" in _p1
+   and "the ladder's fill (mark or better)" in _p1 and "No spread-cost line" in _p1 and "never in prose" in _p1
+   and "the total adds up from the rows shown" in _p1
+   and "LED BY THE EXECUTABLE BASIS" not in _p1 and "the spread cost on its own line" not in _p1
+   and "exec_unpriced_n named" not in _p1 and "Mark is the worst buy or sell we accept." in _p1
+   and _m25 is not None and (int(_m25.group(1)), int(_m25.group(2))) >= (2, 16)
+   and "THE MARK IS THE ONLY BASIS" in _s25 and "sorted by the mark EV" in _s25
+   and "the ladder's fill (mark or better)" in _s25 and "**The basis is the mark (v2.16):**" in _s25
+   and "Paper books the mark both ways, which no live fill gets" not in _s25,
+   "the prompt's §1 and spec v2.16: the mark is the only basis, theories by the mark EV, exec only as a trailing column")
 _shs = open(SH).read()
 ck("S23c", '$WORK/study_dispatch — $_fri' in _shs and 'if [ -f "$WORK/study_dispatch/state.json" ]' in _shs
    and _shs.index('_fri="state.json present') < _shs.index('timeout "$BUDGET_S"'),
@@ -612,7 +628,7 @@ _o3 = p.find("· RUNAWAY O08 WOULD-BE")
 _p3 = _pf[_pf.find("RUNAWAY O08 WOULD-BE"):]
 ck("S27", 0 < _o2 < _o3 < p.find("## 2. ISSUES FROM THE BOT LOGS")
    and "REPORT ONLY, never in the window EV or the theories" in _p3 and "from 2026-11-16" in _p3
-   and "(entry_ask - entry_bid) / ((entry_ask + entry_bid) / 2) > 0.05" in _p3 and "pnl_exec_usd" in _p3
+   and "(entry_ask - entry_bid) / ((entry_ask + entry_bid) / 2) > 0.05" in _p3 and "pnl_usd" in _p3
    and "mainline()" in _p3 and "UNSCORED, named by trade_id, never guessed" in _p3
    and "day-bootstrap 95% interval on the delta" in _p3 and "fees on their own line beside, never in EV" in _p3
    and "every skipped winner of $200 or more named as a cost" in _p3 and _NOTE in _p3,
@@ -621,12 +637,27 @@ _m27 = re.search(r"# THE SATURDAY BRIEF — spec v(\d+)\.(\d+)", spec)
 _s3 = _sf[_sf.find("**1.11 RUNAWAY O08 WOULD-BE"):]
 ck("S27b", _m27 is not None and (int(_m27.group(1)), int(_m27.group(2))) >= (2, 15)
    and spec.find("**1.10 OGAP vs PARK") < spec.find("**1.11 RUNAWAY O08 WOULD-BE") < spec.find("\n## 2. ISSUES FROM THE BOT LOGS")
-   and "`entry_bid`" in _s3 and "`entry_ask`" in _s3 and "`pnl_exec_usd`" in _s3 and "**2026-11-16**" in _s3
+   and "`entry_bid`" in _s3 and "`entry_ask`" in _s3 and "`pnl_usd`" in _s3 and "**2026-11-16**" in _s3
    and "> 0.05" in _s3 and "UNSCORED" in _s3 and "REPORT ONLY" in _s3 and _NOTE in _s3,
    "the spec v2.15 carries 1.11 after 1.10 with the columns and the same decision note, verbatim")
 _NR = os.path.join(ROOT, "tools", "nightly_review.prompt")
 ck("S27c", os.path.exists(_NR) and "O08" not in open(_NR).read(),
    "the nightly review does not carry the O08 would-be (the operator said weekend briefs)")
+
+# S28 (v1.15, dtp r566 / MARK.1): OGAP, OGAP VS PARK and the O08 would-be are scored at the mark, in the prompt
+# and in spec 1.9-1.11. The operator, 2026-11-19: "I just want the brief to reflect how we actually trade—which is the
+# ladder."
+_i28, _j28 = _pf.find("· OGAP (standing"), _sf.find("**1.9 OGAP, its own line")
+_p28 = _pf[_i28:_pf.find("## 2. ISSUES FROM THE BOT LOGS", _i28)] if _i28 >= 0 else ""
+_s28 = _sf[_j28:_sf.find("## 2. ISSUES FROM THE BOT LOGS", _j28)] if _j28 >= 0 else ""
+_bad = ("ask in, bid out", "pnl_exec_usd", "exec-basis", "exec basis", "UNPRICED", "the mark beside it",
+        "the mark basis beside it")
+ck("S28", bool(_p28) and bool(_s28) and not [b for b in _bad if b in _p28 or b in _s28]
+   and _p28.count("the ladder's fill, mark or better") >= 2 and _s28.count("the ladder's fill, mark or better") >= 3
+   and "P&L AT THE MARK (pnl_usd) of ALL Runaway trades" in _p28
+   and "the P&L at the mark of ALL Runaway trades vs the O08-KEPT trades" in _s28,
+   "OGAP, OGAP VS PARK and the O08 would-be at the mark (pnl_usd), no ask/bid basis, no UNPRICED rule; found %s"
+   % [b for b in _bad if b in _p28 or b in _s28])
 
 print()
 if FAILS:

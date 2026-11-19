@@ -12,9 +12,13 @@ READ FIRST, IN THIS ORDER:
 
 THE BRIEF HAS SEVEN SECTIONS, IN THIS ORDER, EACH ONE STANDING ON ITS OWN:
   ## 1. TRADING SUMMARY
-       EV benchmark (~/reviews/window_ev.csv, theories.csv; pre- and post-decay days apart), LED BY THE EXECUTABLE
-       BASIS since dtp r557 (realized_exec, ev_exec_per_trade and its interval, the *_exec_ev theory columns: bought at
-       the ask, sold at the bid) with the mark beside it, the spread cost on its own line and exec_unpriced_n named;
+       EV benchmark (~/reviews/window_ev.csv, theories.csv; pre- and post-decay days apart), AT THE MARK, THE ONLY
+       BASIS (dtp r566, spec v2.16; the operator 2026-11-19: "I don't give a rat shit what the bid-ask is. Mark is the
+       worst buy or sell we accept."): realized, ev_per_trade and the *_ev theory columns, the theories SORTED BY THE
+       MARK EV. Where you name the basis, call it "the ladder's fill (mark or better)". No spread-cost line, no ask/bid
+       (exec) figure in any headline or sentence, nothing calling the mark a paper assumption or something live fills
+       do not get; the *_exec* columns may appear only as the last, trailing column of a data table, never in prose.
+       In every table the total adds up from the rows shown, on one basis;
        by setup, side, day and symbol; missed moves; giveback (~/reviews/giveback.csv);
        the PARK late-day shadow (derived_plan_check park_late_*, read by check_name), never in EV
        (the TCS shadow was deleted by OTV5 r88); fees on their own line, never in EV; the R ledger and excursions.
@@ -43,13 +47,13 @@ THE BRIEF HAS SEVEN SECTIONS, IN THIS ORDER, EACH ONE STANDING ON ITS OWN:
          cash. It is not a study (never in WEEKEND_STUDIES.md) and it makes no recommendation in section 7.
        · OGAP (standing, every Saturday from 2026-11-16; OTV5 OGAP.1, Park's friend's opening-gap trade, QQQ paper only). Its OWN
          line: never in the 10-26..11-27 window EV, the theories or "ex worst setup". Every OGAP row to date in
-         ~/reviews/trades/*.csv (strategy "OGAP"): n, W-L, P&L on Park's basis (ask in, bid out: the AM.1 exec columns
-         when the rows carry them, else entry_ask / exit_bid) with the mark basis beside it, fees beside, never in;
+         ~/reviews/trades/*.csv (strategy "OGAP"): n, W-L, P&L at the mark (pnl_usd, the ladder's fill, mark or
+         better), fees beside, never in;
          EV a row with a day-bootstrap 95% interval; signal before vs after 10:00; calls vs puts; exit reasons; the
          gate-G shadows (data/counterfactual/ogap_shadow.jsonl, plan check ogap_gateg_shadow), labelled SHADOW, never
          in EV; and the status of the bars (OTV5 docs/OGAP_SPEC.md §11: 12 rows, 4 straight losers, the clock tag).
        · OGAP VS PARK (standing, every Saturday; the operator 2026-11-14: "compare them"). Like for like: INDEX rows
-         only (QQQ, SPX), the AM.1 exec basis (ask in, bid out) with the mark beside it, each row scaled to $500 of
+         only (QQQ, SPX), at the mark (pnl_usd, the ladder's fill, mark or better), each row scaled to $500 of
          premium outlay (P&L x 500 / (entry premium x contracts x 100)), fees beside, never in EV. Per setup: n, EV a
          trade with a day-bootstrap 95% interval, the worst day, the largest loss. Overlap days (both fired the same
          session): the count, the share on the same side, and the correlation of daily P&L on the days both traded.
@@ -62,11 +66,11 @@ THE BRIEF HAS SEVEN SECTIONS, IN THIS ORDER, EACH ONE STANDING ON ITS OWN:
          briefs."). REPORT ONLY, never in the window EV or the theories. Re-score every closed RunawayContinuation
          trade from 2026-11-16 through this Friday (load_trades, then mainline(): the OTV4TEST fleet's rows out,
          their count named) as if O08 were on: SKIP when (entry_ask - entry_bid) / ((entry_ask + entry_bid)
-         / 2) > 0.05, else KEEP. entry_bid / entry_ask / pnl_exec_usd are on the warehouse trade row; the fee is the
+         / 2) > 0.05, else KEEP. entry_bid / entry_ask / pnl_usd are on the warehouse trade row; the fee is the
          same trade_id's fee in ~/reviews/trades/<day>.csv (blank: review_kit.est_fee, labelled estimated). A row
-         whose entry_bid or entry_ask is missing, zero or crossed is UNSCORED, named by trade_id, never guessed; a
-         row with no pnl_exec_usd is named UNPRICED, never priced at the mark. For the week and cumulative: kept vs
-         skipped (and unscored) by symbol with the median spread % of mid; exec-basis P&L of ALL Runaway trades vs
+         whose entry_bid or entry_ask is missing, zero or crossed is UNSCORED, named by trade_id, never guessed. For
+         the week and cumulative: kept vs skipped (and unscored) by symbol with the median spread % of mid; P&L AT
+         THE MARK (pnl_usd) of ALL Runaway trades vs
          the O08-KEPT trades and the delta, with a day-bootstrap 95% interval on the delta; EV a trade for both;
          fees on their own line beside, never in EV; the skipped trades listed, every skipped winner of $200 or more
          named as a cost; index rows (SPX, QQQ) on their own line, any index skip named.

@@ -1,13 +1,22 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/review_kit.py — v1.5
+day_trader_pro/tools/review_kit.py — v1.6
+v1.6  2026-11-19  dtp r566 / MARK.1 — THE WINDOW LEADS WITH THE MARK, AND ONLY THE MARK IS DISCUSSED. The operator,
+      2026-11-19: "I don't give a rat shit what the bid-ask is. Mark is the worst buy or sell we accept." and "I just
+      want the brief to reflect how we actually trade—which is the ladder." The entry ladder never fills worse than
+      the mark, so pnl_usd (the ladder's fill, mark or better) is the one basis. `window` prints the mark block first
+      and alone (n, realized, EV, its day-bootstrap interval, fees beside, ex worst setup / symbol, without 10-26,
+      post-decay), then the theories table SORTED BY THE MARK EV with the ask/bid figure as one trailing data
+      column ("x n" and "x EV"), never a headline. No spread-cost line and no unpriced list are printed. Columns are
+      never dropped: window()['exec'], the trade CSVs' four exec columns and the exec columns of window_ev.csv and
+      theories.csv are all kept and written as before (trailing data). Fees stay beside, never inside EV.
 v1.5  2026-11-14  dtp (OGAP.1) — OGAP IS ON ITS OWN LINE. The operator, 2026-11-14: "let's design & paper trade the OGAP on
       QQQ" (D3: its own line, outside the 10-26..11-27 benchmark). load_window leaves strategy OGAP out, so window_ev.csv,
       theories.csv and "ex worst setup" are byte-identical on every day OGAP did not trade; `window` prints one OGAP line
       (n, total, EV a row, fees beside) after the theories. Nothing else changes.
 v1.4  2026-11-14  dtp r557 / AM.1's reporting half — THE WINDOW LEADS WITH THE EXECUTABLE BASIS (buy at the ask, sell at
-      the bid), THE MARK BESIDE IT. The operator, 2026-11-14: "fix the top 10 today" (the amnesty bucket's AM.1: paper
-      books the mark both ways, so the EV benchmark carries no spread cost). OTV5 r111 adds four trade columns
+      the bid), THE MARK BESIDE IT. The operator, 2026-11-14: "fix the top 10 today" (the amnesty bucket's AM.1).
+      WITHDRAWN AS THE LEAD BY v1.6 (the mark is the only basis); the columns stay. OTV5 r111 adds four trade columns
       (entry_exec_premium, exit_exec_premium, pnl_exec_usd, would_fill_live); history 10-26..r111 comes from
       ~/reviews/exec_basis_backfill.csv (OTV5 tools/backfill_exec_basis.py, by trade_id). The trade CSVs carry the
       four columns (appended; nothing dropped). `window` prints the executable figures FIRST (n priced, realized, EV,
@@ -393,20 +402,10 @@ def cmd_window(cut, write=True):
     th = w["theories"]
     e = w["exec"]
     lo, hi = _f(w["lo"]), _f(w["hi"])
-    # v1.4 (AM.1): the executable basis LEADS; the mark is beside it
-    print("window %s..%s EXECUTABLE BASIS (bought at the ask, sold at the bid): %d of %d trades priced, realized %+.2f,"
-          " EV %+.2f a trade, 95%% day-bootstrap [%s, %s]" % (WINDOW_START, w["cut"], e["n"], w["n"], e["total"], e["ev"],
-                                                              _f(e["lo"]), _f(e["hi"])))
-    print("  exec: ex worst setup (%s) %+.2f | ex worst symbol (%s) %+.2f | spread cost against the mark on the same"
-          " %d rows %+.2f" % (e["worst_setup"], e["ev_ex_setup"], e["worst_sym"], e["ev_ex_sym"], e["n"],
-                              e["total"] - e["mark_total"]))
-    if e["unpriced"]:
-        print("  exec NOT PRICED: %d trade(s), never priced at the mark: %s" % (
-            len(e["unpriced"]), "; ".join("%s (%s)" % (t or "?", why) for t, why in e["unpriced"][:20])))
-    for lab, (n, ev, tot) in e["theories"].items():
-        print("  exec %-33s n=%4d EV %+8.2f total %+10.2f" % (lab, n, ev, tot))
-    print("window %s..%s AT THE MARK (beside, for continuity): %d trades over %d days, realized %+.2f, EV %+.2f a"
-          " trade, 95%% day-bootstrap [%s, %s]" % (WINDOW_START, w["cut"], w["n"], w["days"], w["total"], w["ev"], lo, hi))
+    # v1.6 (MARK.1): the mark is the basis (the ladder's fill, mark or better); the ask/bid figure is a trailing
+    # data column of the theories table only, never a headline
+    print("window %s..%s AT THE MARK (the ladder's fill, mark or better): %d trades over %d days, realized %+.2f, EV %+.2f"
+          " a trade, 95%% day-bootstrap [%s, %s]" % (WINDOW_START, w["cut"], w["n"], w["days"], w["total"], w["ev"], lo, hi))
     print("  fees beside (never inside): %.2f, of which estimated %.2f" % (w["fees"], w["fees_est"]))
     print("  ex worst setup (%s) %+.2f | ex worst symbol (%s) %+.2f" % (w["worst_setup"], w["ev_ex_setup"],
                                                                          w["worst_sym"], w["ev_ex_sym"]))
@@ -414,8 +413,10 @@ def cmd_window(cut, write=True):
     n1, t1 = w["post_decay"]
     print("  without %s: n=%d %+.2f EV %+.2f | post-decay (%s..): n=%d %+.2f EV %+.2f" % (
         OUTLIER_DAY, n0, t0, (t0 / n0 if n0 else 0), POST_DECAY, n1, t1, (t1 / n1 if n1 else 0)))
-    for lab, (n, ev, tot) in th.items():
-        print("  %-38s n=%4d EV %+8.2f total %+10.2f" % (lab, n, ev, tot))
+    print("  theories, sorted by the mark EV (trailing data columns x n / x EV: not for prose):")
+    for lab, (n, ev, tot) in sorted(th.items(), key=lambda kv: -kv[1][1]):
+        xn, xev, _xt = e["theories"].get(lab, (0, 0.0, 0.0))
+        print("  %-38s n=%4d EV %+8.2f total %+10.2f | x n=%4d x EV %+8.2f" % (lab, n, ev, tot, xn, xev))
     og = ogap_rows(w["cut"])
     if og:
         _t = sum(x["pnl"] for x in og)

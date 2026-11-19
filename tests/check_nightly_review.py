@@ -1,6 +1,13 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_nightly_review.py  v1.4
+day_trader_pro/tests/check_nightly_review.py  v1.5
+v1.5  2026-11-19  dtp r566 / MARK.1 — THE MARK IS THE ONLY BASIS. The operator, 2026-11-19: "I don't give a rat shit what
+      the bid-ask is. Mark is the worst buy or sell we accept." N15 RESTATED (it pinned r557's executable lead): the
+      prompt leads at the mark, sorts the theories by the mark EV, names the basis "the ladder's fill (mark or better)",
+      forbids a spread-cost line and exec figures in prose, keeps totals on one basis, and tells the session to drop a
+      pre-r566 prior's exec framing. N16 DRIVEN: `review_kit window` prints the mark block first with no EXECUTABLE
+      headline, no spread-cost line and no unpriced list, the theories sorted by the mark EV with the exec EV as the
+      trailing column of each row only; window()['exec'] and both CSVs' exec columns are kept (N14). Red on r565.
 v1.4  2026-11-14  AM.1 — N14 the window leads with the executable basis (row, else back-fill; unpriced named, never the
       mark); window_ev.csv and theories.csv migrate with every old cell kept; the trade CSV keeps its 13 columns first.
 v1.3  2026-11-14  AM.10 — N13 the blank-fee estimate caps equity commission at $10 a leg (OTV5 tests/fees.py); SPX uncapped.
@@ -486,11 +493,54 @@ ck("N14", n14, "exec basis: the row's own pnl_exec_usd wins over the back-fill (
    % (e14["n"], e14["total"], e14["unpriced"]))
 shutil.rmtree(fx3, ignore_errors=True)
 
-# N15 (v1.4, AM.1): the nightly prompt leads the window with the executable basis and names unpriced trades
+# N15 (v1.5, MARK.1; restated from v1.4's executable lead): the nightly prompt leads with the mark, the only basis
 _pr15 = re.sub(r"\s+", " ", read(os.path.join(TOOLS, "nightly_review.prompt")))
-ck("N15", "EXECUTABLE BASIS FIRST" in _pr15 and "LED BY THE EXECUTABLE BASIS" in _pr15
-   and "never priced at the mark" in _pr15 and "the mark beside" in _pr15,
-   "the nightly prompt: executable first, the mark beside, unpriced trades named")
+ck("N15", "THE MARK IS THE ONLY BASIS" in _pr15 and "LED BY THE MARK, the only basis" in _pr15
+   and "SORTED BY THE MARK EV" in _pr15 and "the ladder's fill (mark or better)" in _pr15
+   and "No spread-cost line" in _pr15 and "trailing column of a data table" in _pr15
+   and "the total must add up from the rows shown, on one basis" in _pr15
+   and "EXCEPT its basis" in _pr15 and "Mark is the worst buy or sell we accept." in _pr15
+   and "EXECUTABLE BASIS FIRST" not in _pr15 and "LED BY THE EXECUTABLE BASIS" not in _pr15
+   and "sorted by the executable EV" not in _pr15 and "which no live fill gets" not in _pr15
+   and "Park's basis (ask in, bid out)" not in _pr15,
+   "the nightly prompt: the mark only, theories by the mark EV, exec only as a trailing data column")
+
+# N16 (v1.5, MARK.1) DRIVEN: the kit's window block leads with the mark and sorts the theories by the mark EV; the exec
+# EV is each theory row's trailing column only; no spread-cost line, no unpriced list
+import io as _io
+import contextlib as _cl
+fx4 = tempfile.mkdtemp(prefix="nrev_mark_")
+shutil.copytree(os.path.join(fx, "scripts"), os.path.join(fx4, "scripts"))
+os.makedirs(os.path.join(fx4, "trades"))
+for day in ("2026-11-05", "2026-11-06"):
+    with open(os.path.join(fx4, "trades", day + ".csv"), "w", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=K.TRADE_COLS)
+        w.writeheader()
+        for i, (s_, st_, c, e, x, mf, p_, t, fee) in enumerate(rows):
+            if t[:10] == day:
+                w.writerow(dict(sym=s_, trade_id="t%d" % i, strategy=st_, direction="long", contracts=c,
+                                entry_premium=e, exit_premium=x, pnl_usd=p_, entry_time=t, exit_time=t,
+                                exit_reason="x", fee=fee, mfe_premium=mf, pnl_exec_usd=("-1050" if i == 0 else "")))
+_old_rev = K.REVIEWS
+K.REVIEWS = fx4
+_buf = _io.StringIO()
+with _cl.redirect_stdout(_buf):
+    w16 = K.cmd_window("2026-11-06", write=True)
+K.REVIEWS = _old_rev
+o16 = _buf.getvalue()
+L16 = o16.splitlines()
+_th = [l for l in L16 if re.match(r"^  \S.*n=\s*\d+ EV\s", l)]
+_evs = [float(re.search(r" EV\s+([+-][\d.]+) total", l).group(1)) for l in _th if re.search(r" EV\s+([+-][\d.]+) total", l)]
+_x_ok = bool(_th) and all(re.search(r"\| x n=\s*\d+ x EV\s+[+-][\d.]+$", l) for l in _th)
+_wl16 = open(os.path.join(fx4, "window_ev.csv")).read().splitlines()
+n16 = (bool(L16) and L16[0].startswith("window ") and "AT THE MARK (the ladder's fill, mark or better)" in L16[0]
+       and "-620.00" in L16[0] and "EXECUTABLE" not in o16 and "spread cost" not in o16 and "NOT PRICED" not in o16
+       and "exec " not in o16 and len(_th) == len(w16["theories"]) and _evs == sorted(_evs, reverse=True) and _x_ok
+       and "exec" in w16 and _wl16[0] == K.WINDOW_HDR and _wl16[1].split(",")[9] == "1")
+shutil.rmtree(fx4, ignore_errors=True)
+ck("N16", n16, "review_kit window: the mark leads (%r), theories sorted by the mark EV %s, exec only as each row's "
+   "trailing x column (%s), no spread cost / EXECUTABLE / unpriced line; exec still in window() and window_ev.csv"
+   % (L16[0][:60] if L16 else "", _evs, _x_ok))
 
 # N13 (v1.3, AM.10): a blank-fee row's estimate caps the equity commission at $10 a leg, as OTV5's fee model does
 _e = getattr(K, "est_fee", None)
