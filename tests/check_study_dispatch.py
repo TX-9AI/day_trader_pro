@@ -1,6 +1,16 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_study_dispatch.py  v1.4
+day_trader_pro/tests/check_study_dispatch.py  v1.5
+v1.5  2026-11-19  dtp r567 / SD.1 — A STATUS WITH "]" IN IT (study_dispatch v1.6; the operator, 2026-11-19: "Yes, fix
+      the bug"). BQUEUE is modelled on the real WS.6 bullets: intervals inside the status ("[-882, -177]"), a status
+      mid-line followed by more text (WS.6d), a status at the end with the bullet wrapping on (WS.6a-6c), a line with
+      two statuses, nested brackets, a bullet with a bracket but no status, and one with no status at all.
+      B1 `plan` itself (main(["plan", ...]), stdout read) lists none of WS.6a-6d and every sub-item reads its own
+      status; B2 set_status REPLACES (one [Status: ...] on the line, the rest of the line and every other line
+      byte-identical, WS.6d's trailing text kept) and a second rewrite still leaves one; B3 two statuses read as the
+      last and a rewrite collapses them to one; nested brackets read whole; B4 a bullet with no status takes the
+      parent's (a bracket that is not a status is not read as one) and set_status appends one. Red on r566 (B1-B3);
+      a mutant with the greedy ".*" in both patterns is red at B1 (WS.6d, its status mid-line, reads OPEN).
 v1.4  2026-11-15  dtp r563 / B5.10 — A1 RE-POINTED: CRM is an ordinary box (study_dispatch v1.5 drops NEVER_BOXES; the
       operator, 2026-11-14). FLEET lists CRM last, running and unassigned, so A1b now requires it to be STOPPED like
       any idle running box; A1 keeps "a box someone else claimed is left alone". A2-A4 unchanged.
@@ -570,6 +580,97 @@ ck("S6", "mtimes" not in _v and "--permission-mode acceptEdits" in sd.RUNNER and
    and "FROZEN.ack" in sd.BRIEF_HEAD and "AMENDMENTS.txt" in sd.BRIEF_HEAD and "Write SEAL.txt FIRST" not in sd.BRIEF_HEAD,
    "validate takes no box mtimes; the runner makes the seal read-only and grants writes in the work dir (WS.6d); "
    "the brief says the seal is written, to wait for the ack, and to append amendments")
+
+# ── v1.5 (SD.1): a status with "]" in it ─────────────────────────────────────────────────────────────────────
+import contextlib  # noqa: E402
+
+BQUEUE = """# WEEKEND STUDIES
+
+## QUEUE
+
+### WS.6 — PARK, from Park's studies
+- Status: OPEN (added 2026-11-10)
+- Seal rule (all parts): only sessions after 2026-11-10; with too few set `FORWARD to 2026-11-27`.
+- **WS.6a, calls vs puts.** Hypothesis: our PARK calls have EV ≤ 0. Bar: if the calls' sealed or forward EV ≤ 0 \
+[Status: FORWARD to 2026-11-27 — No PARK trade has fired since 11-06; on the unsealed window the calls lost \
+-$606/trade [-882, -177] (n=33) while the puts made +$814 [-521, +2,510] (n=21). (/home/x/reviews/studies/WS.6a_20261113)]
+  with the puts' > 0, then TRIM or tighten PARK calls. Otherwise keep.
+- **WS.6b, Gate-G.** Never trade against the opening gap (refuse only) [Status: FORWARD to 2026-11-27 — 0 sealed \
+trades; on the 54-trade window Gate-G cut 9 losers (-$1,194.5) and 6 winners (+$1,117) [-65.9 vs -53.9]. \
+(/home/x/reviews/studies/WS.6b_20261113)]
+  as a refuser on live PARK. Outcome: TUNE.
+- **WS.6c, lock vs hold.** Our +60%/+20% lock against holding to the 15:45 mark [Status: FORWARD to 2026-11-27 — \
+holding beat the lock by +$36/trade [-195, +348], helped puts (+$419 [+48, +846], n=21) and hurt calls \
+(-$208 [-398, -3], n=33). (/home/x/reviews/studies/WS.6c_20261113)]
+  TUNE (exit change) or keep the lock.
+- **WS.6d, QQQ vs SPX.** [Status: FORWARD to 2026-11-27 — QQQ +$51/trade [-577, +1,070] (n=7) and SPX +$241 \
+[-2,923, +6,032] (n=6); window $115 [-358, +157] (n=41). (/home/x/reviews/studies/WS.6d_20261114)] Hypothesis: PARK \
+on QQQ outperforms PARK on SPX (Park's study: QQQ +$689 vs SPY +$228).
+  Bar: report the split with intervals.
+- **WS.6e, two statuses.** An old append left two [Status: OPEN (added [11-10])] [Status: DONE 2026-11-14 — FAIL \
+[-1, +2]]
+- **WS.6f, nested.** [Status: FORWARD to 2026-12-04 — arm [A [x, y]] vs arm [B]]
+- **WS.6g, a bracket only.** The interval [-882, -177] is not a status.
+- **WS.6h, nothing.** No status here.
+
+### WS.7 — Hunt entry filter
+- Status: FORWARD to 2026-11-27 — parent forward
+- **WS.7a, no status.** Takes the parent's.
+- **WS.7b, a bracket only.** [-1, +2] is not a status either.
+
+---
+
+## DONE
+"""   # a trailing backslash joins the line below: each bullet is one line, as in the real file
+_bi = {i["id"]: i["status"] for i in sd.parse_queue(BQUEUE)}
+_bd = tempfile.mkdtemp(prefix="sd_b_")
+_bq = os.path.join(_bd, "WEEKEND_STUDIES.md")
+open(_bq, "w").write(BQUEUE)
+_out = io.StringIO()
+with contextlib.redirect_stdout(_out):
+    _rc = sd.main(["plan", "--queue", _bq, "--out", os.path.join(_bd, "out")])
+_plan = [ln.split(":", 1)[0] for ln in _out.getvalue().splitlines() if ln.startswith("WS.")]
+ck("B1", _rc == 0 and _plan == ["WS.6g", "WS.6h"] and "2 OPEN item(s)" in _out.getvalue()
+   and all(_bi[x].startswith("FORWARD to 2026-11-27") for x in ("WS.6a", "WS.6b", "WS.6c", "WS.6d"))
+   and _bi["WS.6a"].endswith("(/home/x/reviews/studies/WS.6a_20261113)") and "[-882, -177]" in _bi["WS.6a"]
+   and _bi["WS.6d"].endswith("(/home/x/reviews/studies/WS.6d_20261114)") and "Hypothesis" not in _bi["WS.6d"],
+   f"plan lists none of WS.6a-6d (a status with intervals, at the end or mid-line, is read whole): plan={_plan}, "
+   f"WS.6d={_bi.get('WS.6d', '')[:40]!r}")
+_lines = BQUEUE.splitlines()
+_ok2 = []
+for x in ("WS.6a", "WS.6b", "WS.6c", "WS.6d"):
+    t1 = sd.set_status(BQUEUE, x, "DONE 2026-11-20 — PASS [+1, +2]")
+    t2 = sd.set_status(t1, x, "DONE 2026-11-21 — FAIL")
+    l0 = next(ln for ln in _lines if ln.startswith(f"- **{x}"))
+    l1 = next(ln for ln in t1.splitlines() if ln.startswith(f"- **{x}"))
+    l2 = next(ln for ln in t2.splitlines() if ln.startswith(f"- **{x}"))
+    other = [a for a, b in zip(_lines, t1.splitlines()) if a != b]
+    _ok2.append(len(t1.splitlines()) == len(_lines) and other == [l0]
+                and l1.count("[Status: ") == 1 and l2.count("[Status: ") == 1
+                and l1[:l1.find("[Status: ")] == l0[:l0.find("[Status: ")]
+                and l1.endswith(l0[sd._status_spans(l0)[-1][1]:])
+                and [i["status"] for i in sd.parse_queue(t1) if i["id"] == x] == ["DONE 2026-11-20 — PASS [+1, +2]"]
+                and [i["status"] for i in sd.parse_queue(t2) if i["id"] == x] == ["DONE 2026-11-21 — FAIL"])
+_l6d = next(ln for ln in sd.set_status(BQUEUE, "WS.6d", "DONE x").splitlines() if ln.startswith("- **WS.6d"))
+ck("B2", all(_ok2) and _l6d.startswith("- **WS.6d, QQQ vs SPX.** [Status: DONE x] Hypothesis: PARK on QQQ"),
+   f"set_status replaces the status in place (one on the line, no other line touched, twice over): {_ok2}; "
+   f"WS.6d -> {_l6d[:70]!r}")
+_t6e = sd.set_status(BQUEUE, "WS.6e", "FORWARD to 2026-11-27")
+_l6e = next(ln for ln in _t6e.splitlines() if ln.startswith("- **WS.6e"))
+ck("B3", _bi["WS.6e"] == "DONE 2026-11-14 — FAIL [-1, +2]"
+   and _bi["WS.6f"] == "FORWARD to 2026-12-04 — arm [A [x, y]] vs arm [B]"
+   and _l6e == "- **WS.6e, two statuses.** An old append left two [Status: FORWARD to 2026-11-27]",
+   f"two statuses read as the last and a rewrite leaves one ({_l6e[-60:]!r}); nested brackets read whole "
+   f"({_bi.get('WS.6f')!r})")
+_t6h = sd.set_status(BQUEUE, "WS.6g", "DONE y")
+_l6g = next(ln for ln in _t6h.splitlines() if ln.startswith("- **WS.6g"))
+ck("B4", _bi["WS.6g"] == "OPEN" and _bi["WS.6h"] == "OPEN" and _bi["WS.7a"].startswith("FORWARD to 2026-11-27")
+   and _bi["WS.7b"].startswith("FORWARD to 2026-11-27")
+   and _l6g == "- **WS.6g, a bracket only.** The interval [-882, -177] is not a status. [Status: DONE y]"
+   and sd.set_status(BQUEUE, "WS.6z", "DONE") == BQUEUE,
+   "a bullet with no status (or a bracket that is not one) takes the parent's, OPEN or FORWARD; set_status appends "
+   "one, and an unknown id changes nothing")
+shutil.rmtree(_bd)
 
 print()
 if FAILS:

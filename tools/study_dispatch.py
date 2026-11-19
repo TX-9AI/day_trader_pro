@@ -1,6 +1,18 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/study_dispatch.py  v1.5
+day_trader_pro/tools/study_dispatch.py  v1.6
+v1.6  2026-11-19  dtp r567 / SD.1 — A SUB-ITEM STATUS WITH "]" IN IT IS READ AND REWRITTEN WHOLE. The operator,
+      2026-11-19: "Yes, fix the bug". The sub-item pattern read the status as "no ] up to the ] at the end of the
+      line", so it stopped at the first "]", and a status carrying an interval ("-$606/trade [-882, -177]") never
+      matched: WS.6a-6d fell back to the parent's OPEN and the Friday
+      11-20 dispatch would have re-run four items that are FORWARD to 11-27 (WS.6d already ran twice, folders
+      _20261113 and _20261114). set_status had the same pattern, so a rewrite APPENDED a second [Status: ...]
+      instead of replacing the first. A greedy ".* up to the last ]" is not enough: WS.6d's status sits
+      mid-line, followed by "Hypothesis: ...", so nothing anchors it to the end of the line. _status_spans() now
+      scans brackets by depth: every "[Status: " group ends at its balancing "]", wherever it sits on the line
+      (an unbalanced group runs to the last "]" on the line). The LAST group is the status (an older append left
+      the newest one last); set_status replaces that group in place and drops any earlier ones, or appends one
+      when the line has none. tests/check_study_dispatch.py v1.5 B1-B4 (red on r566).
 v1.5  2026-11-15  dtp r563 / B5.10 (hygiene item 10) — CRM IS AN ORDINARY BOX. NEVER_BOXES and its two uses go: the
       operator, 2026-11-14, on the Claude session on CRM: "I launched it once to prove to you it's installed by default.
       It's not 'my session'". The dispatcher now treats CRM like any other box (claims still decide who is skipped).
@@ -173,7 +185,43 @@ BOX_REPO = "/home/ubuntu/options-trader"     # v1.4: the box's OTV5 clone (/home
 BOX_VENV_BIN = BOX_REPO + "/venv/bin"
 BOX_HOLD_FLAG = BOX_REPO + "/data/NO_MIDNIGHT_HALT"   # OTV5 warehouse/midnight_halt.py HOLD_FLAG's default (P11)
 HOLD_MARK = "study_dispatch"
-_SUBSTATUS = re.compile(r"\s*\[Status: ([^\]]*)\]\s*$")
+_SUBSTATUS_OPEN = "[Status: "
+
+
+def _status_spans(line):
+    """-> [(start, end)] of every "[Status: ...]" group on a bullet line, end past its closing "]". v1.6: a group
+    ends at the "]" that balances its "[" (a status may carry "[-882, -177]"), wherever it sits on the line; an
+    unbalanced group runs to the last "]" on the line, and one with no "]" after it is not a status."""
+    spans, i = [], 0
+    while True:
+        s = line.find(_SUBSTATUS_OPEN, i)
+        if s < 0:
+            return spans
+        depth, end = 0, None
+        for j in range(s, len(line)):
+            if line[j] == "[":
+                depth += 1
+            elif line[j] == "]":
+                depth -= 1
+                if depth == 0:
+                    end = j + 1
+                    break
+        if end is None:
+            k = line.rfind("]")
+            if k <= s:
+                return spans
+            end = k + 1
+        spans.append((s, end))
+        i = end
+
+
+def sub_status(line):
+    """The status on a sub-item's bullet line (the last [Status: ...] group), or None when it has none."""
+    sp = _status_spans(line)
+    if not sp:
+        return None
+    s, e = sp[-1]
+    return line[s + len(_SUBSTATUS_OPEN): e - 1].strip()
 
 
 def how_block(text):
@@ -203,9 +251,9 @@ def parse_queue(text):
         for j, s in enumerate(subs):
             line_end = body.find("\n- ", s.start() + 1)
             sub_txt = body[s.start(): line_end if line_end > 0 else len(body)].rstrip()
-            ss = _SUBSTATUS.search(sub_txt.splitlines()[0])
-            sub_status = ss.group(1).strip() if ss else ("OPEN" if status.startswith("OPEN") else status)
-            items.append({"id": s.group(1), "title": f"{title} / {s.group(1)}", "status": sub_status,
+            ss = sub_status(sub_txt.splitlines()[0])
+            sub_st = ss if ss is not None else ("OPEN" if status.startswith("OPEN") else status)
+            items.append({"id": s.group(1), "title": f"{title} / {s.group(1)}", "status": sub_st,
                           "text": shared + "\n" + sub_txt, "parent": m.group(1), "depends": depends})
     return items
 
@@ -220,8 +268,21 @@ def set_status(text, item_id, status):
         pat = re.compile(r"(^### " + re.escape(item_id) + r"\b.*?^- Status: )([^\n]*)", re.M | re.S)
         new, n = pat.subn(lambda m: m.group(1) + status, text, count=1)
         return new if n else text
-    pat = re.compile(r"^(- \*\*" + re.escape(item_id) + r"\b[^\n]*?)(\s*\[Status: [^\]]*\])?$", re.M)
-    return pat.sub(lambda m: f"{m.group(1)} [Status: {status}]", text, count=1)
+    m = re.compile(r"^- \*\*" + re.escape(item_id) + r"\b[^\n]*", re.M).search(text)
+    if not m:
+        return text
+    line = m.group(0)
+    sp = _status_spans(line)
+    if not sp:
+        new = f"{line.rstrip()} [Status: {status}]"
+    else:
+        s, e = sp[-1]
+        new = line[:s] + f"[Status: {status}]" + line[e:]
+        for s, e in reversed(sp[:-1]):              # older groups an append left behind, with their leading space
+            while s > 0 and line[s - 1] in " \t":
+                s -= 1
+            new = new[:s] + new[e:]
+    return text[:m.start()] + new + text[m.end():]
 
 
 def roll_parent(text, parent):
