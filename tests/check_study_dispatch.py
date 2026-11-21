@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_study_dispatch.py  v1.5
+day_trader_pro/tests/check_study_dispatch.py  v1.6
+v1.6  2026-11-21  dtp r568 / SD.2 — THE POLL'S REAL COMMAND (study_dispatch v1.7; the operator, 2026-11-21: "We
+      definitely want those missed studies today"). FakeOps.ssh returns rc 0 whatever the command, which is how the
+      stat rc defect passed. P1 runs sd.poll_cmd under bash on a box dir holding SEAL.txt and FROZEN.json only: rc 0,
+      both listed (and the command without the fix exits non-zero). P2 runs poll() with an ops whose ssh is local bash:
+      FROZEN.json is recorded and FROZEN.ack written before RESULT.json exists. Red on r567 (no poll_cmd).
 v1.5  2026-11-19  dtp r567 / SD.1 — A STATUS WITH "]" IN IT (study_dispatch v1.6; the operator, 2026-11-19: "Yes, fix
       the bug"). BQUEUE is modelled on the real WS.6 bullets: intervals inside the status ("[-882, -177]"), a status
       mid-line followed by more text (WS.6d), a status at the end with the bullet wrapping on (WS.6a-6c), a line with
@@ -671,6 +676,53 @@ ck("B4", _bi["WS.6g"] == "OPEN" and _bi["WS.6h"] == "OPEN" and _bi["WS.7a"].star
    "a bullet with no status (or a bracket that is not one) takes the parent's, OPEN or FORWARD; set_status appends "
    "one, and an unknown id changes nothing")
 shutil.rmtree(_bd)
+
+# ── v1.6 (SD.2): the poll's real command, under bash, with files still missing ─────────────────────────────────────
+import subprocess  # noqa: E402
+_pd = tempfile.mkdtemp(prefix="cksd_poll_")
+os.makedirs(os.path.join(_pd, "work"))
+open(os.path.join(_pd, "status.txt"), "w").write("running\n")
+for _f in ("SEAL.txt", "FROZEN.json"):
+    open(os.path.join(_pd, "work", _f), "w").write("{}\n")
+_r = subprocess.run(["bash", "-c", sd.poll_cmd(_pd)], capture_output=True, text=True)
+_old = subprocess.run(["bash", "-c", sd.poll_cmd(_pd)[:-len("; true")]], capture_output=True, text=True)
+ck("P1", _r.returncode == 0 and "SEAL.txt " in _r.stdout and "FROZEN.json " in _r.stdout
+   and "RESULT.json" not in _r.stdout and _old.returncode != 0,
+   f"the real poll command exits 0 with RESULT.json/AMENDMENTS.txt still missing (rc {_r.returncode}; "
+   f"without the fix rc {_old.returncode}) and lists the files that exist")
+
+
+class BashOps:
+    """ssh runs the command under local bash with its real exit status; pull copies the file."""
+    def __init__(self, t0):
+        self.t, self.cmds = t0, []
+
+    def now(self):
+        return self.t
+
+    def ssh(self, ip, cmd, timeout=120):
+        self.cmds.append(cmd)
+        r = subprocess.run(["bash", "-c", cmd], capture_output=True, text=True)
+        return r.returncode, r.stdout, r.stderr
+
+    def pull(self, ip, rel, dest):
+        src = rel if rel.startswith("/") else os.path.join("/home/ubuntu", rel)
+        shutil.copy(src, dest)
+        return 0, "", ""
+
+
+root, q, cl, st, ops, d = env(FLEET)
+d.ops = BashOps(datetime(2026, 11, 20, 18, 0, tzinfo=ET))
+d._box_dir = lambda iid: _pd
+d.state.setdefault("items", {}).setdefault("WS.13", {})
+_a = {"item": {"id": "WS.13"}, "ip": "10.0.0.1"}
+_ret = d.poll("AAA", _a)
+_ack = os.path.join(_pd, "work", "FROZEN.ack")
+ck("P2", _ret is False and "FROZEN.json" in _a["mtimes"] and os.path.exists(_ack)
+   and open(_ack).read().startswith("FROZEN_RECEIVED") and d.state["items"]["WS.13"].get("frozen_sha"),
+   "poll() through a real bash exit status sees FROZEN.json before RESULT.json exists, records it, sends FROZEN.ack, and reads the study as still running")
+shutil.rmtree(root)
+shutil.rmtree(_pd)
 
 print()
 if FAILS:

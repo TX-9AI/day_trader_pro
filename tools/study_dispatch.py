@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/study_dispatch.py  v1.6
+day_trader_pro/tools/study_dispatch.py  v1.7
+v1.7  2026-11-21  dtp r568 / SD.2 — THE POLL READS A BOX WHOSE STUDY HAS NOT FINISHED. The operator, 2026-11-21: "We
+      definitely want those missed studies today." The poll ran `stat` on SEAL.txt FROZEN.json RESULT.json
+      AMENDMENTS.txt; the last two do not exist until late, so stat exited 1 and the poll read rc 1 as an unreachable
+      box: no FROZEN.ack was ever sent, all seven 11-20 items (WS.13-WS.19) stopped INCOMPLETE and seven boxes were
+      held to the deadline (the 11-21 Saturday brief R2). poll_cmd() ends with "; true", so only ssh's own failure
+      reads as unreachable. tests/check_study_dispatch.py v1.6 P1-P2 run the real command under bash.
 v1.6  2026-11-19  dtp r567 / SD.1 — A SUB-ITEM STATUS WITH "]" IN IT IS READ AND REWRITTEN WHOLE. The operator,
       2026-11-19: "Yes, fix the bug". The sub-item pattern read the status as "no ] up to the ] at the end of the
       line", so it stopped at the first "]", and a status carrying an interval ("-$606/trade [-882, -177]") never
@@ -592,6 +598,16 @@ def validate(dest, seal_sha, proof=None):
 
 
 # ── the dispatcher ──────────────────────────────────────────────────────────────────────────────────────────
+def poll_cmd(d):
+    """v1.7 (SD.2): the poll's box command. RESULT.json and AMENDMENTS.txt do not exist until late, and `stat` exits 1
+    when any named file is missing, which the poll read as an unreachable box (no FROZEN.ack was ever sent on
+    2026-11-20). The trailing `; true` keeps a missing file out of the exit status, so only ssh's own failure (255)
+    reads as unreachable; stat still prints the files that exist."""
+    return (f"cat {d}/status.txt 2>/dev/null; echo ---; "
+            f"cd {d}/work 2>/dev/null && stat -c '%n %Y' SEAL.txt FROZEN.json "
+            f"RESULT.json AMENDMENTS.txt 2>/dev/null; true")
+
+
 class Dispatcher:
     def __init__(self, ops, deadline, out, queue_path=None, claims_dir=None, studies=None,
                  update_queue=True, stop_idle=True, only=None, max_boxes=None, bucket=None, run_id=None,
@@ -908,10 +924,8 @@ class Dispatcher:
         acked to the agent) and the first that sees RESULT.json. Box mtimes are kept for the record only."""
         iid, ip = a["item"]["id"], a["ip"]
         d = self._box_dir(iid)
-        rc, out, _err = self.ops.ssh(ip, f"cat {d}/status.txt 2>/dev/null; echo ---; "
-                                         f"cd {d}/work 2>/dev/null && stat -c '%n %Y' SEAL.txt FROZEN.json "
-                                         f"RESULT.json AMENDMENTS.txt 2>/dev/null", timeout=60)
-        if rc != 0:
+        rc, out, _err = self.ops.ssh(ip, poll_cmd(d), timeout=60)
+        if rc != 0:                                        # ssh itself failed (255), never a missing file (v1.7)
             return False
         status, _, stats = out.partition("---")
         mt = {ln.split()[0]: int(ln.split()[1]) for ln in stats.split("\n") if len(ln.split()) == 2}
