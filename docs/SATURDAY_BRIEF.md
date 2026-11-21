@@ -1,4 +1,6 @@
-# THE SATURDAY BRIEF — spec v2.16
+# THE SATURDAY BRIEF — spec v2.17
+
+**v2.17 · 2026-11-21 · dtp r569 (RECAP.1)**: the study queue is FED DAILY and the Friday dispatch STARTS AFTER FRIDAY'S RECAP. The operator, 2026-11-21: every trading day the daily recap (`dtp-daily-recap`, `tools/daily_recap.sh`, 17:00 ET) proposes studies to improve P&L and appends them to `~/reviews/WEEKEND_STUDIES.md` as full OPEN items (`tools/daily_recap.py append`: next free ids, a .bak first, proven with `parse_queue`), plus ONE backlog maintenance proposal for a yes; Friday evening, after the recap and the drain, the week's studies run; Saturday's brief compiles the results; Sundays implement. `tools/friday_studies.sh` v1.2 waits for the conductor and then for today's recap (its ledger line, up to 2 h) before it claims a box. Nothing else in this brief changes; an item whose `- Source:` names a daily recap is an ordinary queue item.
 
 **v2.16 · 2026-11-19 · dtp r566 (MARK.1)**: THE MARK IS THE ONLY BASIS. The operator, 2026-11-19: "I don't give a rat shit what the bid-ask is. Mark is the worst buy or sell we accept." and "I just want the brief to reflect how we actually trade—which is the ladder." The entry ladder never fills worse than the mark, so every headline, sentence, EV, interval, theory ranking, PARK / setup summary, §1.9, §1.10 and §1.11 is on `pnl_usd`, the ladder's fill (mark or better), and the theories are sorted by the mark EV. v2.12's executable lead, its spread-cost line and its unpriced list are withdrawn, and the brief never calls the mark a paper assumption or something live fills do not get. Columns are never dropped: the ask/bid figure (window_ev.csv / theories.csv `*_exec*`, `pnl_exec_usd`) may appear only as the last, trailing column of a data table, never in prose. Fees beside, never inside EV. In every table the total adds up from the rows shown, on one basis.
 
@@ -434,7 +436,7 @@ operator and the sessions have agreed to run, each with its hypothesis, data, se
 before testing. Every item marked OPEN is run blind, and since v2.6 they run ON THE BOXES, IN PARALLEL
 (`tools/study_dispatch.py`, SAT.8), and since v2.9 on FRIDAY NIGHT (SAT.9):
 - The control timer `dtp-study-dispatch` runs `tools/friday_studies.sh` Friday 17:15 ET (not Persistent; the script
-  refuses off Friday evening and waits for the conductor). **The timer is installed by the operator
+  refuses off Friday evening, waits for the conductor and, since v2.17, for Friday's daily recap). **The timer is installed by the operator
   (`sudo bash tools/install_study_dispatch.sh`); the land does not install it, and until then the brief's fallback runs
   the queue.** (2026-11-13's two Friday runs were started by hand from the control Claude session; SAT.9.) It runs `study_dispatch.py run --deadline 02:30 --out
   <WORK>/study_dispatch` for Saturday's WORK, then `study_dispatch.py cleanup`; ledger `~/friday_studies.ledger`.

@@ -1,6 +1,7 @@
 # day_trader_pro
 
-_README updated 2026-10-25 (DOC.7): the fleet runs **OTV5**, not options_trader_v3._
+_README updated 2026-10-25 (DOC.7): the fleet runs **OTV5**, not options_trader_v3. 2026-11-21 (dtp r569, RECAP.1): the
+evening timer chain below, with the daily recap PDF._
 
 Autonomous control layer that unifies **market_brief_v1** (the morning research
 brief) and the **OTV5** trading fleet (`TX-9AI/OTV5`; every box since its
@@ -56,6 +57,27 @@ persist for the next wake.
 **Status 2026-07-18 →:** this full unattended cycle runs **flawlessly** —
 morning startup, report, staged candle wake, trading day, wind-down, EOD
 aggregation. Protect it (see "Protect the EOD chain" below).
+
+
+### The evening chain (control timers, systemd, user ubuntu)
+
+Each unit ships in `tools/` and is installed by the operator with its `tools/install_*.sh` (never by the land).
+
+```
+ 16:05 ET  dtp-eod-conductor      the drain: capture, purge, stop every box
+ 16:40 ET  dtp-nightly-review     tools/nightly_review.sh -> ~/reviews/<date>.md (13:40 on a half day)
+ 17:00 ET  dtp-daily-recap        tools/daily_recap.sh (dtp r569): waits for the review, one headless session
+                                  writes ~/reviews/daily_brief/notes/<date>.json (analysis, 1-3 proposed studies,
+                                  ONE backlog maintenance proposal for a yes: weekday or Sunday), daily_recap.py
+                                  appends the studies to ~/reviews/WEEKEND_STUDIES.md (.bak first), daily_brief.py
+                                  builds ~/reviews/daily_brief/daily_brief_<date>.pdf, one "recap ready" line goes
+                                  through the alert router. Skips weekends and holidays; never runs twice for a day.
+                                  Install: sudo bash tools/install_daily_recap.sh (also creates the brief's venv,
+                                  /home/ubuntu/venvs/daily_brief, outside the repo).
+ Fri 17:15 dtp-study-dispatch     tools/friday_studies.sh: waits for the conductor, then Friday's recap, then runs
+                                  every OPEN queue item blind on the boxes (deadline Sat 02:30 ET)
+ Sat 03:00 the Saturday brief     compiles the week and the study results (docs/SATURDAY_BRIEF.md)
+```
 
 ---
 

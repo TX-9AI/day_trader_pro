@@ -1,5 +1,15 @@
 #!/usr/bin/env bash
-# day_trader_pro/tools/friday_studies.sh — v1.1
+# day_trader_pro/tools/friday_studies.sh — v1.2
+# v1.2 (2026-11-21) — dtp r569 / RECAP.1. THE DISPATCH STARTS AFTER FRIDAY'S DAILY RECAP, NOT AT A FIXED TIME. The
+#   operator, 2026-11-21: "Friday evening, after the daily recap and the drain, run all the studies accumulated during
+#   the week". The recap (dtp-daily-recap, 17:00 ET) appends the day's studies to the queue, so the dispatch must read
+#   the queue after it. After the conductor wait, this waits for the recap: it is done when its ledger
+#   (~/daily_recap.ledger) has a line for today (PRODUCED, PARTIAL, FAILED, STOOD_DOWN or SKIPPED day=<today>), or the
+#   service is not installed, or it is not running at two polls in a row with no line. Capped at 2 h
+#   (FRIDAY_STUDIES_RECAP_WAIT_S); a recap still running then is logged and the dispatch goes ahead. The timer stays
+#   Fri 17:15 ET (not Persistent): it is the earliest start, the waits decide the real one.
+#   For the gate only: FRIDAY_STUDIES_SYSTEMCTL, FRIDAY_STUDIES_POLL_S and FRIDAY_STUDIES_LOCK stand in for
+#   systemctl, the 30 s poll and the lock file.
 # v1.1 (2026-11-15) — dtp r562 / B5.9 (hygiene item 9). The 16:50 below is study_dispatch.RTH_END's, typed again
 #   because bash cannot import it; check_const_parity P12 fails the day the two differ. No behaviour change.
 # v1.0 (2026-11-13) — dtp r552 / SAT.9. THE WEEKEND STUDY QUEUE RUNS FRIDAY NIGHT. The operator, 2026-11-13: "Yes,
@@ -24,6 +34,11 @@ WEEKLY="${FRIDAY_STUDIES_WEEKLY:-/home/ubuntu/reviews/weekly}"
 LEDGER="${FRIDAY_STUDIES_LEDGER:-/home/ubuntu/friday_studies.ledger}"
 DEADLINE="${FRIDAY_STUDIES_DEADLINE_ET:-02:30}"
 NOW="${FRIDAY_STUDIES_NOW:-}"                     # a test clock, "YYYY-MM-DD HH:MM" ET; empty = now
+SYSTEMCTL="${FRIDAY_STUDIES_SYSTEMCTL:-systemctl}"
+POLL_S="${FRIDAY_STUDIES_POLL_S:-30}"
+LOCK="${FRIDAY_STUDIES_LOCK:-/tmp/study_dispatch_friday.lock}"
+RECAP_LEDGER="${FRIDAY_STUDIES_RECAP_LEDGER:-/home/ubuntu/daily_recap.ledger}"
+RECAP_WAIT_S="${FRIDAY_STUDIES_RECAP_WAIT_S:-7200}"
 DRY=0; [ "${1:-}" = "--dry" ] && DRY=1
 _et() { if [ -n "$NOW" ]; then TZ=America/New_York date -d "$NOW" "$@"; else TZ=America/New_York date "$@"; fi; }
 DOW="$(_et +%u)"; HM="$(_et +%H%M)"; TODAY="$(_et +%F)"
@@ -42,17 +57,32 @@ fi
 if [ "$DRY" = 1 ]; then
   echo "would run: $PY $DTP/tools/study_dispatch.py run --deadline $DEADLINE --out $OUT > $LOG"
   echo "  deadline $DEADLINE ET on $SAT; then study_dispatch.py cleanup; ledger $LEDGER"
+  echo "  first waits for the conductor, then for today's daily recap (ledger $RECAP_LEDGER, up to ${RECAP_WAIT_S}s)"
   exit 0
 fi
 
 mkdir -p "$OUT" || { _ledger "FAILED cannot-create $OUT"; exit 1; }
 # the conductor's capture and stop first (Type=oneshot: 'activating' while it runs)
 for _ in $(seq 1 90); do
-  st="$(systemctl show -p ActiveState --value dtp-eod-conductor.service 2>/dev/null)"
+  st="$($SYSTEMCTL show -p ActiveState --value dtp-eod-conductor.service 2>/dev/null)"
   [ "$st" = "activating" ] || [ "$st" = "active" ] || [ "$st" = "reloading" ] || break
-  sleep 30
+  sleep "$POLL_S"
 done
-exec 9> /tmp/study_dispatch_friday.lock
+# v1.2: then Friday's daily recap (it appends the day's studies to the queue this run reads)
+_rw=0; _idle=0; _why="cap"
+while [ "$_rw" -lt "$RECAP_WAIT_S" ]; do
+  if grep -Eq "^[^ ]+ (PRODUCED|PARTIAL|FAILED|STOOD_DOWN|SKIPPED) day=$TODAY( |$)" "$RECAP_LEDGER" 2>/dev/null; then
+    _why="done"; break
+  fi
+  [ "$($SYSTEMCTL show -p LoadState --value dtp-daily-recap.service 2>/dev/null)" = "loaded" ] || { _why="not-installed"; break; }
+  st="$($SYSTEMCTL show -p ActiveState --value dtp-daily-recap.service 2>/dev/null)"
+  if [ "$st" = "activating" ] || [ "$st" = "active" ] || [ "$st" = "reloading" ]; then _idle=0
+  else _idle=$(( _idle + 1 )); [ "$_idle" -ge 2 ] && { _why="not-running"; break; }
+  fi
+  sleep "$POLL_S"; _rw=$(( _rw + POLL_S ))
+done
+echo "$(date -u +%FT%TZ) friday_studies: daily recap wait ${_rw}s ($_why)" >> "$LOG"
+exec 9> "$LOCK"
 flock -n 9 || { echo "another Friday dispatch holds the lock"; _ledger "STOOD_DOWN locked"; exit 0; }
 _dl="$(TZ=America/New_York date -d "$SAT $DEADLINE" +%s)"
 BUDGET=$(( _dl - $(date +%s) + 900 ))

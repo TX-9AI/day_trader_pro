@@ -1,0 +1,13 @@
+[Unit]
+Description=day_trader_pro daily recap PDF, headless (dtp r569 / RECAP.1) - NOT INSTALLED BY THE LAND
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/reviews
+# The script recaps today only (a weekend or holiday skips), waits for the nightly review, and stands down when the
+# day's PDF exists. Its budgets: review wait 9000 s + data pass 900 s + session 2700 s + PDF 1200 s.
+ExecStart=/bin/bash /home/ubuntu/day_trader_pro/tools/daily_recap.sh
+TimeoutStartSec=14400

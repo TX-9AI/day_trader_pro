@@ -1,0 +1,521 @@
+#!/usr/bin/env python3
+"""
+day_trader_pro/tests/check_daily_recap.py  v1.0
+v1.0  2026-11-21  dtp r569 / RECAP.1 — THE DAILY RECAP PDF RUNS FROM A TIMER (tools/daily_recap.sh, daily_recap.py,
+      daily_recap.prompt, daily_brief.py, dtp-daily-recap.{service,timer}, install_daily_recap.sh) AND THE FRIDAY
+      DISPATCH WAITS FOR IT (tools/friday_studies.sh v1.2). The operator, 2026-11-21: "Yes, we are going to begin
+      firming up our system, our trading & our analysis". Everything below runs the real scripts with a fake claude, a
+      fake brief python, a fake systemctl and a fake page, in a scratch tree: nothing reaches the real queue, the
+      real ~/reviews, a box or the operator.
+  R1  the units: the service verifies, its ExecStart is the landed daily_recap.sh, it carries no Environment; the timer
+      elapses only Mon-Fri 17:00 ET across a DST change and is Persistent; the installer parses, installs exactly
+      these two units and builds the brief's venv OUTSIDE the repo (/home/ubuntu/venvs/daily_brief)
+  R2  daily_recap.py plan: a weekend and a holiday (11-26) skip, a full day is due at 16:40 ET, the 11-27 half day at
+      13:40, not before; --day refuses a holiday and a session not yet closed, accepts a closed one
+  R3  the wrapper on a Saturday and on 11-26 skips: exit 0, a SKIPPED day=<date> ledger line, no session, no PDF
+  R4  the wrapper waits for the nightly review (its file AND its service no longer running) before the session, and a
+      review that never comes is waited for only up to the cap, the session told it is MISSING
+  R5  it never runs twice for a day: a second run with the PDF present stands down without a session; a run while
+      another holds the lock stands down; valid notes already written are reused without a session
+  R6  it writes only inside its allowed paths (notes dir, output dir, the queue + its .bak, its ledger/log, its WORK
+      root) and removes its WORK dir; the session runs isolated (--session-id, never --continue), unattended
+      (VERTIGO_UNATTENDED=1), with TMPDIR in its WORK dir; a session that edits the queue has it restored
+  R7  the study append keeps the queue parseable: the accepted proposals become OPEN items with the next free,
+      unique ids (study_dispatch.parse_queue on the result, on a fixture AND on a copy of the real queue when it is
+      readable), inserted before "## DONE", a .bak first; a proposal with a resting take-profit, a missing field or
+      over the daily cap is refused by name and never queued; a re-run appends nothing
+  R8  the notice is ONE line through the injected router post: the day, the PDF, P&L at the mark, fees beside, the
+      queued ids and the maintenance id with weekday/Sunday; validate refuses a bad 'when'
+  R9  friday_studies.sh starts the dispatch only after today's recap ledger line (it waits while the recap runs), does
+      not wait for a recap that is not installed, and goes ahead at the cap
+  R10 the prompt carries the operator's rules (mark only, fees beside, mainline, TastyTrade only, retired strategies,
+      resting take-profits closed, no knobs, never log-only, never edit the queue, one maintenance, weekday/Sunday)
+  R11 the generator is in the repo (tools/daily_brief.py v1.1, compiles), its notes default under
+      ~/reviews/daily_brief/notes, no venv inside the repo, and it takes --facts / --summary-json
+"""
+import json
+import os
+import py_compile
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+TOOLS = os.path.join(ROOT, "tools")
+sys.path.insert(0, TOOLS)
+sys.path.insert(0, ROOT)
+ET = ZoneInfo("America/New_York")
+UTC = ZoneInfo("UTC")
+FAILS, RAN = [], []
+TMP = tempfile.mkdtemp(prefix="check_daily_recap_")
+WRAP = os.path.join(TOOLS, "daily_recap.sh")
+FRI = os.path.join(TOOLS, "friday_studies.sh")
+HELPER = os.path.join(TOOLS, "daily_recap.py")
+
+
+def ck(n, ok, msg):
+    RAN.append(n)
+    print(f"  {n:<4} {'PASS' if ok else 'FAIL'}  {msg}")
+    if not ok:
+        FAILS.append(n)
+
+
+def read(p):
+    with open(p, encoding="utf-8") as fh:
+        return fh.read()
+
+
+def write(p, s, mode=None):
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with open(p, "w", encoding="utf-8") as fh:
+        fh.write(s)
+    if mode:
+        os.chmod(p, mode)
+
+
+# ── R1 ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
+svc = os.path.join(TOOLS, "dtp-daily-recap.service")
+tmr = os.path.join(TOOLS, "dtp-daily-recap.timer")
+vdir = os.path.join(TMP, "units")
+os.makedirs(vdir)
+for u in (svc, tmr):
+    shutil.copy(u, vdir)
+r = subprocess.run(["systemd-analyze", "verify", os.path.join(vdir, "dtp-daily-recap.service")], capture_output=True,
+                   text=True)
+ours = [l for l in (r.stdout + r.stderr).splitlines() if "daily-recap" in l]
+sv = read(svc)
+ex = re.search(r"^ExecStart=(.*)$", sv, re.M).group(1)
+
+
+def elapses(spec, base):
+    out = subprocess.run(["systemd-analyze", "calendar", "--iterations=12", "--base-time=" + base, spec],
+                         capture_output=True, text=True, env=dict(os.environ, TZ="UTC")).stdout
+    return [datetime.strptime(m, "%Y-%m-%d %H:%M:%S").replace(tzinfo=UTC).astimezone(ET)
+            for m in re.findall(r"(?:Next elapse|Iteration #\d+): \w{3} (\d{4}-\d\d-\d\d \d\d:\d\d:\d\d) UTC", out)]
+
+
+tt = read(tmr)
+specs = re.findall(r"^OnCalendar=(.*)$", tt, re.M)
+hits = [t for s in specs for b in ("2026-11-05 12:00:00 UTC", "2027-03-10 12:00:00 UTC") for t in elapses(s, b)]
+hm = sorted({t.strftime("%H:%M") for t in hits})
+inst = read(os.path.join(TOOLS, "install_daily_recap.sh"))
+inst_units = re.findall(r"for u in ([^;]+); do", inst)
+ok1 = (r.returncode == 0 and not ours and ex == "/bin/bash /home/ubuntu/day_trader_pro/tools/daily_recap.sh"
+       and "Environment" not in sv and "TimeoutStartSec=" in sv
+       and hm == ["17:00"] and all(t.weekday() < 5 for t in hits) and len(hits) >= 20
+       and any(t.utcoffset() == timedelta(hours=-4) for t in hits)
+       and any(t.utcoffset() == timedelta(hours=-5) for t in hits)
+       and re.search(r"^Persistent=true$", tt, re.M) is not None
+       and subprocess.run(["bash", "-n", os.path.join(TOOLS, "install_daily_recap.sh")]).returncode == 0
+       and inst_units == ["dtp-daily-recap.service dtp-daily-recap.timer"]
+       and "VENV=/home/ubuntu/venvs/daily_brief" in inst and "daily_brief.requirements.txt" in inst
+       and "enable --now dtp-daily-recap.timer" in inst)
+ck("R1", ok1, "verify rc=%d own=%s exec=%s; timer ET %s n=%d (EST+EDT), Persistent; installer units %s, venv outside "
+   "the repo" % (r.returncode, ours[:2], ex, hm, len(hits), inst_units))
+
+# ── R2 ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
+import daily_recap as DR  # noqa: E402
+
+cases = {("2026-11-21T17:00", None): "SKIP", ("2026-11-26T17:00", None): "SKIP",
+         ("2026-11-23T16:39", None): "SKIP", ("2026-11-23T16:40", None): "DAY 2026-11-23",
+         ("2026-11-23T17:00", None): "DAY 2026-11-23", ("2026-11-27T13:39", None): "SKIP",
+         ("2026-11-27T13:40", None): "DAY 2026-11-27", ("2026-11-27T17:00", None): "DAY 2026-11-27",
+         ("2026-11-27T17:00", "2026-11-26"): "REFUSED", ("2026-11-23T12:00", "2026-11-23"): "REFUSED",
+         ("2026-11-21T09:00", "2026-11-20"): "DAY 2026-11-20"}
+got = {}
+for (n, d), want in cases.items():
+    k, v = DR.plan(datetime.fromisoformat(n).replace(tzinfo=ET), d)
+    got[(n, d)] = k if k != "DAY" else "DAY " + v
+bad = {k: (got[k], w) for k, w in cases.items() if got[k] != w}
+ck("R2", not bad, "%d clock cases (weekend, 11-26 holiday, pre-due, 11-27 half day 13:40, --day refusals); wrong=%s"
+   % (len(cases), bad))
+
+# ── the sandbox and the fakes ────────────────────────────────────────────────────────────────────────────────────────
+SB = os.path.join(TMP, "sb")
+REV = os.path.join(SB, "reviews")
+OUTD = os.path.join(REV, "daily_brief")
+NOTESD = os.path.join(OUTD, "notes")
+QUEUE = os.path.join(REV, "WEEKEND_STUDIES.md")
+OTHER = os.path.join(SB, "other")
+LEDGER = os.path.join(SB, "daily_recap.ledger")
+LOG = os.path.join(SB, "daily_recap.log")
+WROOT = os.path.join(SB, "work")
+CALLS = os.path.join(TMP, "calls.txt")
+POSTS = os.path.join(TMP, "posts.txt")
+STATE = os.path.join(TMP, "sysstate")
+
+QFIX = """# WEEKEND STUDIES — fixture
+
+## HOW AN ITEM IS RUN (every item, every time)
+1. Seal first.
+
+## ADDING AN ITEM
+Append it under QUEUE with the same fields. IDs are WS.<n> and are never reused.
+
+---
+
+## QUEUE
+
+### WS.20 — A done item
+- Status: DONE 2026-11-21 — REJECT. (/home/ubuntu/reviews/studies/WS.20_x)
+- Why: fixture.
+
+### WS.21 — An open item
+- Status: OPEN
+- Why: fixture.
+
+### WS.6 — PARK, with sub-items
+- Status: OPEN
+- Shared: text.
+- **WS.6a, calls vs puts.** Hypothesis. [Status: FORWARD to 2026-11-27 — interval [-882, -177] (n=33)]
+- **WS.6b, gate.** Hypothesis.
+
+## DONE
+(none yet; WS.24 was mentioned once)
+"""
+
+
+def proposal(title, **over):
+    p = {"title": title, "hypothesis": "h", "evidence": "the day: -$100.00", "data": "warehouse, mainline()",
+         "blind": "seal 11-23..12-04, run once", "change": "one gate", "why": "two trades, window n=50",
+         "arms": "A = the book; B = the gate", "model": "1m marks, exits at the 1m mark",
+         "positive_control": "arm A reproduces booked pnl_usd within 5%", "days": "design 10-26..11-20; sealed 11-23..12-04",
+         "pass_bar": "EV/trade beats A with a day-bootstrap 95% interval; prune ledger", "outcome": "TUNE (the gate) or KEEP"}
+    p.update(over)
+    return p
+
+
+NOTES_OK = {"revision": "r", "headline": ["h"], "day_note": ["d"], "symbols": {"QQQ": {"tape": "t", "bots": "b",
+            "well": "w", "better": "x"}}, "section1_close": ["c"], "studies_intro": ["i"], "studies": [],
+            "study_recs": [], "proposals_intro": ["p"],
+            "proposals": [proposal("Bounce-trap filter"), proposal("Second idea")],
+            "code_intro": ["c"], "code": [], "cash_verdict": ["v"],
+            "maintenance": {"id": "HYG.9", "backlog": "OTV5", "title": "t", "what": "w", "why": "y", "risk": "r",
+                            "proof": "p", "when": "weekday", "when_reason": "control-side"}, "sources": ["s"]}
+NOTES_SRC = os.path.join(TMP, "notes_src.json")
+write(NOTES_SRC, json.dumps(NOTES_OK))
+
+FAKE_CLAUDE = os.path.join(TMP, "fake_claude.sh")
+write(FAKE_CLAUDE, "#!/bin/bash\n"
+      "printf 'ARGS %s\\n' \"$*\" | tr '\\n' ' ' | head -c 60000 >> " + CALLS + "; echo >> " + CALLS + "\n"
+      "echo \"UNATTENDED=${VERTIGO_UNATTENDED:-unset} TMPDIR=$TMPDIR PWD=$PWD\" >> " + CALLS + "\n"
+      "out=$(printf '%s' \"$*\" | sed -n 's/.*write the notes JSON to exactly this path: \\([^ ]*\\).*/\\1/p' | head -1)\n"
+      "echo scratch > \"$TMPDIR/scratch.txt\"\n"
+      "[ \"${FAKE_TOUCH_QUEUE:-0}\" = 1 ] && echo 'JUNK FROM THE SESSION' >> \"$FAKE_QUEUE\"\n"
+      "[ \"${FAKE_WRITE:-1}\" = 1 ] && [ -n \"$out\" ] && cp \"$FAKE_NOTES\" \"$out\"\n"
+      "exit 0\n", 0o755)
+FAKE_BRIEF = os.path.join(TMP, "fake_brief.sh")
+write(FAKE_BRIEF, "#!/bin/bash\n"
+      "echo \"BRIEF $*\" >> " + CALLS + "\n"
+      "day=; facts=; out=; summ=\n"
+      "while [ $# -gt 0 ]; do case \"$1\" in --date) day=$2; shift 2;; --facts) facts=$2; shift 2;;\n"
+      "  --out) out=$2; shift 2;; --summary-json) summ=$2; shift 2;; *) shift;; esac; done\n"
+      "if [ -n \"$facts\" ]; then echo '{\"day\": \"'$day'\"}' > \"$facts\"; exit 0; fi\n"
+      "mkdir -p \"$out\"; echo '%PDF-1.4 fake' > \"$out/daily_brief_$day.pdf\"\n"
+      "echo '{\"day\": \"'$day'\", \"pdf\": \"'$out/daily_brief_$day.pdf'\", \"pages\": 7, \"trades\": 20,"
+      " \"paper\": 4149.0, \"fees\": 213.5}' > \"$summ\"\n", 0o755)
+FAKE_POST = os.path.join(TMP, "fake_post.sh")
+write(FAKE_POST, "#!/bin/bash\nprintf '%s\\n' \"$*\" >> " + POSTS + "\n", 0o755)
+# fake systemctl: `show -p ActiveState|LoadState --value UNIT`; per unit a file STATE/UNIT.<prop> holding a list of
+# answers, one per call (the last repeats); a STATE/UNIT.hook run at each call (to land a review mid-wait)
+FAKE_SC = os.path.join(TMP, "fake_systemctl.sh")
+write(FAKE_SC, "#!/bin/bash\n"
+      "prop=; unit=\n"
+      "while [ $# -gt 0 ]; do case \"$1\" in -p) prop=$2; shift 2;; --value|show) shift;; *) unit=$1; shift;; esac; done\n"
+      "f=" + STATE + "/$unit.$prop; c=" + STATE + "/$unit.$prop.n\n"
+      "[ -x " + STATE + "/$unit.hook ] && " + STATE + "/$unit.hook\n"
+      "[ -f \"$f\" ] || { [ \"$prop\" = LoadState ] && echo not-found || echo inactive; exit 0; }\n"
+      "n=$(cat \"$c\" 2>/dev/null || echo 0); n=$((n+1)); echo $n > \"$c\"\n"
+      "l=$(wc -l < \"$f\"); [ $n -gt $l ] && n=$l; sed -n \"${n}p\" \"$f\"\n", 0o755)
+
+
+def fresh():
+    for p in (SB, STATE, CALLS, POSTS):
+        if os.path.isdir(p):
+            shutil.rmtree(p)
+        elif os.path.exists(p):
+            os.remove(p)
+    for d in (REV, OUTD, NOTESD, OTHER, STATE):
+        os.makedirs(d, exist_ok=True)
+    write(QUEUE, QFIX)
+    write(os.path.join(OTHER, "keep.txt"), "untouched")
+
+
+def sc_state(unit, prop, answers, hook=None):
+    write(os.path.join(STATE, f"{unit}.{prop}"), "\n".join(answers) + "\n")
+    if hook:
+        write(os.path.join(STATE, f"{unit}.hook"), "#!/bin/bash\n" + hook + "\n", 0o755)
+
+
+def wrap(args, now, extra=None):
+    env = dict(os.environ, DAILY_RECAP_CLAUDE=FAKE_CLAUDE, DAILY_RECAP_BRIEF_PY=FAKE_BRIEF, DAILY_RECAP_PY=sys.executable,
+               DAILY_RECAP_REVIEWS=REV, DAILY_RECAP_OUT=OUTD, DAILY_RECAP_NOTES=NOTESD, DAILY_RECAP_QUEUE=QUEUE,
+               DAILY_RECAP_LOG=LOG, DAILY_RECAP_LEDGER=LEDGER, DAILY_RECAP_WORK_ROOT=WROOT,
+               DAILY_RECAP_SYSTEMCTL=FAKE_SC, DAILY_RECAP_POST=FAKE_POST, DAILY_RECAP_POLL_S="1",
+               DAILY_RECAP_REPOS=os.path.join(SB, "norepo"), FAKE_NOTES=NOTES_SRC, FAKE_QUEUE=QUEUE)
+    env.pop("VERTIGO_UNATTENDED", None)
+    if now:
+        env["DAILY_RECAP_NOW"] = now
+    env.update(extra or {})
+    return subprocess.run(["bash", WRAP] + args, capture_output=True, text=True, env=env, timeout=180)
+
+
+def calls():
+    return read(CALLS) if os.path.exists(CALLS) else ""
+
+
+def ledger():
+    return read(LEDGER) if os.path.exists(LEDGER) else ""
+
+
+def snapshot(root):
+    out = {}
+    for dp, _dn, fn in os.walk(root):
+        for f in fn:
+            p = os.path.join(dp, f)
+            st = os.stat(p)
+            out[p] = (st.st_size, st.st_mtime_ns)
+    return out
+
+
+# ── R3 ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
+fresh()
+r_sat = wrap([], "2026-11-21T17:00")
+r_hol = wrap([], "2026-11-26T17:00")
+L = ledger()
+ck("R3", r_sat.returncode == 0 and r_hol.returncode == 0 and "SKIPPED day=2026-11-21 not-a-trading-day" in L
+   and "SKIPPED day=2026-11-26 not-a-trading-day" in L and "ARGS" not in calls() and not os.listdir(OUTD + "/notes")
+   and not [f for f in os.listdir(OUTD) if f.endswith(".pdf")],
+   "Saturday and Thanksgiving skip with a ledger line, no session, no PDF (%r)" % r_sat.stdout.strip()[:80])
+
+# ── R4 ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
+fresh()
+review = os.path.join(REV, "2026-11-23.md")
+sc_state("dtp-nightly-review.service", "ActiveState", ["activating", "activating", "activating", "inactive"],
+         hook="n=$(cat %s/dtp-nightly-review.service.ActiveState.n 2>/dev/null || echo 0); [ $n -ge 2 ] && "
+              "echo '# review' > %s; true" % (STATE, review))
+t0 = time.time()
+r4 = wrap([], "2026-11-23T17:00")
+lg = read(LOG) if os.path.exists(LOG) else ""
+m = re.search(r"review present after (\d+)s", lg)
+ok_wait = (r4.returncode == 0 and m is not None and int(m.group(1)) >= 2 and calls().count("ARGS") == 1
+           and "(present)" in calls())
+fresh()
+r4b = wrap([], "2026-11-23T17:00", {"DAILY_RECAP_REVIEW_WAIT_S": "2"})
+lg = read(LOG) if os.path.exists(LOG) else ""
+ok_cap = (r4b.returncode == 0 and "review wait cap 2s reached" in lg and "review MISSING after" in lg
+          and "(MISSING)" in calls() and calls().count("ARGS") == 1)
+ck("R4", ok_wait and ok_cap, "waited %ss for the review file + service before the one session; a review that never "
+   "came: the cap, then the session told MISSING (%s/%s)" % (m.group(1) if m else "?", ok_wait, ok_cap))
+
+# ── R5 ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
+fresh()
+write(os.path.join(REV, "2026-11-23.md"), "# review\n")
+r5a = wrap([], "2026-11-23T17:00")
+n_first = calls().count("ARGS")
+r5b = wrap([], "2026-11-23T17:30")
+n_second = calls().count("ARGS")
+os.remove(os.path.join(OUTD, "daily_brief_2026-11-23.pdf"))
+q_before = read(QUEUE)
+r5c = wrap([], "2026-11-23T18:00")                          # rebuild: notes valid -> no session, no second append
+n_third = calls().count("ARGS")
+os.remove(os.path.join(OUTD, "daily_brief_2026-11-23.pdf"))
+os.makedirs(WROOT, exist_ok=True)
+holder = subprocess.Popen(["flock", os.path.join(WROOT, ".lock"), "sleep", "20"])
+time.sleep(0.5)
+r5d = wrap([], "2026-11-23T18:30")
+holder.terminate()
+holder.wait()
+L = ledger()
+ck("R5", n_first == 1 and n_second == 1 and n_third == 1 and "STOOD_DOWN exists day=2026-11-23" in L
+   and "STOOD_DOWN inflight day=2026-11-23" in L and read(QUEUE) == q_before
+   and os.path.exists(os.path.join(OUTD, "daily_brief_2026-11-23.pdf")) is False
+   and L.count("PRODUCED day=2026-11-23") == 2,
+   "sessions %d/%d/%d: a built day stands down, a rebuild reuses valid notes (no session, queue unchanged), the lock "
+   "stands a second run down" % (n_first, n_second, n_third))
+
+# ── R6 ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
+fresh()
+write(os.path.join(REV, "2026-11-23.md"), "# review\n")
+real_q = os.path.expanduser("~/reviews/WEEKEND_STUDIES.md")
+real_out = os.path.expanduser("~/reviews/daily_brief")
+rq0 = os.stat(real_q).st_mtime_ns if os.path.exists(real_q) else None
+ro0 = snapshot(real_out) if os.path.isdir(real_out) else {}
+before = snapshot(SB)
+r6 = wrap([], "2026-11-23T17:00")
+after = snapshot(SB)
+allowed = (NOTESD + "/", OUTD + "/", QUEUE, LEDGER, LOG, WROOT + "/")
+changed = [p for p in after if before.get(p) != after[p]]
+outside = [p for p in changed if not (p == QUEUE or p.startswith(QUEUE + ".bak_recap_") or p in (LEDGER, LOG)
+                                      or p.startswith(NOTESD + "/") or p.startswith(OUTD + "/")
+                                      or p.startswith(WROOT + "/"))]
+work_left = [d for d in os.listdir(WROOT) if d.startswith("2026-")] if os.path.isdir(WROOT) else []
+c6 = calls()
+iso = re.search(r"--session-id [0-9a-f-]{36}", c6) is not None and "--continue" not in c6
+unatt = "UNATTENDED=1" in c6 and re.search(r"TMPDIR=" + re.escape(WROOT) + r"/2026-11-23-\d+-\d+ ", c6) is not None
+perm = "--permission-mode acceptEdits" in c6 and ("--add-dir " + NOTESD) in c6
+fresh()
+write(os.path.join(REV, "2026-11-23.md"), "# review\n")
+q0 = read(QUEUE)
+r6b = wrap([], "2026-11-23T17:00", {"FAKE_TOUCH_QUEUE": "1"})
+q1 = read(QUEUE)
+restored = "JUNK FROM THE SESSION" not in q1 and "QUEUE_RESTORED day=2026-11-23" in ledger() and "### WS.25 —" in q1
+rq1 = os.stat(real_q).st_mtime_ns if os.path.exists(real_q) else None
+ro1 = snapshot(real_out) if os.path.isdir(real_out) else {}
+ck("R6", r6.returncode == 0 and not outside and not work_left and iso and unatt and perm and restored
+   and rq0 == rq1 and ro0 == ro1,
+   "changed outside the allowed paths: %s; WORK left: %s; isolated %s, unattended+TMPDIR %s, acceptEdits+add-dir %s; "
+   "a session's queue edit restored (then the appender's own items): %s; the real queue and ~/reviews/daily_brief "
+   "untouched" % (outside[:3], work_left, iso, unatt, perm, restored))
+
+# ── R7 ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
+import study_dispatch as SD  # noqa: E402
+
+
+def r7_on(text, label):
+    q = os.path.join(TMP, "q7_%s.md" % label)
+    nf = os.path.join(TMP, "n7_%s.json" % label)
+    write(q, text)
+    notes = dict(NOTES_OK)
+    notes["proposals"] = [proposal("Good one"),
+                          proposal("Resting exit", change="place a resting take-profit order at +50%"),
+                          proposal("Missing arms", arms=""),
+                          proposal("Good two"),
+                          proposal("Good three"),
+                          proposal("Over the cap")]
+    write(nf, json.dumps(notes))
+    before = SD.parse_queue(text)
+    n0 = DR.next_ws_id(text)
+    rc = DR.main(["append", "--day", "2026-11-23", "--notes", nf, "--queue", q])
+    new = read(q)
+    after = SD.parse_queue(new)
+    nn = json.loads(read(nf))
+    ids = [p.get("ws_id") for p in nn["proposals"]]
+    want = ["WS.%d" % n0, None, None, "WS.%d" % (n0 + 1), "WS.%d" % (n0 + 2), None]
+    heads = re.findall(r"^### (WS\.\d+)\b", new, re.M)
+    got = {it["id"]: it for it in after}
+    ok = (rc == 0 and ids == want and len(after) == len(before) + 3 and len(heads) == len(set(heads))
+          and all(got[w]["status"].startswith("OPEN") for w in want if w)
+          and [it["id"] for it in after][:len(before)] == [it["id"] for it in before]
+          and os.path.exists(q + ".bak_recap_20261123") and read(q + ".bak_recap_20261123") == text
+          and "resting take-profit" in nn["proposals"][1].get("queue_refused", "")
+          and "missing arms" in nn["proposals"][2].get("queue_refused", "")
+          and "daily cap" in nn["proposals"][5].get("queue_refused", "")
+          and (new.find("### WS.%d" % n0) < new.find("\n## DONE") or "\n## DONE" not in new)
+          and "Basis (HOW 3b): at the mark" in new and "Never log-only." in new)
+    rc2 = DR.main(["append", "--day", "2026-11-23", "--notes", nf, "--queue", q])
+    ok2 = rc2 == 0 and read(q) == new
+    return ok and ok2, (rc, ids, want, len(before), len(after), ok2)
+
+
+ok7a, d7a = r7_on(QFIX, "fixture")
+if os.path.exists(real_q):
+    ok7b, d7b = r7_on(read(real_q), "realcopy")
+else:
+    ok7b, d7b = True, "real queue not readable here (fixture only)"
+ck("R7", ok7a and ok7b and DR.next_ws_id(QFIX) == 25,
+   "fixture %s; a copy of the real queue %s: accepted proposals OPEN with the next unique ids before ## DONE, a .bak "
+   "first, refusals named, a re-run appends nothing" % (d7a if not ok7a else "ok", d7b if not ok7b else "ok"))
+
+# ── R8 ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
+fresh()
+write(os.path.join(REV, "2026-11-23.md"), "# review\n")
+r8 = wrap([], "2026-11-23T17:00")
+posts = read(POSTS).splitlines() if os.path.exists(POSTS) else []
+p0 = posts[0] if posts else ""
+bad_when = dict(NOTES_OK, maintenance=dict(NOTES_OK["maintenance"], when="Saturday"))
+_f, _r, mp = DR.validate(bad_when)
+ck("R8", len(posts) == 1 and "Daily recap 2026-11-23 ready" in p0 and "+$4,149.00 at the mark" in p0
+   and "fees $213.50 beside" in p0 and "WS.25, WS.26" in p0 and "Maintenance HYG.9 (weekday) awaits your yes" in p0
+   and "\n" not in p0 and any("weekday / Sunday" in x for x in mp),
+   "one line: %r; a 'when' of Saturday refused" % p0[:160])
+
+# ── R9 ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
+fri = date.today() + timedelta(days=(4 - date.today().weekday()) % 7 + 7)      # a Friday next week (deadline ahead)
+FD = os.path.join(TMP, "fri")
+FAKE_PY = os.path.join(TMP, "fake_py.sh")
+write(FAKE_PY, "#!/bin/bash\necho \"PY $* at $(date +%s.%N)\" >> " + os.path.join(FD, "py_calls") + "\n", 0o755)
+
+
+def friday(rl_hook, recap_states, load="loaded", extra=None):
+    if os.path.isdir(FD):
+        shutil.rmtree(FD)
+    os.makedirs(FD)
+    if os.path.isdir(STATE):
+        shutil.rmtree(STATE)
+    os.makedirs(STATE)
+    rl = os.path.join(FD, "recap.ledger")
+    sc_state("dtp-eod-conductor.service", "ActiveState", ["inactive"])
+    sc_state("dtp-daily-recap.service", "LoadState", [load])
+    sc_state("dtp-daily-recap.service", "ActiveState", recap_states,
+             hook=rl_hook % {"n": STATE + "/dtp-daily-recap.service.ActiveState.n", "rl": rl, "day": fri.isoformat()})
+    env = dict(os.environ, FRIDAY_STUDIES_PY=FAKE_PY, FRIDAY_STUDIES_WEEKLY=os.path.join(FD, "weekly"),
+               FRIDAY_STUDIES_LEDGER=os.path.join(FD, "fs.ledger"), FRIDAY_STUDIES_NOW="%s 17:15" % fri,
+               FRIDAY_STUDIES_SYSTEMCTL=FAKE_SC, FRIDAY_STUDIES_POLL_S="1",
+               FRIDAY_STUDIES_LOCK=os.path.join(FD, "lock"), FRIDAY_STUDIES_RECAP_LEDGER=rl)
+    env.update(extra or {})
+    r = subprocess.run(["bash", FRI], capture_output=True, text=True, env=env, timeout=120)
+    pyc = read(os.path.join(FD, "py_calls")) if os.path.exists(os.path.join(FD, "py_calls")) else ""
+    log = "".join(read(p) for p in [os.path.join(FD, "weekly", "saturday_%s_work" % (fri + timedelta(days=1)),
+                                                 "study_dispatch.log")] if os.path.exists(p))
+    lt = os.path.getmtime(rl) if os.path.exists(rl) else None
+    first = re.search(r"study_dispatch\.py run .* at (\d+\.\d+)", pyc)
+    return r, pyc, log, lt, (float(first.group(1)) if first else None)
+
+
+hook = ("n=$(cat %(n)s 2>/dev/null || echo 0); [ $n -ge 3 ] && ! grep -q PRODUCED %(rl)s 2>/dev/null && "
+        "echo \"$(date -u +%%FT%%TZ) PRODUCED day=%(day)s session=rc=0 x\" >> %(rl)s; true")
+r9a, pyc, log, lt, t_run = friday(hook, ["activating"] * 3 + ["inactive"])
+ok_a = (r9a.returncode == 0 and "daily recap wait" in log and "(done)" in log and lt is not None and t_run is not None
+        and t_run >= lt and "study_dispatch.py run --deadline 02:30" in pyc)
+r9b, pyc_b, log_b, _lt, _t = friday("true", ["inactive"], load="not-found")
+ok_b = "daily recap wait 0s (not-installed)" in log_b and "study_dispatch.py run" in pyc_b
+r9c, pyc_c, log_c, _lt, _t = friday("true", ["activating"], extra={"FRIDAY_STUDIES_RECAP_WAIT_S": "3"})
+ok_c = re.search(r"daily recap wait [34]s \(cap\)", log_c) is not None and "study_dispatch.py run" in pyc_c
+fs_src = read(FRI)
+ok_t1 = ('"$HM" -lt 1650' in fs_src and "dtp-daily-recap.service" in fs_src
+         and 0 < fs_src.find("--value dtp-eod-conductor.service") < fs_src.find("--value dtp-daily-recap.service")
+         < fs_src.find("exec 9>"))
+ck("R9", ok_a and ok_b and ok_c and ok_t1,
+   "the dispatch ran after the recap's ledger line (%s), without waiting for a recap not installed (%s), and at the "
+   "cap (%s); conductor wait, then recap wait, then the lock (%s)" % (ok_a, ok_b, ok_c, ok_t1))
+
+# ── R10 ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+pr = re.sub(r"\s+", " ", read(os.path.join(TOOLS, "daily_recap.prompt")))
+need = ["P&L IS AT THE MARK ONLY", "the ladder's fill (mark or better)", "Fees go BESIDE P&L and EV, never inside",
+        "mainline()", "TastyTrade's", "No yfinance", "ORBStrategy", "Breakout (DORMANT", "butterflies", "PARC", "TCS",
+        "Never propose resting take-profit orders", "No new config knobs", "never log-only",
+        "Never edit ~/reviews/WEEKEND_STUDIES.md", "ONE object", '"weekday" or "Sunday"', "live order path",
+        "Never print or copy a service Environment block", "Honest, not cheerleading", "NOT MEASURED", "never /tmp"]
+miss = [n for n in need if n not in pr]
+ws = re.sub(r"(?m)^\s*#.*$", "", read(WRAP))                   # the code, not its comments
+ck("R10", not miss and "export VERTIGO_UNATTENDED=1" in ws and "--continue" not in ws and "--session-id" in ws
+   and 'timeout "$MAX_S"' in ws and "Environment" not in ws and "printenv" not in ws and "env |" not in ws,
+   "prompt rules present (missing: %s); the wrapper is unattended, isolated and capped" % miss)
+
+# ── R11 ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+gen = os.path.join(TOOLS, "daily_brief.py")
+gs = read(gen)
+try:
+    py_compile.compile(gen, cfile=os.path.join(TMP, "db.pyc"), doraise=True)
+    comp = True
+except py_compile.PyCompileError:
+    comp = False
+ck("R11", comp and "daily_brief.py  v1.1" in gs and 'NOTES_DIR = os.path.expanduser("~/reviews/daily_brief/notes")' in gs
+   and "--facts" in gs and "--summary-json" in gs and "/home/ubuntu/venvs/daily_brief" in gs
+   and not os.path.exists(os.path.join(TOOLS, "venv")) and not os.path.exists(os.path.join(TOOLS, "notes"))
+   and "11-20 showed" not in gs and os.path.exists(os.path.join(TOOLS, "daily_brief.requirements.txt")),
+   "tools/daily_brief.py v1.1 compiles; notes under ~/reviews/daily_brief/notes; no venv or notes in the repo")
+
+shutil.rmtree(TMP, ignore_errors=True)
+print()
+if FAILS:
+    print(f"RED — {len(FAILS)} of {len(RAN)} check(s) failed: {' '.join(FAILS)}")
+    sys.exit(1)
+print(f"GREEN — {len(RAN)} checks")

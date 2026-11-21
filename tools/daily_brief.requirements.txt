@@ -1,0 +1,10 @@
+# day_trader_pro/tools/daily_brief.requirements.txt — v1.0 (2026-11-21, dtp r569 / RECAP.1)
+# The daily brief's own venv, OUTSIDE the repo: /home/ubuntu/venvs/daily_brief (tools/install_daily_recap.sh).
+# Pinned to the versions the 2026-11-20 brief was built with (~/otv5_builds/daily_brief/venv, Python 3.14).
+boto3==1.40.72
+botocore==1.40.72
+matplotlib==3.11.2
+numpy==2.5.5
+pillow==12.1.1
+pypdfium2==5.15.2
+reportlab==5.1.0
