@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
-# day_trader_pro/tools/saturday_brief.sh — v2.1
+# day_trader_pro/tools/saturday_brief.sh — v2.2
+# v2.2 (2026-11-21) — dtp r570 / SAT.10 (the operator's new layout, 2026-11-21: "1) Trading- ... 2) Our edge- ...
+#   3) Bot performance- ... 4) Recommendations"; spec v3.0). LABELS ONLY: the run parameters name the new parts (the
+#   STUDIES line says 2B and its FALLBACK 1, the TREES line says 3A and 3B). The timer, the run order, the deadline export,
+#   the Friday collection and the post-session cleanup are unchanged.
 # v2.1 (2026-11-13) — dtp r552 / SAT.9 (the operator, 2026-11-13: "Yes, don't wait until Sunday to do that study. Add
 #   it to the rest"). The study queue now runs Friday night (control timer dtp-study-dispatch, tools/friday_studies.sh,
 #   17:15 ET, deadline Sat 02:30 ET) into this brief's WORK/study_dispatch. The run parameters name that folder
@@ -429,7 +433,7 @@ _deadline_hm="$(TZ=America/New_York date -d "@$(( $(date +%s) + BUDGET_S ))" +%H
 export STUDY_DISPATCH_DEADLINE_ET="$_deadline_hm"   # SAT.8: the box studies end before the session does
 # SAT.9: Friday night's dispatch writes into this brief's WORK; say whether it ran, so the session knows to collect
 if [ -f "$WORK/study_dispatch/state.json" ]; then _fri="state.json present (collect it)"
-else _fri="NO state.json: Friday's run did not happen (section 6 FALLBACK 1)"; fi
+else _fri="NO state.json: Friday's run did not happen (2B FALLBACK 1)"; fi
 timeout "$BUDGET_S" "$CLAUDE_BIN" -p $ISOLATE "$(cat "$PROMPT_FILE")
 
 RUN PARAMETERS (from the wrapper; use them exactly):
@@ -437,8 +441,8 @@ RUN PARAMETERS (from the wrapper; use them exactly):
   WORK    your working files (sweep.json, botlog.json, disk.json, tool outputs): $WORK
   PRIOR   last week's brief: ${PRIOR:-NONE - say so; nothing can be called new}
   PRIOR_WORK  last week's working files (the --prior for botlog_scan and checker_sweep): $PRIOR_WORK
-  TREES   the trees this brief reports on (section 3.4 and the header): $TREES
-  STUDIES Friday night's study dispatch (section 6): $WORK/study_dispatch — $_fri
+  TREES   the trees this brief reports on (3A, 3B and the header): $TREES
+  STUDIES Friday night's study dispatch (2B): $WORK/study_dispatch — $_fri
   DEADLINE    you are stopped at $_deadline_hm ET; have the file written well before it" \
   --allowedTools "$TOOLS" >> "$LOG" 2>&1
 rc=$?

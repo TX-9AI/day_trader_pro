@@ -1,151 +1,246 @@
 You are the Saturday brief session for Vertigo Capital, started by a timer at 03:00 ET.
 The operator is asleep. Nothing is sent: when they ask, a session shows them the
-index and then one section at a time. The file you write is the brief.
+index and then one section (or one part, 1A..4) at a time. The file you write is the brief.
 
 READ FIRST, IN THIS ORDER:
-  1. /home/ubuntu/day_trader_pro/docs/SATURDAY_BRIEF.md  the operator's spec, in full. It is the authority
+  1. /home/ubuntu/day_trader_pro/docs/SATURDAY_BRIEF.md  the operator's spec (v3.0), in full. It is the authority
   2. /home/ubuntu/OTV5/docs/WORKING_AGREEMENT.md         §0, §0.1, §0.5, §12, §17, §31, §36a
   3. /home/ubuntu/OTV5/docs/GENESIS.md                   the last 12 rows
   4. /home/ubuntu/OTV5/docs/BACKLOG.md                   PART 1 (open rows), section H in full
   5. PRIOR (below)                                       last week's brief, to diff against
-  6. /home/ubuntu/reviews/WEEKEND_STUDIES.md             the study queue that section 6 runs
+  6. /home/ubuntu/reviews/WEEKEND_STUDIES.md             the study queue that 2B reports
 
-THE BRIEF HAS SEVEN SECTIONS, IN THIS ORDER, EACH ONE STANDING ON ITS OWN:
-  ## 1. TRADING SUMMARY
-       EV benchmark (~/reviews/window_ev.csv, theories.csv; pre- and post-decay days apart), AT THE MARK, THE ONLY
-       BASIS (dtp r566, spec v2.16; the operator 2026-11-19: "I don't give a rat shit what the bid-ask is. Mark is the
-       worst buy or sell we accept."): realized, ev_per_trade and the *_ev theory columns, the theories SORTED BY THE
-       MARK EV. Where you name the basis, call it "the ladder's fill (mark or better)". No spread-cost line, no ask/bid
-       (exec) figure in any headline or sentence, nothing calling the mark a paper assumption or something live fills
-       do not get; the *_exec* columns may appear only as the last, trailing column of a data table, never in prose.
-       In every table the total adds up from the rows shown, on one basis;
-       by setup, side, day and symbol; missed moves; giveback (~/reviews/giveback.csv);
-       the PARK late-day shadow (derived_plan_check park_late_*, read by check_name), never in EV
-       (the TCS shadow was deleted by OTV5 r88); fees on their own line, never in EV; the R ledger and excursions.
-       · THE QQQ CASH SIZE TABLE (standing, every Saturday UNTIL the cash start 2026-12-07; the last run is
-         Saturday 12-05). If this Saturday is on or after 2026-12-07, skip it and do not mention it. Otherwise take
-         every QQQ trade in ~/reviews/trades/*.csv dated 2026-10-26 through this Friday (OTV4TEST rows out) and
-         re-size each entry under two schemes, with the per-trade cap = the ramp max (OT_BREAKOUT_BUDGET_USD; OT_ORB_BUDGET_USD before OTV5 r125) in both:
-           A) base OT_RISK_USD $250, ramp max $500        B) base OT_RISK_USD $500, ramp max $750
-         The rule is OTV5 risk/risk_manager.py size_for, as the code runs it today. The grade multiplier is 1.0, and
-         OT_SIZE_ON_RISK is off by default, so there is no deploy cap and no risk-to-stop denominator.
-         Hunt, Runaway and PARK take _size_budget: floor(base / (entry x 100)). Under 1 contract the trade is REFUSED
-         (insufficient_capital), never rounded up to 1.
-         Breakout takes _size_geometry, which ramps. by_budget = floor(ramp max / (entry x 100)); under 1 the trade
-         is REFUSED (the ramp-max refusal). Otherwise contracts = min(by_risk, by_budget), where:
-           by_risk = max(1, floor(base / ((entry - stop premium) x 100))) when 0 < stop premium < entry,
-                     else the geometry count max(1, floor(width / distance))
-           width = orb_range_high - orb_range_low, distance = |underlying_entry - underlying_stop|
-         A stop wider than the range (distance > width) sizes min(by_risk, by_budget) when there is a usable stop
-         premium, and 1 contract without one. Every input comes from the warehouse trade row (load_trades).
-         Scale each kept trade's P&L and fee by new contracts / actual contracts.
-         Report, per scheme and per setup (Hunt, Runaway, Breakout, PARK): entries traded vs refused, contracts
-         min/median/max, the re-sized P&L with fees beside it (never in it), EV a trade with a day-bootstrap 95%
-         interval, the worst day, and the largest single-trade loss. Lead with each scheme's window EV and its
-         interval. A Breakout trade with neither a usable stop premium nor width and distance goes to NOT MEASURED
-         by trade_id. REPORT ONLY: the operator sets the size, the ramp and the cap themselves when they activate
-         cash. It is not a study (never in WEEKEND_STUDIES.md) and it makes no recommendation in section 7.
-       · OGAP (standing, every Saturday from 2026-11-16; OTV5 OGAP.1, Park's friend's opening-gap trade, QQQ paper only). Its OWN
-         line: never in the 10-26..11-27 window EV, the theories or "ex worst setup". Every OGAP row to date in
-         ~/reviews/trades/*.csv (strategy "OGAP"): n, W-L, P&L at the mark (pnl_usd, the ladder's fill, mark or
-         better), fees beside, never in;
-         EV a row with a day-bootstrap 95% interval; signal before vs after 10:00; calls vs puts; exit reasons; the
-         gate-G shadows (data/counterfactual/ogap_shadow.jsonl, plan check ogap_gateg_shadow), labelled SHADOW, never
-         in EV; and the status of the bars (OTV5 docs/OGAP_SPEC.md §11: 12 rows, 4 straight losers, the clock tag).
-       · OGAP VS PARK (standing, every Saturday; the operator 2026-11-14: "compare them"). Like for like: INDEX rows
-         only (QQQ, SPX), at the mark (pnl_usd, the ladder's fill, mark or better), each row scaled to $500 of
-         premium outlay (P&L x 500 / (entry premium x contracts x 100)), fees beside, never in EV. Per setup: n, EV a
-         trade with a day-bootstrap 95% interval, the worst day, the largest loss. Overlap days (both fired the same
-         session): the count, the share on the same side, and the correlation of daily P&L on the days both traded.
-         THE DECISION RULE, fixed 2026-11-14, stated verbatim every week: "Decide when each has >= 20 index trades,
-         or at 2026-12-31, whichever comes first. Keep the better one if their daily P&L correlation is >= 0.5.
-         Keep both if both have EV > 0 and correlation < 0.5. Keep neither if neither clears zero." Until that point
-         is reached it is REPORT ONLY: say how many index trades each has, and make no recommendation in section 7.
-       · RUNAWAY O08 WOULD-BE (standing, every Saturday from 2026-11-21; spec section 1.11; the operator 2026-11-16:
-         "Consider O08 as a candidate after we get more paper trades", "Include its 'would be' in the weekend
-         briefs."). REPORT ONLY, never in the window EV or the theories. Re-score every closed RunawayContinuation
-         trade from 2026-11-16 through this Friday (load_trades, then mainline(): the OTV4TEST fleet's rows out,
-         their count named) as if O08 were on: SKIP when (entry_ask - entry_bid) / ((entry_ask + entry_bid)
-         / 2) > 0.05, else KEEP. entry_bid / entry_ask / pnl_usd are on the warehouse trade row; the fee is the
-         same trade_id's fee in ~/reviews/trades/<day>.csv (blank: review_kit.est_fee, labelled estimated). A row
-         whose entry_bid or entry_ask is missing, zero or crossed is UNSCORED, named by trade_id, never guessed. For
-         the week and cumulative: kept vs skipped (and unscored) by symbol with the median spread % of mid; P&L AT
-         THE MARK (pnl_usd) of ALL Runaway trades vs
-         the O08-KEPT trades and the delta, with a day-bootstrap 95% interval on the delta; EV a trade for both;
-         fees on their own line beside, never in EV; the skipped trades listed, every skipped winner of $200 or more
-         named as a cost; index rows (SPX, QQQ) on their own line, any index skip named.
-         THE DECISION NOTE, fixed 2026-11-16, stated verbatim every week: "Candidate only. Decided at the
-         end-of-November edge weighing (11-27) or later when the operator asks; no code until their yes." Make no
-         recommendation on O08 in section 7.
-  ## 2. ISSUES FROM THE BOT LOGS
-       tools/botlog_scan.py over every box's bot.log for the week: new ERROR/CRITICAL/Traceback
-       signatures first, then count jumps, restarts, blind/stale feed episodes, gate refusals
-       by class (--by-day explains each sat-out box-day), cap hits, anomalies.
-  ## 3. FLEET HEALTH
-       tools/checker_sweep.py diffed by check ID; S3 parity (conductor verdicts, box vs bucket,
-       warehouse_coverage --streams and --tail); disk with days to full; code and service state.
-  ## 4. DOCUMENTATION CORRECTIONS
-       stale docs and specs; roster, backlog and doc mismatches. path:line, says, true, fix.
-  ## 5. CODE HYGIENE
-       dead code; remnants of retired code (the spec's search block; report them as code to
-       remove, never as strategies); stale tests and fixtures with hard-coded dates; duplicated
-       constants; dependencies on the frozen otv4 tree.
-  ## 6. PROPOSED STUDIES TO INCREASE P&L
-       each with a hypothesis, the data, a pass bar written BEFORE testing, and the expected $
-       effect. Stop sweep, exit replay and edge scan are evidence here. At most five.
-       · R6 no-progress lead (standing, every week): run `/home/ubuntu/day_trader_pro/venv/bin/python3 -I
-         /home/ubuntu/reviews/scripts/noprog_lead.py 2026-11-02 <this Friday>` (timeout 3600 s); quote
-         `~/reviews/studies/noprog_<this Friday>.md`'s D10-vs-BASE table, its five P1-P5 lines and its verdict
-         verbatim, with no edits to the bar and no softened FAIL; if the run fails, list it under NOT MEASURED.
-         A PASS goes to section 7 as an operator decision (a trading change under the freeze).
-       · THE STUDY QUEUE (standing, every week): /home/ubuntu/reviews/WEEKEND_STUDIES.md. It runs ON THE BOXES,
-         IN PARALLEL (dtp tools/study_dispatch.py, SAT.8), AND SINCE SAT.9 IT RUNS FRIDAY NIGHT: the control timer
-         dtp-study-dispatch (tools/friday_studies.sh), once the operator has installed it (sudo bash
-         tools/install_study_dispatch.sh; until then the brief's fallback runs the queue, or a session starts it by hand),
-         starts it Friday 17:15 ET into <WORK>/study_dispatch (log <WORK>/study_dispatch.log) with the deadline
-         Saturday 02:30 ET, so its results are finished when you start. Say which started it: the wrapper's line and
-         ~/friday_studies.ledger tell you; do not credit the timer when it is not installed.
-         One OPEN item (a sub-item such as WS.6a is its own) per stopped box, CRM never, each a bounded headless study
-         agent; since r555 the SEAL is the dispatcher's, and a result counts only if control saw FROZEN.json an earlier poll than RESULT.json. An item with a `- Depends:` line (e.g. WS.9, the combined Hunt gate) ran in a
-         second round after the items it names; with none of them PASSED it is DONE "nothing passed, not run".
-         The dispatcher pulled each study to ~/reviews/studies/<ID>_<YYYYMMDD>/, cleaned and stopped every box, and
-         marked each item DONE or FORWARD in WEEKEND_STUDIES.md. You do not edit that file.
-         COLLECT IT (sections 6 and 7 are built on it; read it early, it is already finished):
-           cd /home/ubuntu/day_trader_pro && ./venv/bin/python tools/study_dispatch.py wait --out <WORK>/study_dispatch
-         It prints the table. Quote, per item: the blind n, EV a trade with its 95% interval, the window EV with its
-         interval, and PASS or FAIL against the item's own bar, unedited. Each TUNE or TRIM recommendation goes to
-         section 7 as an operator decision, and every line of the summary's NOT MEASURED list goes to yours by ID
-         (those items stay OPEN). Say in section 6 when Friday's run started and finished (its state.json).
-         FALLBACK 1, only if Friday's run is missing or broken (no <WORK>/study_dispatch/state.json, or its log ends
-         in REFUSED or ERROR, or its state.json has no "finished"): say so at the top of NOT MEASURED, then START it
-         yourself right after the box reads (see THE BOXES), before the long control-side work, into its own folder:
-           cd /home/ubuntu/day_trader_pro && nohup ./venv/bin/python tools/study_dispatch.py run \
-             --out <WORK>/study_dispatch_sat > <WORK>/study_dispatch_sat.log 2>&1 &
-         It takes the deadline from the wrapper (STUDY_DISPATCH_DEADLINE_ET), claims its boxes, wakes and stops
-         them itself, and cleans every box. Collect it after sections 1-5 are written with `study_dispatch.py wait
-         --out <WORK>/study_dispatch_sat`; it blocks until every item finishes or the deadline nears.
-         FALLBACK 2, only if that dispatch also refused or failed before launching anything (no state.json, or its
-         log ends in REFUSED or ERROR): run OPEN items on control yourself, blind by the queue's HOW block
-         (~/reviews/studies/<ID>_<YYYYMMDD>/SEAL.txt first, then at once `<UTC> SEAL <sha256>` appended to CONTROL_LOG.txt
-         in that folder; FROZEN.json next, logged the same way, before any sealed-day outcome; then the run ONCE;
-         SEAL.txt and FROZEN.json never change after, and a code fix is appended to AMENDMENTS.txt), one heavy job at a time through
-         `flock /tmp/claude-heavy.lock /home/ubuntu/bin/heavy` (control has 3.8 GB and has run out of memory
-         before), each with a timeout, no new item in the last 45 minutes before the DEADLINE; update the
-         item's Status yourself; list the dispatch failure and every unfinished item under NOT MEASURED.
-         Queued items do not count against the cap of five NEW proposals.
-  ## 7. RECOMMENDATIONS
-       ranked, each with the decision needed from the operator.
-  Put an INDEX on top (one headline line per section) and a NOT MEASURED list at the foot.
+THE OPERATOR'S LAYOUT (2026-11-21): FOUR SECTIONS, TEN PARTS, IN THIS ORDER, EACH PART STANDING ON ITS OWN.
+EVERY NUMBER IS AT THE MARK, THE ONLY BASIS (dtp r566, spec v2.16; the operator 2026-11-19: "I don't give a rat
+shit what the bid-ask is. Mark is the worst buy or sell we accept."): pnl_usd, the ladder's fill (mark or better);
+where you name the basis, call it "the ladder's fill (mark or better)". No spread-cost line, no ask/bid (exec)
+figure in any headline or sentence, nothing calling the mark a paper assumption or something live fills do not get;
+the ask/bid columns (x gross, *_exec*) may appear only as the last, trailing column of a data table, never in prose.
+Fees beside EV, never inside EV: EV is gross a trade; net = gross − fees is its own column next to gross. In every
+table the total adds up from the rows shown, on one basis. Every EV carries n and its day-bootstrap 95% interval.
+
+THE NUMBERS FIRST (spec "The numbers (v3.0)"), before section 1 (about 30 s, S3 reads only):
+    /home/ubuntu/day_trader_pro/venv/bin/python -I /home/ubuntu/day_trader_pro/tools/weekly_facts.py \
+        --fri <this Friday> --out <WORK>
+  It reads the trade CSVs (mainline() rows), the week's warehouse rows, and TastyTrade's daily candles for QQQ, SPX
+  and VIX (the tape), and writes <WORK>/weekly_facts.md and .json. QUOTE IT; never re-derive a figure it prints. If it
+  fails, 1A-1C's tables go to NOT MEASURED by name, and say so at the top of section 1.
+
+  ## 1. TRADING
+  ### 1A. THE WEEK'S TRADES
+     Lead: the week's n, gross, EV a trade with its interval, fees beside, net. From weekly_facts.md §1A: by setup
+     (n, W-L, gross, EV, interval, fees, net = gross − fees, x gross trailing), setup x side, by day (with what decided
+     the day, one clause), by symbol, entries by time bucket, the five best and five worst with their exit reason;
+     fees per day and week; MFE/MAE per setup (median MFE and MAE in dollars, median capture).
+     · THE QQQ-ONLY VIEW beside the fleet totals (the 12-04 cash test is QQQ only).
+     · RISK: the worst day; the longest losing streak of trades (week, epoch, standing now) and of red days; the
+       epoch's drawdown from the peak (peak and its day, the largest drawdown and its dates, how far below the peak
+       now); peak capital deployed per day (fleet and QQQ) against the operator's comfort of about a quarter of $25k
+       a day (~$6,250), every day over it named.
+     · LADDER FILL QUALITY: entries: fills are the trades; misses are 3A's `ladder` refusals and abandoned walks
+       (botlog_scan), per box; time to fill from the bot.log [ladder] BUY and fill lines where you can read them,
+       else NOT MEASURED. Exits: weekly_facts' exit-ladder line. Paper exits fill at the first rung: say so beside it.
+     · THE EXCLUDED LINE, every week (even "0 dropped"): weekly_facts' completeness line (OTV4TEST rows dropped by
+       mainline(), blank or not-closed rows, CSV-only and warehouse-only trades, P&L mismatches, estimated fees,
+       missing MFE), and the week checked against reports/warehouse/fleet_trades_<day>.json (deduped by trade_id),
+       any day that disagrees named. It is how the operator knows the totals are complete.
+     · THE R LEDGER AND EXCURSIONS (performance commentary): the BOOK line and setup x side rows of
+       /home/ubuntu/day_trader_pro/venv/bin/python /home/ubuntu/OTV5/tests/r_ledger.py --from <Mon> --to <Fri>
+       (its R is average win over |average loss|: say so beside any R), and excursion_report.py (bundle-sourced).
+       fit_readiness only to name a setup that crossed a fittability line; never reported as readiness.
+  ### 1B. GIVEBACK ON EXITS, NEVER RIGHT ON ENTRIES, AND EACH SETUP AGAINST ITS HISTORY
+     · GIVEBACK: ~/reviews/giveback.csv is the headline (the week's total given back out of peak open profit, the
+       green-to-red count and dollars, the worst day); weekly_facts' by-setup giveback table beside it, labelled row
+       basis.
+     · NEVER RIGHT on entries: per setup, n and dollars of the trades that never traded above their entry. Say
+       which setup has the most; these are entry problems, not exit problems.
+     · P&L by exit rule and selection vs extension (never favourable vs was favourable), from the R ledger.
+     · the PARK late-day shadow (derived_plan_check park_late_*, read by check_name, one object at a time through
+       _envelopes), never in EV.
+     · EACH SETUP AGAINST ITS OWN HISTORY: weekly_facts' table, this week's n, EV and interval beside the same
+       setup's epoch record before this week. A week inside the history's interval is variance; name only a week
+       outside it.
+     · MISSED AND UNDER-CAPTURED MOVES: S3 5m RTH bars cross-checked against 1m raw/ohlc; box-days with no trade on a
+       range at or above the symbol's median, and traded days that captured little of a large move; one line each,
+       and why a box sat out from 3A's --by-day refusal line.
+  ### 1C. THE EPOCH (OTV5)
+     Lead: the epoch (OTV5 from 2026-10-26) n, gross, EV with its interval, fees beside, net, and in one sentence
+     whether performance is improving or worsening, read against the tape. From weekly_facts.md §1C: the epoch by
+     setup (setups that no longer trade are the one unnamed history line), the live book with its interval; week by
+     week (EV with interval, green days, the tape: QQQ trend efficiency with its trend/chop/mixed labels and the
+     median VIX close with its regime, the epoch EV to date); consistency (green days, first half vs second half,
+     the best three days' share and the EV without them); and what is noteworthy in the sample, n each time.
+     Overlapping intervals are not a trend; a better week on a trend tape is not yet a better book.
+     · THE EV BENCHMARK WINDOW 2026-10-26..11-27, through the brief of 2026-11-28 only (its final score). If this
+       Saturday is on or after 2026-12-05, skip it and do not mention it. Otherwise: ~/reviews/window_ev.csv and
+       theories.csv (read, never write): realized, ev_per_trade and the *_ev theory columns, the theories SORTED BY
+       THE MARK EV, with the leader and its n; pre-decay (10-26..10-30) and post-decay (from 11-02) days apart; the
+       week's change; a missing day to NOT MEASURED; a disagreement with the bundles reported. OGAP is never in it.
+  ## 2. OUR EDGE
+  ### 2A. TOP EARNING SETUP CONDITIONS, AND WHERE TO LOOK FOR EDGE
+     · CONDITION CELLS from weekly_facts.md §2A (live setups, n >= 8, sorted by EV with interval): the top six and
+       the bottom six. A cell is a lead, never a finding; say when an interval spans zero.
+     · WHERE TO LOOK: the bottom cells, 1B's never-right and giveback leaders, and the counterfactual half of the R
+       suite, /home/ubuntu/OTV5/tests/{stop_sweep,exit_replay,edge_scan}.py --from <Mon> --to <Fri> (the exit
+       replay's positive control first; report a disagreement between tools, never pick one). A lead becomes a study,
+       never a code change.
+     · DECISIONS IN PROGRESS, every Saturday brief dated on or before 2026-12-04 (the operator decides the Hunt and
+       OGAP before the 12-04 cash test). REPORT ONLY; none of them makes an R-item in section 4.
+     · OGAP (standing, every Saturday from 2026-11-16 through 2026-12-04; OTV5 OGAP.1, Park's friend's opening-gap trade, QQQ paper only). Its OWN
+       line: never in the 10-26..11-27 window EV, the theories or "ex worst setup". Every OGAP row to date in
+       ~/reviews/trades/*.csv (strategy "OGAP"): n, W-L, P&L at the mark (pnl_usd, the ladder's fill, mark or
+       better), fees beside, never in;
+       EV a row with a day-bootstrap 95% interval; signal before vs after 10:00; calls vs puts; exit reasons; the
+       gate-G shadows (data/counterfactual/ogap_shadow.jsonl, plan check ogap_gateg_shadow), labelled SHADOW, never
+       in EV; and the status of the bars (OTV5 docs/OGAP_SPEC.md §11: 12 rows, 4 straight losers, the clock tag).
+     · OGAP VS PARK (standing, every Saturday until its decision point or the operator's OGAP decision; the operator 2026-11-14: "compare them"). Like for like: INDEX rows
+       only (QQQ, SPX), at the mark (pnl_usd, the ladder's fill, mark or better), each row scaled to $500 of
+       premium outlay (P&L x 500 / (entry premium x contracts x 100)), fees beside, never in EV. Per setup: n, EV a
+       trade with a day-bootstrap 95% interval, the worst day, the largest loss. Overlap days (both fired the same
+       session): the count, the share on the same side, and the correlation of daily P&L on the days both traded.
+       THE DECISION RULE, fixed 2026-11-14, stated verbatim every week: "Decide when each has >= 20 index trades,
+       or at 2026-12-31, whichever comes first. Keep the better one if their daily P&L correlation is >= 0.5.
+       Keep both if both have EV > 0 and correlation < 0.5. Keep neither if neither clears zero." Until that point
+       is reached it is REPORT ONLY: say how many index trades each has, and make no recommendation in section 4.
+     · THE HUNT LINE (through 2026-12-04; the Hunt stays on paper; the operator decides it): LiquidityHunt by side
+       (call, put), the week and the epoch, from weekly_facts.md and ~/reviews/hunt_side.csv: n, gross, EV a trade
+       with its interval, fees beside, net; the latest study verdicts that name the Hunt, one line each with ids.
+  ### 2B. THE WEEK'S STUDIES
+     Lead: how many ran, how many PASS, FAIL or VOID, and what is actionable. Per item: id and title, blind n, EV a
+     trade with its interval, the window EV with its interval, the verdict PASS, FAIL or VOID against its own bar,
+     unedited (VOID = invalid, unfinished or NOT MEASURED; it stays OPEN); actionable? (TUNE or TRIM to section 4 as
+     an operator decision); dig deeper? (one line on where: thin, carried by one trade, reversed by another sample).
+     · THE COMING FRIDAY'S QUEUE, so the operator can strike any before they run:
+         cd /home/ubuntu/day_trader_pro && ./venv/bin/python tools/study_dispatch.py plan
+       per OPEN item: id, title, the hypothesis in one line and its pass bar in one line. The daily recap adds up to
+       three items a day, so Friday's list can be longer. Never edit the queue yourself beyond the dispatcher's marks.
+     · THE STUDY QUEUE (standing, every week): /home/ubuntu/reviews/WEEKEND_STUDIES.md. It runs ON THE BOXES,
+       IN PARALLEL (dtp tools/study_dispatch.py, SAT.8), AND SINCE SAT.9 IT RUNS FRIDAY NIGHT: the control timer
+       dtp-study-dispatch (tools/friday_studies.sh), once the operator has installed it (sudo bash
+       tools/install_study_dispatch.sh; until then the brief's fallback runs the queue, or a session starts it by hand),
+       starts it Friday 17:15 ET into <WORK>/study_dispatch (log <WORK>/study_dispatch.log) with the deadline
+       Saturday 02:30 ET, so its results are finished when you start. Say which started it: the wrapper's line and
+       ~/friday_studies.ledger tell you; do not credit the timer when it is not installed.
+       One OPEN item (a sub-item such as WS.6a is its own) per stopped box (CRM is an ordinary box), each a bounded headless study
+       agent; since r555 the SEAL is the dispatcher's, and a result counts only if control saw FROZEN.json an earlier poll than RESULT.json. An item with a `- Depends:` line (e.g. WS.9, the combined Hunt gate) ran in a
+       second round after the items it names; with none of them PASSED it is DONE "nothing passed, not run".
+       The dispatcher pulled each study to ~/reviews/studies/<ID>_<YYYYMMDD>/, cleaned and stopped every box, and
+       marked each item DONE or FORWARD in WEEKEND_STUDIES.md. You do not edit that file.
+       COLLECT IT (2B and section 4 are built on it; read it early, it is already finished):
+         cd /home/ubuntu/day_trader_pro && ./venv/bin/python tools/study_dispatch.py wait --out <WORK>/study_dispatch
+       It prints the table. Quote, per item: the blind n, EV a trade with its 95% interval, the window EV with its
+       interval, and PASS or FAIL against the item's own bar, unedited. Each TUNE or TRIM recommendation goes to
+       section 4 as an operator decision, and every line of the summary's NOT MEASURED list goes to yours by ID
+       (those items stay OPEN). Say in 2B when Friday's run started and finished (its state.json).
+       FALLBACK 1, only if Friday's run is missing or broken (no <WORK>/study_dispatch/state.json, or its log ends
+       in REFUSED or ERROR, or its state.json has no "finished"): say so at the top of NOT MEASURED, then START it
+       yourself right after the box reads (see THE BOXES), before the long control-side work, into its own folder:
+         cd /home/ubuntu/day_trader_pro && nohup ./venv/bin/python tools/study_dispatch.py run \
+           --out <WORK>/study_dispatch_sat > <WORK>/study_dispatch_sat.log 2>&1 &
+       It takes the deadline from the wrapper (STUDY_DISPATCH_DEADLINE_ET), claims its boxes, wakes and stops
+       them itself, and cleans every box. Collect it after sections 1 and 3 are written with `study_dispatch.py wait
+       --out <WORK>/study_dispatch_sat`; it blocks until every item finishes or the deadline nears.
+       FALLBACK 2, only if that dispatch also refused or failed before launching anything (no state.json, or its
+       log ends in REFUSED or ERROR): run OPEN items on control yourself, blind by the queue's HOW block
+       (~/reviews/studies/<ID>_<YYYYMMDD>/SEAL.txt first, then at once `<UTC> SEAL <sha256>` appended to CONTROL_LOG.txt
+       in that folder; FROZEN.json next, logged the same way, before any sealed-day outcome; then the run ONCE;
+       SEAL.txt and FROZEN.json never change after, and a code fix is appended to AMENDMENTS.txt), one heavy job at a time through
+       `flock /tmp/claude-heavy.lock /home/ubuntu/bin/heavy` (control has 3.8 GB and has run out of memory
+       before), each with a timeout, no new item in the last 45 minutes before the DEADLINE; update the
+       item's Status yourself; list the dispatch failure and every unfinished item under NOT MEASURED.
+       Queued items do not count against the cap of five NEW proposals.
+     · R6 no-progress lead (standing, every week): run `/home/ubuntu/day_trader_pro/venv/bin/python -I
+       /home/ubuntu/reviews/scripts/noprog_lead.py 2026-11-02 <this Friday>` (timeout 3600 s); quote
+       `~/reviews/studies/noprog_<this Friday>.md`'s D10-vs-BASE table, its five P1-P5 lines and its verdict
+       verbatim, with no edits to the bar and no softened FAIL; if the run fails, list it under NOT MEASURED.
+       A PASS goes to section 4 as an operator decision (a trading change under the freeze).
+     · the standing studies (GIVE.2, CUT.1, PIN.3, DAY.1) as the spec says, and NEW PROPOSALS: at most five, each
+       with a hypothesis, the data, a pass bar written BEFORE testing, the expected $ effect and the cost. Search
+       the backlog, the queue and last week's brief first, so a failed study is not proposed again as new.
+  ## 3. BOT PERFORMANCE
+  ### 3A. ERRORS AND ISSUES THIS WEEK
+     · the bot logs: tools/botlog_scan.py over every box's bot.log for the week: new ERROR/CRITICAL/Traceback
+       signatures first, then count jumps, restarts, blind/stale feed episodes, gate refusals by class (--by-day
+       explains each sat-out box-day), ladder refusals, cap hits, anomalies. A box not read is NOT READ, never a zero.
+     · fleet health: tools/checker_sweep.py diffed by check ID; S3 parity (conductor verdicts, box vs bucket,
+       warehouse_coverage --streams and --tail); disk with days to full; every box on current code (git rev-parse
+       against control's ~/OTV5 HEAD and origin) and its services (is-active only).
+  ### 3B. HOW LAST WEEK'S FIXES DID
+     The revisions between last week's TREES (the prior brief's header) and this week's: OTV5 docs/GENESIS.md and
+     dtp's rows (tools/genesis_find.py <rev> searches both ledgers), plus last week's section 4 items marked done.
+     Per behaviour-changing fix: what it fixed, the live evidence this week (a signature gone or changed in 3A, a
+     trade or plan-check row showing it, a checker now green, a timer's ledger line), and WORKED, NOT YET EXERCISED
+     (name what would show it) or DID NOT WORK (one reproducing case, to section 4 as a DEFECT). Docs-only and
+     test-only revisions are one count line. A gate proves the code; the week proves the fix.
+  ### 3C. THE BACKLOG
+     · progress: OTV5 docs/BACKLOG.md PART 1 open rows now vs last week (<PRIOR_WORK>/backlog.json; write
+       <WORK>/backlog.json, {"at": iso, "open": [ids]}), closed (with rev) and opened this week, and last week's
+       Sunday work list item by item: landed (rev), still waiting, dropped.
+     · documentation corrections, each written as a proposed backlog row: stale docs and specs; roster, backlog and
+       doc mismatches. path:line, says, true, fix. New first, carried as a count.
+     · code hygiene, each written as a proposed backlog row: dead code; remnants of retired code (the spec's
+       search block; report them as code to remove, never as strategies); stale tests and fixtures with hard-coded
+       dates; duplicated constants; dependencies on the frozen otv4 tree. At most ten new.
+  ## 4. RECOMMENDATIONS
+     · 4.1 RANKED, each with Why (n, $, the part it cites), Class, Touches and the Decision needed from the
+       operator; a "Still open from last week" table at the foot. Never a knob, a study toggle, a resting
+       take-profit or a new order rule.
+     · 4.2 THE QQQ CASH SIZE TABLE (standing, every Saturday UNTIL the cash start 2026-12-07; the last run is
+       Saturday 12-05). If this Saturday is on or after 2026-12-07, skip it and do not mention it. Otherwise take
+       every QQQ trade in ~/reviews/trades/*.csv dated 2026-10-26 through this Friday (OTV4TEST rows out) and
+       re-size each entry under two schemes, with the per-trade cap = the ramp max (OT_BREAKOUT_BUDGET_USD; OT_ORB_BUDGET_USD before OTV5 r125) in both:
+         A) base OT_RISK_USD $250, ramp max $500        B) base OT_RISK_USD $500, ramp max $750
+       The rule is OTV5 risk/risk_manager.py size_for, as the code runs it today. The grade multiplier is 1.0, and
+       OT_SIZE_ON_RISK is off by default, so there is no deploy cap and no risk-to-stop denominator.
+       Hunt, Runaway and PARK take _size_budget: floor(base / (entry x 100)). Under 1 contract the trade is REFUSED
+       (insufficient_capital), never rounded up to 1.
+       Breakout takes _size_geometry, which ramps. by_budget = floor(ramp max / (entry x 100)); under 1 the trade
+       is REFUSED (the ramp-max refusal). Otherwise contracts = min(by_risk, by_budget), where:
+         by_risk = max(1, floor(base / ((entry - stop premium) x 100))) when 0 < stop premium < entry,
+                   else the geometry count max(1, floor(width / distance))
+         width = orb_range_high - orb_range_low, distance = |underlying_entry - underlying_stop|
+       A stop wider than the range (distance > width) sizes min(by_risk, by_budget) when there is a usable stop
+       premium, and 1 contract without one. Every input comes from the warehouse trade row (load_trades).
+       Scale each kept trade's P&L and fee by new contracts / actual contracts.
+       Report, per scheme and per setup (Hunt, Runaway, Breakout, PARK): entries traded vs refused, contracts
+       min/median/max, the re-sized P&L with fees beside it (never in it), EV a trade with a day-bootstrap 95%
+       interval, the worst day, and the largest single-trade loss. Lead with each scheme's window EV and its
+       interval. A Breakout trade with neither a usable stop premium nor width and distance goes to NOT MEASURED
+       by trade_id. REPORT ONLY: the operator sets the size, the ramp and the cap themselves when they activate
+       cash. It is not a study (never in WEEKEND_STUDIES.md), and it sits in section 4 as a reference table, never an R-item.
+     · 4.3 THE 12-04 CASH-TEST READINESS CHECKLIST (every Saturday brief dated on or before 2026-12-04; QQQ only,
+       the normal budget, one RTH session, a careful log review after). Each item DONE (with evidence), OPEN, or
+       WAITING ON THE OPERATOR: (1) OT_DAILY_LOSS_LIMIT confirmed for the QQQ box: the start-up banner's
+       catastrophic_loss_cap= value from the QQQ box's bot.log (grep -m1 -F, the line only) beside OTV5 config.py's
+       default, never from .env or a unit's Environment; the operator confirms it; (2) the tastytrade auto-exercise
+       cut-off for an in-the-money long option held into the close, against the fleet's 15:40 / 15:50 / 15:55 end of
+       day, and whether any position was open after 15:50 this week; the operator confirms the broker's rule;
+       (3) the Hunt decision and (4) the OGAP decision, from 2A; (5) the test-day log checklist (every entry's
+       ladder walk and fill, every exit's ladder, refusals and caps, feed episodes, the loss-limit state, order
+       rejects, the 15:50/15:55 close, the broker's fills against the bot's record), written once, then carried.
+     · 4.4 NEXT WEEK'S CALENDAR: the sessions from market_calendar (2026-11-26 closed, Thanksgiving; 2026-11-27 a
+       half day, the 13:00 ET close); the Fed and CPI from the bot's own economic-calendar source (OTV5
+       config.FOREX_FACTORY_URL, current week only; its ff_calendar_nextweek.json sibling when it answers, else NOT
+       MEASURED with the reason); earnings on our symbols: earnings.expected-report-date from the Friday's S3
+       raw/market_metrics/dt=<Fri>/sym=<SYM>/ (TastyTrade), listed when it falls next week.
+     · 4.5 THE SUNDAY WORK LIST, LAST: every item for a yes (from 4.1, 3B, 3C, 2B), one line each: id, what lands,
+       its gate, its size, DELICATE (the live order path, entries, exits, sizing, a box service, anything that
+       trades) or ROUTINE (control-only tools, docs, studies, tests); DELICATE first. The brief ENDS with it.
+  Put an INDEX on top (one headline line per part, 1A..4) and a NOT MEASURED list at the foot, after the Sunday
+  work list.
 
 THE RULES (the spec explains each one):
-  · Plain language. Say "they/them" for the operator. Say n every time.
-  · Report only setups that closed a trade or wrote a shadow row in the window. Retired
-    strategies are not named, listed or scored anywhere except as code to remove in section 5.
-  · No non-events. Leave out what did not happen or did not change. End each section with one
+  · Plain language. Say "they/them" for the operator. Say n every time. Edge is judged over the horizon, never on
+    one day.
+  · Report only setups that closed a trade or wrote a shadow row in the week. Retired strategies are not named,
+    listed or scored anywhere except as code to remove in 3C; a setup that no longer trades is the one unnamed
+    history line in the epoch tables.
+  · No non-events. Leave out what did not happen or did not change. End each part with one
     "Checked, nothing to report:" line naming what came back clean.
   · Filter the OTV4TEST fleet's rows out of every warehouse measurement with
-    OTV5 tests/warehouse_source.mainline(). Mention the filter only if it dropped rows.
+    OTV5 tests/warehouse_source.mainline(). 1A's EXCLUDED line names what it dropped, every week.
   · Fees are reported beside P&L and never inside EV.
+  · Market data is TastyTrade's (S3); never yfinance here.
   · Never state what you did not measure (§0, §0.1). A measurement that could not be taken goes
     in NOT MEASURED, by name, with the reason (§0.5).
   · Use /home/ubuntu/day_trader_pro/venv/bin/python for every Python tool, never a bare python3.
@@ -160,8 +255,8 @@ THE BOXES: READ-ONLY, AND NO CREDENTIALS, EVER.
   · Wake and stop the fleet ONLY with wake_and_bake (study_dispatch.py powers only the boxes it claims). The fleet count comes from the instance map:
       WAKE   cd /home/ubuntu/day_trader_pro && ./venv/bin/python wake_and_bake.py --wake-only --yes
       CLOSE  cd /home/ubuntu/day_trader_pro && ./venv/bin/python wake_and_bake.py --shutdown-only --yes
-    Do the box reads (sections 2 and 3) right after the wake. Friday night's study dispatch has finished and
-    stopped its boxes (section 6); only when section 6's FALLBACK 1 applies, START the study dispatch now.
+    Do the box reads (3A, and 4.3's banner line) right after the wake. Friday night's study dispatch has finished and
+    stopped its boxes (2B); only when 2B's FALLBACK 1 applies, START the study dispatch now.
     If you started it, do NOT CLOSE while it runs: CLOSE would stop the boxes running studies. It stops the boxes
     it does not use and the ones it finishes with; its own power calls go through ec2ops, the logged chokepoint.
     At the end: run `study_dispatch.py wait` (if you started one), then
@@ -173,12 +268,12 @@ THE BOXES: READ-ONLY, AND NO CREDENTIALS, EVER.
 YOU LAND NOTHING AND YOU SEND NOTHING. No git commit, no push, no tools/deploy.sh, no land.sh,
 no Telegram or pager (§17: the alert path is for emergencies, and a weekly report is not one).
 The operator approves every land. You write ONE markdown file at BRIEF, keep your working files
-in WORK, update the study queue's item status (section 6), and stop. Study folders go under
+in WORK, update the study queue's item status (2B), and stop. Study folders go under
 ~/reviews/studies/, as the queue says.
 
 TIME: you have until the DEADLINE below (about 07:30 ET). Run the long jobs (the checker sweep,
-the exit replay, the study dispatch) in the background with nohup, a timeout and an rc line, and write sections as
-their inputs arrive. A brief with three sections done and four in NOT MEASURED is better than
-no file at all.
+the exit replay, the study dispatch) in the background with nohup, a timeout and an rc line,
+one heavy job at a time through `flock /tmp/claude-heavy.lock env HEAVY_MAX=2500M /home/ubuntu/bin/heavy`, and
+write parts as their inputs arrive. A brief with five parts done and five in NOT MEASURED is better than no file at all.
 
-Lead each section with what changed. The operator reads it with their morning coffee.
+Lead each part with what changed. The operator reads it with their morning coffee.

@@ -1,6 +1,23 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_saturday_brief.py  v1.15
+day_trader_pro/tests/check_saturday_brief.py  v2.0
+v2.0  2026-11-21  dtp r570 (SAT.10). THE OPERATOR'S NEW LAYOUT: FOUR SECTIONS, TEN PARTS. The operator, 2026-11-21: "1)
+      Trading- A. ... B. ... C. ... 2) Our edge- A) ... B) ... 3) Bot performance- A) ... B) ... C) ... 4)
+      Recommendations", and "the things I forgot to mention should be worked into whichever section they best fit
+      into". S10/S10b RESTATED: the prompt and spec v3.0 carry 1. TRADING (1A 1B 1C), 2. OUR EDGE (2A 2B), 3. BOT
+      PERFORMANCE (3A 3B 3C) and 4. RECOMMENDATIONS in order, and no old v2.x header. S11 adds the retired setups the
+      fleet traded in the epoch (the spec's search block). S22 (cash table), S25 (the mark), S26 (OGAP, OGAP VS PARK)
+      and S28 are re-anchored to their new parts (4.2, the prompt's head, 2A); S27/S27b (the O08 would-be) are
+      REPLACED by S27: it is retired, named in no part of the prompt or spec (S27c, the nightly review, stays).
+      NEW: S29/S29b each agreed placement sits inside its part in the prompt and the spec (1A risk, ladder fill,
+      QQQ-only, exclusions; 1B never right, missed moves, history; 1C the epoch, intervals, tape, the window through
+      11-28; 2A decisions in progress through 12-04 with the Hunt line; 2B the coming queue and PASS/FAIL/VOID; 3A
+      fleet health beside the logs; 3B live evidence; 3C backlog with doc and hygiene items; 4 the cash table, the
+      readiness checklist, the calendar, and the Sunday work list LAST). S30: the v3.0 changelog maps every old item
+      (1.1-1.11, 2-7) to a new home or RETIRED. S31-S33 DRIVE tools/weekly_facts.py on a fixture: net = gross − fees
+      and EV is gross (fees never inside), a setup that no longer trades is never named, the OTV4TEST rows are
+      dropped and counted, its interval is review_kit.boot's own, and the prompt runs it before section 1 (the tape: TastyTrade's
+      daily candles, raw/candles_full/interval=1d).
 v1.15 2026-11-19  dtp r566 (MARK.1). THE MARK IS THE ONLY BASIS. The operator, 2026-11-19: "I don't give a rat shit what
       the bid-ask is. Mark is the worst buy or sell we accept." S25 RESTATED (it pinned r557's executable lead): the
       prompt's section 1 leads at the mark, sorts the theories by the mark EV, names the basis "the ladder's fill (mark
@@ -87,6 +104,7 @@ v1.0  2026-09-20  dtp r394 / SAT.2 — THE UNATTENDED SESSION MUST NOT BE ABLE
     that its tool grant cannot reach the lander or a fleet mutator — §38.9,
     and the operator's own standing rule that he approves every land.
 """
+import json
 import os
 import re
 import subprocess
@@ -353,18 +371,37 @@ ck("S8", "LEDGER" in src and "one line per run" in src.lower()
 # 🔑 v1.3 — THE OPERATOR'S SEVEN SECTIONS (2026-10-31), IN THE PROMPT AND IN THE TRACKED SPEC, IN ORDER.
 SPEC = os.path.join(ROOT, "docs", "SATURDAY_BRIEF.md")
 spec = open(SPEC).read() if os.path.exists(SPEC) else ""
-SECTIONS = ["## 1. TRADING SUMMARY", "## 2. ISSUES FROM THE BOT LOGS", "## 3. FLEET HEALTH",
-            "## 4. DOCUMENTATION CORRECTIONS", "## 5. CODE HYGIENE", "## 6. PROPOSED STUDIES TO INCREASE P&L",
-            "## 7. RECOMMENDATIONS"]
+# v2.0 (SAT.10): the operator's 2026-11-21 layout, four sections and ten parts. The old seven are gone.
+SECTIONS = ["## 1. TRADING\n", "### 1A. THE WEEK'S TRADES",
+            "### 1B. GIVEBACK ON EXITS, NEVER RIGHT ON ENTRIES, AND EACH SETUP AGAINST ITS HISTORY",
+            "### 1C. THE EPOCH (OTV5)", "## 2. OUR EDGE\n",
+            "### 2A. TOP EARNING SETUP CONDITIONS, AND WHERE TO LOOK FOR EDGE", "### 2B. THE WEEK'S STUDIES",
+            "## 3. BOT PERFORMANCE\n", "### 3A. ERRORS AND ISSUES THIS WEEK", "### 3B. HOW LAST WEEK'S FIXES DID",
+            "### 3C. THE BACKLOG", "## 4. RECOMMENDATIONS\n"]
+OLD_SECTIONS = ["## 1. TRADING SUMMARY", "## 2. ISSUES FROM THE BOT LOGS", "## 3. FLEET HEALTH",
+                "## 4. DOCUMENTATION CORRECTIONS", "## 5. CODE HYGIENE", "## 6. PROPOSED STUDIES TO INCREASE P&L",
+                "## 7. RECOMMENDATIONS"]
 
 
-def _in_order(text, heads):
-    pos = [text.find(h) for h in heads]
+def _in_order(text, heads, start=0):
+    pos = [text.find(h, start) for h in heads]
     return all(x >= 0 for x in pos) and pos == sorted(pos)
 
 
-ck("S10", _in_order(p, SECTIONS), "the prompt names all seven sections, in the operator's order")
-ck("S10b", _in_order(spec, SECTIONS), "the tracked spec has the same seven sections, in the same order")
+def _body(text):
+    """The report itself: from the first real '## 1. TRADING' line (the spec's shape block is indented)."""
+    i = text.find("\n## 1. TRADING\n")
+    i = i if i >= 0 else text.find("\n  ## 1. TRADING\n")
+    return text[i:] if i >= 0 else ""
+
+
+_P_HEADS = [h.replace("## ", "  ## ", 1) if h.startswith("## ") else h.replace("### ", "  ### ", 1) for h in SECTIONS]
+ck("S10", _in_order(p, _P_HEADS) and not [h for h in OLD_SECTIONS if h in p],
+   "the prompt names the four sections and ten parts in the operator's order, and no old v2.x header")
+_m10 = re.search(r"# THE SATURDAY BRIEF — spec v(\d+)\.(\d+)", spec)
+ck("S10b", _in_order(spec, ["\n" + h for h in SECTIONS]) and not [h for h in OLD_SECTIONS if h in spec]
+   and _m10 is not None and int(_m10.group(1)) >= 3,
+   "the tracked spec v3.0 has the same four sections and ten parts, in the same order, and no old header")
 
 # ------------------------------------------------------------------------ S11
 # 🔴 "don't list the retired strategies either." The search list is the spec's own RETIRED-SEARCH block, so the
@@ -390,10 +427,10 @@ _report = spec
 if _blk:
     _report = _report.replace(_blk.group(0), "")
 _report = _report.split("## WHAT THIS SPEC RETIRED")[0]
-_report = _report[_report.find("## 1. TRADING SUMMARY"):] if "## 1. TRADING SUMMARY" in _report else ""
-_named_spec = [t for t in _named(_report) if t not in ("ORB",)]   # 5. says the ORB *engine* stays
+_report = _body(_report)
+_named_spec = [t for t in _named(_report) if t not in ("ORB",)]   # 3C says the ORB *engine* stays
 ck("S11b", bool(_report) and not _named_spec,
-   f"the spec's seven sections name no retired strategy outside the search block (named: {_named_spec or 'none'})")
+   f"the spec's four sections name no retired strategy outside the search block (named: {_named_spec or 'none'})")
 
 # ------------------------------------------------------------------------ S12
 ck("S12", "/home/ubuntu/day_trader_pro/docs/SATURDAY_BRIEF.md" in p and "handoffs/SATURDAY" not in p,
@@ -449,7 +486,7 @@ ck("S16", os.path.exists(os.path.join(_d, "seen")) and not os.path.exists(_mk),
    "a real run holds its own in-flight marker while the session runs, and clears it after")
 _hp = open(os.path.join(_d, "prompt")).read() if os.path.exists(os.path.join(_d, "prompt")) else ""
 ck("S17", f"exactly this path: {_o16}" in _hp and "WORK" in _hp and "DEADLINE" in _hp
-   and os.path.isdir(_o16[:-3] + "_work") and "## 1. TRADING SUMMARY" in _hp,
+   and os.path.isdir(_o16[:-3] + "_work") and "## 1. TRADING\n" in _hp,
    "the session is handed the prompt, its BRIEF path, its WORK folder (created) and its DEADLINE")
 
 # ------------------------------------------------------------------------ S18 / S19
@@ -555,10 +592,10 @@ ck("S24", "the SEAL is the dispatcher's" in _qf and "earlier poll than RESULT.js
    and "**v2.11 ·" in spec and "never self-attested" in _sf and "FROZEN.ack" in _sf and "CONTROL_LOG.txt" in _sf,
    "the prompt and spec v2.11: the dispatcher writes the seal, control proves the order, the fallback logs each sha")
 # S25 (v1.15, dtp r566 / MARK.1; restated from v1.11's executable lead): §1's EV benchmark is at the mark only
-_p1 = re.sub(r"\s+", " ", p.split("## 1. TRADING SUMMARY", 1)[-1][:1800])
+_p1 = re.sub(r"\s+", " ", p.split("THE OPERATOR'S LAYOUT (2026-11-21)", 1)[-1][:1800])   # v2.0: the basis heads the layout
 _m25 = re.search(r"# THE SATURDAY BRIEF — spec v(\d+)\.(\d+)", spec)
 _s25 = re.sub(r"\s+", " ", spec)
-ck("S25", "AT THE MARK, THE ONLY BASIS" in _p1 and "SORTED BY THE MARK EV" in _p1
+ck("S25", "AT THE MARK, THE ONLY BASIS" in _p1 and "SORTED BY THE MARK EV" in re.sub(r"\s+", " ", p)
    and "the ladder's fill (mark or better)" in _p1 and "No spread-cost line" in _p1 and "never in prose" in _p1
    and "the total adds up from the rows shown" in _p1
    and "LED BY THE EXECUTABLE BASIS" not in _p1 and "the spread cost on its own line" not in _p1
@@ -566,8 +603,10 @@ ck("S25", "AT THE MARK, THE ONLY BASIS" in _p1 and "SORTED BY THE MARK EV" in _p
    and _m25 is not None and (int(_m25.group(1)), int(_m25.group(2))) >= (2, 16)
    and "THE MARK IS THE ONLY BASIS" in _s25 and "sorted by the mark EV" in _s25
    and "the ladder's fill (mark or better)" in _s25 and "**The basis is the mark (v2.16):**" in _s25
+   and "Fees beside EV, never inside EV" in _p1 and "net = gross − fees" in _p1
    and "Paper books the mark both ways, which no live fill gets" not in _s25,
-   "the prompt's §1 and spec v2.16: the mark is the only basis, theories by the mark EV, exec only as a trailing column")
+   "the prompt's layout head and spec v2.16+: the mark is the only basis, theories by the mark EV, exec only as a "
+   "trailing column, fees beside with net = gross − fees")
 _shs = open(SH).read()
 ck("S23c", '$WORK/study_dispatch — $_fri' in _shs and 'if [ -f "$WORK/study_dispatch/state.json" ]' in _shs
    and _shs.index('_fri="state.json present') < _shs.index('timeout "$BUDGET_S"'),
@@ -580,13 +619,14 @@ _c1 = p.find("THE QQQ CASH SIZE TABLE")
 ck("S22", bool(_c) and "on or after 2026-12-07, skip it" in _c and "$250, ramp max $500" in _c
    and "$500, ramp max $750" in _c and "cap = the ramp max" in _c and "never rounded up to 1" in _c
    and "fees beside it (never in it)" in _c and "REPORT ONLY" in _c and "~/reviews/trades/*.csv" in _c
-   and p.find("## 1. TRADING SUMMARY") < _c1 < p.find("## 2. ISSUES FROM THE BOT LOGS"),
-   "the prompt's section 1 sizes QQQ under both schemes until 2026-12-07, refuses not floors, report only")
-_c8 = spec.split("**1.8 The QQQ cash size table", 1)[-1][:3000] if "**1.8 The QQQ cash size table" in spec else ""
+   and "never an R-item" in _c and p.find("  ## 4. RECOMMENDATIONS") < _c1 < p.find("4.3 THE 12-04 CASH-TEST READINESS"),
+   "the prompt's section 4 (4.2) sizes QQQ under both schemes until 2026-12-07, refuses not floors, report only")
+_c8 = spec.split("**4.2 The QQQ cash size table", 1)[-1][:3000] if "**4.2 The QQQ cash size table" in spec else ""
 ck("S22b", bool(_c8) and "On or after 2026-12-07 the brief skips this item" in _c8 and "| A | $250 | $500 |" in _c8
    and "| B | $500 | $750 |" in _c8 and "never rounded up to one" in _c8 and "Report only:" in _c8
-   and spec.find("\n## 1. TRADING SUMMARY") < spec.find("**1.8 The QQQ cash size table") < spec.find("\n## 2. ISSUES FROM THE BOT LOGS"),
-   "the spec's 1.8 names the same two schemes, the refusal, the date stop and report only")
+   and "never an R-item" in _c8
+   and spec.find("\n## 4. RECOMMENDATIONS") < spec.find("**4.2 The QQQ cash size table") < spec.find("**4.3 The 12-04"),
+   "the spec's 4.2 names the same two schemes, the refusal, the date stop and report only")
 # S22c (v1.8, dtp r551): THE SIZING RULE IS THE CODE'S. OTV5 _size_geometry floors Breakout's risk count at 1 and
 # falls back to geometry; r550 wrote min(floor(...), floor(...)) with no floor and sent a missing stop to NOT MEASURED.
 _flat = lambda t: re.sub(r"\s+", " ", t)
@@ -609,37 +649,27 @@ _RULE = ("Decide when each has >= 20 index trades, or at 2026-12-31, whichever c
          "clears zero.")
 _pf, _sf = _flat(p), _flat(spec)
 _o1, _o2 = p.find("· OGAP (standing"), p.find("· OGAP VS PARK")
-ck("S26", 0 < p.find("## 1. TRADING SUMMARY") < _o1 < _o2 < p.find("## 2. ISSUES FROM THE BOT LOGS")
+ck("S26", 0 < p.find("  ### 2A.") < _o1 < _o2 < p.find("· THE HUNT LINE") < p.find("  ### 2B.")
+   and "DECISIONS IN PROGRESS, every Saturday brief dated on or before 2026-12-04" in _pf
    and "never in the 10-26..11-27 window EV, the theories" in _pf and "labelled SHADOW, never in EV" in _pf
    and "INDEX rows only (QQQ, SPX)" in _pf and "each row scaled to $500 of premium outlay" in _pf
    and "the correlation of daily P&L" in _pf and _RULE in _pf and "REPORT ONLY" in _pf[_pf.find("OGAP VS PARK"):],
-   "the prompt's section 1 has OGAP on its own line and OGAP VS PARK with the fixed rule, report only")
+   "the prompt's 2A has OGAP on its own line and OGAP VS PARK with the fixed rule, report only, then the Hunt line")
 _m26 = re.search(r"# THE SATURDAY BRIEF — spec v(\d+)\.(\d+)", spec)     # v1.13: v2.13 or any later spec
-ck("S26b", _m26 is not None and (int(_m26.group(1)), int(_m26.group(2))) >= (2, 13) and "**1.9 OGAP, its own line" in spec
-   and "**1.10 OGAP vs PARK" in spec and _RULE in _sf and "REPORT ONLY" in _sf[_sf.find("1.10 OGAP vs PARK"):]
-   and spec.find("**1.9 OGAP") < spec.find("**1.10 OGAP vs PARK") < spec.find("\n## 2. ISSUES FROM THE BOT LOGS"),
-   "the spec v2.13 carries 1.9 and 1.10 with the same rule, verbatim")
+ck("S26b", _m26 is not None and (int(_m26.group(1)), int(_m26.group(2))) >= (3, 0) and "**OGAP, its own line**" in spec
+   and "**OGAP vs PARK**" in spec and _RULE in _sf and "REPORT ONLY" in _sf[_sf.find("**OGAP vs PARK**"):]
+   and spec.find("\n### 2A.") < spec.find("**Decisions in progress (every Saturday brief dated on or before 2026-12-04).**")
+   < spec.find("**OGAP, its own line**") < spec.find("**OGAP vs PARK**") < spec.find("**The Hunt line.**")
+   < spec.find("\n### 2B."),
+   "the spec v3.0 carries OGAP and OGAP vs PARK in 2A's decisions in progress with the same rule, verbatim, then the Hunt")
 
-# S27 (v1.14, O08): THE RUNAWAY O08 WOULD-BE. The operator, 2026-11-16: "Consider O08 as a candidate after we get more
-# paper trades" and "Include its 'would be' in the weekend briefs." (weekend only: the nightly review does not carry it).
-_NOTE = ("Candidate only. Decided at the end-of-November edge weighing (11-27) or later when the operator asks; no code "
-         "until their yes.")
-_o3 = p.find("· RUNAWAY O08 WOULD-BE")
-_p3 = _pf[_pf.find("RUNAWAY O08 WOULD-BE"):]
-ck("S27", 0 < _o2 < _o3 < p.find("## 2. ISSUES FROM THE BOT LOGS")
-   and "REPORT ONLY, never in the window EV or the theories" in _p3 and "from 2026-11-16" in _p3
-   and "(entry_ask - entry_bid) / ((entry_ask + entry_bid) / 2) > 0.05" in _p3 and "pnl_usd" in _p3
-   and "mainline()" in _p3 and "UNSCORED, named by trade_id, never guessed" in _p3
-   and "day-bootstrap 95% interval on the delta" in _p3 and "fees on their own line beside, never in EV" in _p3
-   and "every skipped winner of $200 or more named as a cost" in _p3 and _NOTE in _p3,
-   "the prompt's section 1 has the RUNAWAY O08 WOULD-BE with the fixed decision note, report only")
-_m27 = re.search(r"# THE SATURDAY BRIEF — spec v(\d+)\.(\d+)", spec)
-_s3 = _sf[_sf.find("**1.11 RUNAWAY O08 WOULD-BE"):]
-ck("S27b", _m27 is not None and (int(_m27.group(1)), int(_m27.group(2))) >= (2, 15)
-   and spec.find("**1.10 OGAP vs PARK") < spec.find("**1.11 RUNAWAY O08 WOULD-BE") < spec.find("\n## 2. ISSUES FROM THE BOT LOGS")
-   and "`entry_bid`" in _s3 and "`entry_ask`" in _s3 and "`pnl_usd`" in _s3 and "**2026-11-16**" in _s3
-   and "> 0.05" in _s3 and "UNSCORED" in _s3 and "REPORT ONLY" in _s3 and _NOTE in _s3,
-   "the spec v2.15 carries 1.11 after 1.10 with the columns and the same decision note, verbatim")
+# S27 (v2.0, SAT.10; replaces v1.14's S27/S27b): THE RUNAWAY O08 WOULD-BE IS RETIRED. The operator agreed to drop it,
+# 2026-11-21. It is named nowhere in the prompt and in no part of the spec (its changelog entry and the retirement
+# table keep the history).
+_sp_body = _body(spec).split("## WHAT THIS SPEC RETIRED")[0]
+ck("S27", "O08" not in p and "WOULD-BE" not in p.upper() and "O08" not in _sp_body and "1.11" not in _sp_body
+   and "| v2.15 §1.11 RUNAWAY O08 WOULD-BE (2026-11-21) | retired" in spec,
+   "the O08 would-be is retired: not in the prompt, not in any part of the spec, named in the retirement table")
 _NR = os.path.join(ROOT, "tools", "nightly_review.prompt")
 ck("S27c", os.path.exists(_NR) and "O08" not in open(_NR).read(),
    "the nightly review does not carry the O08 would-be (the operator said weekend briefs)")
@@ -647,17 +677,171 @@ ck("S27c", os.path.exists(_NR) and "O08" not in open(_NR).read(),
 # S28 (v1.15, dtp r566 / MARK.1): OGAP, OGAP VS PARK and the O08 would-be are scored at the mark, in the prompt
 # and in spec 1.9-1.11. The operator, 2026-11-19: "I just want the brief to reflect how we actually trade—which is the
 # ladder."
-_i28, _j28 = _pf.find("· OGAP (standing"), _sf.find("**1.9 OGAP, its own line")
-_p28 = _pf[_i28:_pf.find("## 2. ISSUES FROM THE BOT LOGS", _i28)] if _i28 >= 0 else ""
-_s28 = _sf[_j28:_sf.find("## 2. ISSUES FROM THE BOT LOGS", _j28)] if _j28 >= 0 else ""
+_i28, _j28 = _pf.find("· OGAP (standing"), _sf.find("**OGAP, its own line**")
+_p28 = _pf[_i28:_pf.find("### 2B.", _i28)] if _i28 >= 0 else ""
+_s28 = _sf[_j28:_sf.find("### 2B.", _j28)] if _j28 >= 0 else ""
 _bad = ("ask in, bid out", "pnl_exec_usd", "exec-basis", "exec basis", "UNPRICED", "the mark beside it",
         "the mark basis beside it")
 ck("S28", bool(_p28) and bool(_s28) and not [b for b in _bad if b in _p28 or b in _s28]
-   and _p28.count("the ladder's fill, mark or better") >= 2 and _s28.count("the ladder's fill, mark or better") >= 3
-   and "P&L AT THE MARK (pnl_usd) of ALL Runaway trades" in _p28
-   and "the P&L at the mark of ALL Runaway trades vs the O08-KEPT trades" in _s28,
-   "OGAP, OGAP VS PARK and the O08 would-be at the mark (pnl_usd), no ask/bid basis, no UNPRICED rule; found %s"
+   and _p28.count("the ladder's fill, mark or better") >= 2 and _s28.count("the ladder's fill, mark or better") >= 2,
+   "OGAP and OGAP VS PARK at the mark (pnl_usd), no ask/bid basis, no UNPRICED rule; found %s"
    % [b for b in _bad if b in _p28 or b in _s28])
+
+# S29 (v2.0, SAT.10): EVERY AGREED PLACEMENT SITS INSIDE ITS PART, in the prompt and in the spec. The operator, 2026-11-21:
+# "the things I forgot to mention should be worked into whichever section they best fit into".
+def _parts(text, heads):
+    """-> {head: text of that part, up to the next head}; '' for a missing head."""
+    pos = [(text.find(h), h) for h in heads]
+    out = {}
+    for k, (i, h) in enumerate(pos):
+        nxt = [j for j, _ in pos[k + 1:] if j > i]
+        out[h] = re.sub(r"\s+", " ", text[i:(min(nxt) if nxt else len(text))]) if i >= 0 else ""
+    return out
+
+
+PLACE = {   # part -> phrases that must sit inside it (prompt, spec)
+    "1A": (["THE QQQ-ONLY VIEW", "RISK: the worst day", "losing streak", "drawdown from the peak",
+            "peak capital deployed", "~$6,250", "LADDER FILL QUALITY", "THE EXCLUDED LINE, every week", "MFE/MAE",
+            "net = gross − fees", "r_ledger.py", "weekly_facts.md §1A"],
+           ["**the QQQ-only view**", "**risk**", "losing-trade streak", "drawdown from its peak",
+            "**peak capital deployed**", "(~$6,250)", "**ladder fill quality.**", "**the exclusions line, every week**",
+            "**MFE/MAE**", "net (gross − fees)", "r_ledger.py", "`weekly_facts.md` §1A"]),
+    "1B": (["GIVEBACK: ~/reviews/giveback.csv", "NEVER RIGHT on entries", "EACH SETUP AGAINST ITS OWN HISTORY",
+            "MISSED AND UNDER-CAPTURED MOVES", "PARK late-day shadow", "selection vs extension"],
+           ["**Giveback** (old §1.4)", "**Never right on entries**", "**Each setup against its own history**",
+            "**Missed and under-captured moves** (old §1.3)", "**The PARK late-day shadow (never in EV)** (old §1.5)",
+            "**selection vs extension**"]),
+    "1C": (["the epoch (OTV5 from 2026-10-26)", "improving or worsening, read against the tape", "trend efficiency",
+            "median VIX close", "consistency", "noteworthy in the sample", "through the brief of 2026-11-28 only",
+            "on or after 2026-12-05, skip it", "SORTED BY THE MARK EV"],
+           ["whether it is improving or worsening, read against the tape", "**week by week**", "trend efficiency",
+            "the median VIX close", "**consistency**", "**noteworthy in the sample**",
+            "through the brief of 2026-11-28 only", "from 2026-12-05 the brief skips it", "**sorted by the mark EV**"]),
+    "2A": (["CONDITION CELLS", "WHERE TO LOOK", "stop_sweep", "· OGAP (standing", "· OGAP VS PARK", "· THE HUNT LINE",
+            "on or before 2026-12-04"],
+           ["**Condition cells**", "**Where to look for edge improvements**", "stop_sweep.py",
+            "**OGAP, its own line**", "**OGAP vs PARK**", "**The Hunt line.**", "on or before 2026-12-04"]),
+    "2B": (["PASS, FAIL or VOID", "THE COMING FRIDAY'S QUEUE, so the operator can strike any before they run",
+            "study_dispatch.py plan", "THE STUDY QUEUE (standing", "R6 no-progress lead", "at most five"],
+           ["**PASS, FAIL or VOID**", "**The coming Friday's queue, so the operator can strike any before they run.**",
+            "study_dispatch.py plan", "**The study queue (standing", "**The R6 no-progress lead", "at most five"]),
+    "3A": (["tools/botlog_scan.py", "tools/checker_sweep.py diffed by check ID", "S3 parity", "days to full",
+            "every box on current code"],
+           ["botlog_scan.py", "checker_sweep.py", "**S3 parity:**", "**Days to full**",
+            "**Every box on current code, and its services:**"]),
+    "3B": (["GENESIS", "live evidence", "WORKED, NOT YET EXERCISED", "DID NOT WORK"],
+           ["GENESIS", "**live evidence**", "**WORKED**", "**NOT YET EXERCISED**", "**DID NOT WORK**"]),
+    "3C": (["BACKLOG.md PART 1", "backlog.json", "documentation corrections, each written as a proposed backlog row",
+            "code hygiene, each written as a proposed backlog row"],
+           ["PART 1", "backlog.json", "**Documentation corrections, as backlog items** (old §4)",
+            "**Code hygiene, as backlog items** (old §5)", "<!-- RETIRED-SEARCH"]),
+    "4": (["4.1 RANKED", "4.2 THE QQQ CASH SIZE TABLE", "4.3 THE 12-04 CASH-TEST READINESS CHECKLIST",
+           "OT_DAILY_LOSS_LIMIT", "auto-exercise", "the Hunt decision", "the OGAP decision", "the test-day log checklist",
+           "4.4 NEXT WEEK'S CALENDAR", "2026-11-26 closed", "2026-11-27 a half day", "the Fed and CPI", "earnings",
+           "4.5 THE SUNDAY WORK LIST, LAST", "DELICATE", "ROUTINE", "The brief ENDS with it"],
+          ["**4.1 Ranked recommendations.**", "**4.2 The QQQ cash size table", "**4.3 The 12-04 cash-test readiness",
+           "`OT_DAILY_LOSS_LIMIT` confirmed", "auto-exercise", "**The Hunt decision**", "**the OGAP decision**",
+           "**The test-day log checklist**", "**4.4 Next week's calendar.**", "2026-11-26 is closed",
+           "2026-11-27 is a half day", "the Fed and CPI", "earnings on our symbols",
+           "**4.5 The Sunday work list (the brief ENDS with it).**", "**DELICATE**", "**ROUTINE**"]),
+}
+_ph = _parts(p, ["  ### 1A.", "  ### 1B.", "  ### 1C.", "  ### 2A.", "  ### 2B.", "  ### 3A.", "  ### 3B.", "  ### 3C.",
+                 "  ## 4. RECOMMENDATIONS", "Put an INDEX on top"])
+_sh = _parts(spec, ["\n### 1A.", "\n### 1B.", "\n### 1C.", "\n### 2A.", "\n### 2B.", "\n### 3A.", "\n### 3B.", "\n### 3C.",
+                    "\n## 4. RECOMMENDATIONS", "\n## WHAT THIS SPEC RETIRED"])
+_pk = dict(zip(PLACE, list(_ph.values())[:9]))
+_sk = dict(zip(PLACE, list(_sh.values())[:9]))
+_miss_p = {k: [x for x in v[0] if x not in _pk[k]] for k, v in PLACE.items()}
+_miss_s = {k: [x for x in v[1] if x not in _sk[k]] for k, v in PLACE.items()}
+ck("S29", not any(_miss_p.values()) and p.find("4.4 NEXT WEEK'S CALENDAR") < p.find("4.5 THE SUNDAY WORK LIST, LAST")
+   < p.find("Put an INDEX on top"),
+   "every agreed placement is inside its part of the prompt, and the Sunday work list is section 4's last item "
+   "(missing: %s)" % ({k: v for k, v in _miss_p.items() if v} or "none"))
+_s4 = spec[spec.find("\n## 4. RECOMMENDATIONS"):spec.find("\n## WHAT THIS SPEC RETIRED")]
+ck("S29b", not any(_miss_s.values()) and _s4.find("**4.4 Next week's calendar.**") < _s4.find("**4.5 The Sunday work list")
+   and _s4.rstrip().rstrip("-").rstrip().endswith("only NOT MEASURED follows it."),
+   "every agreed placement is inside its part of the spec, and 4.5 ends section 4 (missing: %s)"
+   % ({k: v for k, v in _miss_s.items() if v} or "none"))
+
+# S30 (v2.0): NOTHING CURRENTLY COMPUTED SILENTLY DISAPPEARS. The v3.0 changelog maps every old item to a new home or
+# RETIRED, and the retirement table names what went.
+_v3 = spec[spec.find("**v3.0 ·"):spec.find("**v2.17 ·")] if "**v3.0 ·" in spec and "**v2.17 ·" in spec else ""
+_olds = ["§1.1 ", "§1.2 ", "§1.3 ", "§1.4 ", "§1.5 ", "§1.6 ", "§1.7 R ledger", "§1.7 P&L by exit rule", "§1.8 ",
+         "§1.9 ", "§1.10 ", "§1.11 ", "§2 ", "§3 ", "§4 ", "§5 ", "§6 counterfactual", "§6 R6", "§7 "]
+_rows = {o: next((l for l in _v3.splitlines() if l.startswith("| " + o)), "") for o in _olds}
+ck("S30", bool(_v3) and all(_rows.values()) and all(re.search(r"\*\*(1A|1B|1C|2A|2B|3A|3C|4\.\d|RETIRED)\*\*", l)
+                                                    for l in _rows.values())
+   and "**RETIRED**" in _rows["§1.11 "] and "the operator agreed to drop it" in _rows["§1.11 "],
+   "the v3.0 changelog maps every old item (1.1-1.11, 2-7) to a new part or RETIRED (unmapped: %s)"
+   % ([o for o, l in _rows.items() if not l] or "none"))
+
+# S31-S33 (v2.0): tools/weekly_facts.py, DRIVEN on a fixture (no S3: --no-warehouse).
+WF = os.path.join(ROOT, "tools", "weekly_facts.py")
+_wf = tempfile.mkdtemp(prefix="chk_satbrief_wf_")
+os.makedirs(os.path.join(_wf, "trades"))
+_HDR = ("sym,trade_id,strategy,direction,contracts,entry_premium,exit_premium,pnl_usd,entry_time,exit_time,"
+        "exit_reason,fee,mfe_premium,entry_exec_premium,exit_exec_premium,pnl_exec_usd,would_fill_live")
+_FX = {   # day -> rows (sym, id, strategy, dir, contracts, entry, pnl, entry ET hh:mm, fee, mfe)
+    "2026-11-09": [("QQQ", "a1", "RunawayContinuation", "long", 2, 1.00, 100.0, "09:40", 2.50, 1.80),
+                   ("SPX", "a2", "PARK", "short", 1, 5.00, -50.0, "11:00", 2.47, 5.00),
+                   ("NVDA", "a3", "GEXPinButterfly", "long", 1, 2.00, 40.0, "10:05", 1.25, 2.60)],
+    "2026-11-10": [("QQQ", "b1", "LiquidityHunt", "short", 4, 0.50, -80.0, "09:50", 5.00, 0.50),
+                   ("QQQ", "b2", "OGAP", "long", 1, 2.00, 30.0, "09:35", 1.25, 2.50),
+                   ("AAL", "b3", "RunawayContinuation", "long", 9, 0.10, 999.0, "09:45", 1.00, 0.30)],
+    "2026-11-16": [("QQQ", "c1", "RunawayContinuation", "long", 2, 1.00, -60.0, "09:41", 2.50, 1.00),
+                   ("SPX", "c2", "PARK", "short", 1, 6.00, 300.0, "11:00", 2.47, 9.50),
+                   ("CRM", "c3", "LiquidityHunt", "long", 3, 1.00, 90.0, "10:40", 3.75, 1.60)],
+    "2026-11-17": [("QQQ", "d1", "OGAP", "short", 1, 1.50, -20.0, "09:36", "", 1.50),
+                   ("QQQ", "d2", "PARK", "long", 2, 2.50, 120.0, "11:00", 2.50, 3.40)],
+}
+for _d, _rs in _FX.items():
+    with open(os.path.join(_wf, "trades", _d + ".csv"), "w") as fh:
+        fh.write(_HDR + "\n")
+        for (sy, ti, stg, dr, c, ep, pnl, hm, fee, mfe) in _rs:
+            hh, mm = map(int, hm.split(":"))
+            et_in = "%sT%02d:%02d:00+00:00" % (_d, hh + 5, mm)          # 2026-11: EST, UTC-5
+            et_out = "%sT%02d:%02d:00+00:00" % (_d, hh + 6, mm)
+            fh.write("%s,%s,%s,%s,%d,%.2f,%.2f,%.2f,%s,%s,exit,%s,%.2f,,,,\n" % (sy, ti, stg, dr, c, ep, ep + pnl / (c * 100),
+                                                                              pnl, et_in, et_out, fee, mfe))
+_out = os.path.join(_wf, "out")
+r = subprocess.run([sys.executable, "-I", WF, "--fri", "2026-11-20", "--out", _out, "--no-warehouse"],
+                   capture_output=True, text=True, timeout=300, env=dict(os.environ, DTP_REVIEWS_DIR=_wf))
+_j = json.load(open(os.path.join(_out, "weekly_facts.json"))) if r.returncode == 0 else {}
+_md = open(os.path.join(_out, "weekly_facts.md")).read() if r.returncode == 0 else ""
+_bs = _j.get("week_by_strategy", {})
+_net_ok = bool(_bs) and all(abs(a["net"] - (a["gross"] - a["fees"])) < 0.01 and abs(a["ev"] - a["gross"] / a["n"]) < 0.01
+                            for a in _bs.values())
+_wk = _j.get("week_book", {})
+ck("S31", r.returncode == 0 and _net_ok and _wk.get("n") == 5 and abs(_wk.get("gross", 0) - 430.0) < 0.01
+   and abs(_wk.get("net", 0) - (430.0 - _wk.get("fees", 0))) < 0.01 and _wk.get("fees_est", 0) > 0
+   and "net (gross − fees)" in _md and "x gross |" in _md,
+   "weekly_facts: EV is gross a trade, net = gross − fees in its own column, an estimated fee is counted "
+   "(rc=%s %s)" % (r.returncode, (r.stderr or "")[-200:]))
+_ex = _j.get("excluded", {})
+_eb = _j.get("epoch_by_strategy", {})
+ck("S32", r.returncode == 0 and "GEXPinButterfly" not in _md and "setups no longer trading (history)" in _eb
+   and _eb["setups no longer trading (history)"]["n"] == 1 and _ex.get("otv4test_rows_csv") == 1
+   and _j.get("epoch_book", {}).get("n") == 10 and _j.get("epoch_start") == "2026-10-26",
+   "weekly_facts: a setup that no longer trades is one unnamed history line, the OTV4TEST row is dropped and counted, "
+   "the epoch starts 2026-10-26")
+sys.path.insert(0, os.path.join(ROOT, "tools"))
+os.environ["DTP_REVIEWS_DIR"] = _wf
+import importlib  # noqa: E402
+import review_kit as _RK  # noqa: E402
+import weekly_facts as _WF  # noqa: E402
+_rows, _ = _WF.load_rows("2026-10-26", "2026-11-20", _wf)
+_mine = _WF.boot(_rows, n=3000)
+_theirs = _RK.boot(_rows, n=3000)
+_ov = _j.get("ogap_vs_park", {})
+ck("S33", _mine == _theirs and _mine[0] is not None and _ov.get("overlap_days") == 1
+   and abs((_ov.get("OGAP") or {}).get("gross", 0) - (30.0 * 500 / 200 - 20.0 * 500 / 150)) < 0.01
+   and "weekly_facts.py" in p and p.find("weekly_facts.py") < p.find("  ## 1. TRADING")
+   and "flock /tmp/claude-heavy.lock env HEAVY_MAX=2500M" in p and "--fri <this Friday> --out <WORK>" in p
+   and "tools/weekly_facts.py --fri <Fri> --out <WORK>" in spec and "QUOTE IT; never re-derive" in p
+   and "raw/candles_full/interval=1d" in spec,
+   "weekly_facts' interval is review_kit.boot's own (%s vs %s), OGAP vs PARK scales to $500, the prompt runs it before "
+   "section 1 and quotes it, the tape is TastyTrade's daily candles" % (_mine, _theirs))
+shutil.rmtree(_wf, ignore_errors=True)
 
 print()
 if FAILS:
