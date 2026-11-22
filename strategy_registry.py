@@ -1,4 +1,6 @@
-# day_trader_pro/strategy_registry.py — v1.11
+# day_trader_pro/strategy_registry.py — v1.12
+# v1.12 (2026-11-22) — dtp r577 / OGAP.4 — COMMENT ONLY: OGAP is no longer "QQQ paper only"; OTV5 r149 paper-trades it
+#   on every box (the operator, 2026-11-22: "I honestly want it paper Trading on all of them"), dormant on a live box. Its code, lineage and row are unchanged.
 # v1.11 (2026-11-14) — dtp r559 / B5.6 (the 11-14 Saturday brief section 5 item 6). lineages_for is DELETED: no
 #   caller anywhere. The lineage data it read (REGISTRY[n][2], HISTORICAL[n][1]) stays; resolve_lineage and
 #   box_lineage are the readers. No behaviour change. Gate tests/check_dead_defs_gone.py.
@@ -200,7 +202,8 @@ REGISTRY = {
     "LiquidityHunt":        ("HUNT", LIVE,    (TEST, OTV5),       None),
     # r519 — OTV5's PARK (strategy/park.py, the 11:00 debit held to 15:45). Was the unregistered "?PAR".
     "PARK":                 ("PARK", LIVE,    (OTV5,),            None),
-    # OGAP.1 (2026-11-14) — OTV5's OGAP (strategy/ogap.py), Park's friend's ORB-GAP, QQQ paper only.
+    # OGAP.1 (2026-11-14) — OTV5's OGAP (strategy/ogap.py), Park's friend's ORB-GAP; QQQ paper to OTV5 r148, every box on
+    # paper from r149 (OGAP.4; dormant on a live box).
     "OGAP":                 ("OGAP", LIVE,    (OTV5,),            None),
 }
 

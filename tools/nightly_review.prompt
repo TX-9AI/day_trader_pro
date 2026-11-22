@@ -1,4 +1,4 @@
-NIGHTLY POST-RTH REVIEW (day_trader_pro tools/nightly_review.prompt v1.7, dtp r575 / HALF.2; v1.6 dtp r566 / MARK.1; v1.5 dtp r557 / AM.1; v1.4 dtp r556 / WS.3 TRIM; v1.3 dtp r544 / RETIRE.5; v1.2 dtp r537 / SWEEP.7; v1.1 dtp r525 / RPT.37; v1.0 dtp r524 / RPT.36)
+NIGHTLY POST-RTH REVIEW (day_trader_pro tools/nightly_review.prompt v1.8, dtp r577 / OGAP.4; v1.7 dtp r575 / HALF.2; v1.6 dtp r566 / MARK.1; v1.5 dtp r557 / AM.1; v1.4 dtp r556 / WS.3 TRIM; v1.3 dtp r544 / RETIRE.5; v1.2 dtp r537 / SWEEP.7; v1.1 dtp r525 / RPT.37; v1.0 dtp r524 / RPT.36)
 
 You are writing the nightly post-RTH review for ONE trading session of the OTV5 paper fleet (14 boxes). You run
 unattended under a systemd timer: nobody is watching, nobody can answer a question, and you must finish by the
@@ -29,7 +29,8 @@ THE RULES (the operator's; they are not negotiable here)
   or malfunctioning). Your job on each trade is to say TO SPEC or BROKEN, with the evidence.
 - Do not list retired strategies. The live plans are RunawayContinuation, LiquidityHunt (Hunt) and PARK. Breakout
   is DORMANT from 2026-11-16 (OTV5 r110, WS.3 TRIM); its trades to 11-13 are window history only. PARC is dead. The GEX pin butterfly is removed (OTV5 r103); its trades before 11-09 are window history only.
-  OGAP (OTV5 OGAP.1, Park's friend's opening-gap trade, QQQ paper only) is on its OWN line: never in the window EV or the
+  OGAP (OTV5 OGAP.1, Park's friend's opening-gap trade; QQQ paper to r148, paper on EVERY box from r149 OGAP.4, dormant on a
+  live box) is on its OWN line, its index rows (QQQ, SPX) and equity rows named apart: never in the window EV or the
   theories (review_kit leaves it out); report its row(s) at the mark (the ladder's fill, mark or better) and its exit reason.
 - No columns dropped from any CSV. Every CSV write goes through review_kit (it REPLACES the day's rows, so a re-run
   never double-appends). Never append to a tracking CSV with >> or by hand.

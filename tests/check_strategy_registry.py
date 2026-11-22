@@ -1,6 +1,13 @@
 #!/usr/bin/env python3
 """
-tests/check_strategy_registry.py  v1.6
+tests/check_strategy_registry.py  v1.7
+v1.7  2026-11-22  dtp r577 / OGAP.4 (control's half of OTV5 r149) — R11 READS THE BOX FLAG SCHEMA TOO. OTV5 r148 put the
+      per-box setup roster in utils/box_flags.py SCHEMA, and r149 moves OGAP there: its plan_state.TABLE default is FLAG
+      (no ACTIVE literal; the default is the schema's `ogap`, on). R11's OTV5 active set is now the TABLE's ACTIVE HOUR
+      rows PLUS every schema setup whose default is on, both read by ast (nothing of OTV5 imported), and every schema
+      setup, whatever its default, must have a REGISTRY code (the design's "every schema setup has a REGISTRY code").
+      Green on OTV5 r146 / r148 (no schema key; OGAP an ACTIVE literal) and on r149 (OGAP a schema setup). No mirror:
+      nothing compares a default with a copy of it.
 v1.6  2026-11-14  r556 / WS.3 TRIM — HISTORY_CODES gains Breakout -> BRKO: OTV5 r110 makes Breakout DORMANT (off the roster), so R11 wants it out of REGISTRY and R12 wants its rows still decoded. Red on db948ac at R11 once OTV5 r110 is HEAD (Breakout listed, not active).
 v1.5  2026-11-09  r544 / RETIRE.5 — HISTORY_CODES gains GEXPinButterfly -> GEXB: OTV5 r103 removes the GEX pin butterfly, so
       R11 wants it out of REGISTRY and R12 wants its old rows still decoded. R11 was red on f779abb (the fly DORMANT in
@@ -111,6 +118,38 @@ def _declared(tree):
         src = open(f, encoding="utf-8", errors="replace").read()
         decl |= set(re.findall(r'name\s*=\s*"([A-Za-z0-9_]+)"', src))
     return {d for d in decl if d and d[0].isupper()}
+
+
+def _otv5_schema_setups():
+    """v1.7 — {setup: default} from OTV5 utils/box_flags.py SCHEMA (Key(key, setup, allowed, default) calls), by ast;
+    {} when the file or the schema is absent (OTV5 before r148)."""
+    path = os.path.join(OTV5, "utils", "box_flags.py")
+    if not os.path.exists(path):
+        return {}
+    tree = ast.parse(open(path, encoding="utf-8").read())
+    names = {}
+    for node in tree.body:                                     # NAME = "on"  and  ON, OFF = "on", "off"
+        if not (isinstance(node, ast.Assign) and len(node.targets) == 1):
+            continue
+        t, v = node.targets[0], node.value
+        if isinstance(t, ast.Name) and isinstance(v, ast.Constant) and isinstance(v.value, str):
+            names[t.id] = v.value
+        elif isinstance(t, ast.Tuple) and isinstance(v, ast.Tuple) and len(t.elts) == len(v.elts):
+            for a, b in zip(t.elts, v.elts):
+                if isinstance(a, ast.Name) and isinstance(b, ast.Constant) and isinstance(b.value, str):
+                    names[a.id] = b.value
+    for node in ast.walk(tree):
+        tgt = getattr(node, "target", None) or (node.targets[0] if isinstance(node, ast.Assign) else None)
+        if isinstance(tgt, ast.Name) and tgt.id == "SCHEMA" and isinstance(node.value, ast.Dict):
+            out = {}
+            for v in node.value.values:
+                if isinstance(v, ast.Call) and len(v.args) >= 2:
+                    setup = v.args[1].value
+                    d = v.args[3] if len(v.args) >= 4 else None
+                    dv = (names.get(d.id) if isinstance(d, ast.Name) else getattr(d, "value", None)) if d is not None else "on"
+                    out[setup] = dv
+            return out
+    return {}
 
 
 def _otv5_active_trades():
@@ -282,16 +321,20 @@ def main():
         ck("R10", False, f"{type(exc).__name__}: {exc}")
 
     # ── R11 (v1.4) — the LISTED set is what OTV5 trades: ACTIVE plans, PARK registered, PARC and retired not ──
+    # v1.7: plus every box flag schema setup whose default is on; every schema setup has a code
     try:
-        act = _otv5_active_trades() - set(NOT_REGISTERED)
+        sch = _otv5_schema_setups()
+        act = (_otv5_active_trades() | {s for s, d in sch.items() if d == "on"}) - set(NOT_REGISTERED)
+        unreg = sorted(s for s in sch if not SR.is_registered(s))
         listed = set(SR.REGISTRY)
         retired_listed = sorted(listed & set(HISTORY_CODES))
         ok = (listed == act and SR.code("PARK") == "PARK" and not SR.is_registered("PARC")
-              and SR.code("PARC").startswith(SR.UNREGISTERED_PREFIX) and not retired_listed)
+              and SR.code("PARC").startswith(SR.UNREGISTERED_PREFIX) and not retired_listed and not unreg)
         ck("R11", ok,
            f"REGISTRY == OTV5 ACTIVE trading plans {sorted(act)}; PARK -> PARK; PARC unregistered"
            if ok else f"listed-not-active={sorted(listed - act)} active-not-listed={sorted(act - listed)} "
-                      f"PARK={SR.code('PARK')!r} PARC={SR.code('PARC')!r} retired-listed={retired_listed}")
+                      f"PARK={SR.code('PARK')!r} PARC={SR.code('PARC')!r} retired-listed={retired_listed} "
+                      f"schema-unregistered={unreg}")
     except Exception as exc:                                   # noqa: BLE001
         ck("R11", False, f"{type(exc).__name__}: {exc}")
 

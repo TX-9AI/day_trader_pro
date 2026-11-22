@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_nightly_review.py  v1.6
+day_trader_pro/tests/check_nightly_review.py  v1.7
+v1.7  2026-11-22  dtp r577 / OGAP.4 — N17 reads the prompt's own version (v1.8: OGAP paper on every box from OTV5 r149);
+      NEW N18: the prompt no longer calls OGAP "QQQ paper only" and names its index and equity rows apart.
 v1.6  2026-11-22  dtp r575 / HALF.2 — A 13:00 HALF DAY IS A NON-TRADING DAY (the operator, 2026-11-22: "Yes, just treat
       them as bank holidays. No trading."; OTV5 r145 opens nothing). NEW N17: the prompt (v1.7) says zero trades on a
       half day is expected, never BROKEN, never a lead or a study, and a trade opened on one IS broken; review_kit's
@@ -560,9 +562,14 @@ _d17a = K.due(datetime(2026, 11, 27, 13, 39, tzinfo=K.ET))
 _d17b = K.due(datetime(2026, 11, 27, 13, 40, tzinfo=K.ET))
 ck("N17", "A HALF DAY IS A NON-TRADING DAY" in _pr17 and "Yes, just treat them as bank holidays. No trading." in _pr17
    and "Zero trades is EXPECTED: never BROKEN, never a lead, never a study" in _pr17
-   and "Any trade OPENED on a half day IS BROKEN" in _pr17 and "nightly_review.prompt v1.7" in _pr17
+   and "Any trade OPENED on a half day IS BROKEN" in _pr17 and "nightly_review.prompt v1.8" in _pr17
    and _g17["n"] == 0 and _g17["pct"] is None and _d17b == "2026-11-27" and _d17a != "2026-11-27",
    "the prompt states the ruling; 11-27 due at 13:40 (%s / %s); an empty day's giveback n=%d" % (_d17a, _d17b, _g17["n"]))
+
+# N18 (v1.7, OGAP.4): OGAP is paper on every box from OTV5 r149
+ck("N18", "QQQ paper only" not in _pr17 and "paper on EVERY box from r149 OGAP.4, dormant on a live box" in _pr17
+   and "its index rows (QQQ, SPX) and equity rows named apart" in _pr17,
+   "the prompt says OGAP runs on every box on paper and splits its index and equity rows")
 
 shutil.rmtree(TMP, ignore_errors=True)
 print()
