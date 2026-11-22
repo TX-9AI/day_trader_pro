@@ -1,6 +1,13 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_daily_recap.py  v1.3
+day_trader_pro/tests/check_daily_recap.py  v1.4
+v1.4  2026-11-22  dtp r576 / BOXF.1 (daily_recap v1.4, the prompt v1.5). NEW:
+  R19 the Box flags block: from the conductor's extracts (each box's LAST [flags] line of the day) and a stand-in OTV5
+      show tool (--otv5 on a scratch tree): a default box is listed plainly, a box with a difference and a REFUSED tail
+      names both, a box whose HEAD file hash or values differ is PENDING, a box with no [flags] line is NOT SEEN, a box
+      that restarted reads its last line; all-default boxes read "all defaults on N box(es)"; the show tool runs once,
+      as `python3 -I ... --json`, with an env of PATH/HOME/LANG only (no OT_ / TT_ key reaches it); a missing show tool
+      reads HEAD NOT READ; the context names no Environment, token or account; the prompt quotes the block, report only
 v1.3  2026-11-22  dtp r575 / HALF.2 + RWATCH.1 (daily_recap v1.3, daily_recap.sh v1.2, the prompt v1.4, daily_brief
       v1.3). R11 wants daily_brief v1.3; R15's PARA_KEYS anchor names "runaway_watch" before "sources". NEW:
   R17 a 13:00 half day is a non-trading day (the operator, 2026-11-22: "Yes, just treat them as bank holidays. No
@@ -729,6 +736,62 @@ ck("R18", os.path.exists(os.path.join(_w18, "runaway_watch.md"))
    and "RWATCH (RUN PARAMETERS)" in _pr18,
    "the watch lands in WORK and its statuses in the context; an invented figure and 'paper size' withhold the "
    "commentary, quoted figures pass; PDF section 5c, the wrapper and the prompt's report-only rules")
+
+# ── R19 (v1.4, BOXF.1): the Box flags block ───────────────────────────────────────────────────────────────────────
+_bl19 = os.path.join(TMP, "bl19", "2026-11-23")
+_D = "\u00b7"
+write(os.path.join(_bl19, "QQQ.txt"), "# QQQ x\n2026-11-23 09:15:03 [INFO ] __main__: [flags] QQQ source=none (defaults) "
+      f"sha256=- commit=c0ffee0000 {_D} schema v1: no keys {_D} differs: none\n")
+write(os.path.join(_bl19, "SPX.txt"), "# SPX x\n2026-11-23 09:15:03 [WARNING] __main__: [flags] SPX "
+      f"source=deploy/box_flags/SPX sha256=0123456789ab commit=c0ffee0000 {_D} ogap=off {_D} differs: ogap(off, "
+      f"default on) {_D} REFUSED: line 2 unknown key 'brk': ignored (schema v1: ogap)\n")
+write(os.path.join(_bl19, "NVDA.txt"), "# NVDA x\n2026-11-23 09:15:03 [INFO ] __main__: [flags] NVDA source=none "
+      f"(defaults) sha256=- commit=c0ffee0000 {_D} ogap=on {_D} differs: none\n2026-11-23 11:00:00 [INFO ] __main__: "
+      f"[flags] NVDA source=none (defaults) sha256=- commit=c0ffee0001 {_D} ogap=on {_D} differs: none\n")
+write(os.path.join(_bl19, "AMD.txt"), "# AMD x\n2026-11-23 09:32:00 [ERROR] main: boom\n")
+_o5 = os.path.join(TMP, "otv5_19")
+_envf = os.path.join(TMP, "env19.json")
+write(os.path.join(_o5, "tools", "box_flags_show.py"),
+      "import json, os, sys\n"
+      f"open({_envf!r}, 'a').write(json.dumps({{'argv': sys.argv[1:], 'env': sorted(os.environ), 'I': sys.flags.isolated}}) + '\\n')\n"
+      "H = {'QQQ': ('-', {}), 'SPX': ('0123456789ab', {'ogap': 'off'}), 'NVDA': ('fedcba987654', {'ogap': 'off'}),\n"
+      "     'TSLA': ('-', {})}\n"
+      "syms = [sys.argv[i + 1] for i, a in enumerate(sys.argv) if a == '--symbol']\n"
+      "print(json.dumps({'schema_version': 1, 'schema': {}, 'boxes': [{'symbol': s, 'sha256': H[s][0], "
+      "'values': H[s][1]} for s in syms]}))\n")
+os.environ["TT_REFRESH_TOKEN"] = "r19-secret-must-not-pass"
+os.environ["OT_INSTRUMENT_R19"] = "x"
+_f19 = DR.flags_summary("2026-11-23", os.path.join(TMP, "bl19"), _o5)
+_bl19b = os.path.join(TMP, "bl19b", "2026-11-23")
+for _s in ("QQQ", "TSLA"):
+    write(os.path.join(_bl19b, _s + ".txt"), f"# {_s}\n2026-11-23 09:15:03 [INFO ] __main__: [flags] {_s} source=none "
+          f"(defaults) sha256=- commit=c0ffee0000 {_D} schema v1: no keys {_D} differs: none\n")
+_f19b = DR.flags_summary("2026-11-23", os.path.join(TMP, "bl19b"), _o5)
+_f19c = DR.flags_summary("2026-11-23", os.path.join(TMP, "bl19b"), os.path.join(TMP, "no_otv5"))
+os.environ.pop("TT_REFRESH_TOKEN", None)
+os.environ.pop("OT_INSTRUMENT_R19", None)
+_calls19 = [json.loads(x) for x in read(_envf).splitlines() if x.strip()] if os.path.exists(_envf) else []
+_w19 = os.path.join(TMP, "w19")
+DR.main(["context", "--day", "2026-11-23", "--work", _w19, "--queue", _q17, "--notes-dir", os.path.join(TMP, "nd19"),
+         "--studies", os.path.join(TMP, "st19"), "--weekly", os.path.join(TMP, "wk19"),
+         "--otv5-backlog", os.path.join(TMP, "nobl"), "--hygiene", os.path.join(TMP, "hy19"),
+         "--botlogs", os.path.join(TMP, "bl19"), "--trades", os.path.join(TMP, "tr19"), "--otv5", _o5])
+_c19 = read(os.path.join(_w19, "context.md"))
+_j19 = " | ".join(_f19)
+_pr19 = re.sub(r"\s+", " ", read(os.path.join(TOOLS, "daily_recap.prompt")))
+ck("R19", _f19[0] == "defaults, as HEAD: QQQ"
+   and any(x.startswith("SPX: differs: ogap(off, default on); REFUSED: line 2 unknown key 'brk'") for x in _f19)
+   and any(x.startswith("NVDA: PENDING: HEAD would start it with ogap=off (file fedcba987654)") and "c0ffee0001" in x
+           for x in _f19)
+   and any(x.startswith("NOT SEEN") and "AMD" in x for x in _f19) and "PENDING" not in _j19.split("NVDA")[0]
+   and _f19b == ["all defaults on 2 box(es) (QQQ, TSLA)"]
+   and any(x.startswith("HEAD NOT READ") for x in _f19c)
+   and len(_calls19) == 2 and all(c["I"] == 1 and "--json" in c["argv"] for c in _calls19)
+   and all(set(c["env"]) <= {"PATH", "HOME", "LANG", "LC_CTYPE"} for c in _calls19)
+   and "Box flags (each box's [flags] start line" in _c19 and "NVDA: PENDING" in _c19
+   and not re.search(r"Environment|r19-secret|TT_REFRESH|account number", _c19)
+   and 'CONTEXT\'s "Box flags" block' in _pr19 and "Report only: never propose a flag change" in _pr19,
+   "box flags: %s / %s / %s; calls %s" % (_f19, _f19b, _f19c, _calls19))
 
 shutil.rmtree(TMP, ignore_errors=True)
 print()

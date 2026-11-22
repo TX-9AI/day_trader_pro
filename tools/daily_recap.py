@@ -1,6 +1,16 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/daily_recap.py  v1.3
+day_trader_pro/tools/daily_recap.py  v1.4
+v1.4  2026-11-22  dtp r576 / BOXF.1 (control's half of OTV5 r148) — ONE "Box flags" LINE IN THE CONTEXT. OTV5 r148 gives
+      each box a saved settings file (deploy/box_flags/<SYM>, read once at the bot's start; the schema and defaults in
+      utils/box_flags.py) and one "[flags]" start line, which eod_conductor_v2 v2.19 copies with the day's errors. context
+      reads each box's last [flags] line of the day (its EFFECTIVE values) and runs OTV5's own show tool once
+      (python3 -I ~/OTV5/tools/box_flags_show.py --json; control keeps no copy of the parser) for what ~/OTV5 HEAD would
+      start the same boxes with. The line says "all defaults" when every box that started ran on the defaults with no
+      refusal, else per box: its differences, REFUSED (a refused line, named), PENDING (HEAD would start it on other
+      values or another file hash: a land not yet baked or not yet started) and NOT SEEN (no [flags] line in its
+      extract: a box that did not start today, or one not yet on r148). It reads bot-log extracts and the show tool's
+      JSON only: never an env file, a unit or a credential.
 v1.3  2026-11-22  dtp r575 / HALF.2 + RWATCH.1 — A HALF DAY IS A NON-TRADING DAY, AND THE RUNAWAY EQUITY WATCH.
       (1) HALF DAYS. The operator, 2026-11-22: "Yes, just treat them as bank holidays. No trading." OTV5 r145 opens
       nothing on a 13:00 half day (2026-11-27, 2026-12-24); the boxes still wake and record data. The recap still runs
@@ -75,6 +85,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 from datetime import date, datetime, time, timedelta
@@ -98,6 +109,7 @@ NOTES_DIR = os.path.join(OUT, "notes")
 STUDIES = os.path.join(REVIEWS, "studies")
 WEEKLY = os.path.join(REVIEWS, "weekly")
 OTV5_BACKLOG = os.path.join(HOME, "OTV5", "docs", "BACKLOG.md")
+OTV5 = os.path.join(HOME, "OTV5")            # v1.4: the box flags show tool runs from this tree's HEAD
 HYGIENE = os.path.join(REVIEWS, "hygiene")
 BOTLOGS = os.path.join(OUT, "botlogs")       # v1.2: eod_conductor_v2 v2.18 writes <date>/<SYM>.txt before the stop
 DUP_JACCARD = 0.8                            # v1.2: the near-duplicate title bar (word sets), documented above
@@ -334,6 +346,88 @@ def botlog_summary(day, root=BOTLOGS):
     return out or ["(the folder %s is empty)" % d]
 
 
+FLAGS_RX = re.compile(r"\[flags\] (\S+) source=(.+?) sha256=(\S+) commit=(\S+) \u00b7 (.+?) \u00b7 differs: (.+?)"
+                      r"(?: \u00b7 REFUSED: (.+))?$")
+
+
+def _flag_values(txt):
+    """v1.4 -> {key: value} from a [flags] line's values part ("schema v1: no keys" -> {})."""
+    if txt.startswith("schema v"):
+        return {}
+    return dict(kv.split("=", 1) for kv in txt.split() if "=" in kv)
+
+
+def head_flags(symbols, otv5=OTV5):
+    """v1.4 -> ({SYM: {"sha256", "values"}}, problem) from OTV5's own show tool at HEAD (one call, read only)."""
+    tool = os.path.join(otv5, "tools", "box_flags_show.py")
+    if not os.path.exists(tool):
+        return {}, "the show tool is not in %s (OTV5 before r148)" % otv5
+    cmd = [sys.executable, "-I", tool, "--json"]
+    for s_ in symbols:
+        cmd += ["--symbol", s_]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=60,
+                           env={"PATH": "/usr/bin:/bin", "HOME": HOME, "LANG": "C.UTF-8"})
+        doc = json.loads(r.stdout)
+        return {b["symbol"]: {"sha256": b["sha256"], "values": b["values"]} for b in doc.get("boxes", [])}, ""
+    except Exception as e:                       # noqa: BLE001 - the recap goes on; the line says HEAD NOT READ
+        return {}, "%s: %s" % (type(e).__name__, str(e)[:120])
+
+
+def flags_summary(day, root=BOTLOGS, otv5=OTV5):
+    """v1.4 -> lines for the context's "Box flags" block: each box's EFFECTIVE flags (its last [flags] start line in
+    the day's extract) against what ~/OTV5 HEAD would start it with."""
+    d = os.path.join(root, day)
+    if not os.path.isdir(d):
+        return ["(no bot-log extracts for %s: box flags NOT SEEN on any box)" % day]
+    seen, unseen = {}, []
+    for p in sorted(glob.glob(os.path.join(d, "*.txt"))):
+        sym = os.path.basename(p)[:-4]
+        try:
+            t = open(p, encoding="utf-8", errors="replace").read()
+        except OSError:
+            unseen.append(sym)
+            continue
+        last = None
+        for ln in t.splitlines():
+            i = ln.find("[flags] ")
+            if i >= 0:
+                m = FLAGS_RX.match(ln[i:].rstrip())
+                if m:
+                    last = m
+        if last is None:
+            unseen.append(sym)
+            continue
+        seen[sym] = {"source": last.group(2), "sha256": last.group(3), "commit": last.group(4),
+                     "values": _flag_values(last.group(5)), "differs": last.group(6), "refused": last.group(7) or ""}
+    head, why = head_flags(sorted(seen), otv5) if seen else ({}, "")
+    out, plain = [], []
+    for sym in sorted(seen):
+        e = seen[sym]
+        h = head.get(sym)
+        notes = []
+        if e["differs"] != "none":
+            notes.append("differs: " + e["differs"])
+        if e["refused"]:
+            notes.append("REFUSED: " + e["refused"])
+        if h is not None and (h["values"] != e["values"] or h["sha256"] != e["sha256"]):
+            notes.append("PENDING: HEAD would start it with %s (file %s)"
+                         % (" ".join("%s=%s" % kv for kv in sorted(h["values"].items())) or "no keys", h["sha256"]))
+        if notes:
+            out.append("%s: %s (%s, commit %s)" % (sym, "; ".join(notes), e["source"], e["commit"]))
+        else:
+            plain.append(sym)
+    if plain:
+        out.insert(0, "all defaults on %d box(es) (%s)" % (len(plain), ", ".join(plain)) if not out else
+                   "defaults, as HEAD: %s" % ", ".join(plain))
+    if unseen:
+        out.append("NOT SEEN (no [flags] line in the day's extract: not started today, or not yet on OTV5 r148): %s"
+                   % ", ".join(unseen))
+    if why:
+        out.append("HEAD NOT READ (%s): PENDING cannot be judged" % why)
+    return out
+
+
 def watch_problems(notes, sc):
     """v1.3 -> [reason] the Runaway watch commentary is withheld: a dollar figure the scorer did not print (within $1),
     or the paper dollars called "paper size"."""
@@ -409,6 +503,8 @@ def cmd_context(a):
               "2026-11-21)." % " / ".join(SD.SETUP_NAMES)]
     lines += ["", "Bot-log extracts the conductor copied before the stop (ERROR / CRITICAL / Traceback / restarts):"]
     lines += ["  " + b for b in botlog_summary(a.day, a.botlogs)]
+    lines += ["Box flags (each box's [flags] start line, the EFFECTIVE values, against ~/OTV5 HEAD; OTV5 r148):"]
+    lines += ["  " + b for b in flags_summary(a.day, a.botlogs, a.otv5)]
     try:
         sc = CB.score(a.day, day=a.day, trades_dir=a.trades)
         with open(os.path.join(a.work, "cash_books.json"), "w", encoding="utf-8") as fh:
@@ -732,6 +828,7 @@ def main(argv=None):
     p.add_argument("--otv5-backlog", default=OTV5_BACKLOG)
     p.add_argument("--hygiene", default=HYGIENE)
     p.add_argument("--botlogs", default=BOTLOGS)
+    p.add_argument("--otv5", default=OTV5)
     p.add_argument("--trades", default=CB.TRADES)
     p = sub.add_parser("validate")
     p.add_argument("--day", required=True)

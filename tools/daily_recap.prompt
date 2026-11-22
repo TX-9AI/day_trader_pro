@@ -1,4 +1,4 @@
-DAILY RECAP (day_trader_pro tools/daily_recap.prompt v1.4, dtp r575 / HALF.2 + RWATCH.1; v1.3 dtp r574 / CASHBOOK.2; v1.2 dtp r572 / SD.3 + RECAP.2 + CASHBOOK.1; v1.1 dtp r571; v1.0 dtp r569)
+DAILY RECAP (day_trader_pro tools/daily_recap.prompt v1.5, dtp r576 / BOXF.1; v1.4 dtp r575 / HALF.2 + RWATCH.1; v1.3 dtp r574 / CASHBOOK.2; v1.2 dtp r572 / SD.3 + RECAP.2 + CASHBOOK.1; v1.1 dtp r571; v1.0 dtp r569)
 
 You write the analyst notes for ONE trading session's daily recap PDF of the OTV5 paper fleet (14 boxes). You run
 unattended under a systemd timer: nobody is watching and nobody can answer a question. Write ONE file, the NOTES path
@@ -60,6 +60,10 @@ READ, IN THIS ORDER (quote figures; do not recompute them another way)
      either), the studies that reported since the last recap, prior maintenance proposals, the open backlog rows, the
      queue item format, the bot-log counts per box, and where the C1-C4 scoreboard is.
   3a. BOTLOGS (RUN PARAMETERS): one file a box, the day's ERROR / CRITICAL / Traceback lines and restart markers.
+     CONTEXT's "Box flags" block (OTV5 r148: each box's saved settings file, read at its start) is computed for
+     you from those files and OTV5's own show tool: quote it as ONE sentence in code_intro ("all defaults", or each
+     box's differences, and every REFUSED, PENDING or NOT SEEN by name). Report only: never propose a flag change,
+     never a study from it; a REFUSED line is a defect to name.
   3b. CASHBOOKS (RUN PARAMETERS): the C1-C4 scoreboard from tools/cash_books.py (the one scorer; the books are frozen
      in ~/reviews/cash_candidates_20261121/PREREG.md). Quote it; never re-derive a figure.
   3c. RWATCH (RUN PARAMETERS): the Runaway equity watch from tools/runaway_watch.py (the one scorer; the list and the

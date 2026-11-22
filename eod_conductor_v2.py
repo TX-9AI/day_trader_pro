@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/eod_conductor_v2.py — v2.18
+day_trader_pro/eod_conductor_v2.py — v2.19
+v2.19 2026-11-22 — dtp r576 / BOXF.1 (control's half of OTV5 r148) — THE BOX'S [flags] START LINE COMES TO CONTROL WITH ITS
+      ERRORS. OTV5 r148 logs one "[flags] <SYM> source=... sha256=... commit=... · <values> · differs: ..." line at every
+      bot start (utils/box_flags: the box's saved settings file, read once). The copy's awk keeps the day's lines
+      holding ": [flags] " beside the ERROR / CRITICAL / Traceback / restart lines, so the daily recap reads the box's
+      EFFECTIVE flags with every box stopped. Same bounds (BOTLOG_MAX_LINES, BOTLOG_MAX_BYTES), same redaction; the line
+      names values, a file hash and a commit, never an env value or a credential. Gate check_conductor_botlogs v1.1 L7.
 v2.18 2026-11-22 — dtp r572 / RECAP.2 — THE DAY'S BOT-LOG ERRORS COME TO CONTROL BEFORE THE BOXES GO DOWN. The daily recap
       (17:00 ET, dtp-daily-recap) reads no box (they are stopped by then), so its code section said NOT READ for every
       crash, Traceback and restart. The close now starts copy_botlogs() before the takedown, in a daemon thread, over every box the
@@ -490,7 +496,7 @@ _BOTLOG_AWK = (
     '/^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:/ { day = substr($0, 1, 10); tb = 0;'
     ' if (day != D) next;'
     ' if (index($0, " [ERROR") || index($0, " [CRITICAL") || (index($0, "OptionsBot [") && index($0, "] STARTED"))'
-    ' || index($0, "OptionsBot STOPPED")) { print; n++ } if (n >= M) exit; next }'
+    ' || index($0, "OptionsBot STOPPED") || index($0, ": [flags] ")) { print; n++ } if (n >= M) exit; next }'
     ' { if (day != D) next; if (index($0, "Traceback (most recent call last)") > 0) { tb = 1; tl = 0 }'
     ' if (tb && tl < 60) { print; tl++; n++ } if (n >= M) exit }')
 _BOTLOG_REDACT = ("sed -E -e 's/((token|secret|passw(or)?d|api[_-]?key|authorization|credential)[A-Za-z_]*"

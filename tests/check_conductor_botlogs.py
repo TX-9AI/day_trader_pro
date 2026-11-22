@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_conductor_botlogs.py — v1.0
+day_trader_pro/tests/check_conductor_botlogs.py — v1.1
+v1.1  2026-11-22  dtp r576 / BOXF.1 (control's half of OTV5 r148) — NEW L7: the box command also keeps the day's
+      "[flags]" start lines (OTV5 r148 logs one at every bot start: the box's effective saved settings, its file hash and
+      the commit), a WARNING one with its REFUSED tail included, and still drops another day's [flags] line and a line
+      that only mentions flags; the ssh budget and bounds are unchanged (L2). BORN RED on f28f5b7 (r575, v2.18).
 v1.0  2026-11-22  dtp r572 / RECAP.2 — new. eod_conductor_v2 v2.18 copies each box's day of ERROR / CRITICAL /
       Traceback lines and restart markers to control (~/reviews/daily_brief/botlogs/<date>/<SYM>.txt) before the stop,
       so the 17:00 daily recap can read them with every box stopped. Nothing here touches a box: the box command runs
@@ -18,6 +22,8 @@ v1.0  2026-11-22  dtp r572 / RECAP.2 — new. eod_conductor_v2 v2.18 copies each
       gates, fleet_reconcile) copies nothing
   L5  the order: _run_close starts the copy over every box the close saw (HELD included) before takedown(), which joins
       it after the capture wait and before ec2ops.stop
+  L7  the day's "[flags]" start lines are kept (INFO and WARNING, the REFUSED tail with them); another day's [flags]
+      line and an INFO line that merely mentions flags are dropped
   L6  it never reads an env file, a credential or a unit's Environment: the command reads bot.log* and the unit's
       systemd lifecycle lines only (no printenv, env, /proc, .env, systemctl show/cat, /etc/systemd)
 BORN RED on b02c6b9 (r571): eod_conductor_v2 v2.17 has no botlog_cmd / copy_botlogs.
@@ -68,7 +74,7 @@ def main():
         import eod_conductor_v2 as C
         C.botlog_cmd, C.copy_botlogs, C.finish_botlogs  # noqa: B018
     except (ImportError, AttributeError) as e:
-        for n in ("L1", "L2", "L3", "L4", "L5", "L6"):
+        for n in ("L1", "L2", "L3", "L4", "L5", "L6", "L7"):
             ck(n, False, f"eod_conductor_v2 has no bot-log copy ({e})")
         print("\nRED — " + ", ".join(FAILS))
         return 1
@@ -88,6 +94,22 @@ def main():
            and all(k in out for k in keep) and not [d for d in drop if d in out]
            and "refresh_token=[REDACTED]" in out and "Bearer [REDACTED]" in out,
            f"kept/dropped wrong: {out!r}")
+        # L7 (v1.1) — the [flags] start lines
+        home7 = os.path.join(tmp, "box7")
+        os.makedirs(os.path.join(home7, "options-trader"))
+        open(os.path.join(home7, "options-trader", "bot.log"), "w", encoding="utf-8").write(
+            "2026-11-19 09:15:03 [INFO ] __main__: [flags] QQQ source=none (defaults) sha256=- commit=0000000000 "
+            "· schema v1: no keys · differs: none\n"
+            "2026-11-20 09:15:03 [INFO ] __main__: [flags] QQQ source=none (defaults) sha256=- commit=df5125207e "
+            "\u00b7 schema v1: no keys \u00b7 differs: none\n"
+            "2026-11-20 09:15:04 [INFO ] main: the flags were read, nothing else\n"
+            "2026-11-20 11:02:00 [WARNING] main: [flags] QQQ source=deploy/box_flags/QQQ sha256=0123456789ab "
+            "commit=df5125207e \u00b7 ogap=off \u00b7 differs: ogap(off, default on) \u00b7 REFUSED: line 1 "
+            "ogap = 'of' is not one of on/off: ogap reads off\n")
+        r7 = run_box(cmd, home7).stdout
+        ck("L7", "commit=df5125207e \u00b7 schema v1: no keys" in r7 and "REFUSED: line 1 ogap = 'of'" in r7
+           and "commit=0000000000" not in r7 and "nothing else" not in r7 and r7.count("[flags]") == 2,
+           f"the [flags] lines were not kept as specified: {r7!r}")
         # L2
         home2 = os.path.join(tmp, "box2")
         os.makedirs(os.path.join(home2, "options-trader"))
