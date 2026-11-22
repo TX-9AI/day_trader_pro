@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_cash_books.py — v1.1
+day_trader_pro/tests/check_cash_books.py — v1.2
+v1.2  2026-11-22  dtp r574 / CASHBOOK.2, PREREG amendment 2 (the operator, 2026-11-22: "I want the best risk to reward
+      balance, the highest earning combination with as low as we can get drawdowns"; "just treat them as bank
+      holidays. No trading."). B4: 2026-11-27 (a 13:00 half day) is no longer a forward session. B7: the concentration
+      column moved one right. NEW B8: rtd = net / |max DD| on every book and window (None with no drawdown, printed
+      "no drawdown"), the tables list the books in the combined window's rtd order, a ranking line names them, and
+      amendment_lines() carries both amendments when the real AMENDMENTS.txt is readable.
 v1.1  2026-11-22  dtp r572 / PREREG amendment 1 (the operator, 2026-11-22: "You want to cut the 2 worst as well? I
       didn't think so."). NEW B7: every window carries gross without the two largest losers beside gross without the
       two largest winners, the markdown prints them in ONE column labelled concentration context, the scorer reads and
@@ -56,7 +62,7 @@ def main():
     try:
         import cash_books as CB
     except ImportError as e:
-        for n in ("B1", "B2", "B3", "B4", "B5", "B6", "B7"):
+        for n in ("B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"):
             ck(n, False, f"no tools/cash_books.py ({e})")
         print("\nRED — " + ", ".join(FAILS))
         return 1
@@ -117,7 +123,7 @@ def main():
                and w2["forward"]["to"] == "2026-12-03" and w2["forward_cumulative"]["to"] == "2026-12-04"
                and w2["forward_cumulative"]["books"]["C1"]["n"] == 4 and w2["forward"]["books"]["C1"]["n"] == 3
                and "2026-12-01" in w2["forward"]["missing_trade_files"]
-               and "2026-11-27" in w2["forward"]["missing_trade_files"]
+               and "2026-11-27" not in w2["forward"]["missing_trade_files"]
                and "2026-11-26" not in w2["forward"]["missing_trade_files"])
         ck("B4", ok4, "windows %s; forward to %s; cumulative %s; missing %s" % (
             sorted(w), w["forward"]["to"], w2.get("forward_cumulative", {}).get("to"),
@@ -149,12 +155,29 @@ def main():
         amend = getattr(CB, "amendment_line", lambda: None)()
         real_amend = os.path.exists(os.path.join(os.path.dirname(CB.PREREG), "AMENDMENTS.txt"))
         ck("B7", f2b == 550 and all("ex top-2 winners / ex bottom-2 losers (context)" in h for h in hdr) and hdr
-           and all(" / " in ln.split("|")[10] for ln in md.splitlines() if ln.startswith("| C"))
+           and all(" / " in ln.split("|")[11] for ln in md.splitlines() if ln.startswith("| C"))
            and "never a qualifier" in md and "never a qualifier" in getattr(CB, "CONCENTRATION", "")
            and (not real_amend or (amend and amend.startswith("2026-11-22T") and "AMENDMENT 1" in amend
                                    and ("Amendment: " + amend) in CB.render_md(CB.score(CB.IN_SAMPLE[1]))))
            and all("gross_ex_bottom2" in m for w in sc["windows"].values() for m in w["books"].values()),
            f"ex bottom-2 {f2b} (want 550 = -150 - (-400 - 300)); headers {hdr[:1]}; amendment {str(amend)[:40]}")
+        # B8 (amendment 2): return to drawdown ranks the books; it never filters
+        comb = sc["windows"]["combined"]["books"]
+        rank = sc.get("ranking") or []
+        rows8 = [ln.split("|")[1].strip() for ln in md.splitlines() if ln.startswith("| C")]
+        want_rank = sorted([b for b, _d in CB.BOOKS], key=lambda b: (
+            0 if comb[b].get("rtd") is None and comb[b]["n"] else 1, -(comb[b].get("rtd") or 0), [x for x, _ in CB.BOOKS].index(b)))
+        flat = CB.metrics([{"day": "2026-11-23", "pnl": 10.0, "fee": 1.0}], ["2026-11-23"])
+        lines = getattr(CB, "amendment_lines", lambda: [])()
+        ck("B8", f2.get("rtd") == -0.40 and CB.rtd(-158, -400) == -0.40 and CB.rtd(500, 0) is None
+           and flat["rtd"] is None and rank == want_rank and len(rank) == 4
+           and all(rows8[i:i + 4] == rank for i in range(0, len(rows8), 4)) and rows8
+           and all("net / max DD" in h for h in hdr) and "Ranking, return to drawdown" in md
+           and all("rtd" in m for w in sc["windows"].values() for m in w["books"].values())
+           and all(m["n"] >= 0 for m in comb.values())
+           and (not real_amend or (len(lines) >= 2 and "AMENDMENT 1" in lines[0] and "AMENDMENT 2" in lines[1])),
+           f"forward C2 rtd {f2.get('rtd')} (want -0.40 = -158 / 400); ranking {rank} vs {want_rank}; "
+           f"table rows {rows8[:4]}; amendments {len(lines)}")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     print()

@@ -1,4 +1,4 @@
-DAILY RECAP (day_trader_pro tools/daily_recap.prompt v1.2, dtp r572 / SD.3 + RECAP.2 + CASHBOOK.1; v1.1 dtp r571; v1.0 dtp r569)
+DAILY RECAP (day_trader_pro tools/daily_recap.prompt v1.3, dtp r574 / CASHBOOK.2; v1.2 dtp r572 / SD.3 + RECAP.2 + CASHBOOK.1; v1.1 dtp r571; v1.0 dtp r569)
 
 You write the analyst notes for ONE trading session's daily recap PDF of the OTV5 paper fleet (14 boxes). You run
 unattended under a systemd timer: nobody is watching and nobody can answer a question. Write ONE file, the NOTES path
@@ -107,11 +107,17 @@ present) as the model of tone, depth and length. Markdown bold (**x**) is allowe
   "code":           [{"title", "when", "effect", "status", "detail": [..]}] each code behaviour that touched the day:
                     defects, gates that refused, recent fixes seen working; status says FIXED rN / OPEN backlog id /
                     TO SPEC.
-  "cash_verdict":   1-3 paragraphs: "If this had been cash" - the FACTS cash rows (QQQ $1,050, SPX $5,000 an entry,
+  "cash_verdict":   1-3 paragraphs: "If this had been cash" - the FACTS cash rows (QQQ $1,050, SPX $4,200 an entry from 2026-11-23 (was $5,000),
                     PARK/Runaway/Hunt/OGAP), at the mark with fees beside, and an honest verdict.
   "cash_books":     1-3 paragraphs, the commentary on the C1-C4 scoreboard (CASHBOOKS), for the operator (2026-11-22:
                     "On C1-C4, I would like some commentary on the daily and weekly recaps as to how each of them is
-                    performing"): which book the day favoured and why (e.g. a big index PARK day, a Runaway equity
+                    performing"). LEAD with the scorer's RANKING line, return to drawdown = net / |max DD|
+                    (amendment 2; the operator, 2026-11-22: "I want the best risk to reward balance, the highest
+                    earning combination with as low as we can get drawdowns"): the combined order, each book's forward
+                    figure beside it, and whether the forward days are confirming or eroding it (seven forward
+                    sessions is a small sample: say so while it is). SPX entries size on $4,200 from 2026-11-23 (was
+                    $5,000; per contract unchanged): name the change when an SPX day moves a book. Then: which book
+                    the day favoured and why (e.g. a big index PARK day, a Runaway equity
                     day), and whether any book's standing changed on the forward and combined lines. CONCENTRATION
                     (amendment 1; the operator, 2026-11-22: "I don't know if I'm on board with cutting the 2 best
                     trades to qualify. You want to cut the 2 worst as well?"): gross without the two largest winners

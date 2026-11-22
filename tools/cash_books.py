@@ -1,6 +1,17 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/cash_books.py  v1.1
+day_trader_pro/tools/cash_books.py  v1.2
+v1.2  2026-11-22  dtp r574 / CASHBOOK.2, AMENDMENT 2 (~/reviews/cash_candidates_20261121/AMENDMENTS.txt, written before
+      any forward data; PREREG.md unchanged, its sha still holds). The operator, 2026-11-22: "I want the best risk to
+      reward balance, the highest earning combination with as low as we can get drawdowns". (a) Every book and window
+      gets RETURN TO DRAWDOWN, rtd = net / |max drawdown on the daily equity curve| (net after fees, at the mark; None,
+      printed "no drawdown", when the window never drew down). It RANKS, it never filters: every table lists the books in
+      the order of the COMBINED window's rtd (highest first; PREREG's C1-C4 order breaks ties and a book with no
+      drawdown goes first), and a ranking line above the tables names each book's combined and forward rtd. Every
+      PREREG metric is printed unchanged. (b) Half days are non-trading days (the operator, 2026-11-22: "just treat them
+      as bank holidays. No trading."): sessions() leaves out market_calendar.is_half_day, so the forward window is 7
+      sessions (11-27 out). (c) amendment_lines(): the first line of EVERY amendment (was amendment 1's only);
+      amendment_line() is kept and returns the first.
 v1.1  2026-11-22  dtp r572 / CASHBOOK.1, AMENDMENT 1 (~/reviews/cash_candidates_20261121/AMENDMENTS.txt; PREREG.md
       unchanged, its sha still holds). The operator, 2026-11-22: "Our trading sample is already small. I don't know if
       I'm on board with cutting the 2 best trades to qualify. You want to cut the 2 worst as well? I didn't think so."
@@ -54,7 +65,7 @@ HOME = os.path.expanduser("~")
 TRADES = os.path.join(HOME, "reviews", "trades")
 PREREG = os.path.join(HOME, "reviews", "cash_candidates_20261121", "PREREG.md")
 PREREG_SHA = "0bfddb1933bfaa94987f9d509c5944799866c8f4db85b21a90c81a94c09a086e"
-AMENDMENTS = os.path.join(os.path.dirname(PREREG), "AMENDMENTS.txt")   # v1.1: amendment 1 (2026-11-22)
+AMENDMENTS = os.path.join(os.path.dirname(PREREG), "AMENDMENTS.txt")   # v1.1: amendment 1; v1.2: amendment 2
 CONCENTRATION = ("concentration context, never a qualifier: gross without the two largest winners beside gross "
                  "without the two largest losers (amendment 1)")
 INDEX = ("QQQ", "SPX")
@@ -114,10 +125,11 @@ def load(trades_dir=TRADES):
 
 
 def sessions(lo, hi, file_days):
-    """The trading days in [lo, hi] (dtp market_calendar), and those of them with no trade file yet."""
+    """The trading days in [lo, hi] (dtp market_calendar), and those of them with no trade file yet. v1.2 (amendment
+    2): a 13:00 half day is a non-trading day, never a session."""
     out, x, end = [], date.fromisoformat(lo), date.fromisoformat(hi)
     while x <= end:
-        if market_calendar.is_trading_day(x):
+        if market_calendar.is_trading_day(x) and not market_calendar.is_half_day(x):
             out.append(x.isoformat())
         x += timedelta(days=1)
     have = set(file_days)
@@ -178,7 +190,25 @@ def metrics(rows, sess):
             "ev": round(gross / n, 2) if n else None, "ci": [round(lo, 2), round(hi, 2)] if lo is not None else None,
             "up": sum(1 for v in daily.values() if v > 0), "sessions": len(daily),
             "worst_day": round(min(daily.values()), 2) if daily else None, "max_dd": round(dd, 2),
-            "gross_ex_top2": round(gross - sum(top2), 2), "gross_ex_bottom2": round(gross - sum(bottom2), 2)}
+            "gross_ex_top2": round(gross - sum(top2), 2), "gross_ex_bottom2": round(gross - sum(bottom2), 2),
+            "rtd": rtd(gross - fees, dd)}
+
+
+def rtd(net, max_dd):
+    """v1.2 (amendment 2): return to drawdown, net / |max drawdown|, to 0.01; None when the window never drew down."""
+    return round(net / abs(max_dd), 2) if max_dd and max_dd < 0 else None
+
+
+def ranking(sc):
+    """v1.2 (amendment 2): the books in the order of the COMBINED window's rtd, highest first. No drawdown ranks first;
+    PREREG's order breaks ties. -> [book]."""
+    comb = (sc.get("windows", {}).get("combined") or {}).get("books") or {}
+    order = [b for b, _d in BOOKS]
+
+    def key(b):
+        r = (comb.get(b) or {}).get("rtd")
+        return (0 if r is None and (comb.get(b) or {}).get("n") else 1, -(r if r is not None else 0), order.index(b))
+    return sorted(order, key=key)
 
 
 def score(through, day=None, week_start=None, trades_dir=TRADES):
@@ -195,7 +225,7 @@ def score(through, day=None, week_start=None, trades_dir=TRADES):
     if day:
         wins.append(("day", day, day))
     out = {"through": through, "prereg": PREREG, "prereg_sha": PREREG_SHA, "basis": "the mark (pnl_usd); fees beside",
-           "amendment": amendment_line(), "concentration": CONCENTRATION,
+           "amendment": amendment_line(), "amendments": amendment_lines(), "concentration": CONCENTRATION,
            "books": dict(BOOKS), "windows": {}}
     for name, lo, hi in wins:
         sess, missing = sessions(lo, hi, file_days)
@@ -209,6 +239,7 @@ def score(through, day=None, week_start=None, trades_dir=TRADES):
                 m["displaced_unmeasurable"] = bad
             w["books"][b] = m
         out["windows"][name] = w
+    out["ranking"] = ranking(out)
     return out
 
 
@@ -219,6 +250,15 @@ def amendment_line(path=AMENDMENTS):
             return fh.readline().strip() or None
     except OSError:
         return None
+
+
+def amendment_lines(path=AMENDMENTS):
+    """v1.2: the first line of every amendment in AMENDMENTS.txt (a line holding "AMENDMENT <n> ("), oldest first."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return [ln.strip() for ln in fh if re.search(r"\bAMENDMENT \d+ \(", ln)]
+    except OSError:
+        return []
 
 
 def prereg_sha(path=PREREG):
@@ -281,14 +321,25 @@ def _m(x, dec=0):
 
 def render_md(sc):
     """The scoreboard as markdown: one table per window, the mark as the basis, fees beside."""
-    lab = {"in_sample": "In-sample (seen, hindsight)", "forward": "Forward (unseen, PREREG's 8 sessions)",
+    lab = {"in_sample": "In-sample (seen, hindsight)", "forward": "Forward (unseen; 7 sessions, amendment 2)",
            "forward_cumulative": "Forward, cumulative past 12-03", "combined": "Combined", "week": "The week",
            "day": "The day"}
     L = ["# Cash candidate books C1-C4, through %s" % sc["through"], "",
          "Frozen in %s (sha256 %s). Basis: the mark (pnl_usd); fees beside, never inside EV. Report only: never in the "
          "window EV or the theories; the choice of book is the operator's." % (sc["prereg"], sc["prereg_sha"][:12]), ""]
-    if sc.get("amendment"):
-        L += ["Amendment: " + sc["amendment"], ""]
+    for a in sc.get("amendments") or ([sc["amendment"]] if sc.get("amendment") else []):
+        L += ["Amendment: " + a, ""]
+    comb = (sc["windows"].get("combined") or {}).get("books") or {}
+    fwd = (sc["windows"].get("forward") or {}).get("books") or {}
+
+    def _r(m):
+        if not m:
+            return "-"
+        return "no drawdown" if m.get("rtd") is None else "%.2f" % m["rtd"]
+    rank = sc.get("ranking") or [b for b, _d in BOOKS]
+    L += ["**Ranking, return to drawdown (net / |max DD|, amendment 2; higher is better), combined window:** "
+          + " > ".join("%s %s%s" % (b, _r(comb.get(b)), (" (forward %s)" % _r(fwd.get(b))) if fwd else "")
+                       for b in rank), ""]
     L += ["Ex top-2 / ex bottom-2: " + CONCENTRATION + ".", ""]
     for b, d in BOOKS:
         L.append("- %s: %s" % (b, d))
@@ -300,17 +351,17 @@ def render_md(sc):
                                                       "; NO trade file yet for " + ", ".join(w["missing_trade_files"])
                                                       if w["missing_trade_files"] else ""), ""]
         disp = name.startswith("forward") or name in ("week", "day")
-        L.append("| book | n | gross | fees | net | EV [95%] | up | worst day | max DD | "
+        L.append("| book | n | gross | fees | net | EV [95%] | up | worst day | max DD | net / max DD | "
                  "gross ex top-2 winners / ex bottom-2 losers (context) |"
                  + (" fired beside a Hunt/OGAP position |" if disp else ""))
-        L.append("|---|---|---|---|---|---|---|---|---|---|" + ("---|" if disp else ""))
-        for b, _d in BOOKS:
+        L.append("|---|---|---|---|---|---|---|---|---|---|---|" + ("---|" if disp else ""))
+        for b in rank:
             m = w["books"][b]
             ev = "-" if m["ev"] is None else "%s [%s, %s]" % (_m(m["ev"], 1), _m(m["ci"][0]) if m["ci"] else "-",
                                                               _m(m["ci"][1]) if m["ci"] else "-")
-            row = "| %s | %d | %s | %s | %s | %s | %d/%d | %s | %s | %s / %s |" % (
+            row = "| %s | %d | %s | %s | %s | %s | %d/%d | %s | %s | %s | %s / %s |" % (
                 b, m["n"], _m(m["gross"]), _m(m["fees"]), _m(m["net"]), ev, m["up"], m["sessions"],
-                _m(m["worst_day"]), _m(m["max_dd"]), _m(m["gross_ex_top2"]), _m(m["gross_ex_bottom2"]))
+                _m(m["worst_day"]), _m(m["max_dd"]), _r(m), _m(m["gross_ex_top2"]), _m(m["gross_ex_bottom2"]))
             if disp:
                 row += " %d%s |" % (m["displaced"], " (+%d unmeasurable)" % m["displaced_unmeasurable"]
                                     if m["displaced_unmeasurable"] else "")
