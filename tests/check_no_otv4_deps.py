@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_no_otv4_deps.py  v1.1
+day_trader_pro/tests/check_no_otv4_deps.py  v1.2
+v1.2  2026-11-21  dtp r571 / OTV4DEP.3 — N1 RED SINCE r569, GREEN AGAIN. dtp r569 (RECAP.1) added two references with no
+      allowance. tools/daily_recap.py read the frozen BACKLOG for open rows and never found one (its PART 1 marks ⬜,
+      the rows MOVED to OTV5 at otv4 r510): daily_recap v1.1 removes the read, so it gets no allowance.
+      tools/daily_recap.sh's REPOS lists the frozen checkout as a TAMPER WATCH: the recap's headless session must
+      leave every repo unedited, and the frozen tree still holds dtp's ledger (every dtp land's docs half), so a
+      session edit there is the change it exists to catch. It reads no code or doc from the tree: ALLOWED gains it (1).
 v1.1  2026-11-08  dtp r533 / OTV4DEP.2 — THE GATE NOW COVERS tests/. Hygiene item 7 of the 11-07 brief: seven dtp
       tests and screens still located the trading code they check (the trend meter, the structure classifier, the
       trades DDL, the derived schemas, s3_push's series tables) in the frozen ~/options-trader-v4. r533 points each at
@@ -40,6 +46,8 @@ ALLOWED = {
                              "by that folder name), by design"),
     "tools/check_land_discipline.py": (1, "dtp's own ledger rows live in otv4's GENESIS (the docs half of every land)"),
     "tools/checker_sweep.py": (2, "otv4 is swept only when asked for by name"),
+    "tools/daily_recap.sh": (1, "REPOS: the headless session's tamper watch (git status before/after); the frozen "
+                                "tree holds dtp's ledger, so an edit there is what the watch catches. Reads nothing"),
     "tools/claude_boot.py": (1, "WORKDIR: the Claude session's cwd, not a code tree"),
     "tools/gen_handoff.py": (2, "the frozen tree is LISTED as frozen; the transcript folder is Claude's project name"),
     "tools/genesis_find.py": (3, "otv4 GENESIS/BACKLOG are searched as HISTORY, after OTV5"),

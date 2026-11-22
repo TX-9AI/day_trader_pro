@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_land_spec_parse.py  v1.0
+day_trader_pro/tests/check_land_spec_parse.py  v1.1
+v1.1  2026-11-21  dtp r571 / C2 — RUNS UNDER THE UNATTENDED GUARD. checker_sweep gives every checker
+      VERTIGO_UNATTENDED=1, so every land here exited 9 and L1-L5b were standing Saturday reds for nine weeks. The
+      sandboxed child (HOME redirected into this run's scratch tree, L0's safety bit) now runs with the guard
+      dropped, through check_land_sh._clean_env's own rule (dropped only for a HOME inside the temp dir that is not
+      the caller's); the lander's own refusal is unchanged.
 v1.0  2026-09-20  dtp r392 / LAND.10 — A `NEG` WHOSE PATH DOES NOT RESOLVE
       PASSED SILENTLY, AND A NEG IS THE ONLY THING PROVING SUPERSEDED CODE IS
       GONE.
@@ -31,6 +36,8 @@ import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+from check_land_sh import _sandboxed_home   # noqa: E402  (v1.1: one rule for both harnesses)
 REPO_ROOT = os.path.dirname(HERE)
 LANDER = os.path.join(REPO_ROOT, "tools", "land.sh")
 
@@ -142,6 +149,8 @@ def run_case(spec_body, payload=None, marker_file=True):
                GIT_COMMITTER_EMAIL="x@y")
     env.pop("LAND_ARCHIVE", None)
     env.pop("LAND_STAGE", None)
+    if _sandboxed_home(home):          # v1.1 (C2): the guard goes for the sandboxed child only
+        env.pop("VERTIGO_UNATTENDED", None)
     r = subprocess.run(["bash", os.path.join(stage, "land.sh"), "half"],
                        capture_output=True, text=True, env=env, timeout=180)
     out = r.stdout + r.stderr

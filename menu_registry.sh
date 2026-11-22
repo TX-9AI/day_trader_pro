@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# day_trader_pro/menu_registry.sh — v1.28
+# day_trader_pro/menu_registry.sh — v1.29
+# v1.29 (2026-11-21) — dtp r571 / OTV5 r141 (the 11-21 brief R5a). The FLEET item reads "Ramp TOP
+#   (OT_BREAKOUT_BUDGET_USD, Breakout only - dormant) & spot": the key is read only by Breakout's _size_geometry (OTV5
+#   risk/risk_manager.py), Breakout is dormant since OTV5 r110, and the live setups size on OT_RISK_USD. Label only.
 # v1.28 (2026-11-15) — dtp r564 / OTV5 r125 (HYG.28). The FLEET item reads "Ramp TOP (OT_BREAKOUT_BUDGET_USD) & spot": the
 #   ramp top's key was renamed from OT_ORB_BUDGET_USD. Same function, same script.
 # v1.27 (2026-11-08) — dtp r529 / MENU.1. The FLEET item "ORB budget & spot (every running box)" is "Ramp TOP
@@ -257,7 +260,7 @@ MENU=(
   "ITEM|Fleet ping|mi_fleet_ping"
   "ITEM|Run command (all running)|mi_run_command_all_running"
   "ITEM|status.py + query.py      (one/all/some)|mi_status_py_query_py_one_all_some"
-  "ITEM|Ramp TOP (OT_BREAKOUT_BUDGET_USD) & spot|mi_orb_budget_fleet"
+  "ITEM|Ramp TOP (OT_BREAKOUT_BUDGET_USD, Breakout only - dormant) & spot|mi_orb_budget_fleet"
   "ITEM|Dry-run spool-up (real reads)|mi_dry_run_spool_up_real_reads"
 
   "SECTION|SENSORS (derived stores; read-only, one/all/some)"

@@ -1,4 +1,6 @@
-# THE SATURDAY BRIEF — spec v3.0
+# THE SATURDAY BRIEF — spec v3.1
+
+**v3.1 · 2026-11-21 · dtp r571 (the 11-21 brief's R4 and R6)**: corrections only; the layout, the timer, the run order and the CLOSE are unchanged. (1) **The R6 no-progress lead is RETIRED from 2B.** Its population is Breakout's, and Breakout has been DORMANT since OTV5 r110 (2026-11-16): the same 8 trades every week, and P5 (three decay-live weeks) can no longer be met, so it failed by construction. It is not re-pointed; a revisit of Breakout brings it back as a new item with a bar written first. (2) **The Friday timer is INSTALLED** (`dtp-study-dispatch.timer`, unit files 2026-11-14 16:16 UTC; enabled and active; its first run was Friday 2026-11-20, `~/friday_studies.ledger` `2026-11-21T07:09:35Z RAN rc=0`); the "until then the brief's fallback runs the queue" sentence goes, and the fallbacks stand only for a missing or broken run. (3) **2B's standing studies drop GIVE.2 and DAY.1**: both are closed in OTV5 BACKLOG PART 2 (r81: GIVE.2 failed blind, DAY.1 scored FAIL). CUT.1 and PIN.3 stay. (4) **4.2, the QQQ cash table, adds OGAP** (QQQ paper since 2026-11-16, `_size_budget` on `OT_RISK_USD`, OTV5 r131/r136) and says the ramp max (`OT_BREAKOUT_BUDGET_USD`) is read only by Breakout's `_size_geometry`, so it binds Breakout's rows only, and Breakout has no row after 2026-11-13. Gate `tests/check_saturday_brief.py` v2.1 (S34: the lead is named nowhere in the prompt or the spec's parts; S35: the timer is installed, GIVE.2/DAY.1 not standing, OGAP in 4.2).
 
 **v3.0 · 2026-11-21 · dtp r570 (SAT.10)**: THE BRIEF IS THE OPERATOR'S NEW LAYOUT: FOUR SECTIONS, TEN PARTS. The operator, 2026-11-21, verbatim: *"1) Trading- A. Summary of the week's trades, our EV per trade, gross and net totals by strategy after fees. MFE/MAE, and any other performance commentary. B. A breakdown of our give-back on exits and never right on entries, and how each's strategy type fared the previous week vs its historical performance C. Our EPOCH (otv5) cumulative metrics. Is our performance improved or worsening? Is it consistent? Anything noteworthy in the sample worth mentioning? 2) Our edge- A) What are our top earning setup conditions & where should we be looking for edge improvements? B) What are the results of the week's studies? Are any of the results actionable? Do we need to dig deeper anywhere? 3) Bot performance- A) Any errors or issues this week? B) How effective were the previous week's fixes? C) how's our backlog coming along? 4) Recommendations"*, and *"the things I forgot to mention should be worked into whichever section they best fit into"*. The numbers of 1A, 1B, 1C and 2A that have one right answer come from the new `tools/weekly_facts.py` v1.0 (the session quotes `<WORK>/weekly_facts.md`, never re-derives it); the tape for 1C is TastyTrade's daily candles for QQQ, SPX and VIX (S3 `raw/candles_full/interval=1d`, CAP.6), read by the same tool. It reuses dtp `tools/review_kit.py` (the fee estimate, the bootstrap's seed and draws) and `strategy_registry` (which setups trade today, the epoch's first day); the daily recap's `daily_brief.py` helpers need that tool's own venv (matplotlib, reportlab), so they are not imported. How and when the brief runs is unchanged (timer, run order, Friday dispatch, collection, CLOSE). Every old item has a new home or is retired by name:
 
@@ -367,9 +369,9 @@ operator and the sessions have agreed to run, each with its hypothesis, data, se
 before testing. Every item marked OPEN is run blind, and since v2.6 they run ON THE BOXES, IN PARALLEL
 (`tools/study_dispatch.py`, SAT.8), and since v2.9 on FRIDAY NIGHT (SAT.9):
 - The control timer `dtp-study-dispatch` runs `tools/friday_studies.sh` Friday 17:15 ET (not Persistent; the script
-  refuses off Friday evening, waits for the conductor and, since v2.17, for Friday's daily recap). **The timer is installed by the operator
-  (`sudo bash tools/install_study_dispatch.sh`); the land does not install it, and until then the brief's fallback runs
-  the queue.** (2026-11-13's two Friday runs were started by hand from the control Claude session; SAT.9.) It runs `study_dispatch.py run --deadline 02:30 --out
+  refuses off Friday evening, waits for the conductor and, since v2.17, for Friday's daily recap). **The timer is INSTALLED** (by the operator,
+  `sudo bash tools/install_study_dispatch.sh`, 2026-11-14; its first run was Friday 2026-11-20, v3.1). (2026-11-13's two
+  Friday runs were started by hand from the control Claude session; SAT.9.) It runs `study_dispatch.py run --deadline 02:30 --out
   <WORK>/study_dispatch` for Saturday's WORK, then `study_dispatch.py cleanup`; ledger `~/friday_studies.ledger`.
   The brief collects it. Only when it is missing or broken (no `state.json`, a log ending in REFUSED or ERROR, or
   no "finished") does the brief start `study_dispatch.py run` itself, right after the box reads, into
@@ -416,23 +418,13 @@ before testing. Every item marked OPEN is run blind, and since v2.6 they run ON 
 Queued items don't count against the cap of five new proposals. Sessions add items by appending to the file
 (IDs WS.<n>, never reused); nothing in this spec needs to change when they do.
 
-**The R6 no-progress lead (standing, every week):** `/home/ubuntu/day_trader_pro/venv/bin/python -I
-/home/ubuntu/reviews/scripts/noprog_lead.py 2026-11-02 <this Friday>` (timeout 3600 s); quote
-`~/reviews/studies/noprog_<this Friday>.md`'s D10-vs-BASE table, its five P1-P5 lines and its verdict verbatim, with
-no edits to the bar and no softened FAIL; if the run fails, it goes under NOT MEASURED. A PASS goes to section 4 as
-an operator decision.
-
-**Standing studies (kept from the old Saturday rows):**
-- **GIVE.2, fleet:** exits that give back profit. 1B's giveback is its weekly input, and the exit families
-  (no-progress cut, trails, decay stop from 11-02) are its candidates.
+**Standing studies (kept from the old Saturday rows; GIVE.2 and DAY.1 closed at OTV5 r81, v3.1):**
 - **CUT.1, fleet:** OTV5 ends Runaway and Breakout entries at 10:29 (`RUNAWAY_END`, `BREAKOUT_END`) and records
   later fires LOG-ONLY (OBS.1). The bar is the row's own: RIGHT = blocked net ≤ 0; WRONG = ≥ 10 blocked fires,
   net > 0, and losing days not made worse. It needs a tool that prices a LOG-ONLY fire on its option's quotes. Until
   one exists it is NOT MEASURED, with the build as the study's cost.
 - **PIN.3 (absorbs PIN.1):** what the directional pin gate's refusals would have made, from the refusal lines
   (3A) and the tape. Losing days first; name the cost case (a pinned open that breaks away).
-- **DAY.1, final score:** E = |price − open| / (high − low) at 09:45 on QQQ and SPX from `raw/ohlc`, 10-07 to the
-  window's end, scored against the row's frozen terms. It is scored once, then closed by its result.
 
 **New proposals (at most five, ranked by expected $).** Each has these five fields, written **before** any number is
 looked at:
@@ -599,7 +591,10 @@ the foot, a short table **Still open from last week**: one line per open recomme
 every weekend until the date arrives". **On or after 2026-12-07 the brief skips this item and does not mention it.**
 Source: every QQQ trade in `~/reviews/trades/*.csv` from 2026-10-26 through the Friday (OTV4TEST rows out), with
 Breakout's stop premium from the warehouse trade row (`load_trades`, `stop_premium`). Two schemes, the per-trade cap
-equal to the ramp max (`OT_BREAKOUT_BUDGET_USD`; `OT_ORB_BUDGET_USD` before OTV5 r125) in both:
+equal to the ramp max (`OT_BREAKOUT_BUDGET_USD`; `OT_ORB_BUDGET_USD` before OTV5 r125) in both. **The ramp max is read
+only by Breakout's `_size_geometry`** (OTV5 `risk/risk_manager.py`; only a signal with `sizes_on_geometry` reaches it,
+and only Breakout sets it), so it binds Breakout's rows only, and Breakout has been dormant since OTV5 r110 (no row
+after 2026-11-13). Every other setup sizes on the base alone (v3.1):
 
 | Scheme | Base (`OT_RISK_USD`) | Ramp max = cap (`OT_BREAKOUT_BUDGET_USD`) |
 |---|---|---|
@@ -611,7 +606,7 @@ and `OT_SIZE_ON_RISK` is off by default, so there is no deploy cap and no risk-t
 
 | Setup | Rule | Contracts | Refused when |
 |---|---|---|---|
-| Hunt, Runaway, PARK | `_size_budget` | floor(base / (entry × 100)) | under 1 (`insufficient_capital`) |
+| Hunt, Runaway, PARK, OGAP | `_size_budget` (OGAP passes the base as its own budget, OTV5 r131; on the mark, r136) | floor(base / (entry × 100)) | under 1 (`insufficient_capital`) |
 | Breakout | `_size_geometry` (the ramp) | min(by_risk, by_budget) | by_budget under 1 (the ramp-max refusal) |
 
 For Breakout, by_budget = floor(ramp max / (entry × 100)), and by_risk = **max(1,** floor(base / ((entry − stop
@@ -620,7 +615,7 @@ max(1, floor(width / distance)), with width = `orb_range_high` − `orb_range_lo
 `underlying_stop`|. A stop wider than the range (distance > width) sizes min(by_risk, by_budget) with a usable stop
 premium, and 1 contract without one. Every input is on the warehouse trade row (`load_trades`). A refused trade is
 never rounded up to one contract. Each kept trade's P&L and fee scale by new contracts / actual
-contracts. Report, per scheme and per setup (Hunt, Runaway, Breakout, PARK): entries traded vs refused; contracts
+contracts. Report, per scheme and per setup (Hunt, Runaway, PARK, OGAP, and Breakout's rows to 2026-11-13): entries traded vs refused; contracts
 min / median / max; the re-sized P&L with fees beside it, never in it; EV per trade with a day-bootstrap 95%
 interval; the worst day; the largest single-trade loss. Lead with each scheme's window EV and its interval. A
 Breakout trade with neither a usable stop premium nor width and distance goes to NOT MEASURED by trade_id.
@@ -670,7 +665,9 @@ the last thing in the brief; only NOT MEASURED follows it.
 | VERD.1 | closed, superseded: its verdict file and scorer were on the retired QQQ-TEST box, never in S3; OTV5's box agents are off at boot |
 | PIN.1 | merged into PIN.3 (OTV5's own pin gate) |
 | CUT.1, GIVE.2 | re-scoped to the OTV5 fleet; their QQQ-TEST halves closed |
-| DAY.1 | one final score, then closed by its result |
+| DAY.1 | one final score, then closed by its result (scored FAIL, closed OTV5 r81; out of 2B's standing studies, v3.1) |
+| GIVE.2 as a standing study (2026-11-21) | closed OTV5 r81 (both halves failed blind); 1B's giveback stays |
+| the R6 no-progress lead (2026-11-21) | retired: its population is Breakout's, dormant since OTV5 r110; P5 could no longer be met |
 | v2.15 §1.11 RUNAWAY O08 WOULD-BE (2026-11-21) | retired: the operator agreed to drop it; its decision note stands in the v2.15 changelog entry |
 | the v2.x section numbering (2026-11-21) | retired: v3.0's four sections and ten parts; the map is in the v3.0 changelog entry |
 | the 10-26..11-27 benchmark framing (from 2026-12-05) | retires after its final score in the 11-28 brief; the epoch metrics (1C) replace it |

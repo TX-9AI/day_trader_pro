@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/check_land_sh.py — v1.14
+# day_trader_pro/tests/check_land_sh.py — v1.15
+# v1.15 (2026-11-21) — dtp r571 / C2. THE HARNESS RUNS UNDER THE UNATTENDED GUARD. checker_sweep gives every checker
+#   VERTIGO_UNATTENDED=1 (its scratch env, by design), so every land this file drove exited 9 and the Saturday
+#   sweep carried 33 standing red IDs here for nine weeks (C2, first raised 2026-09-26), among which a real lander
+#   regression would hide. _clean_env now drops VERTIGO_UNATTENDED for a SANDBOXED child only: one whose HOME is
+#   handed in and resolves inside this run's temp dir (never the caller's HOME), so the lander's resolver and
+#   deploy.sh's archive search see only the fixture world. A child that inherits the real HOME keeps the guard.
+#   Pinned by G7/G7b/G7c (sandboxed: dropped; no HOME given: kept; the caller's own HOME given: kept). The lander's
+#   own refusal (land.sh / deploy.sh exit 9) is unchanged.
 # v1.14 (2026-11-14) — dtp r560 / LAND.11. SK1/SK1b/SK2 DRIVE A SPEC WHOSE FIRST CHECK DRAINS STDIN. At land.sh
 #   v1.19 every CHECK inherited the loop's stdin (the spec's CHECK lines), so a CHECK that reads stdin ate the rest
 #   and they were skipped silently (r559: 7 declared, 4 ran). SK1 the second CHECK still runs and the land says so;
@@ -206,7 +214,21 @@ def _clean_env(**over):
     for k in ("LAND_ARCHIVE", "LAND_STAGE"):
         e.pop(k, None)
     e.update(over)
+    # v1.15 (C2): the unattended guard is dropped for a SANDBOXED child only (its HOME is a fixture world under
+    # this run's temp dir), so the harness runs under checker_sweep's VERTIGO_UNATTENDED=1. Anything else keeps it.
+    if _sandboxed_home(over.get("HOME")):
+        e.pop("VERTIGO_UNATTENDED", None)
     return e
+
+
+def _sandboxed_home(home) -> bool:
+    """True when `home` is a fixture HOME: given, inside this run's temp dir, and not the caller's own HOME."""
+    if not home:
+        return False
+    real = os.path.realpath(home)
+    tmp = os.path.realpath(tempfile.gettempdir())
+    mine = os.path.realpath(os.environ.get("HOME") or os.path.expanduser("~"))
+    return real != mine and not mine.startswith(real + os.sep) and real.startswith(tmp + os.sep)
 
 
 def _run(cmd, cwd=None, env=None):
@@ -354,6 +376,25 @@ def main():
     _dups = sorted({i for i in _ids if _ids.count(i) > 1})
     check("U1 every check id in this file is unique",
           len(_ids) > 50 and not _dups, f"{len(_ids)} ids; duplicated: {_dups}")
+    # 🔑 G7 (v1.15 / C2) — the unattended guard is dropped only for a sandboxed child.
+    _saved = os.environ.get("VERTIGO_UNATTENDED")
+    os.environ["VERTIGO_UNATTENDED"] = "1"
+    try:
+        with tempfile.TemporaryDirectory() as _gt:
+            _fh = os.path.join(_gt, "home")
+            os.makedirs(_fh)
+            check("G7 a sandboxed child (HOME a fixture under the temp dir) runs without VERTIGO_UNATTENDED",
+                  "VERTIGO_UNATTENDED" not in _clean_env(HOME=_fh))
+        check("G7b a child given no HOME keeps VERTIGO_UNATTENDED",
+              _clean_env().get("VERTIGO_UNATTENDED") == "1")
+        check("G7c a child given the caller's own HOME keeps VERTIGO_UNATTENDED",
+              _clean_env(HOME=os.path.expanduser("~")).get("VERTIGO_UNATTENDED") == "1"
+              and _clean_env(HOME="/home/ubuntu").get("VERTIGO_UNATTENDED") == "1")
+    finally:
+        if _saved is None:
+            os.environ.pop("VERTIGO_UNATTENDED", None)
+        else:
+            os.environ["VERTIGO_UNATTENDED"] = _saved
     # 🔴 M1 RUNS FIRST, AND ITS FIRST PLACEMENT WAS WRONG. It sat at the
     # END of this file, where the G2 traceback aborted the run before it
     # could speak — so in the exact state it exists to diagnose, it never

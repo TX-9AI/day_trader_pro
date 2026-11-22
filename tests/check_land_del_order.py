@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/check_land_del_order.py — v1.0
+# day_trader_pro/tests/check_land_del_order.py — v1.1
+# v1.1 (2026-11-21) — dtp r571 / C2. Its lands now run under checker_sweep's VERTIGO_UNATTENDED=1: the world builder
+#   is check_land_sh's, whose _clean_env (v1.15) drops the guard for a sandboxed child only (a fixture HOME inside
+#   the temp dir). The "not run" report below stays, for any caller whose child is still refused.
 # v1.0 (2026-11-08) — dtp r532 / OTV4DEP.1. land.sh v1.19 RUNS DEL BEFORE THE CHECKS. At v1.18 the DEL block ran
 #   after the CHECK loop, so r532's own gate (check_no_otv4_deps) refused its land on tools/build_level_history.py,
 #   the file the same spec deletes. Mirrors OTV5 land.sh v5.3 (r76 / RETIRE.1). Driven through REAL lands on
@@ -11,9 +14,9 @@
 #   O3   a refused land whose spec DELETES a file leaves HEAD where it was
 #   O3b  ...and die()'s printed discard-the-payload recipe RESTORES the DEL'd file and leaves the tree clean
 #
-# ⚠️ RUNS UNDER THE UNATTENDED GUARD LIKE check_land_sh: every land here is a child with VERTIGO_UNATTENDED removed
-#   from ITS environment only if the caller is attended; under an unattended caller the lander exits 9 and these
-#   cases report that by name (they do not pass vacuously).
+# ⚠️ RUNS UNDER THE UNATTENDED GUARD LIKE check_land_sh: every land here is a sandboxed child (HOME a fixture world),
+#   which check_land_sh._clean_env runs without VERTIGO_UNATTENDED (v1.1). If the lander still exits 9, these cases
+#   report that by name (they do not pass vacuously).
 # Run:  venv/bin/python tests/check_land_del_order.py
 import os
 import re

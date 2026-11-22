@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_ramp_top_report.py  v1.1
+day_trader_pro/tests/check_ramp_top_report.py  v1.2
+v1.2  2026-11-21  dtp r571 (the 11-21 brief R5a). T6: the label says the key sizes Breakout only, which is dormant (OTV5
+      r110): "Ramp TOP (OT_BREAKOUT_BUDGET_USD, Breakout only - dormant) & spot". Label only.
 v1.1  2026-11-15  dtp r564 / OTV5 r125 (HYG.28). T2/T6/T7 name OT_BREAKOUT_BUDGET_USD (the ramp top's new key). New T8: the
       box program reads config.BREAKOUT_BUDGET_USD and falls back to config.ORB_BUDGET_USD, so a box on either side
       of the r125 bake reports its real ramp top - run against a stub config of each shape.
@@ -15,7 +17,7 @@ v1.0  2026-11-08  dtp r529 / MENU.1 (the 11-07 brief section 5 item 6 / R5 half;
   T3  single-quoted with a space `Environment='K=a b'` reads K=a b
   T4  several assignments on one line all read
   T5  a line shlex refuses is COUNTED (UNPARSED) and contributes no pair
-  T6  the registry label is "Ramp TOP (OT_ORB_BUDGET_USD) & spot", wired to mi_orb_budget_fleet, and no menu label
+  T6  the registry label is "Ramp TOP (OT_BREAKOUT_BUDGET_USD, Breakout only - dormant) & spot" (v1.2), wired to mi_orb_budget_fleet, and no menu label
       names an "ORB budget"
   T7  the report's printed text says Ramp TOP and points at configure.sh item 7, never "ORB budget" or "-> 8"
   T8  the box program reads BREAKOUT_BUDGET_USD, and ORB_BUDGET_USD on a box still on OTV5 r124 (r564)
@@ -67,7 +69,7 @@ def main():
     check("T5", got == [("OT_OK", "1")] and unparsed[0] == before + 1, (got, unparsed[0] - before))
 
     reg = open(REGISTRY).read()
-    check("T6", '"ITEM|Ramp TOP (OT_BREAKOUT_BUDGET_USD) & spot|mi_orb_budget_fleet"' in reg
+    check("T6", '"ITEM|Ramp TOP (OT_BREAKOUT_BUDGET_USD, Breakout only - dormant) & spot|mi_orb_budget_fleet"' in reg
           and "ITEM|ORB budget" not in reg, "registry label")
 
     src = open(SCRIPT).read()

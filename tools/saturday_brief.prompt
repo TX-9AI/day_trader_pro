@@ -116,11 +116,10 @@ THE NUMBERS FIRST (spec "The numbers (v3.0)"), before section 1 (about 30 s, S3 
        three items a day, so Friday's list can be longer. Never edit the queue yourself beyond the dispatcher's marks.
      · THE STUDY QUEUE (standing, every week): /home/ubuntu/reviews/WEEKEND_STUDIES.md. It runs ON THE BOXES,
        IN PARALLEL (dtp tools/study_dispatch.py, SAT.8), AND SINCE SAT.9 IT RUNS FRIDAY NIGHT: the control timer
-       dtp-study-dispatch (tools/friday_studies.sh), once the operator has installed it (sudo bash
-       tools/install_study_dispatch.sh; until then the brief's fallback runs the queue, or a session starts it by hand),
+       dtp-study-dispatch (tools/friday_studies.sh; INSTALLED 2026-11-14, first timer run 2026-11-20)
        starts it Friday 17:15 ET into <WORK>/study_dispatch (log <WORK>/study_dispatch.log) with the deadline
        Saturday 02:30 ET, so its results are finished when you start. Say which started it: the wrapper's line and
-       ~/friday_studies.ledger tell you; do not credit the timer when it is not installed.
+       ~/friday_studies.ledger tell you; do not credit the timer for a run it did not start.
        One OPEN item (a sub-item such as WS.6a is its own) per stopped box (CRM is an ordinary box), each a bounded headless study
        agent; since r555 the SEAL is the dispatcher's, and a result counts only if control saw FROZEN.json an earlier poll than RESULT.json. An item with a `- Depends:` line (e.g. WS.9, the combined Hunt gate) ran in a
        second round after the items it names; with none of them PASSED it is DONE "nothing passed, not run".
@@ -149,12 +148,7 @@ THE NUMBERS FIRST (spec "The numbers (v3.0)"), before section 1 (about 30 s, S3 
        before), each with a timeout, no new item in the last 45 minutes before the DEADLINE; update the
        item's Status yourself; list the dispatch failure and every unfinished item under NOT MEASURED.
        Queued items do not count against the cap of five NEW proposals.
-     · R6 no-progress lead (standing, every week): run `/home/ubuntu/day_trader_pro/venv/bin/python -I
-       /home/ubuntu/reviews/scripts/noprog_lead.py 2026-11-02 <this Friday>` (timeout 3600 s); quote
-       `~/reviews/studies/noprog_<this Friday>.md`'s D10-vs-BASE table, its five P1-P5 lines and its verdict
-       verbatim, with no edits to the bar and no softened FAIL; if the run fails, list it under NOT MEASURED.
-       A PASS goes to section 4 as an operator decision (a trading change under the freeze).
-     · the standing studies (GIVE.2, CUT.1, PIN.3, DAY.1) as the spec says, and NEW PROPOSALS: at most five, each
+     · the standing studies (CUT.1, PIN.3) as the spec says, and NEW PROPOSALS: at most five, each
        with a hypothesis, the data, a pass bar written BEFORE testing, the expected $ effect and the cost. Search
        the backlog, the queue and last week's brief first, so a failed study is not proposed again as new.
   ## 3. BOT PERFORMANCE
@@ -188,11 +182,14 @@ THE NUMBERS FIRST (spec "The numbers (v3.0)"), before section 1 (about 30 s, S3 
      · 4.2 THE QQQ CASH SIZE TABLE (standing, every Saturday UNTIL the cash start 2026-12-07; the last run is
        Saturday 12-05). If this Saturday is on or after 2026-12-07, skip it and do not mention it. Otherwise take
        every QQQ trade in ~/reviews/trades/*.csv dated 2026-10-26 through this Friday (OTV4TEST rows out) and
-       re-size each entry under two schemes, with the per-trade cap = the ramp max (OT_BREAKOUT_BUDGET_USD; OT_ORB_BUDGET_USD before OTV5 r125) in both:
+       re-size each entry under two schemes, with the per-trade cap = the ramp max (OT_BREAKOUT_BUDGET_USD; OT_ORB_BUDGET_USD before OTV5 r125) in both.
+       The ramp max is read only by Breakout's _size_geometry, so it binds Breakout's rows only (dormant since OTV5
+       r110; no Breakout row after 2026-11-13); every other setup sizes on the base alone:
          A) base OT_RISK_USD $250, ramp max $500        B) base OT_RISK_USD $500, ramp max $750
        The rule is OTV5 risk/risk_manager.py size_for, as the code runs it today. The grade multiplier is 1.0, and
        OT_SIZE_ON_RISK is off by default, so there is no deploy cap and no risk-to-stop denominator.
-       Hunt, Runaway and PARK take _size_budget: floor(base / (entry x 100)). Under 1 contract the trade is REFUSED
+       Hunt, Runaway, PARK and OGAP take _size_budget: floor(base / (entry x 100)) (OGAP passes the base as its own
+       budget, OTV5 r131, on the mark, r136). Under 1 contract the trade is REFUSED
        (insufficient_capital), never rounded up to 1.
        Breakout takes _size_geometry, which ramps. by_budget = floor(ramp max / (entry x 100)); under 1 the trade
        is REFUSED (the ramp-max refusal). Otherwise contracts = min(by_risk, by_budget), where:
@@ -202,7 +199,7 @@ THE NUMBERS FIRST (spec "The numbers (v3.0)"), before section 1 (about 30 s, S3 
        A stop wider than the range (distance > width) sizes min(by_risk, by_budget) when there is a usable stop
        premium, and 1 contract without one. Every input comes from the warehouse trade row (load_trades).
        Scale each kept trade's P&L and fee by new contracts / actual contracts.
-       Report, per scheme and per setup (Hunt, Runaway, Breakout, PARK): entries traded vs refused, contracts
+       Report, per scheme and per setup (Hunt, Runaway, PARK, OGAP, and Breakout's rows to 2026-11-13): entries traded vs refused, contracts
        min/median/max, the re-sized P&L with fees beside it (never in it), EV a trade with a day-bootstrap 95%
        interval, the worst day, and the largest single-trade loss. Lead with each scheme's window EV and its
        interval. A Breakout trade with neither a usable stop premium nor width and distance goes to NOT MEASURED

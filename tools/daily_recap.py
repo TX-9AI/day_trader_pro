@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/daily_recap.py  v1.0
+day_trader_pro/tools/daily_recap.py  v1.1
+v1.1  2026-11-21  dtp r571 / OTV4DEP.3 — THE CONTEXT READS ONE BACKLOG, OTV5's. v1.0 also read the frozen tree's
+      docs/BACKLOG.md for open rows (check_no_otv4_deps N1 red since r569). It never yielded a row: the frozen tree's
+      PART 1 marks open work ⬜, not 🔲, and its open rows MOVED to OTV5 at otv4 r510 (one backlog since 2026-10-25).
+      The read, its --otv4-backlog flag and the "otv4" backlog label are gone; a maintenance proposal names OTV5.
 v1.0  2026-11-21  dtp r569 / RECAP.1 — THE DAILY RECAP'S MECHANICAL HALF. The operator, 2026-11-21: "Yes, we are going to
       begin firming up our system, our trading & our analysis". Their process: (1) every trading day the recap proposes
       studies to improve P&L and ONE piece of code maintenance from the backlog for a yes (delicate / live-order-path
@@ -54,7 +58,6 @@ NOTES_DIR = os.path.join(OUT, "notes")
 STUDIES = os.path.join(REVIEWS, "studies")
 WEEKLY = os.path.join(REVIEWS, "weekly")
 OTV5_BACKLOG = os.path.join(HOME, "OTV5", "docs", "BACKLOG.md")
-OTV4_BACKLOG = os.path.join(HOME, "options-trader-v4", "docs", "BACKLOG.md")
 HYGIENE = os.path.join(REVIEWS, "hygiene")
 DUE_AFTER_MIN = 40             # after the close, as the nightly review (review_kit.DUE_AFTER_MIN)
 MAX_QUEUED_A_DAY = 3           # the Friday dispatch runs one item per box; five days x 3 fits the fleet
@@ -215,7 +218,7 @@ def cmd_context(a):
     with open(os.path.join(a.work, "backlog_open.txt"), "w", encoding="utf-8") as fh:
         fh.write("OPEN backlog rows (a cell starting 🔲; built-but-unproven ◐ rows and closed/dead rows left out).\n"
                  "One row a line: <backlog> <ID> [<category>] <cells>, cut at 400 characters; read the file for more.\n\n")
-        for ln in backlog_rows(a.otv5_backlog, "OTV5") + backlog_rows(a.otv4_backlog, "otv4"):
+        for ln in backlog_rows(a.otv5_backlog, "OTV5"):
             fh.write(ln + "\n")
     with open(os.path.join(a.work, "queue_format.md"), "w", encoding="utf-8") as fh:
         fh.write(item_format(qt) if qt else "(queue not found)\n")
@@ -487,7 +490,6 @@ def main(argv=None):
     p.add_argument("--studies", default=STUDIES)
     p.add_argument("--weekly", default=WEEKLY)
     p.add_argument("--otv5-backlog", default=OTV5_BACKLOG)
-    p.add_argument("--otv4-backlog", default=OTV4_BACKLOG)
     p.add_argument("--hygiene", default=HYGIENE)
     p = sub.add_parser("validate")
     p.add_argument("--day", required=True)

@@ -1,6 +1,13 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_saturday_brief.py  v2.0
+day_trader_pro/tests/check_saturday_brief.py  v2.1
+v2.1  2026-11-21  dtp r571 (the 11-21 brief's R4 and R6). S29's 2B placement no longer wants the R6 no-progress lead;
+      NEW S34: the lead is RETIRED (Breakout, its population, dormant since OTV5 r110): no part of the prompt or the
+      spec names noprog_lead.py or the lead, and the retirement table and the v3.1 entry say so. NEW S35: the Friday
+      timer reads INSTALLED in both (no "until then the brief's fallback runs the queue"), GIVE.2 and DAY.1 are not
+      standing studies (closed OTV5 r81), and 4.2 sizes OGAP with Hunt, Runaway and PARK while the ramp max binds
+      Breakout's rows only. S22c re-anchored to the four-setup budget line; S22/S22b read 3200/3800 characters of 4.2 (was 2500/3000:
+      the OGAP row and the Breakout-only line lengthen it). Spec v3.1.
 v2.0  2026-11-21  dtp r570 (SAT.10). THE OPERATOR'S NEW LAYOUT: FOUR SECTIONS, TEN PARTS. The operator, 2026-11-21: "1)
       Trading- A. ... B. ... C. ... 2) Our edge- A) ... B) ... 3) Bot performance- A) ... B) ... C) ... 4)
       Recommendations", and "the things I forgot to mention should be worked into whichever section they best fit
@@ -614,14 +621,14 @@ ck("S23c", '$WORK/study_dispatch — $_fri' in _shs and 'if [ -f "$WORK/study_di
 
 # S22 (v1.7, dtp r550 / CASH.1): THE QQQ CASH SIZE TABLE. The operator, 2026-11-11: "On the weekend prior, let's do a
 # table of $250/$500 & $500/$750 with a cap at the ramp max", then "just brief it every weekend until the date arrives".
-_c = p.split("THE QQQ CASH SIZE TABLE", 1)[-1][:2500] if "THE QQQ CASH SIZE TABLE" in p else ""
+_c = p.split("THE QQQ CASH SIZE TABLE", 1)[-1][:3200] if "THE QQQ CASH SIZE TABLE" in p else ""
 _c1 = p.find("THE QQQ CASH SIZE TABLE")
 ck("S22", bool(_c) and "on or after 2026-12-07, skip it" in _c and "$250, ramp max $500" in _c
    and "$500, ramp max $750" in _c and "cap = the ramp max" in _c and "never rounded up to 1" in _c
    and "fees beside it (never in it)" in _c and "REPORT ONLY" in _c and "~/reviews/trades/*.csv" in _c
    and "never an R-item" in _c and p.find("  ## 4. RECOMMENDATIONS") < _c1 < p.find("4.3 THE 12-04 CASH-TEST READINESS"),
    "the prompt's section 4 (4.2) sizes QQQ under both schemes until 2026-12-07, refuses not floors, report only")
-_c8 = spec.split("**4.2 The QQQ cash size table", 1)[-1][:3000] if "**4.2 The QQQ cash size table" in spec else ""
+_c8 = spec.split("**4.2 The QQQ cash size table", 1)[-1][:3800] if "**4.2 The QQQ cash size table" in spec else ""
 ck("S22b", bool(_c8) and "On or after 2026-12-07 the brief skips this item" in _c8 and "| A | $250 | $500 |" in _c8
    and "| B | $500 | $750 |" in _c8 and "never rounded up to one" in _c8 and "Report only:" in _c8
    and "never an R-item" in _c8
@@ -634,7 +641,7 @@ _cf, _c8f = _flat(_c), _flat(_c8)
 ck("S22c", "by_risk = max(1, floor(base / ((entry - stop premium) x 100))) when 0 < stop premium < entry" in _cf
    and "else the geometry count max(1, floor(width / distance))" in _cf
    and "by_budget = floor(ramp max / (entry x 100)); under 1 the trade is REFUSED" in _cf
-   and "Hunt, Runaway and PARK take _size_budget: floor(base / (entry x 100))" in _cf
+   and "Hunt, Runaway, PARK and OGAP take _size_budget: floor(base / (entry x 100))" in _cf
    and "OT_SIZE_ON_RISK is off by default" in _cf
    and "min(floor(base / ((entry - stop premium) x 100))" not in _cf
    and "with no stop premium goes to NOT MEASURED" not in _cf
@@ -722,9 +729,9 @@ PLACE = {   # part -> phrases that must sit inside it (prompt, spec)
            ["**Condition cells**", "**Where to look for edge improvements**", "stop_sweep.py",
             "**OGAP, its own line**", "**OGAP vs PARK**", "**The Hunt line.**", "on or before 2026-12-04"]),
     "2B": (["PASS, FAIL or VOID", "THE COMING FRIDAY'S QUEUE, so the operator can strike any before they run",
-            "study_dispatch.py plan", "THE STUDY QUEUE (standing", "R6 no-progress lead", "at most five"],
+            "study_dispatch.py plan", "THE STUDY QUEUE (standing", "at most five"],
            ["**PASS, FAIL or VOID**", "**The coming Friday's queue, so the operator can strike any before they run.**",
-            "study_dispatch.py plan", "**The study queue (standing", "**The R6 no-progress lead", "at most five"]),
+            "study_dispatch.py plan", "**The study queue (standing", "at most five"]),
     "3A": (["tools/botlog_scan.py", "tools/checker_sweep.py diffed by check ID", "S3 parity", "days to full",
             "every box on current code"],
            ["botlog_scan.py", "checker_sweep.py", "**S3 parity:**", "**Days to full**",
@@ -774,6 +781,30 @@ ck("S30", bool(_v3) and all(_rows.values()) and all(re.search(r"\*\*(1A|1B|1C|2A
    and "**RETIRED**" in _rows["§1.11 "] and "the operator agreed to drop it" in _rows["§1.11 "],
    "the v3.0 changelog maps every old item (1.1-1.11, 2-7) to a new part or RETIRED (unmapped: %s)"
    % ([o for o, l in _rows.items() if not l] or "none"))
+
+# S34 (v2.1, dtp r571; the 11-21 brief R6): THE R6 NO-PROGRESS LEAD IS RETIRED. Its population is Breakout's, dormant
+# since OTV5 r110, so it failed by construction every week (P5 could no longer be met). Named nowhere a session reads as
+# an instruction: not in the prompt, not in any part of the spec; the retirement table and the v3.1 entry record it.
+_sparts = spec[spec.find("\n## 1. TRADING"):spec.find("\n## WHAT THIS SPEC RETIRED")]
+_ret = spec[spec.find("\n## WHAT THIS SPEC RETIRED"):]
+_v31 = spec[spec.find("**v3.1 ·"):spec.find("**v3.0 ·")] if "**v3.1 ·" in spec and "**v3.0 ·" in spec else ""
+ck("S34", "noprog_lead" not in p and "no-progress lead" not in p.lower() and "noprog_lead" not in _sparts
+   and "no-progress lead" not in _sparts.lower() and "| the R6 no-progress lead (2026-11-21) | retired" in _ret
+   and "The R6 no-progress lead is RETIRED from 2B" in _v31 and "OTV5 r110" in _v31,
+   "the R6 no-progress lead is retired: named in no part of the prompt or the spec, recorded in the retirement table "
+   "and the v3.1 entry")
+# S35 (v2.1, dtp r571; the 11-21 brief section 4 items 1, 9 and 10, verified on control 2026-11-21: the timer is
+# enabled and active, unit files 2026-11-14; GIVE.2 and DAY.1 closed in OTV5 BACKLOG PART 2 at r81).
+_b2 = _flat(spec[spec.find("\n### 2B."):spec.find("\n### 3A.")])
+_p2 = _flat(p[p.find("  ### 2B."):p.find("  ### 3A.")])
+ck("S35", "until then the brief's fallback runs" not in _flat(_sparts) and "until then the brief's fallback runs" not in _flat(p)
+   and "**The timer is INSTALLED**" in _b2 and "INSTALLED 2026-11-14, first timer run 2026-11-20" in _p2
+   and "**GIVE.2, fleet:**" not in _b2 and "**DAY.1, final score:**" not in _b2
+   and "the standing studies (CUT.1, PIN.3)" in _p2 and "GIVE.2" not in _p2 and "DAY.1" not in _p2
+   and "| Hunt, Runaway, PARK, OGAP | `_size_budget`" in _c8 and "binds Breakout's rows only" in _c8f
+   and "binds Breakout's rows only" in _cf and "(Hunt, Runaway, PARK, OGAP, and Breakout's rows to 2026-11-13)" in _cf,
+   "the timer reads INSTALLED, GIVE.2 and DAY.1 are not standing studies, and 4.2 sizes OGAP on the base with the ramp "
+   "max binding Breakout's rows only")
 
 # S31-S33 (v2.0): tools/weekly_facts.py, DRIVEN on a fixture (no S3: --no-warehouse).
 WF = os.path.join(ROOT, "tools", "weekly_facts.py")
