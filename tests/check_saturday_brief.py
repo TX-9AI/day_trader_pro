@@ -1,6 +1,15 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_saturday_brief.py  v2.1
+day_trader_pro/tests/check_saturday_brief.py  v2.3
+v2.3  2026-11-22  dtp r572 / PREREG amendment 1. NEW S38: the C1-C4 block in 1C (prompt and spec) shows gross without
+      the two largest winners only beside gross without the two largest losers, as concentration context, never a
+      qualifier, and never "dependent on its best trades" without the worst-trades figure; the one-sided wording is gone.
+v2.2  2026-11-22  dtp r572 (SD.3, CASHBOOK.1). NEW S36: 2B collects the WHOLE WEEK's study runs: the prompt reads every
+      <WORK>/study_dispatch_nightly_<date> folder with `study_dispatch.py status --out` beside Friday's and counts the
+      week's verdicts over all of them, the spec v3.2 says the same, and the wrapper names the folders (NIGHTLY) before
+      the session. NEW S37: 1C carries the cash candidate books C1-C4: the prompt runs tools/cash_books.py with the
+      week and the Friday, inside 1C (before 2A), quotes it, and carries the report-only rules (never in the window EV
+      or the theories, the choice is the operator's, never "paper size"); the spec's 1C names PREREG and the scorer.
 v2.1  2026-11-21  dtp r571 (the 11-21 brief's R4 and R6). S29's 2B placement no longer wants the R6 no-progress lead;
       NEW S34: the lead is RETIRED (Breakout, its population, dormant since OTV5 r110): no part of the prompt or the
       spec names noprog_lead.py or the lead, and the retirement table and the v3.1 entry say so. NEW S35: the Friday
@@ -873,6 +882,36 @@ ck("S33", _mine == _theirs and _mine[0] is not None and _ov.get("overlap_days") 
    "weekly_facts' interval is review_kit.boot's own (%s vs %s), OGAP vs PARK scales to $500, the prompt runs it before "
    "section 1 and quotes it, the tape is TastyTrade's daily candles" % (_mine, _theirs))
 shutil.rmtree(_wf, ignore_errors=True)
+
+# S36 (v2.2, dtp r572 / SD.3): 2B is the whole week's runs, the weeknights' and Friday's
+_p36 = re.sub(r"\s+", " ", p)
+_s36 = re.sub(r"\s+", " ", spec)
+_b2 = _p36.split("### 2B.", 1)[-1].split("## 3.", 1)[0]
+_sh36 = open(SH).read()
+ck("S36", "<WORK>/study_dispatch_nightly_<YYYY-MM-DD>" in _b2 and "study_dispatch.py status --out <WORK>/study_dispatch_nightly_" in _b2
+   and "2B covers EVERY run of the week" in _b2 and "at most 3 at once" in _b2 and "PARK and Runaway" in _b2
+   and "# THE SATURDAY BRIEF — spec v3.2" in spec and "**The whole week's runs (v3.2).**" in spec
+   and "study_dispatch_nightly_<YYYY-MM-DD>" in _s36 and "Mon–Fri 17:15 ET" in _s36
+   and 'NIGHTLY the week' in _sh36 and "study_dispatch_nightly_20??-??-??" in _sh36
+   and _sh36.index("_nightly=") < _sh36.index('timeout "$BUDGET_S"'),
+   "2B reads every weeknight folder and Friday's, spec v3.2 says so, the wrapper names them before the session")
+# S37 (v2.2, dtp r572 / CASHBOOK.1): the cash candidate books in 1C
+_c1 = _p36.split("### 1C.", 1)[-1].split("### 2A.", 1)[0]
+_sc1 = _s36.split("### 1C. THE EPOCH (OTV5)")[-1].split("### 2A.", 1)[0]       # the part itself, not the outline
+ck("S37", "THE CASH CANDIDATE BOOKS C1-C4" in _c1 and "tools/cash_books.py --through <this Friday>" in _c1
+   and "--week-start <this Monday>" in _c1 and "cash_candidates_20261121/PREREG.md" in _c1 and "QUOTE ITS FIGURES" in _c1
+   and "never in the window EV or the theories" in _c1 and "choice of book is the operator's" in _c1
+   and '"paper size"' in _c1 and "never propose changing a book's definition" in _c1
+   and "**The cash candidate books C1–C4 (v3.2).**" in _sc1 and "tools/cash_books.py --through <Fri>" in _sc1
+   and "PREREG" in _sc1 and "Report only" in _sc1,
+   "1C runs the one C1-C4 scorer for the week and the forward window, quotes it, and keeps the books report-only")
+
+# S38 (v2.3, PREREG amendment 1): both concentration figures or neither
+ck("S38", "BESIDE gross without the two largest losers" in _c1 and "never a qualifier" in _c1
+   and "never the top-two alone" in _c1 and "gross without the top two" not in _c1 and "leans on its top two" not in _c1
+   and "beside gross without the two largest losers" in _sc1 and "never a qualifier" in _sc1
+   and "gross without the top two" not in _sc1 and "leans on its top two" not in _sc1,
+   "1C's C1-C4 block: ex top-2 only beside ex bottom-2, concentration context, never a qualifier")
 
 print()
 if FAILS:

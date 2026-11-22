@@ -1,6 +1,23 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_daily_recap.py  v1.0
+day_trader_pro/tests/check_daily_recap.py  v1.2
+v1.2  2026-11-22  dtp r572 / PREREG amendment 1. NEW R16: a C1-C4 commentary that names the two best trades (or a book
+      "dependent on its best trades") without the two worst beside them is withheld, one that gives both is kept; the
+      PDF's 5b column prints ex top-2 and ex bottom-2 together; the prompt says both or neither, never a qualifier.
+v1.1  2026-11-22  dtp r572 / SD.3 + RECAP.2 + CASHBOOK.1 (daily_recap v1.2, daily_recap.sh v1.1, the prompt v1.2,
+      daily_brief v1.2). The fixture proposals carry "setup" (now required). R11 wants daily_brief v1.2. NEW:
+  R12 a proposal's setup: required, read by the dispatcher's own parser (an unknown or miscased name is refused), the
+      appended item carries `- Setup: <names>` under its Status and reads tier 0 for PARK / Runaway; over the daily
+      cap the PARK / Runaway proposals are admitted first
+  R13 no duplicate study: context lists the DONE items' ids and titles; the validator (with the queue) refuses an
+      exact or near duplicate (word sets equal, or Jaccard >= 0.8) of an OPEN, FORWARD or DONE title and accepts a
+      distinct one; an item's own earlier append is not its duplicate (a re-run appends nothing)
+  R14 bot logs: context counts each box's ERROR / CRITICAL / Traceback / restart lines from the conductor's extracts
+      and names a NOT READ box; the wrapper passes BOTLOGS and --botlogs; the prompt reads them (no more "needs a box
+      read")
+  R15 the cash books: context writes the scorer's cash_books.md / .json; a commentary quoting a figure the scorer did
+      not print, or saying "paper size", is withheld (append records cash_books_withheld and drops it), a commentary
+      quoting the scorer is kept; the PDF has section 5b from cash_books; the prompt carries the report-only rules
 v1.0  2026-11-21  dtp r569 / RECAP.1 — THE DAILY RECAP PDF RUNS FROM A TIMER (tools/daily_recap.sh, daily_recap.py,
       daily_recap.prompt, daily_brief.py, dtp-daily-recap.{service,timer}, install_daily_recap.sh) AND THE FRIDAY
       DISPATCH WAITS FOR IT (tools/friday_studies.sh v1.2). The operator, 2026-11-21: "Yes, we are going to begin
@@ -186,7 +203,8 @@ def proposal(title, **over):
          "blind": "seal 11-23..12-04, run once", "change": "one gate", "why": "two trades, window n=50",
          "arms": "A = the book; B = the gate", "model": "1m marks, exits at the 1m mark",
          "positive_control": "arm A reproduces booked pnl_usd within 5%", "days": "design 10-26..11-20; sealed 11-23..12-04",
-         "pass_bar": "EV/trade beats A with a day-bootstrap 95% interval; prune ledger", "outcome": "TUNE (the gate) or KEEP"}
+         "pass_bar": "EV/trade beats A with a day-bootstrap 95% interval; prune ledger", "outcome": "TUNE (the gate) or KEEP",
+         "setup": "Runaway"}
     p.update(over)
     return p
 
@@ -507,11 +525,132 @@ try:
     comp = True
 except py_compile.PyCompileError:
     comp = False
-ck("R11", comp and "daily_brief.py  v1.1" in gs and 'NOTES_DIR = os.path.expanduser("~/reviews/daily_brief/notes")' in gs
+ck("R11", comp and "daily_brief.py  v1.2" in gs and 'NOTES_DIR = os.path.expanduser("~/reviews/daily_brief/notes")' in gs
    and "--facts" in gs and "--summary-json" in gs and "/home/ubuntu/venvs/daily_brief" in gs
    and not os.path.exists(os.path.join(TOOLS, "venv")) and not os.path.exists(os.path.join(TOOLS, "notes"))
    and "11-20 showed" not in gs and os.path.exists(os.path.join(TOOLS, "daily_brief.requirements.txt")),
-   "tools/daily_brief.py v1.1 compiles; notes under ~/reviews/daily_brief/notes; no venv or notes in the repo")
+   "tools/daily_brief.py v1.2 compiles; notes under ~/reviews/daily_brief/notes; no venv or notes in the repo")
+
+# ── R12 ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+_r12q = os.path.join(TMP, "q12.md")
+_r12n = os.path.join(TMP, "n12.json")
+write(_r12q, QFIX)
+_n12 = dict(NOTES_OK)
+_n12["proposals"] = [proposal("Hunt idea one", setup="Hunt"), proposal("No setup at all", setup=""),
+                     proposal("Miscased setup", setup="park"), proposal("Hunt idea two", setup="Hunt"),
+                     proposal("PARK late lock", setup="PARK"), proposal("Runaway reentry", setup="Runaway, Hunt")]
+write(_r12n, json.dumps(_n12))
+_rc12 = DR.main(["append", "--day", "2026-11-23", "--notes", _r12n, "--queue", _r12q])
+_q12 = read(_r12q)
+_p12 = json.loads(read(_r12n))["proposals"]
+_it12 = {it["title"].split(" — ", 1)[-1]: it for it in SD.parse_queue(_q12)}
+ck("R12", _rc12 == 0 and [bool(p.get("ws_id")) for p in _p12] == [True, False, False, False, True, True]
+   and "missing setup" in _p12[1].get("queue_refused", "") and "setup:" in _p12[2].get("queue_refused", "")
+   and "daily cap" in _p12[3].get("queue_refused", "")
+   and "- Setup: PARK\n" in _q12 and "- Setup: Runaway, Hunt\n" in _q12
+   and SD.priority_tier(_it12["PARK late lock"]) == 0 and SD.priority_tier(_it12["Hunt idea one"]) == 1
+   and re.search(r"- Status: OPEN \(added 2026-11-23[^\n]*\n- Setup: PARK\n", _q12) is not None,
+   "setup required and read by the dispatcher (blank and 'park' refused); `- Setup:` under the Status; over the cap the "
+   "PARK / Runaway proposals went first: %s" % [(p["title"], p.get("ws_id"), p.get("queue_refused", "")[:30]) for p in _p12])
+
+# ── R13 ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+_r13q = os.path.join(TMP, "q13.md")
+_r13n = os.path.join(TMP, "n13.json")
+_q13 = QFIX.replace("### WS.20 — A done item", "### WS.20 — Hunt shorts: skip against the QQQ day trend")
+write(_r13q, _q13)
+_n13 = dict(NOTES_OK)
+_n13["proposals"] = [proposal("Hunt shorts — skip against the QQQ day-trend", setup="Hunt"),
+                     proposal("Hunt shorts: skip against the QQQ day trend, again", setup="Hunt"),
+                     proposal("An open item!", setup="PARK"),
+                     proposal("PARK call trim on gap days", setup="PARK")]
+write(_r13n, json.dumps(_n13))
+_rc13 = DR.main(["append", "--day", "2026-11-24", "--notes", _r13n, "--queue", _r13q])
+_p13 = json.loads(read(_r13n))["proposals"]
+_after13 = read(_r13q)
+_rc13b = DR.main(["append", "--day", "2026-11-24", "--notes", _r13n, "--queue", _r13q])
+_w13 = os.path.join(TMP, "w13")
+DR.main(["context", "--day", "2026-11-24", "--work", _w13, "--queue", _r13q, "--notes-dir", os.path.join(TMP, "nd13"),
+         "--studies", os.path.join(TMP, "st13"), "--weekly", os.path.join(TMP, "wk13"),
+         "--otv5-backlog", os.path.join(TMP, "nobl"), "--hygiene", os.path.join(TMP, "hy13"),
+         "--botlogs", os.path.join(TMP, "bl13"), "--trades", os.path.join(TMP, "tr13")])
+_c13 = read(os.path.join(_w13, "context.md"))
+ck("R13", _rc13 == 0 and [bool(p.get("ws_id")) for p in _p13] == [False, False, False, True]
+   and all("duplicates WS.20" in _p13[i].get("queue_refused", "") for i in (0, 1))
+   and "duplicates WS.21" in _p13[2].get("queue_refused", "")
+   and _rc13b == 0 and read(_r13q) == _after13
+   and "Queue items already DONE" in _c13 and "WS.20 WS.20 — Hunt shorts: skip against the QQQ day trend" in _c13
+   and DR.dup_of("Hunt shorts skip against QQQ day trend window", _q13) == "WS.20"
+   and DR.dup_of("Runaway equity calls after 09:45", _q13) is None,
+   "exact and near duplicates of a DONE and an OPEN title refused, a distinct one queued, the re-run appends nothing, "
+   "context lists the DONE items: %s" % [(p["title"][:30], p.get("ws_id"), p.get("queue_refused", "")[:30]) for p in _p13])
+
+# ── R14 ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+_bl = os.path.join(TMP, "bl14", "2026-11-24")
+write(os.path.join(_bl, "AMD.txt"), "# AMD 2026-11-24 bot.log extract: x\n== bot.log (bot.log)\n"
+      "2026-11-24 09:32:00 [ERROR] main: boom\nTraceback (most recent call last):\n  File x\n"
+      "2026-11-24 10:00:00 [CRITICAL] risk: y\n2026-11-24 09:30:01 [INFO ] a: ALERT: OptionsBot [PAPER] STARTED | AMD\n")
+write(os.path.join(_bl, "NVDA.txt"), "# NVDA 2026-11-24 NOT READ: ssh rc=255 timed out (eod_conductor_v2, x)\n")
+_w14 = os.path.join(TMP, "w14")
+DR.main(["context", "--day", "2026-11-24", "--work", _w14, "--queue", _r13q, "--notes-dir", os.path.join(TMP, "nd13"),
+         "--studies", os.path.join(TMP, "st13"), "--weekly", os.path.join(TMP, "wk13"),
+         "--otv5-backlog", os.path.join(TMP, "nobl"), "--hygiene", os.path.join(TMP, "hy13"),
+         "--botlogs", os.path.join(TMP, "bl14"), "--trades", os.path.join(TMP, "tr13")])
+_c14 = read(os.path.join(_w14, "context.md"))
+_pr14 = re.sub(r"\s+", " ", read(os.path.join(TOOLS, "daily_recap.prompt")))
+_ws14 = read(WRAP)
+ck("R14", "AMD: 1 ERROR, 1 CRITICAL, 1 Traceback, 1 restart marker(s)" in _c14 and "NVDA: NOT READ" in _c14
+   and "BOTLOGS   $OUTDIR/botlogs/$DAY" in _ws14 and '--botlogs "$OUTDIR/botlogs"' in _ws14
+   and "needs a box read" not in _pr14 and "BOTLOGS" in _pr14 and "restart markers" in _pr14,
+   "context counts the conductor's extracts per box and names a NOT READ box; the wrapper and the prompt use them")
+
+# ── R15 ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+import cash_books as CB  # noqa: E402
+_tr = os.path.join(TMP, "tr15")
+write(os.path.join(_tr, "2026-11-23.csv"),
+      "sym,trade_id,strategy,direction,contracts,entry_premium,exit_premium,pnl_usd,entry_time,exit_time,exit_reason,fee\n"
+      "QQQ,a,PARK,long,2,1,2,1234.0,2026-11-23T16:01:00+00:00,2026-11-23T20:45:00+00:00,x,10.0\n"
+      "AMD,b,RunawayContinuation,long,2,1,2,-200.0,2026-11-23T14:40:00+00:00,2026-11-23T15:00:00+00:00,x,5.0\n")
+_w15 = os.path.join(TMP, "w15")
+DR.main(["context", "--day", "2026-11-23", "--work", _w15, "--queue", _r13q, "--notes-dir", os.path.join(TMP, "nd13"),
+         "--studies", os.path.join(TMP, "st13"), "--weekly", os.path.join(TMP, "wk13"),
+         "--otv5-backlog", os.path.join(TMP, "nobl"), "--hygiene", os.path.join(TMP, "hy13"),
+         "--botlogs", os.path.join(TMP, "bl14"), "--trades", _tr])
+_cj = os.path.join(_w15, "cash_books.json")
+_sc15 = json.loads(read(_cj)) if os.path.exists(_cj) else {}
+_good = dict(NOTES_OK, cash_books=["A big index PARK day: C1 netted $1,224 on the day, C2 $1,019."])
+_inv = dict(NOTES_OK, cash_books=["C1 made $9,999 today."])
+_ps = dict(NOTES_OK, cash_books=["At paper size C1 netted $1,224."])
+_n15 = os.path.join(TMP, "n15.json")
+_q15 = os.path.join(TMP, "q15.md")
+write(_q15, QFIX)
+write(_n15, json.dumps(_inv))
+DR.main(["append", "--day", "2026-11-23", "--notes", _n15, "--queue", _q15, "--cash-books", _cj])
+_after15 = json.loads(read(_n15))
+_bs = read(os.path.join(TOOLS, "daily_brief.py"))
+_pr15 = re.sub(r"\s+", " ", read(os.path.join(TOOLS, "daily_recap.prompt")))
+ck("R15", os.path.exists(os.path.join(_w15, "cash_books.md")) and _sc15.get("windows", {}).get("day", {}).get("books", {})
+   .get("C1", {}).get("net") == 1224.0
+   and DR.cash_problems(_good, _sc15) == [] and any("$9,999" in x for x in DR.cash_problems(_inv, _sc15))
+   and any("paper size" in x for x in DR.cash_problems(_ps, _sc15))
+   and "cash_books" not in _after15 and "$9,999" in _after15.get("cash_books_withheld", "")
+   and "5b. The cash candidate books C1-C4" in _bs and "cash_books_rows(day)" in _bs and '"cash_books", "sources")' in _bs
+   and '"cash_books":' in _pr15 and "REPORT ONLY" in _pr15 and "paper size" in _pr15
+   and "never in the window EV or the theories" in _pr15 and "never propose changing a book's definition" in _pr15
+   and "CASHBOOKS $WORK/cash_books.md" in read(WRAP) and '--cash-books "$WORK/cash_books.json"' in read(WRAP),
+   "the scoreboard lands in WORK; an invented figure and 'paper size' withhold the commentary, quoted figures pass; "
+   "PDF section 5b and the prompt's report-only rules")
+
+# ── R16 (amendment 1) ────────────────────────────────────────────────────────────────────────────────────────────────
+_t1 = dict(NOTES_OK, cash_books=["C1 leans on its top two trades."])
+_t2 = dict(NOTES_OK, cash_books=["C2 is dependent on its best trades."])
+_t3 = dict(NOTES_OK, cash_books=["Without its two largest winners C1 is lower, and without its two largest losers higher."])
+_pr16 = re.sub(r"\s+", " ", read(os.path.join(TOOLS, "daily_recap.prompt")))
+_bs16 = read(os.path.join(TOOLS, "daily_brief.py"))
+ck("R16", any("amendment 1" in x for x in DR.cash_problems(_t1, _sc15))
+   and any("amendment 1" in x for x in DR.cash_problems(_t2, _sc15)) and DR.cash_problems(_t3, _sc15) == []
+   and '"Fwd ex top-2 / ex bottom-2"' in _bs16 and 'f["gross_ex_bottom2"]' in _bs16
+   and "quote both or neither" in _pr16 and "never a qualifier" in _pr16 and "(gross without the top two)" not in _pr16,
+   "the top-two figure alone is withheld, both together pass; the PDF and the prompt carry both or neither")
 
 shutil.rmtree(TMP, ignore_errors=True)
 print()

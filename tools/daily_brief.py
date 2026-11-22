@@ -1,6 +1,14 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/daily_brief.py  v1.1  -  the post-trading-day brief (PDF) for any session.
+day_trader_pro/tools/daily_brief.py  v1.2  -  the post-trading-day brief (PDF) for any session.
+v1.2  2026-11-22  dtp r572 / CASHBOOK.1 — SECTION 5b, THE CASH CANDIDATE BOOKS C1-C4. The operator, 2026-11-22: "On
+      C1-C4, I would like some commentary on the daily and weekly recaps as to how each of them is performing". After
+      section 5, one table from tools/cash_books.py (the one scorer, PREREG frozen; ~/reviews/trades CSVs, the mark,
+      fees beside): per book the day's n and net, the forward window to date (n, gross, fees, net, EV with its 95%
+      day-bootstrap interval, gross without the two largest winners ALWAYS beside gross without the two largest losers,
+      concentration context only (amendment 1), the trades fired beside a Hunt/OGAP position) and the
+      combined window; then the session's "cash_books" commentary, or the validator's reason when it was withheld.
+      Report only: never in the window EV or the theories. A scorer failure prints NOT MEASURED and the brief builds.
 v1.1  2026-11-21  dtp r569 / RECAP.1 — THE GENERATOR MOVES INTO dtp AND THE DAILY RECAP TIMER DRIVES IT. The operator,
       2026-11-21: "Yes, we are going to begin firming up our system, our trading & our analysis". Moved from
       ~/otv5_builds/daily_brief/daily_brief.py (v1.0, outside any repo); tools/daily_recap.sh runs it at the end of
@@ -562,7 +570,7 @@ def facts(day):
 
 
 PARA_KEYS = ("headline", "day_note", "section1_close", "studies_intro", "study_recs", "proposals_intro", "code_intro",
-             "cash_verdict", "sources")
+             "cash_verdict", "cash_books", "sources")
 
 
 def normalize_notes(notes):
@@ -577,6 +585,50 @@ def normalize_notes(notes):
             if isinstance(it, dict) and isinstance(it.get("detail"), str):
                 it["detail"] = [it["detail"]]
     return notes
+
+
+def cash_books_rows(day, trades_dir=None):
+    """v1.2 -> [str | table rows] for section 5b: the scorer's own numbers, never recomputed here."""
+    try:
+        sys.path.insert(0, os.path.join(DTP_ROOT, "tools"))
+        import cash_books as CB                          # noqa: E402  (stdlib + market_calendar only)
+        sc = CB.score(day, day=day, trades_dir=trades_dir or CB.TRADES)
+    except Exception as e:                               # noqa: BLE001
+        return ["C1-C4: NOT MEASURED (%s: %s)." % (type(e).__name__, e)]
+    W = sc["windows"]
+    fw = W.get("forward")
+    fwc = W.get("forward_cumulative") or fw
+    cb = W["combined"]
+
+    def ev(m):
+        if m["ev"] is None:
+            return "-"
+        ci = m.get("ci")
+        return money(m["ev"], dec=0) + (" [%s, %s]" % (money(ci[0], dec=0), money(ci[1], dec=0)) if ci else "")
+    data = [["Book", "Day n / net", "Fwd n", "Fwd gross", "Fwd fees", "Fwd net", "Fwd EV [95%]",
+             "Fwd ex top-2 / ex bottom-2",
+             "Beside H/O", "Comb. net"]]
+    for b, _d in CB.BOOKS:
+        dm, cm = W["day"]["books"][b], cb["books"][b]
+        f = (fwc or {}).get("books", {}).get(b) if fwc else None
+        data.append([b, "%d / %s" % (dm["n"], money(dm["net"], dec=0)),
+                     str(f["n"]) if f else "-", money(f["gross"], dec=0) if f else "-",
+                     money(f["fees"], sign=False, dec=0) if f else "-", money(f["net"], dec=0) if f else "-",
+                     ev(f) if f else "-",
+                     ("%s / %s" % (money(f["gross_ex_top2"], dec=0), money(f["gross_ex_bottom2"], dec=0))) if f else "-",
+                     str(f.get("displaced", "-")) if f else "-",
+                     "%s (n %d, EV %s)" % (money(cm["net"], dec=0), cm["n"], ev(cm))])
+    head = ("Frozen in PREREG (%s, sealed 2026-11-21): " % os.path.basename(sc["prereg"])
+            + "; ".join("%s %s" % (b, d) for b, d in CB.BOOKS) + ". At the mark, fees beside, never inside EV. "
+            "Forward %s..%s (%d of 8 sessions so far)" % (fwc["from"], fwc["to"], fwc["sessions"]) if fwc else
+            "Frozen in PREREG (sealed 2026-11-21). The forward window starts 2026-11-23; until then only the in-sample "
+            "(hindsight) figures exist")
+    note = ("'Ex top-2 / ex bottom-2': " + CB.CONCENTRATION + ". "
+            + ("Amendment: " + sc["amendment"] + " " if sc.get("amendment") else "") +
+            "'Beside H/O' counts the forward trades that fired while a Hunt or OGAP position was open on the same box; "
+            "a fire that position kept from trading is not in the trade files (NOT MEASURED). Report only: never in "
+            "the window EV or the theories; the choice of book is the operator's.")
+    return [head + ".", data, note]
 
 
 def build(day, notes, out_dir):
@@ -797,6 +849,21 @@ def build(day, notes, out_dir):
                 f"on paper) are on equity boxes that do not trade cash.", "small"))
     for h in notes.get("cash_verdict", []):
         st.append(P(h))
+
+    # ── Section 5b (v1.2): the cash candidate books C1-C4, scored by tools/cash_books.py ──
+    st.append(Spacer(1, 8))
+    st.append(P("5b. The cash candidate books C1-C4", "h1"))
+    for row in cash_books_rows(day):
+        if isinstance(row, str):
+            st.append(P(row, "small"))
+        else:
+            st.append(table(row, [x * inch for x in (0.35, 0.7, 0.4, 0.7, 0.55, 0.65, 1.15, 0.65, 0.5, 1.45)]))
+    for h in notes.get("cash_books", []):
+        st.append(P(h))
+    if notes.get("cash_books_withheld"):
+        st.append(P("Commentary withheld by the recap's validator: " + notes["cash_books_withheld"] + ".", "small"))
+    elif not notes.get("cash_books"):
+        st.append(P("No commentary supplied for this day.", "small"))
 
     # ── Section 6 (v1.1): the day's ONE maintenance proposal, for a yes ──
     mt = notes.get("maintenance")

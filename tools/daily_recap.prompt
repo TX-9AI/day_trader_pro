@@ -1,4 +1,4 @@
-DAILY RECAP (day_trader_pro tools/daily_recap.prompt v1.1, dtp r571 / OTV4DEP.3; v1.0 dtp r569 / RECAP.1)
+DAILY RECAP (day_trader_pro tools/daily_recap.prompt v1.2, dtp r572 / SD.3 + RECAP.2 + CASHBOOK.1; v1.1 dtp r571; v1.0 dtp r569)
 
 You write the analyst notes for ONE trading session's daily recap PDF of the OTV5 paper fleet (14 boxes). You run
 unattended under a systemd timer: nobody is watching and nobody can answer a question. Write ONE file, the NOTES path
@@ -7,14 +7,23 @@ proposed studies to the queue itself, and sends the operator a one-line notice. 
 
 THE OPERATOR'S PROCESS (2026-11-21): every trading day this recap proposes studies to improve P&L and ONE piece of
 code maintenance from the backlog for a yes (until the backlog is cleared; delicate or live-order-path items are
-marked for Sunday). Friday evening every study queued that week runs blind on the boxes; Saturday's brief compiles the
+marked for Sunday). The queue now runs blind on the boxes EVERY weeknight (Monday to Thursday after this recap, at most
+three studies at once, PARK and Runaway first; dtp r572) and Friday evening; Saturday's brief compiles the week's
 results; Sundays implement; the next week evaluates.
+
+THE OPERATOR'S FOCUS (2026-11-21, verbatim): "Our studies going forward now should primarily focus on maximizing the
+PNL on those two trade set ups [PARK and Runaway]. We need to study extensively and exhaustively anything that we can
+possibly do to make them better. That should be our number one focus on our nightly studies." And: "continue paper
+Trading everything as-is." So propose PARK and Runaway studies first (entries, exits, stops, sizing at the mark,
+conditions, symbols); a study of another setup only when the day and the window give a strong reason, said in its
+"why". Every proposal names its setup.
 
 THE RULES (the operator's; not negotiable)
 - READ ONLY everywhere except the NOTES file and the WORK directory. Never edit ~/reviews/WEEKEND_STUDIES.md, a
   backlog, a review, a CSV, any repo (~/OTV5, ~/day_trader_pro, ~/options-trader-v4), a service, a crontab or a config.
   Never land, commit, push, deploy, wake, stop or start a box. Never write to S3. No box reads at all (the boxes are
-  stopped): where a figure needs a bot.log, write "NOT READ (needs a box read)".
+  stopped): the conductor copied each box's day of ERROR / CRITICAL / Traceback lines and restart markers to BOTLOGS
+  (RUN PARAMETERS) before the stop; read those. A box whose file is missing or says NOT READ is "NOT READ".
 - Never print or copy a service Environment block, a token or a credential.
 - P&L IS AT THE MARK ONLY: pnl_usd, "the ladder's fill (mark or better)". No ask/bid or spread-cost figure in any
   sentence. Fees go BESIDE P&L and EV, never inside them. Every total adds up from its rows.
@@ -39,8 +48,12 @@ READ, IN THIS ORDER (quote figures; do not recompute them another way)
   2. REVIEW: the nightly review of the day (~/reviews/DAY.md): the window EV and interval, giveback, each trade's TO
      SPEC / BROKEN verdict, the gate refusals, feeds, broken behaviour, forward tracks. If it is MISSING say so in
      code_intro and work from FACTS alone.
-  3. CONTEXT (RUN PARAMETERS): the next study id, the queue's OPEN/FORWARD items (never duplicate one), the studies
-     that reported since the last recap, prior maintenance proposals, the open backlog rows, the queue item format.
+  3. CONTEXT (RUN PARAMETERS): the next study id, the queue's OPEN/FORWARD items and its DONE items (never duplicate
+     either), the studies that reported since the last recap, prior maintenance proposals, the open backlog rows, the
+     queue item format, the bot-log counts per box, and where the C1-C4 scoreboard is.
+  3a. BOTLOGS (RUN PARAMETERS): one file a box, the day's ERROR / CRITICAL / Traceback lines and restart markers.
+  3b. CASHBOOKS (RUN PARAMETERS): the C1-C4 scoreboard from tools/cash_books.py (the one scorer; the books are frozen
+     in ~/reviews/cash_candidates_20261121/PREREG.md). Quote it; never re-derive a figure.
   4. Study results named in CONTEXT (each folder's RESULT.json / REPORT): for section 2.
   5. Control's alert router spool ~/day_trader_pro/data/alert_router/ for the day (counts and kinds only), and
      `journalctl --user -u dtp-alert-router --since DAY --until DAY+1 --no-pager | tail` if readable, else NOT READ.
@@ -67,7 +80,11 @@ present) as the model of tone, depth and length. Markdown bold (**x**) is allowe
   "proposals_intro":1 line.
   "proposals":      1 to 3 NEW studies to improve P&L (0 only if nothing in the day and window warrants one; say so in
                     proposals_intro). Each is queued as a full WEEKEND_STUDIES.md item, so every field is required:
-                    {"title", "hypothesis", "evidence" (what this day showed, with dollars), "data" (warehouse prefixes,
+                    {"title", "setup" (the setup it studies, exactly one or more of: PARK, Runaway (or
+                     RunawayContinuation, the queue's own spelling), Hunt, OGAP, fleet; comma-separated, e.g. "PARK"
+                     or "RunawayContinuation"; it becomes the item's `- Setup:` line
+                     and decides its place in the nightly queue: PARK and Runaway run first),
+                     "hypothesis", "evidence" (what this day showed, with dollars), "data" (warehouse prefixes,
                      mainline(), TastyTrade bars only), "blind" (one line: the seal and run-once), "change" (the code
                      change a pass would ship, and what it would have done on this day in $),
                      "why" (the motivating trades and the window numbers), "arms" (the frozen grid; a control arm A =
@@ -79,16 +96,33 @@ present) as the model of tone, depth and length. Markdown bold (**x**) is allowe
                      prune ledger: losers cut vs winners cut, each cut winner of +$200 or more named),
                      "outcome" ("TUNE (...) or TRIM (...) or KEEP" - which code it would change), "run_budget"
                      (optional, e.g. "up to 3 hours")}.
-                    Never duplicate an OPEN/FORWARD item; extend it in prose instead. The appender takes the first
-                    three valid ones and refuses any that breaks a rule above (resting take-profits, knobs, log-only,
-                    retired strategies).
-  "code_intro":     1 paragraph: crashes / Tracebacks / CRITICAL (NOT READ unless the review or the router has them),
+                    Never duplicate a queue item, OPEN, FORWARD or DONE: the validator refuses a title whose words
+                    (3+ letters, punctuation and words like "the"/"and" dropped) match an item's, or share 80%
+                    of them. The appender takes three
+                    valid ones a day, PARK and Runaway proposals first, and refuses any that breaks a rule above
+                    (resting take-profits, knobs, log-only, retired strategies, no setup).
+  "code_intro":     1 paragraph: crashes / Tracebacks / CRITICAL and restarts from BOTLOGS (per box, with counts;
+                    NOT READ only for a box whose file is missing or says so),
                     boots and stops, restarts, feeds (router spool), what the review flagged BROKEN.
   "code":           [{"title", "when", "effect", "status", "detail": [..]}] each code behaviour that touched the day:
                     defects, gates that refused, recent fixes seen working; status says FIXED rN / OPEN backlog id /
                     TO SPEC.
   "cash_verdict":   1-3 paragraphs: "If this had been cash" - the FACTS cash rows (QQQ $1,050, SPX $5,000 an entry,
                     PARK/Runaway/Hunt/OGAP), at the mark with fees beside, and an honest verdict.
+  "cash_books":     1-3 paragraphs, the commentary on the C1-C4 scoreboard (CASHBOOKS), for the operator (2026-11-22:
+                    "On C1-C4, I would like some commentary on the daily and weekly recaps as to how each of them is
+                    performing"): which book the day favoured and why (e.g. a big index PARK day, a Runaway equity
+                    day), and whether any book's standing changed on the forward and combined lines. CONCENTRATION
+                    (amendment 1; the operator, 2026-11-22: "I don't know if I'm on board with cutting the 2 best
+                    trades to qualify. You want to cut the 2 worst as well?"): gross without the two largest winners
+                    and gross without the two largest losers are context, never a qualifier; quote both or neither,
+                    never the top-two figure alone, and never call a book dependent on its best trades without the
+                    worst-trades figure beside it. Quote ONLY the scoreboard's figures:
+                    a dollar figure it does not print gets the commentary withheld. REPORT ONLY: the books are never
+                    in the window EV or the theories, the choice of book is the operator's, and you never propose
+                    changing a book's definition (no pruning a symbol, no adding a setup). Caveats on sample size and
+                    fill realism are fine; never call the paper dollars "paper size" (paper is sized as cash, on
+                    purpose).
   "maintenance":    ONE object, the next backlog item to clear, for the operator's yes:
                     {"id" (the backlog row id exactly), "backlog" ("OTV5", the one backlog), "title", "what" (the change in
                      2-3 sentences), "why" (why this one now), "risk" (what could break, and how the proof shows it

@@ -1,6 +1,19 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_study_dispatch.py  v1.6
+day_trader_pro/tests/check_study_dispatch.py  v1.7
+v1.7  2026-11-22  dtp r572 / SD.3 — THE WEEKNIGHT QUEUE (study_dispatch v1.8, friday_studies.sh v1.3; the operator,
+      2026-11-21: "That should be our number one focus on our nightly studies"). N1 the `- Setup:` line is read
+      strictly (exact names, one line, the parent's for a sub-item; a title naming PARK with no line is tier 1); N2 a
+      run launches PARK / Runaway items first, `- Depends:` still last, and `plan` prints that order with each tier;
+      N3 --nightly never holds more than NIGHTLY_MAX_PARALLEL (3) agents at once and still runs every item (a freed box
+      takes the next), while a Friday run uses a box per item; N4 a weeknight run never claims or stops a box that is
+      RUNNING at its start; N5 the cap is a code constant of 3 (no environment or config read; --max 10 --nightly
+      still 3); N6 the wrapper: Mon-Thu after 16:50 runs `--nightly` with the deadline 07:30 ET the next morning into
+      the coming Saturday's WORK as study_dispatch_nightly_<date>, 2026-11-26 (closed) skips, Friday unchanged, a
+      weekday morning skips; the timer fires Mon..Thu and Fri 17:15 ET (not Persistent) and the service's timeout
+      covers 17:15 to 08:00; every box is down well before 08:45. N7 on a COPY of the live queue (WS.25-WS.36 carry
+      `- Setup: PARK` / `- Setup: RunawayContinuation`): every Setup line reads, tier 0 first. Red on r571 (no
+      item_setups, no --nightly).
 v1.6  2026-11-21  dtp r568 / SD.2 — THE POLL'S REAL COMMAND (study_dispatch v1.7; the operator, 2026-11-21: "We
       definitely want those missed studies today"). FakeOps.ssh returns rc 0 whatever the command, which is how the
       stat rc defect passed. P1 runs sd.poll_cmd under bash on a box dir holding SEAL.txt and FROZEN.json only: rc 0,
@@ -723,6 +736,175 @@ ck("P2", _ret is False and "FROZEN.json" in _a["mtimes"] and os.path.exists(_ack
    "poll() through a real bash exit status sees FROZEN.json before RESULT.json exists, records it, sends FROZEN.ack, and reads the study as still running")
 shutil.rmtree(root)
 shutil.rmtree(_pd)
+
+# ── v1.7 (SD.3): the weeknight queue ─────────────────────────────────────────────────────────────────────────
+_HAS = hasattr(sd, "item_setups") and hasattr(sd, "NIGHTLY_MAX_PARALLEL")
+NQUEUE = QUEUE.replace("""### WS.1 — Hunt shorts
+- Status: OPEN (added 2026-11-10)
+""", """### WS.1 — Hunt shorts
+- Status: OPEN (added 2026-11-10)
+- Setup: Hunt
+""").replace("""### WS.6 — PARK, from Park's studies
+- Status: OPEN (added 2026-11-10)
+""", """### WS.6 — PARK, from Park's studies
+- Status: OPEN (added 2026-11-10)
+- Setup: PARK
+""").replace("""---
+
+## DONE""", """### WS.30 — PARK late entries, untagged
+- Status: OPEN (added 2026-11-22)
+- Why: a title that names PARK, with no Setup line.
+
+### WS.31 — Runaway second entry
+- Status: OPEN (added 2026-11-22)
+- Setup: Runaway, Hunt
+- Why: tier 0 by its line.
+
+### WS.32 — Combined
+- Status: OPEN (added 2026-11-22)
+- Setup: Runaway
+- Depends: WS.31
+- Why: after WS.31.
+
+### WS.33 — Fleet fills
+- Status: OPEN (added 2026-11-22)
+- Setup: fleet
+- Why: tier 1.
+
+---
+
+## DONE""")
+if _HAS:
+    _ni = {i["id"]: i for i in sd.parse_queue(NQUEUE)}
+    _t = {k: sd.priority_tier(v) for k, v in _ni.items()}
+    _bad = [sd.item_setups({"text": x})[0] for x in ("- Setup: park", "- Setup: Runaway,Hunts", "- Setup: ",
+                                                       "- Setup: PARK\n- Setup: PARK", "- Why: PARK")]
+    ck("N1", _t == {"WS.1": 1, "WS.2": 1, "WS.6a": 0, "WS.6b": 0, "WS.30": 1, "WS.31": 0, "WS.32": 0, "WS.33": 1}
+       and sd.item_setups(_ni["WS.31"])[0] == ["RunawayContinuation", "LiquidityHunt"] and _bad == [None] * 5
+       and "no `- Setup:` line" in sd.item_setups(_ni["WS.30"])[1],
+       f"the Setup line is read strictly, a sub-item takes its parent's, a title is never read: {_t}")
+    root, q, cl, st, ops, d = env([("BBB", "10.0.0.2", "stopped")], queue=NQUEUE, max_boxes=1)
+    ops.pass_items = {"WS.31"}
+    d.run()
+    _order = [c[2].split("/")[-1].split(".tar.gz")[0] for c in ops.calls if c[0] == "push"]
+    _out = io.StringIO()
+    _so = sys.stdout
+    sys.stdout = _out
+    try:
+        sd.main(["plan", "--queue", os.path.join(root, "plan_q.md")] if open(os.path.join(root, "plan_q.md"), "w").write(NQUEUE) else [])
+    finally:
+        sys.stdout = _so
+    _pl = [ln.split(":")[0] for ln in _out.getvalue().splitlines() if ln.startswith("WS.")]
+    ck("N2", _order == ["WS.6a", "WS.6b", "WS.31", "WS.32", "WS.1", "WS.30", "WS.33"]
+       and _pl == ["WS.6a", "WS.6b", "WS.31", "WS.32", "WS.1", "WS.30", "WS.33"] and "[tier 0: PARK]" in _out.getvalue(),
+       f"tier 0 (PARK, Runaway) first, queue order inside a tier, the dependent after its dependency: {_order}; plan {_pl}")
+    shutil.rmtree(root)
+
+    class _CountOps(FakeOps):
+        def __init__(self, *a, **k):
+            super().__init__(*a, **k)
+            self.active, self.peak = set(), 0
+
+        def ssh(self, ip, cmd, timeout=120):
+            sym = self.ip2sym[ip]
+            if "nohup setsid" in cmd:
+                self.active.add(sym)
+                self.peak = max(self.peak, len(self.active))
+            if "CLEAN_DONE" in cmd:
+                self.active.discard(sym)
+            return super().ssh(ip, cmd, timeout)
+
+    _F6 = [("B%d" % i, "10.0.1.%d" % i, "stopped") for i in range(1, 7)]
+
+    def _cenv(nightly, fleet, mx=None):
+        root = tempfile.mkdtemp(prefix="cksd_n_")
+        qq = os.path.join(root, "WEEKEND_STUDIES.md")
+        open(qq, "w").write(NQUEUE)
+        cl = os.path.join(root, "claims")
+        os.makedirs(cl)
+        stt = os.path.join(root, "reviews", "studies")
+        os.makedirs(stt)
+        t0 = datetime(2026, 11, 23, 18, 0, tzinfo=ET)            # a Monday evening
+        ops = _CountOps(fleet, t0)
+        dd = sd.Dispatcher(ops, t0 + timedelta(hours=13), os.path.join(root, "out"), queue_path=qq, claims_dir=cl,
+                           studies=stt, run_id="sdN", nightly=nightly, max_boxes=mx)
+        return root, ops, dd
+    root, ops, d = _cenv(True, _F6)
+    d.run()
+    _done = [i for i, v in d.state["items"].items() if v["status"] == "DONE"]
+    root2, ops2, d2 = _cenv(False, _F6)
+    d2.run()
+    ck("N3", ops.peak == sd.NIGHTLY_MAX_PARALLEL == 3 and len(_done) == 7 and d.state.get("mode") == "nightly"
+       and d.state.get("max_parallel") == 3 and ops2.peak > 3,
+       f"a weeknight holds at most 3 agents at once (peak {ops.peak}) and still runs all 7 ({len(_done)} DONE); a "
+       f"Friday run uses a box per item (peak {ops2.peak})")
+    shutil.rmtree(root)
+    shutil.rmtree(root2)
+    _F = [("B1", "10.0.1.1", "running"), ("B2", "10.0.1.2", "stopped"), ("B3", "10.0.1.3", "running"),
+          ("B4", "10.0.1.4", "stopped")]
+    root, ops, d = _cenv(True, _F)
+    d.run()
+    _touch = {c[1] for c in ops.calls if isinstance(c[1], str)} | {x for c in ops.calls if isinstance(c[1], tuple)
+                                                                    for x in c[1]}
+    ck("N4", "B1" not in _touch and "B3" not in _touch and {"B2", "B4"} <= _touch
+       and not os.path.exists(os.path.join(root, "claims", "B1")),
+       f"a weeknight run never claims, ssh's or stops a box RUNNING at its start (the conductor's HELD box): {sorted(_touch)}")
+    shutil.rmtree(root)
+    _src = open(sd.__file__).read()
+    root, ops, d = _cenv(True, _F6, mx=10)
+    ck("N5", "NIGHTLY_MAX_PARALLEL = 3 " in _src and "environ" not in _src.split("NIGHTLY_MAX_PARALLEL = 3", 1)[1][:200]
+       and not __import__("re").search(r"environ[^\n]*NIGHTLY|NIGHTLY[^\n]*environ", _src) and d.max_boxes == 3
+       and d.stop_idle is False,
+       "the cap is a code constant of 3, never read from the environment or config; --max 10 --nightly is still 3")
+    shutil.rmtree(root)
+else:
+    for _n in ("N1", "N2", "N3", "N4", "N5"):
+        ck(_n, False, "study_dispatch has no Setup tiers or weeknight cap (item_setups / NIGHTLY_MAX_PARALLEL)")
+
+# N7 a COPY of the live queue (never the file itself): every `- Setup:` line there reads, PARK / RunawayContinuation
+# items come first, untagged ones after
+_rq = os.path.expanduser("~/reviews/WEEKEND_STUDIES.md")
+if _HAS and os.path.exists(_rq):
+    _cq = os.path.join(tempfile.mkdtemp(prefix="cksd_n7_"), "WEEKEND_STUDIES.md")
+    shutil.copy(_rq, _cq)
+    _its = sd.prioritize(sd.open_items(sd.parse_queue(open(_cq).read())))
+    _tiers = [sd.priority_tier(i) for i in _its]
+    _tagbad = [i["id"] for i in _its if "\n- Setup: " in i["text"] and sd.item_setups(i)[0] is None]
+    ck("N7", _tiers == sorted(_tiers) and not _tagbad and open(_rq).read() == open(_cq).read(),
+       f"the live queue's copy: {len(_its)} OPEN, tiers {_tiers}, unreadable Setup lines {_tagbad}")
+    shutil.rmtree(os.path.dirname(_cq))
+else:
+    ck("N7", _HAS, "the live queue is not readable here (N1-N6 cover the reader)")
+
+# N6 the wrapper and the units
+_tmp = tempfile.mkdtemp(prefix="cksd_n6_")
+
+
+def _dry(now):
+    return _sp.run(["bash", fs, "--dry"], capture_output=True, text=True,
+                   env=dict(os.environ, FRIDAY_STUDIES_WEEKLY=_tmp, FRIDAY_STUDIES_LEDGER=os.path.join(_tmp, "l"),
+                            FRIDAY_STUDIES_NOW=now)).stdout
+
+
+_mon, _hol, _fri, _morn, _wed = (_dry("2026-11-23 17:15"), _dry("2026-11-26 17:15"), _dry("2026-11-27 17:15"),
+                                 _dry("2026-11-24 10:00"), _dry("2026-11-25 23:30"))
+tm = open(os.path.join(TOOLS, "dtp-study-dispatch.timer")).read()
+sv = open(os.path.join(TOOLS, "dtp-study-dispatch.service")).read()
+_to = int(__import__("re").search(r"TimeoutStartSec=(\d+)", sv).group(1))
+_need = (datetime(2026, 11, 24, 8, 0) - datetime(2026, 11, 23, 17, 15)).total_seconds()
+_src_fs = open(fs).read()
+ck("N6", "would run (nightly)" in _mon and "--nightly" in _mon and "deadline 07:30 ET on 2026-11-24" in _mon
+   and "saturday_2026-11-28_work/study_dispatch_nightly_2026-11-23 " in _mon
+   and "SKIPPED" in _hol and "2026-11-26 is not a trading day" in _hol
+   and "would run (friday)" in _fri and "--nightly" not in _fri and "deadline 02:30 ET on 2026-11-28" in _fri
+   and "saturday_2026-11-28_work/study_dispatch " in _fri and "SKIPPED" in _morn
+   and "deadline 07:30 ET on 2026-11-26" in _wed
+   and "OnCalendar=Mon..Thu *-*-* 17:15:00 America/New_York" in tm and "OnCalendar=Fri *-*-* 17:15:00 America/New_York" in tm
+   and "Persistent=false" in tm and _to >= _need and 'NIGHTLY_DEADLINE="07:30"' in _src_fs
+   and "market_calendar" in _src_fs and not os.listdir(_tmp)
+   and (7 * 60 + 30) * 60 - sd.MARGIN_S + 15 * 60 + 15 * 60 < (sd.RTH_START[0] * 60 + sd.RTH_START[1]) * 60,
+   f"Mon {_mon.strip()[:90]!r} | 11-26 {_hol.strip()[:60]!r} | Fri {_fri.strip()[:70]!r} | timeout {_to}s >= {_need:.0f}s")
+shutil.rmtree(_tmp)
 
 print()
 if FAILS:

@@ -1,5 +1,5 @@
 [Unit]
-Description=day_trader_pro weekend study queue, Friday night (dtp r552 / SAT.9) - NOT INSTALLED BY THE LAND
+Description=day_trader_pro study queue, every weekday night (dtp r552 / SAT.9, r572 / SD.3) - NOT INSTALLED BY THE LAND
 After=network-online.target
 Wants=network-online.target
 
@@ -7,6 +7,8 @@ Wants=network-online.target
 Type=oneshot
 User=ubuntu
 WorkingDirectory=/home/ubuntu/day_trader_pro
-# The script refuses off Friday evening, waits for the conductor, and ends by Saturday 02:30 ET plus its cleanup.
+# The script refuses outside a weekday evening and on a market holiday, waits for the conductor and the daily recap,
+# and ends by its deadline plus its cleanup: Saturday 02:30 ET on Friday, 07:30 ET the next morning Mon-Thu (its own
+# timeout ends at 07:45, the cleanup by 08:00). 17:15 to 08:00 is 14 h 45 min; the cap is 15 h 30 min.
 ExecStart=/bin/bash /home/ubuntu/day_trader_pro/tools/friday_studies.sh
-TimeoutStartSec=39600
+TimeoutStartSec=55800

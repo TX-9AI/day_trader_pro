@@ -64,7 +64,9 @@ aggregation. Protect it (see "Protect the EOD chain" below).
 Each unit ships in `tools/` and is installed by the operator with its `tools/install_*.sh` (never by the land).
 
 ```
- 16:05 ET  dtp-eod-conductor      the drain: capture, purge, stop every box
+ 16:05 ET  dtp-eod-conductor      the drain: capture, purge, stop every box; first copies each box's day of
+                                  ERROR/CRITICAL/Traceback lines and restarts to ~/reviews/daily_brief/botlogs/
+                                  <date>/<SYM>.txt (dtp r572; bounded, never holds the stop)
  16:40 ET  dtp-nightly-review     tools/nightly_review.sh -> ~/reviews/<date>.md (13:40 on a half day)
  17:00 ET  dtp-daily-recap        tools/daily_recap.sh (dtp r569): waits for the review, one headless session
                                   writes ~/reviews/daily_brief/notes/<date>.json (analysis, 1-3 proposed studies,
@@ -74,8 +76,12 @@ Each unit ships in `tools/` and is installed by the operator with its `tools/ins
                                   through the alert router. Skips weekends and holidays; never runs twice for a day.
                                   Install: sudo bash tools/install_daily_recap.sh (also creates the brief's venv,
                                   /home/ubuntu/venvs/daily_brief, outside the repo).
- Fri 17:15 dtp-study-dispatch     tools/friday_studies.sh: waits for the conductor, then Friday's recap, then runs
-                                  every OPEN queue item blind on the boxes (deadline Sat 02:30 ET)
+ Mon-Fri 17:15 dtp-study-dispatch tools/friday_studies.sh: waits for the conductor, then the day's recap, then runs
+                                  the OPEN queue items blind on the boxes, PARK and Runaway items first. Mon-Thu
+                                  (dtp r572): at most 3 at once, deadline 07:30 ET the next morning, a market holiday
+                                  skips; Fri: a box per item, deadline Sat 02:30 ET. The daily recap and the
+                                  Saturday brief also carry the C1-C4 cash candidate books (tools/cash_books.py).
+                                  Install/refresh: sudo bash tools/install_study_dispatch.sh
  Sat 03:00 the Saturday brief     compiles the week and the study results (docs/SATURDAY_BRIEF.md)
 ```
 

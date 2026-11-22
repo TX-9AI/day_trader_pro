@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_conductor_capture.py — v1.2
+day_trader_pro/tests/check_conductor_capture.py — v1.3
+v1.3  2026-11-22  dtp r572 / RECAP.2 — K7 the takedown order with v2.18's bot-log copy (started by _run_close and handed
+      in): the takedown joins it after the capture wait and before the machines are stopped. The handle is a stand-in
+      here: a real copy would write the live ~/reviews/daily_brief/botlogs.
 v1.2  2026-11-09  dtp r546 / CAP.7 — K8 the capture wait's budget: 1800 s, cut to the 16:40 ET deadline (self_close fires at
       16:45 on a box still up), 0 past it; K2/K6 re-stated for the 2100 s option-candles bound and the 1800 s wait.
 v1.1  2026-11-09  dtp r545 / CAP.7 — the capture never started on 11-09 (its log, capture_all.log, is root-owned: systemd's
@@ -179,12 +182,13 @@ def main():
     C.stop_services = lambda ok, dry: order.append("services")
     C.purge_verified = lambda ok, dry: order.append("purge")
     C.wait_for_capture = lambda ok, dry: order.append("capture_wait") or []
+    C.finish_botlogs = lambda h, wait_s=None: order.append("botlog_join") or True
     C.instance_registry.discover = lambda ok: ({s: {"instance_id": "i-" + s} for s in ok}, None)
     C.ec2ops.stop = lambda ids: order.append("ec2_stop")
     C.ec2ops.wait_state = lambda ids, st: None
     with redirect_stdout(io.StringIO()):
-        C.takedown({"AMD": {"verdict": "OK", "short": "0", "raw": ""}}, False, True)
-    ck("K7", order == ["services", "purge", "capture_wait", "ec2_stop"], str(order))
+        C.takedown({"AMD": {"verdict": "OK", "short": "0", "raw": ""}}, False, True, botlogs="H")
+    ck("K7", order == ["services", "purge", "capture_wait", "botlog_join", "ec2_stop"], str(order))
 
     print()
     if FAILS:

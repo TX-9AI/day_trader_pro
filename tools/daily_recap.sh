@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
-# day_trader_pro/tools/daily_recap.sh — v1.0
+# day_trader_pro/tools/daily_recap.sh — v1.1
+# v1.1 (2026-11-22) — dtp r572 / SD.3 + RECAP.2 + CASHBOOK.1. validate and append now read the queue (a proposal that
+#   duplicates any queue item's title is refused) and the C1-C4 scoreboard context wrote (WORK/cash_books.json: a
+#   commentary quoting a figure the scorer did not print is withheld). The session's RUN PARAMETERS name the bot-log
+#   extracts (BOTLOGS, written by the conductor before the stop) and the scoreboard (CASHBOOKS). No new knob.
 # v1.0 (2026-11-21) — dtp r569 / RECAP.1. THE DAILY RECAP PDF, EVERY TRADING DAY, FROM A TIMER. The operator,
 #   2026-11-21: "Yes, we are going to begin firming up our system, our trading & our analysis". Their process: each
 #   trading day the recap proposes studies to improve P&L and ONE piece of code maintenance from the backlog for a yes
@@ -131,12 +135,13 @@ export TMPDIR="$WORK"
 if ! timeout "$FACTS_S" "$BRIEF_PY" -I "$BRIEF" --date "$DAY" --facts "$WORK/facts.json" >> "$LOG" 2>&1; then
   echo "  🔴 the data pass failed for $DAY - see $LOG"; ledger "FAILED facts day=$DAY"; exit 1
 fi
-"$PY" "$HELPER" context --day "$DAY" --work "$WORK" --queue "$QUEUE" --notes-dir "$NOTES_DIR" >> "$LOG" 2>&1 \
+"$PY" "$HELPER" context --day "$DAY" --work "$WORK" --queue "$QUEUE" --notes-dir "$NOTES_DIR" \
+  --botlogs "$OUTDIR/botlogs" --trades "$REVIEWS/trades" >> "$LOG" 2>&1 \
   || { ledger "FAILED context day=$DAY"; exit 1; }
 
 # ── the session (skipped when valid notes for the day already exist) ──
 SESSION="skipped"
-if [ -f "$NOTES" ] && "$PY" "$HELPER" validate --day "$DAY" --notes "$NOTES" >> "$LOG" 2>&1; then
+if [ -f "$NOTES" ] && "$PY" "$HELPER" validate --day "$DAY" --notes "$NOTES" --queue "$QUEUE" >> "$LOG" 2>&1; then
   log "notes exist and are valid: no session"
 else
   [ -f "$PROMPT_FILE" ] || { echo "  ⚠️ REFUSED: no prompt file at $PROMPT_FILE"; ledger "FAILED no_prompt day=$DAY"; exit 1; }
@@ -153,6 +158,8 @@ RUN PARAMETERS (from the wrapper; use them exactly):
   FACTS     $WORK/facts.json
   REVIEW    $REVIEW ($REVIEW_STATE)
   CONTEXT   $WORK/context.md
+  BOTLOGS   $OUTDIR/botlogs/$DAY (the day's bot-log extracts, one file a box, copied by the conductor before the stop)
+  CASHBOOKS $WORK/cash_books.md (C1-C4, tools/cash_books.py; quote it, never re-derive it)
   MODEL     $MODEL_NOTES
   WORK      $WORK  - EVERY scratch file you make goes here (it is deleted when you finish); never /tmp
   DEADLINE  you are stopped at $_deadline_hm ET; have the file written well before it" \
@@ -171,10 +178,12 @@ fi
 
 # ── validate, queue the studies, build the PDF ──
 STATUS="PRODUCED"; QUEUED="-"
-if [ -f "$NOTES" ] && "$PY" "$HELPER" validate --day "$DAY" --notes "$NOTES" > "$WORK/validate.txt" 2>&1; then
+if [ -f "$NOTES" ] && "$PY" "$HELPER" validate --day "$DAY" --notes "$NOTES" --queue "$QUEUE" \
+      --cash-books "$WORK/cash_books.json" > "$WORK/validate.txt" 2>&1; then
   cat "$WORK/validate.txt" >> "$LOG"
   if [ -f "$QUEUE" ]; then
-    QUEUED="$("$PY" "$HELPER" append --day "$DAY" --notes "$NOTES" --queue "$QUEUE" 2>&1)"; arc=$?
+    QUEUED="$("$PY" "$HELPER" append --day "$DAY" --notes "$NOTES" --queue "$QUEUE" \
+      --cash-books "$WORK/cash_books.json" 2>&1)"; arc=$?
     log "$QUEUED"
     [ "$arc" = 0 ] || { STATUS="PARTIAL"; ledger "WARN queue_append_refused day=$DAY"; }
   else

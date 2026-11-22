@@ -1,4 +1,6 @@
-# THE SATURDAY BRIEF — spec v3.1
+# THE SATURDAY BRIEF — spec v3.2
+
+**v3.2 · 2026-11-22 · dtp r572 (SD.3, CASHBOOK.1)**: two additions; the layout, the brief's own timer, the run order and the CLOSE are unchanged. (1) **2B collects the whole week's study runs.** The operator, 2026-11-21: *"Our studies going forward now should primarily focus on maximizing the PNL on those two trade set ups [PARK and Runaway] ... That should be our number one focus on our nightly studies. I say nightly because the amount of studies that I wanna try is gonna take more than a weekend to find the answer."* The same timer (`dtp-study-dispatch`, now Mon–Fri 17:15 ET) also runs the queue Monday to Thursday night after the day's daily recap, deadline 07:30 ET the next morning, at most 3 studies at once (`study_dispatch.NIGHTLY_MAX_PARALLEL`, a constant), PARK and Runaway items first (each item's `- Setup:` line), into `<WORK>/study_dispatch_nightly_<YYYY-MM-DD>`; Friday's run is unchanged. 2B reads every one of them (`study_dispatch.py status --out <folder>`) beside Friday's; the wrapper names them (NIGHTLY). (2) **1C carries the cash candidate books C1–C4** (the operator, 2026-11-22: *"On C1-C4, I would like some commentary on the daily and weekly recaps as to how each of them is performing"*): `tools/cash_books.py` v1.0, the one scorer of the books frozen in `~/reviews/cash_candidates_20261121/PREREG.md`, for the week, the forward window and combined, with a short commentary that quotes it. Report only. Gate `tests/check_saturday_brief.py` v2.2 (S36, S37).
 
 **v3.1 · 2026-11-21 · dtp r571 (the 11-21 brief's R4 and R6)**: corrections only; the layout, the timer, the run order and the CLOSE are unchanged. (1) **The R6 no-progress lead is RETIRED from 2B.** Its population is Breakout's, and Breakout has been DORMANT since OTV5 r110 (2026-11-16): the same 8 trades every week, and P5 (three decay-live weeks) can no longer be met, so it failed by construction. It is not re-pointed; a revisit of Breakout brings it back as a new item with a bar written first. (2) **The Friday timer is INSTALLED** (`dtp-study-dispatch.timer`, unit files 2026-11-14 16:16 UTC; enabled and active; its first run was Friday 2026-11-20, `~/friday_studies.ledger` `2026-11-21T07:09:35Z RAN rc=0`); the "until then the brief's fallback runs the queue" sentence goes, and the fallbacks stand only for a missing or broken run. (3) **2B's standing studies drop GIVE.2 and DAY.1**: both are closed in OTV5 BACKLOG PART 2 (r81: GIVE.2 failed blind, DAY.1 scored FAIL). CUT.1 and PIN.3 stay. (4) **4.2, the QQQ cash table, adds OGAP** (QQQ paper since 2026-11-16, `_size_budget` on `OT_RISK_USD`, OTV5 r131/r136) and says the ramp max (`OT_BREAKOUT_BUDGET_USD`) is read only by Breakout's `_size_geometry`, so it binds Breakout's rows only, and Breakout has no row after 2026-11-13. Gate `tests/check_saturday_brief.py` v2.1 (S34: the lead is named nowhere in the prompt or the spec's parts; S35: the timer is installed, GIVE.2/DAY.1 not standing, OGAP in 4.2).
 
@@ -280,6 +282,20 @@ improving or worsening, read against the tape.
 - **noteworthy in the sample**: name anything a reader should weigh: a total carried by one setup or a few days, a
   setup whose n is too thin to judge, a regime the epoch has not yet seen. Say n each time.
 
+**The cash candidate books C1–C4 (v3.2).** The four books the operator listed on 2026-11-21 are frozen in
+`~/reviews/cash_candidates_20261121/PREREG.md` (sealed; C1 QQQ and SPX, Runaway and PARK; C2 all 14, PARK and Runaway;
+C3 PARK on QQQ/SPX, Runaway on the 12 equities; C4 PARK and Runaway on QQQ/SPX, Runaway only on the equities). One
+scorer computes them, `tools/cash_books.py --through <Fri> --week-start <Mon> --md <WORK>/cash_books.md` (the trade
+CSVs, the mark, fees beside; it reproduces PREREG's in-sample table exactly). Show its scoreboard for the week, the
+forward window to date (2026-11-23..12-03, then cumulative) and combined (the in-sample part is hindsight): n, gross,
+fees, net, EV with its interval, up days, worst day, max drawdown, gross without the two largest winners beside gross
+without the two largest losers (concentration context, never a qualifier; both or neither, PREREG amendment 1), and
+the trades that
+fired beside a Hunt/OGAP position. Then a short commentary: which book the week favoured and why, whether a book's
+standing changed, and how concentrated each book is, with both the top-two and the bottom-two figure (never the
+top-two alone; never "dependent on its best trades" without the worst-trades figure). It quotes the scorer, never re-derives it. Report only: never
+in the window EV or the theories; the choice of book is the operator's, and a book's definition is never re-argued.
+
 **The EV benchmark window 2026-10-26 → 11-27 (old §1.1), through the brief of 2026-11-28 only.** Its final score is
 in the 11-28 brief; **from 2026-12-05 the brief skips it and does not mention it** (the epoch replaces it). Until
 then: `~/reviews/window_ev.csv` (window-to-date: trades, realized, fees, EV a trade, EV without the worst setup and
@@ -355,6 +371,12 @@ invalid or unfinished result, or a NOT MEASURED; the item stays OPEN). Then **ac
 section 4 as an operator decision; a trading change under the freeze only if the code is broken) and **dig deeper?**
 (one line on where, when a result is thin, carried by one trade, or reversed by another sample). Say when Friday's
 run started and finished (its `state.json`) and which started it.
+
+**The whole week's runs (v3.2).** Since 2026-11-23 the queue also runs Monday to Thursday night (the same timer, after the
+day's daily recap; deadline 07:30 ET the next morning; at most 3 at once; PARK and Runaway items first; a market
+holiday skips), each into `<WORK>/study_dispatch_nightly_<YYYY-MM-DD>`. 2B reports every run of the week, each
+nightly folder (`study_dispatch.py status --out <folder>`) and Friday's, one table: per item the night that ran it,
+and the week's PASS / FAIL / VOID counted over all of them.
 
 **The coming Friday's queue, so the operator can strike any before they run.** The OPEN items as of this brief:
 

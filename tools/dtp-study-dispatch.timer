@@ -1,11 +1,13 @@
 [Unit]
-Description=weekend study queue on the boxes: Friday 17:15 ET, deadline Saturday 02:30 ET (dtp r552 / SAT.9)
+Description=the study queue on the boxes: Mon-Thu 17:15 ET (deadline 07:30 ET the next morning, at most 3 at once) and Fri 17:15 ET (deadline Saturday 02:30 ET) (dtp r552 / SAT.9, r572 / SD.3)
 
 [Timer]
+OnCalendar=Mon..Thu *-*-* 17:15:00 America/New_York
 OnCalendar=Fri *-*-* 17:15:00 America/New_York
 AccuracySec=30s
 # No catch-up: a run started after downtime would collide with the 03:00 Saturday brief, which starts the
-# queue itself when Friday's run is missing (saturday_brief.prompt §6 fallback).
+# queue itself when Friday's run is missing (saturday_brief.prompt §6 fallback). A weeknight start is the earliest
+# start: the script waits for the conductor and the daily recap, and skips a market holiday.
 Persistent=false
 
 [Install]

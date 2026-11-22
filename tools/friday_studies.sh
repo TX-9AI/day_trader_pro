@@ -1,5 +1,20 @@
 #!/usr/bin/env bash
-# day_trader_pro/tools/friday_studies.sh — v1.2
+# day_trader_pro/tools/friday_studies.sh — v1.3
+# v1.3 (2026-11-22) — dtp r572 / SD.3. THE QUEUE ALSO RUNS MONDAY TO THURSDAY NIGHT. The operator, 2026-11-21: "That
+#   should be our number one focus on our nightly studies. I say nightly because the amount of studies that I wanna
+#   try is gonna take more than a weekend to find the answer." The timer now fires Mon-Fri 17:15 ET. Friday is
+#   unchanged (deadline Saturday 02:30 ET, one item per box, into <WORK>/study_dispatch). Monday to Thursday:
+#   · a market holiday skips (dtp market_calendar.is_trading_day; 2026-11-26 is closed), and so does an unreadable
+#     calendar (no studies is the safe side);
+#   · the same waits (the conductor, then today's daily recap), the same lock (a weeknight run still going blocks the
+#     next start);
+#   · `study_dispatch.py run --nightly`: at most study_dispatch.NIGHTLY_MAX_PARALLEL (3) agents at once, PARK and
+#     Runaway items first, a running box never claimed or stopped;
+#   · the deadline is 07:30 ET the next morning (NIGHTLY_DEADLINE, a constant here): every box is killed 25 min
+#     before it (06:45 is the last start, MIN_RUN_S), the wrapper's own timeout ends at 07:45 and the cleanup by
+#     08:00, before the 08:45 trading window and the fleet's 09:15 wake;
+#   · the output goes to the COMING Saturday brief's WORK as study_dispatch_nightly_<YYYY-MM-DD> (log beside it), so
+#     the brief collects the whole week (2B).
 # v1.2 (2026-11-21) — dtp r569 / RECAP.1. THE DISPATCH STARTS AFTER FRIDAY'S DAILY RECAP, NOT AT A FIXED TIME. The
 #   operator, 2026-11-21: "Friday evening, after the daily recap and the drain, run all the studies accumulated during
 #   the week". The recap (dtp-daily-recap, 17:00 ET) appends the day's studies to the queue, so the dispatch must read
@@ -41,22 +56,36 @@ RECAP_LEDGER="${FRIDAY_STUDIES_RECAP_LEDGER:-/home/ubuntu/daily_recap.ledger}"
 RECAP_WAIT_S="${FRIDAY_STUDIES_RECAP_WAIT_S:-7200}"
 DRY=0; [ "${1:-}" = "--dry" ] && DRY=1
 _et() { if [ -n "$NOW" ]; then TZ=America/New_York date -d "$NOW" "$@"; else TZ=America/New_York date "$@"; fi; }
+NIGHTLY_DEADLINE="07:30"                          # v1.3: Mon-Thu, the next morning; a constant, never a knob
 DOW="$(_et +%u)"; HM="$(_et +%H%M)"; TODAY="$(_et +%F)"
-SAT="$(TZ=America/New_York date -d "$TODAY +1 day" +%F)"
+SAT="$(TZ=America/New_York date -d "$TODAY +$(( (6 - DOW + 7) % 7 )) day" +%F)"   # the coming Saturday
 WORK="$WEEKLY/saturday_${SAT}_work"
+MODE="friday"; NIGHTLY_ARG=""; DL_DAY="$SAT"
 OUT="$WORK/study_dispatch"
 LOG="$WORK/study_dispatch.log"
 _ledger() { [ "$DRY" = 1 ] || echo "$(date -u +%FT%TZ) $*" >> "$LEDGER"; }
 
 # 1650 == tools/study_dispatch.py RTH_END (16, 50): pinned by tests/check_const_parity.py P12
-if [ "$DOW" != "5" ] || [ "$HM" -lt 1650 ]; then
-  echo "SKIPPED: not Friday evening ET ($TODAY $HM, day $DOW); the 03:00 Saturday brief starts the queue itself if needed"
-  _ledger "SKIPPED not-friday-evening $TODAY $HM"
+if [ "$DOW" -ge 1 ] && [ "$DOW" -le 4 ] && [ "$HM" -ge 1650 ]; then
+  # v1.3: a weeknight. A market holiday (or an unreadable calendar) runs nothing.
+  if ! python3 -I -c 'import sys, datetime; sys.path.insert(0, sys.argv[1]); import market_calendar as m
+sys.exit(0 if m.is_trading_day(datetime.date.fromisoformat(sys.argv[2])) else 3)' "$DTP" "$TODAY" 2>/dev/null; then
+    echo "SKIPPED: $TODAY is not a trading day (or the calendar could not be read): no weeknight studies"
+    _ledger "SKIPPED not-a-trading-day $TODAY"
+    exit 0
+  fi
+  MODE="nightly"; NIGHTLY_ARG="--nightly"; DEADLINE="$NIGHTLY_DEADLINE"
+  DL_DAY="$(TZ=America/New_York date -d "$TODAY +1 day" +%F)"
+  OUT="$WORK/study_dispatch_nightly_$TODAY"
+  LOG="$OUT.log"
+elif [ "$DOW" != "5" ] || [ "$HM" -lt 1650 ]; then
+  echo "SKIPPED: not a weekday evening ET ($TODAY $HM, day $DOW); the 03:00 Saturday brief starts the queue itself if needed"
+  _ledger "SKIPPED not-a-weekday-evening $TODAY $HM"
   exit 0
 fi
 if [ "$DRY" = 1 ]; then
-  echo "would run: $PY $DTP/tools/study_dispatch.py run --deadline $DEADLINE --out $OUT > $LOG"
-  echo "  deadline $DEADLINE ET on $SAT; then study_dispatch.py cleanup; ledger $LEDGER"
+  echo "would run ($MODE): $PY $DTP/tools/study_dispatch.py run --deadline $DEADLINE --out $OUT${NIGHTLY_ARG:+ $NIGHTLY_ARG} > $LOG"
+  echo "  deadline $DEADLINE ET on $DL_DAY; then study_dispatch.py cleanup; ledger $LEDGER"
   echo "  first waits for the conductor, then for today's daily recap (ledger $RECAP_LEDGER, up to ${RECAP_WAIT_S}s)"
   exit 0
 fi
@@ -84,14 +113,14 @@ done
 echo "$(date -u +%FT%TZ) friday_studies: daily recap wait ${_rw}s ($_why)" >> "$LOG"
 exec 9> "$LOCK"
 flock -n 9 || { echo "another Friday dispatch holds the lock"; _ledger "STOOD_DOWN locked"; exit 0; }
-_dl="$(TZ=America/New_York date -d "$SAT $DEADLINE" +%s)"
+_dl="$(TZ=America/New_York date -d "$DL_DAY $DEADLINE" +%s)"
 BUDGET=$(( _dl - $(date +%s) + 900 ))
-[ "$BUDGET" -gt 900 ] || { _ledger "SKIPPED past-deadline"; exit 0; }
-echo "$(date -u +%FT%TZ) friday_studies: run --deadline $DEADLINE --out $OUT (budget ${BUDGET}s)" >> "$LOG"
+[ "$BUDGET" -gt 900 ] || { _ledger "SKIPPED past-deadline $MODE"; exit 0; }
+echo "$(date -u +%FT%TZ) friday_studies: $MODE run --deadline $DEADLINE --out $OUT${NIGHTLY_ARG:+ $NIGHTLY_ARG} (budget ${BUDGET}s)" >> "$LOG"
 cd "$DTP" || exit 1
-timeout "$BUDGET" "$PY" tools/study_dispatch.py run --deadline "$DEADLINE" --out "$OUT" >> "$LOG" 2>&1
+timeout "$BUDGET" "$PY" tools/study_dispatch.py run --deadline "$DEADLINE" --out "$OUT" $NIGHTLY_ARG >> "$LOG" 2>&1
 rc=$?
 timeout 900 "$PY" tools/study_dispatch.py cleanup >> "$LOG" 2>&1 || echo "cleanup rc=$?" >> "$LOG"
 [ "$rc" = "124" ] && echo "ERROR: the dispatch hit its timeout (rc=124)" >> "$LOG"
-_ledger "RAN rc=$rc out=$OUT"
+_ledger "RAN $MODE rc=$rc out=$OUT"
 exit "$rc"

@@ -1,6 +1,23 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/study_dispatch.py  v1.7
+day_trader_pro/tools/study_dispatch.py  v1.8
+v1.8  2026-11-22  dtp r572 / SD.3 — THE QUEUE RUNS EVERY WEEKNIGHT TOO, AT MOST THREE AT A TIME, PARK AND RUNAWAY FIRST.
+      The operator, 2026-11-21: "Our studies going forward now should primarily focus on maximizing the PNL on those
+      two trade set ups [PARK and Runaway] ... That should be our number one focus on our nightly studies. I say
+      nightly because the amount of studies that I wanna try is gonna take more than a weekend to find the answer."
+      · `run --nightly` (tools/friday_studies.sh, Mon-Thu after the daily recap, deadline 07:30 ET the next morning):
+        at most NIGHTLY_MAX_PARALLEL (3) items run at once (a freed box takes the next item, so the night is not
+        capped at three items, only at three agents in parallel); a box that is RUNNING when the run starts is not
+        claimed and not stopped (the conductor HOLDS a box whose drain did not verify, and the operator may be on
+        one); nothing idle is stopped. NIGHTLY_MAX_PARALLEL is a constant here, never a config key or env knob: on
+        2026-11-15 eleven parallel agents used up the operator's plan. Friday (no --nightly) is unchanged: one item
+        per box, idle boxes stopped.
+      · PRIORITY. An item declares its setup on ONE line in its own text (the parent's text for a sub-item):
+        `- Setup: PARK`, `- Setup: RunawayContinuation` or `- Setup: Runaway, Hunt` (the format the 2026-11-22 queue
+        items WS.25-WS.36 carry). The names are SETUP_NAMES' keys exactly (case and spelling),
+        comma-separated; `fleet` means no one setup. An item whose line names PARK or Runaway runs first (tier 0);
+        everything else after (tier 1), each tier in queue order, so `- Depends:` still decides within it. No line,
+        two lines, or a name outside the list is tier 1 and `plan` says why. The title is never read for this.
 v1.7  2026-11-21  dtp r568 / SD.2 — THE POLL READS A BOX WHOSE STUDY HAS NOT FINISHED. The operator, 2026-11-21: "We
       definitely want those missed studies today." The poll ran `stat` on SEAL.txt FROZEN.json RESULT.json
       AMENDMENTS.txt; the last two do not exist until late, so stat exited 1 and the poll read rc 1 as an unreachable
@@ -104,11 +121,11 @@ since v1.1; the Saturday brief starts it itself only as a fallback):
 
 COMMANDS:
   run      [--deadline HH:MM] [--out DIR] [--queue F] [--only SYM,..] [--max N] [--max-run-min M]
-           [--no-update-queue] [--no-stop-idle]
+           [--no-update-queue] [--no-stop-idle] [--nightly]
   wait     [--deadline HH:MM] [--out DIR]      block until `run` finishes (or the deadline), print the summary
   status   [--out DIR]
   cleanup  [--run RUN_ID]                      clean + stop + release every box claimed by study_dispatch
-  plan     [--queue F]                         print the OPEN items it would dispatch, touch nothing
+  plan     [--queue F]                         print the OPEN items in dispatch order (tier, setup), touch nothing
 
 It lands nothing, sends nothing, and never writes a repo.
 """
@@ -153,6 +170,11 @@ CTX_FILE_MAX = 2 * 1024 * 1024
 CTX_TOTAL_MAX = 40 * 1024 * 1024
 CTX_EXT = (".md", ".txt", ".json", ".csv", ".py")
 RESULT_KEYS = ("n", "ev", "ci", "window_ev", "window_ci", "verdict", "outcome")
+NIGHTLY_MAX_PARALLEL = 3                  # v1.8: agents at once on a weeknight. A constant, never a knob (2026-11-15)
+# v1.8: the names a `- Setup:` line may carry, exactly as written -> the strategy they mean. `fleet` = no one setup.
+SETUP_NAMES = {"PARK": "PARK", "Runaway": "RunawayContinuation", "RunawayContinuation": "RunawayContinuation",
+               "Hunt": "LiquidityHunt", "LiquidityHunt": "LiquidityHunt", "OGAP": "OGAP", "fleet": "fleet"}
+PRIORITY_SETUPS = ("PARK", "RunawayContinuation")    # the operator's two setups (2026-11-21): their items run first
 
 
 # ── time ────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -266,6 +288,35 @@ def parse_queue(text):
 
 def open_items(items):
     return [it for it in items if it["status"].upper().startswith("OPEN")]
+
+
+_SETUP = re.compile(r"^- Setup: (.*)$", re.M)
+
+
+def item_setups(item):
+    """v1.8 -> (strategies, problem). strategies: the list a single `- Setup:` line names (SETUP_NAMES' values), or
+    None with the reason when the item has no line, more than one, an empty one or a name outside SETUP_NAMES."""
+    lines = _SETUP.findall(item.get("text") or "")
+    if not lines:
+        return None, "no `- Setup:` line"
+    if len(lines) > 1:
+        return None, "%d `- Setup:` lines (one only)" % len(lines)
+    names = [x.strip() for x in lines[0].split(",")]
+    bad = [x for x in names if x not in SETUP_NAMES]
+    if not names or bad:
+        return None, "`- Setup:` names %s outside %s" % (bad or ["(nothing)"], ", ".join(SETUP_NAMES))
+    return [SETUP_NAMES[x] for x in names], ""
+
+
+def priority_tier(item):
+    """v1.8: 0 when the item's `- Setup:` line names PARK or Runaway, else 1 (the title is never read)."""
+    got, _why = item_setups(item)
+    return 0 if got and any(x in PRIORITY_SETUPS for x in got) else 1
+
+
+def prioritize(items):
+    """v1.8: tier 0 (PARK / Runaway) first, then tier 1; queue order kept inside each tier (a stable sort)."""
+    return sorted(items, key=priority_tier)
 
 
 def set_status(text, item_id, status):
@@ -611,8 +662,13 @@ def poll_cmd(d):
 class Dispatcher:
     def __init__(self, ops, deadline, out, queue_path=None, claims_dir=None, studies=None,
                  update_queue=True, stop_idle=True, only=None, max_boxes=None, bucket=None, run_id=None,
-                 max_run_s=None):
+                 max_run_s=None, nightly=False):
         self.ops, self.deadline, self.out = ops, deadline, out
+        # v1.8: a weeknight run holds at most NIGHTLY_MAX_PARALLEL boxes, never claims or stops a running box
+        self.nightly = bool(nightly)
+        if self.nightly:
+            max_boxes = min(max_boxes or NIGHTLY_MAX_PARALLEL, NIGHTLY_MAX_PARALLEL)
+            stop_idle = False
         self.max_run_s = int(max_run_s or MAX_RUN_S)
         self.ack_path = getattr(ops, "ack_path", None)
         self._acked = set()                            # (sym, ET day) already written to the power-audit ack file
@@ -624,7 +680,8 @@ class Dispatcher:
         self.bucket = bucket if bucket is not None else getattr(ops, "bucket", "")
         self.run_id = run_id or "sd" + ops.now().strftime("%Y%m%dT%H%M")
         self.day = ops.now().strftime("%Y%m%d")
-        self.state = {"run_id": self.run_id, "deadline": deadline.isoformat(), "started": ops.now().isoformat(),
+        self.state = {"run_id": self.run_id, "mode": "nightly" if self.nightly else "friday",
+                      "max_parallel": self.max_boxes, "deadline": deadline.isoformat(), "started": ops.now().isoformat(),
                       "finished": None, "boxes": {}, "items": {}, "not_measured": [], "log": []}
         os.makedirs(out, exist_ok=True)
 
@@ -763,12 +820,14 @@ class Dispatcher:
         text = open(self.queue_path).read()
         how = how_block(text)
         self.queue_items = {it["id"]: it for it in parse_queue(text)}
-        pending = open_items(parse_queue(text))
+        pending = prioritize(open_items(parse_queue(text)))       # v1.8: PARK / Runaway items first
         for it in pending:
-            self.state["items"][it["id"]] = {"status": "QUEUED", "title": it["title"]}
+            self.state["items"][it["id"]] = {"status": "QUEUED", "title": it["title"], "tier": priority_tier(it)}
             if it.get("depends"):
                 self.state["items"][it["id"]]["depends"] = it["depends"]
-        self.log(f"run {self.run_id}: {len(pending)} OPEN item(s): {', '.join(i['id'] for i in pending) or 'none'}")
+        self.log(f"run {self.run_id} ({self.state['mode']}, at most {self.max_boxes or 'one per box'} at once): "
+                 f"{len(pending)} OPEN item(s), PARK/Runaway first: "
+                 f"{', '.join(i['id'] + ('*' if priority_tier(i) == 0 else '') for i in pending) or 'none'}")
         active = {}                                   # sym -> {item, ip, started, seal_sha}
         self.pending = pending                        # launch() takes its item off this list
         self.resolve_dependents(pending, active)
@@ -843,6 +902,9 @@ class Dispatcher:
             owner = claim_owner(sym, self.claims_dir)
             if owner is not None:
                 self.log(f"skip {sym}: claimed by '{owner}'")
+                continue
+            if self.nightly and st == "running" and sym not in self.state["boxes"]:
+                self.log(f"skip {sym}: running at a weeknight start (held or in use), left as it is")
                 continue
             if len(chosen) < need and (self.max_boxes is None or len(chosen) < self.max_boxes) and ip:
                 if claim(sym, self.run_id, self.claims_dir):
@@ -1100,13 +1162,16 @@ def main(argv=None):
     ap.add_argument("--run", default=None)
     ap.add_argument("--no-update-queue", action="store_true")
     ap.add_argument("--no-stop-idle", action="store_true")
+    ap.add_argument("--nightly", action="store_true", help="a weeknight run: at most NIGHTLY_MAX_PARALLEL at once")
     a = ap.parse_args(argv)
     out = a.out or os.path.join(DEFAULT_OUT, now_et().strftime("%Y%m%d"))
     if a.cmd == "plan":
-        items = open_items(parse_queue(open(a.queue).read()))
+        items = prioritize(open_items(parse_queue(open(a.queue).read())))
         for it in items:
             dep = f"  (after {', '.join(it['depends'])})" if it.get("depends") else ""
-            print(f"{it['id']}: {it['title']}{dep}")
+            got, why = item_setups(it)
+            tag = f"[tier {priority_tier(it)}: {', '.join(got) if got else why}]"
+            print(f"{it['id']}: {it['title']}{dep}  {tag}")
         print(f"{len(items)} OPEN item(s)")
         return 0
     if a.cmd in ("wait", "status"):
@@ -1131,7 +1196,7 @@ def main(argv=None):
     d = Dispatcher(ops, deadline_dt(a.deadline, ops.now()), out, queue_path=a.queue,
                    update_queue=not a.no_update_queue, stop_idle=not a.no_stop_idle,
                    only=set(x for x in a.only.split(",") if x) or None, max_boxes=a.max,
-                   max_run_s=a.max_run_min * 60)
+                   max_run_s=a.max_run_min * 60, nightly=a.nightly)
     return d.run()
 
 

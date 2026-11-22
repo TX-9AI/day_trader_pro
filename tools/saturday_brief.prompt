@@ -3,7 +3,7 @@ The operator is asleep. Nothing is sent: when they ask, a session shows them the
 index and then one section (or one part, 1A..4) at a time. The file you write is the brief.
 
 READ FIRST, IN THIS ORDER:
-  1. /home/ubuntu/day_trader_pro/docs/SATURDAY_BRIEF.md  the operator's spec (v3.0), in full. It is the authority
+  1. /home/ubuntu/day_trader_pro/docs/SATURDAY_BRIEF.md  the operator's spec (v3.2), in full. It is the authority
   2. /home/ubuntu/OTV5/docs/WORKING_AGREEMENT.md         §0, §0.1, §0.5, §12, §17, §31, §36a
   3. /home/ubuntu/OTV5/docs/GENESIS.md                   the last 12 rows
   4. /home/ubuntu/OTV5/docs/BACKLOG.md                   PART 1 (open rows), section H in full
@@ -71,6 +71,22 @@ THE NUMBERS FIRST (spec "The numbers (v3.0)"), before section 1 (about 30 s, S3 
      median VIX close with its regime, the epoch EV to date); consistency (green days, first half vs second half,
      the best three days' share and the EV without them); and what is noteworthy in the sample, n each time.
      Overlapping intervals are not a trend; a better week on a trend tape is not yet a better book.
+     · THE CASH CANDIDATE BOOKS C1-C4 (dtp r572; the operator, 2026-11-22: "On C1-C4, I would like some commentary on
+       the daily and weekly recaps as to how each of them is performing"). Run the one scorer (seconds, local files):
+         cd /home/ubuntu/day_trader_pro && ./venv/bin/python tools/cash_books.py --through <this Friday> \
+           --week-start <this Monday> --md <WORK>/cash_books.md --json <WORK>/cash_books.json
+       The books are FROZEN in ~/reviews/cash_candidates_20261121/PREREG.md (C1 QQQ+SPX Runaway and PARK; C2 all 14,
+       PARK and Runaway; C3 PARK on QQQ/SPX, Runaway on the 12 equities; C4 PARK and Runaway on QQQ/SPX, Runaway on
+       the equities). Show its scoreboard for THE WEEK, the FORWARD window to date (from 2026-11-23; cumulative past
+       12-03) and COMBINED (in-sample 10-26..11-20 is hindsight: say so): per book n, gross, fees beside, net, EV with
+       its 95% interval, up days, worst day, max drawdown, gross without the two largest winners BESIDE gross without
+       the two largest losers (concentration context, never a qualifier: both or neither), and the trades that fired beside a
+       Hunt/OGAP position (a fire that never traded is NOT MEASURED). Then 1-2 paragraphs of commentary: which book the
+       week favoured and why (an index PARK week, a Runaway equity week), whether a book's standing changed, how
+       concentrated each book is, always with both the top-two and the bottom-two figure (amendment 1: never the top-two alone,
+       never "dependent on its best trades" without the worst-trades figure). QUOTE ITS FIGURES; never re-derive or invent one. REPORT ONLY: never in the window EV
+       or the theories, the choice of book is the operator's, and never propose changing a book's definition. Sample
+       and fill-realism caveats are fine; never call the paper dollars "paper size" (paper is sized as cash on purpose).
      · THE EV BENCHMARK WINDOW 2026-10-26..11-27, through the brief of 2026-11-28 only (its final score). If this
        Saturday is on or after 2026-12-05, skip it and do not mention it. Otherwise: ~/reviews/window_ev.csv and
        theories.csv (read, never write): realized, ev_per_trade and the *_ev theory columns, the theories SORTED BY
@@ -110,10 +126,18 @@ THE NUMBERS FIRST (spec "The numbers (v3.0)"), before section 1 (about 30 s, S3 
      trade with its interval, the window EV with its interval, the verdict PASS, FAIL or VOID against its own bar,
      unedited (VOID = invalid, unfinished or NOT MEASURED; it stays OPEN); actionable? (TUNE or TRIM to section 4 as
      an operator decision); dig deeper? (one line on where: thin, carried by one trade, reversed by another sample).
+     · THE WHOLE WEEK'S RUNS (dtp r572): since 2026-11-23 the queue also runs MONDAY TO THURSDAY NIGHT (the same
+       timer, after the day's daily recap, deadline 07:30 ET the next morning, at most 3 at once, PARK and Runaway
+       items first), each into <WORK>/study_dispatch_nightly_<YYYY-MM-DD> (log beside it, .log). 2B covers EVERY run
+       of the week: each nightly folder and Friday's <WORK>/study_dispatch. Read each finished one with
+         cd /home/ubuntu/day_trader_pro && ./venv/bin/python tools/study_dispatch.py status --out <WORK>/study_dispatch_nightly_<YYYY-MM-DD>
+       and quote its items like Friday's (a weeknight with no folder: the ledger ~/friday_studies.ledger says why,
+       SKIPPED for a holiday). Count the week's PASS / FAIL / VOID over all of them, and say per item which night ran it.
      · THE COMING FRIDAY'S QUEUE, so the operator can strike any before they run:
          cd /home/ubuntu/day_trader_pro && ./venv/bin/python tools/study_dispatch.py plan
-       per OPEN item: id, title, the hypothesis in one line and its pass bar in one line. The daily recap adds up to
-       three items a day, so Friday's list can be longer. Never edit the queue yourself beyond the dispatcher's marks.
+       per OPEN item: id, title, the hypothesis in one line and its pass bar in one line (plan prints them in run
+       order: tier 0, PARK and Runaway, first). The daily recap adds up to three items a day and the weeknights run
+       them, so name the OPEN list as of this brief. Never edit the queue yourself beyond the dispatcher's marks.
      · THE STUDY QUEUE (standing, every week): /home/ubuntu/reviews/WEEKEND_STUDIES.md. It runs ON THE BOXES,
        IN PARALLEL (dtp tools/study_dispatch.py, SAT.8), AND SINCE SAT.9 IT RUNS FRIDAY NIGHT: the control timer
        dtp-study-dispatch (tools/friday_studies.sh; INSTALLED 2026-11-14, first timer run 2026-11-20)

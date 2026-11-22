@@ -1,6 +1,20 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/eod_conductor_v2.py — v2.17
+day_trader_pro/eod_conductor_v2.py — v2.18
+v2.18 2026-11-22 — dtp r572 / RECAP.2 — THE DAY'S BOT-LOG ERRORS COME TO CONTROL BEFORE THE BOXES GO DOWN. The daily recap
+      (17:00 ET, dtp-daily-recap) reads no box (they are stopped by then), so its code section said NOT READ for every
+      crash, Traceback and restart. The close now starts copy_botlogs() before the takedown, in a daemon thread, over every box the
+      close saw running (verified and HELD alike): one bounded ssh per box (ssh_map, BOTLOG_BOX_S; the remote work is
+      itself cut at BOTLOG_REMOTE_S) reads the day's lines of ~/options-trader/bot.log (and its rotations touched today)
+      that are ERROR or CRITICAL, every Traceback with up to 60 lines after it, and the restart markers (the bot's
+      "OptionsBot [..] STARTED" / "OptionsBot STOPPED" alert lines, and the unit's systemd lifecycle lines from the
+      journal: Started, Stopped, Main process exited, Scheduled restart, Failed), at most BOTLOG_MAX_LINES lines and
+      BOTLOG_MAX_BYTES bytes, with token / secret / password / key / Bearer values redacted on the box. Each box's file
+      is ~/reviews/daily_brief/botlogs/<date>/<SYM>.txt; an unanswered box gets a one-line "NOT READ" file. 🔑 IT NEVER
+      HOLDS THE STOP: the copy runs beside the purge and the capture wait (minutes), and the stop waits for it at most
+      BOTLOG_JOIN_S seconds; whatever has not answered by then is abandoned (its ssh dies on its own timeout). No env
+      file, credential or unit file is ever read; the journal lines kept are systemd's own, never an Environment block.
+      Gate tests/check_conductor_botlogs.py L1-L6; check_conductor_capture v1.3 K7 the order.
 v2.17 2026-11-09 — dtp r546 / CAP.7 — THE CAPTURE WAIT RUNS TO A DEADLINE, NOT A FIXED 900 s. Measured the night r545 landed
       (OTV5 r105, one stream per box because the account's session limit is shared by 14 boxes): SPX's front chain is
       about 570 contracts a day, 4-5 minutes a series, seven series - longer than 900 s after the purge. The wait now runs
@@ -167,6 +181,7 @@ import json
 import os
 import re
 import sys
+import threading
 import time
 from datetime import datetime
 
@@ -464,6 +479,92 @@ def wait_for_capture(ok: list, dry: bool, budget=None, poll=None, sleep=time.sle
     return []
 
 
+# ── v2.18 (RECAP.2) — THE DAY'S BOT-LOG ERRORS, COPIED TO CONTROL BEFORE THE STOP ─────────────────────────
+BOTLOG_DIR = os.path.join(os.path.expanduser("~"), "reviews", "daily_brief", "botlogs")
+BOTLOG_MAX_BYTES = 256 * 1024        # per box, cut on the box (head -c)
+BOTLOG_MAX_LINES = 4000              # per box, the awk filter stops here
+BOTLOG_REMOTE_S = 30                 # the box-side filter's own timeout
+BOTLOG_BOX_S = 45                    # the ssh budget per box (ssh_util adds the connect allowance)
+BOTLOG_JOIN_S = 5                    # the most the stop ever waits for the copy
+_BOTLOG_AWK = (
+    '/^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:/ { day = substr($0, 1, 10); tb = 0;'
+    ' if (day != D) next;'
+    ' if (index($0, " [ERROR") || index($0, " [CRITICAL") || (index($0, "OptionsBot [") && index($0, "] STARTED"))'
+    ' || index($0, "OptionsBot STOPPED")) { print; n++ } if (n >= M) exit; next }'
+    ' { if (day != D) next; if (index($0, "Traceback (most recent call last)") > 0) { tb = 1; tl = 0 }'
+    ' if (tb && tl < 60) { print; tl++; n++ } if (n >= M) exit }')
+_BOTLOG_REDACT = ("sed -E -e 's/((token|secret|passw(or)?d|api[_-]?key|authorization|credential)[A-Za-z_]*"
+                  "[[:space:]]*[=:][[:space:]]*)[^[:space:],;]+/\\1[REDACTED]/Ig'"
+                  " -e 's/(bearer)[[:space:]]+[^[:space:]]+/\\1 [REDACTED]/Ig'")
+
+
+def botlog_cmd(day: str) -> str:
+    """The ONE box command: the day's error lines, Tracebacks and restart markers, bounded and redacted on the box.
+    The awk program is single-quoted (it holds no single quote); the date is digits and dashes only."""
+    d = re.sub(r"[^0-9-]", "", str(day))[:10]
+    return ("{ cd \"$HOME/options-trader\" 2>/dev/null || { echo '== NOT READ: no ~/options-trader'; exit 0; }; "
+            "F=''; for f in bot.log.5 bot.log.4 bot.log.3 bot.log.2 bot.log.1 bot.log; do "
+            "[ -f \"$f\" ] && [ -n \"$(find \"$f\" -maxdepth 0 -newermt '" + d + " 00:00' 2>/dev/null)\" ] "
+            "&& F=\"$F $f\"; done; "
+            "echo \"== bot.log ($(echo $F))\"; "
+            "[ -n \"$F\" ] && timeout " + str(BOTLOG_REMOTE_S) + " nice -n 10 awk -v D=" + d + " -v M="
+            + str(BOTLOG_MAX_LINES) + " '" + _BOTLOG_AWK + "' $F | " + _BOTLOG_REDACT + "; "
+            "echo '== optionsbot unit lifecycle (journal)'; "
+            "timeout 10 journalctl -u optionsbot --since '" + d + " 00:00' --no-pager -o short-iso 2>/dev/null "
+            "| grep -E 'systemd\\[[0-9]+\\]: .*(Started|Stopped|Stopping|Main process exited|Scheduled restart|"
+            "Failed with result)' | tail -n 200 | " + _BOTLOG_REDACT + "; } 2>/dev/null | head -c "
+            + str(BOTLOG_MAX_BYTES))
+
+
+def _botlog_write(out_dir: str, sym: str, day: str, res) -> str:
+    rc, out, err = res if res else (255, "", "no answer")
+    os.makedirs(out_dir, exist_ok=True)
+    p = os.path.join(out_dir, f"{sym}.txt")
+    stamp = ettime.now_et().strftime("%Y-%m-%d %H:%M ET")
+    if rc != 0:
+        body = f"# {sym} {day} NOT READ: ssh rc={rc} {(err or '').strip()[:120]} (eod_conductor_v2, {stamp})\n"
+    else:
+        body = (f"# {sym} {day} bot.log extract: ERROR/CRITICAL lines, Tracebacks, restart markers (eod_conductor_v2, "
+                f"{stamp}; at most {BOTLOG_MAX_LINES} lines / {BOTLOG_MAX_BYTES} bytes, secrets redacted)\n" + (out or ""))
+    tmp = p + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        fh.write(body)
+    os.replace(tmp, p)
+    return p
+
+
+def copy_botlogs(symbols, day, dry: bool, out_dir=None):
+    """v2.18 — start the copy in a daemon thread and return it (None when dry or nothing to copy). Never raises."""
+    if dry or not symbols:
+        return None
+    out_dir = out_dir or os.path.join(BOTLOG_DIR, str(day))
+
+    def work():
+        try:
+            boxes = [(s, ip) for s, ip, _st in fleet.get_fleet(list(symbols)) if ip]
+            res = ssh_util.ssh_map(boxes, botlog_cmd(str(day)), timeout=BOTLOG_BOX_S)
+            for s in symbols:
+                _botlog_write(out_dir, s, str(day), res.get(s))
+            _log("BOTLOG", f"copied {len(symbols)} box(es) to {out_dir}")
+        except Exception as exc:                               # noqa: BLE001
+            _log("BOTLOG", f"copy failed: {exc} (the stop goes ahead)")
+
+    t = threading.Thread(target=work, name="botlog-copy", daemon=True)
+    t.start()
+    return t
+
+
+def finish_botlogs(handle, wait_s=None) -> bool:
+    """v2.18 — wait at most BOTLOG_JOIN_S for the copy; True when it finished. The stop goes ahead either way."""
+    if handle is None:
+        return True
+    handle.join(BOTLOG_JOIN_S if wait_s is None else wait_s)
+    if handle.is_alive():
+        _log("BOTLOG", f"copy still running after {BOTLOG_JOIN_S if wait_s is None else wait_s}s - stopping anyway")
+        return False
+    return True
+
+
 def stop_services(ok: list, dry: bool) -> dict:
     """Stop the writers on the verified boxes, so the reclaim can do its job.
 
@@ -727,7 +828,7 @@ def _lag_s(r) -> int:
         return 0
 
 
-def takedown(results: dict, dry: bool, enabled: bool) -> tuple:
+def takedown(results: dict, dry: bool, enabled: bool, botlogs=None) -> tuple:
     """Stop the instances that verified. Leave the rest UP, and say why.
 
     🔴 PER BOX, NOT FLEET-WIDE. One short box must not keep fourteen good ones
@@ -786,6 +887,8 @@ def takedown(results: dict, dry: bool, enabled: bool) -> tuple:
     # The capture started at stop_services runs beside the purge; the SPX and QQQ option chains outlast it. Bounded by
     # CAPTURE_WAIT_S; a box still capturing at the bound is stopped anyway and resumes at the next close.
     wait_for_capture(ok, dry)
+    # v2.18 (RECAP.2): the bot-log copy _run_close started before this call; at most BOTLOG_JOIN_S, then the stop
+    finish_botlogs(botlogs)
 
     if ok:
         # ⚠️ STOP BY INSTANCE ID, NOT BY SSH. A box whose sshd is wedged still
@@ -879,7 +982,10 @@ def _run_close(running, date, dry, a) -> int:
             _log("VERIFY", f"  {sym}: {_t} {_l}s behind — rows still on the box; HELD so its timer ships them")
 
     # 4 ─ take down what verified
-    ok, held = takedown(results, dry, not a.no_takedown)
+    # v2.18 (RECAP.2): first start the copy of each box's day of errors to control (every box this close saw, the
+    # HELD ones too). It runs beside the purge and the capture wait; takedown() waits for it at most BOTLOG_JOIN_S.
+    botlogs = copy_botlogs(list(results), date, dry) if not a.no_takedown else None
+    ok, held = takedown(results, dry, not a.no_takedown, botlogs=botlogs)
 
     # ── P&L headline, before the full report run ────────────────────────
     # 🔴 THE OLD CHAIN COMPUTED P&L TWICE: eod_summary on each box at 15:50 and

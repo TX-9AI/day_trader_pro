@@ -1,6 +1,30 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/daily_recap.py  v1.1
+day_trader_pro/tools/daily_recap.py  v1.2
+v1.2  2026-11-22  dtp r572 / SD.3 + RECAP.2 + CASHBOOK.1 — FOUR ADDITIONS, ALL MECHANICAL.
+      (1) PARK AND RUNAWAY FIRST (the operator, 2026-11-21: "Our studies going forward now should primarily focus on
+      maximizing the PNL on those two trade set ups"). A proposal carries "setup" (the names study_dispatch.SETUP_NAMES
+      knows, e.g. "PARK" or "Runaway, Hunt"); the appended item gets the dispatcher's `- Setup:` line right under its
+      Status, so the nightly queue runs it in the right tier. A proposal with no setup or an unknown name is refused.
+      When more than MAX_QUEUED_A_DAY are valid, the cap admits the PARK / Runaway ones first.
+      (2) NO DUPLICATE STUDY. context lists every DONE item's id and title beside the OPEN / FORWARD ones, and the
+      validator (with the queue) refuses a proposal whose title is a duplicate of ANY queue item, whatever its status.
+      THE RULE (simple on purpose): a title is lowercased, a leading "WS.<n> —" dropped, every character that is not a
+      letter or digit made a space, and its words of 3+ characters (less DUP_STOPWORDS: the, and, for, with, from,
+      into, its, our, than, then) kept as a set; two titles are duplicates when the
+      sets are equal or share at least DUP_JACCARD (0.8) of their union. The item an earlier run appended for the same
+      proposal (its own "(daily recap DAY, Pn)" marker) is not a duplicate of itself, so a re-run still appends nothing.
+      (3) BOT LOGS. context lists the day's bot-log extracts the conductor copied before the stop
+      (~/reviews/daily_brief/botlogs/<date>/<SYM>.txt, eod_conductor_v2 v2.18), with each box's ERROR, CRITICAL,
+      Traceback and restart counts, so the code section reads them instead of saying NOT READ.
+      (4) THE CASH CANDIDATE BOOKS C1-C4 (the operator, 2026-11-22: "On C1-C4, I would like some commentary on the
+      daily and weekly recaps as to how each of them is performing"). context runs tools/cash_books.py (the one
+      scorer; PREREG frozen) into WORK/cash_books.{md,json}; the notes' "cash_books" paragraphs are the session's
+      commentary on it, and the validator (with --cash-books) refuses a commentary that quotes a dollar figure the
+      scorer did not print, or calls the paper dollars "paper size": the PDF then prints the scoreboard with the
+      commentary withheld and the reason. AMENDMENT 1 (2026-11-22): a commentary that names the top-two exclusion
+      (the two best / largest winners, "dependent on its best trades") without the two largest losers beside it is
+      withheld too: both figures or neither.
 v1.1  2026-11-21  dtp r571 / OTV4DEP.3 — THE CONTEXT READS ONE BACKLOG, OTV5's. v1.0 also read the frozen tree's
       docs/BACKLOG.md for open rows (check_no_otv4_deps N1 red since r569). It never yielded a row: the frozen tree's
       PART 1 marks open work ⬜, not 🔲, and its open rows MOVED to OTV5 at otv4 r510 (one backlog since 2026-10-25).
@@ -26,9 +50,9 @@ v1.0  2026-11-21  dtp r569 / RECAP.1 — THE DAILY RECAP'S MECHANICAL HALF. The 
 
 Usage:
   python tools/daily_recap.py plan [--day D] [--now YYYY-MM-DDTHH:MM]
-  python tools/daily_recap.py context --day D --work DIR [--queue Q] [--notes-dir N] [--reviews R]
-  python tools/daily_recap.py validate --day D --notes FILE
-  python tools/daily_recap.py append --day D --notes FILE [--queue Q]
+  python tools/daily_recap.py context --day D --work DIR [--queue Q] [--notes-dir N] [--botlogs B] [--trades T]
+  python tools/daily_recap.py validate --day D --notes FILE [--queue Q] [--cash-books WORK/cash_books.json]
+  python tools/daily_recap.py append --day D --notes FILE [--queue Q] [--cash-books WORK/cash_books.json]
   python tools/daily_recap.py notice --day D --notes FILE --summary FILE
 """
 import argparse
@@ -48,6 +72,7 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, ROOT)
 import market_calendar        # noqa: E402
 import study_dispatch as SD   # noqa: E402  (parse_queue: the dispatcher's own reader is the proof)
+import cash_books as CB       # noqa: E402  (v1.2: the one C1-C4 scorer)
 
 ET = ZoneInfo("America/New_York")
 HOME = os.path.expanduser("~")
@@ -59,6 +84,9 @@ STUDIES = os.path.join(REVIEWS, "studies")
 WEEKLY = os.path.join(REVIEWS, "weekly")
 OTV5_BACKLOG = os.path.join(HOME, "OTV5", "docs", "BACKLOG.md")
 HYGIENE = os.path.join(REVIEWS, "hygiene")
+BOTLOGS = os.path.join(OUT, "botlogs")       # v1.2: eod_conductor_v2 v2.18 writes <date>/<SYM>.txt before the stop
+DUP_JACCARD = 0.8                            # v1.2: the near-duplicate title bar (word sets), documented above
+DUP_STOPWORDS = ("the", "and", "for", "with", "from", "into", "its", "our", "than", "then")   # not words of a title
 DUE_AFTER_MIN = 40             # after the close, as the nightly review (review_kit.DUE_AFTER_MIN)
 MAX_QUEUED_A_DAY = 3           # the Friday dispatch runs one item per box; five days x 3 fits the fleet
 FREEZE_END = "2026-11-27"      # the benchmark's trading-code freeze (only BROKEN code changes before it)
@@ -70,9 +98,10 @@ QFIELDS = (("why", "Why"), ("hypothesis", "Hypothesis"),
            ("positive_control", "Positive control"), ("days", "Days"), ("pass_bar", "Pass bar (written now)"),
            ("outcome", "Outcome"))
 QREQUIRED = ("why", "hypothesis", "arms", "data", "model", "positive_control", "days", "pass_bar", "outcome")
+PRIORITY_NAMES = tuple(k for k, v in SD.SETUP_NAMES.items() if v in SD.PRIORITY_SETUPS)
 PDF_KEYS = ("revision", "headline", "symbols", "studies_intro", "proposals", "code_intro", "cash_verdict")
 PARA_KEYS = ("headline", "day_note", "section1_close", "studies_intro", "study_recs", "proposals_intro", "code_intro",
-             "cash_verdict", "sources")       # daily_brief.normalize_notes reads a string as one paragraph
+             "cash_verdict", "cash_books", "sources")       # daily_brief.normalize_notes reads a string as one paragraph
 MREQUIRED = ("id", "backlog", "title", "what", "risk", "when")
 FORBIDDEN = (
     (re.compile(r"resting\s+(take[- ]?profit|tp)\b|\bresting\s+(limit\s+)?(exit|target)\s+order", re.I),
@@ -81,6 +110,10 @@ FORBIDDEN = (
      "no new config knobs or study toggles (the operator, 2026-10-31)"),
 )
 RETIRED = re.compile(r"\b(butterfl(y|ies)|BFLY|PARC|TCS|ORBStrategy|original ORB)\b", re.I)
+TOP2 = re.compile(r"\b(top[- ](two|2)|(two|2) (best|biggest|largest) (trades|winners)|best (two|2)|largest winners|"
+                  r"(depend\w*|lean\w*|rel\w*) on (its|their|the) (best|top|biggest))", re.I)
+BOTTOM2 = re.compile(r"\b(bottom[- ](two|2)|(two|2) (worst|largest) (trades|losers)|worst (two|2)|largest losers)",
+                     re.I)                      # amendment 1: the top-two figure only ever beside the bottom-two
 LOGONLY = re.compile(r"\blog[- ]only\b|\bshadow\s+(mode|log|rule)\b", re.I)
 
 
@@ -201,6 +234,87 @@ def reported_studies(day, studies=STUDIES, weekly=WEEKLY, queue_text=""):
     return since, found, closed
 
 
+def _words(title):
+    t = re.sub(r"^\s*WS\.\d+[a-z]?\s*[—-]\s*", "", str(title or "").lower())
+    return {w for w in re.sub(r"[^a-z0-9]+", " ", t).split() if len(w) >= 3 and w not in DUP_STOPWORDS}
+
+
+def dup_of(title, queue_text, own_marker=None):
+    """v1.2 -> the id of a queue item whose title duplicates `title` (the rule in the header), or None. Every item
+    under ## QUEUE counts, OPEN, FORWARD or DONE; an item carrying `own_marker` (this proposal's earlier append) does
+    not."""
+    if not queue_text:
+        return None
+    mine = _words(title)
+    if not mine:
+        return None
+    q = queue_text.split("## QUEUE", 1)[-1]
+    heads = list(re.finditer(r"^### (WS\.\d+[a-z]?)\b[^\n]*$", q, re.M))
+    for i, m in enumerate(heads):
+        body = q[m.start(): heads[i + 1].start() if i + 1 < len(heads) else len(q)]
+        if own_marker and own_marker in body:
+            continue
+        theirs = _words(m.group(0)[4:])
+        if not theirs:
+            continue
+        if mine == theirs or len(mine & theirs) / len(mine | theirs) >= DUP_JACCARD:
+            return m.group(1)
+    return None
+
+
+def setup_names(p):
+    """v1.2 -> (the `- Setup:` text, problem) for a proposal's "setup" field, checked by the dispatcher's own reader."""
+    v = p.get("setup")
+    if isinstance(v, list):
+        v = ", ".join(str(x).strip() for x in v)
+    v = re.sub(r"\s+", " ", str(v or "").strip())
+    if not v:
+        return "", "missing setup (the `- Setup:` line: %s)" % ", ".join(SD.SETUP_NAMES)
+    _got, why = SD.item_setups({"text": "- Setup: " + v})
+    return (v, "") if not why else ("", "setup: " + why)
+
+
+def botlog_summary(day, root=BOTLOGS):
+    """v1.2 -> lines 'SYM: N ERROR, N CRITICAL, N Traceback, N restart marker(s) (path)' for the day's extracts."""
+    d = os.path.join(root, day)
+    if not os.path.isdir(d):
+        return ["(no bot-log extracts for %s in %s: the conductor copied none; say NOT READ)" % (day, d)]
+    out = []
+    for p in sorted(glob.glob(os.path.join(d, "*.txt"))):
+        try:
+            t = open(p, encoding="utf-8", errors="replace").read()
+        except OSError:
+            continue
+        sym = os.path.basename(p)[:-4]
+        if " NOT READ" in t.split("\n", 1)[0]:
+            out.append("%s: NOT READ (%s)" % (sym, t.split("\n", 1)[0][2:160]))
+            continue
+        c = lambda pat: len(re.findall(pat, t, re.M))   # noqa: E731
+        out.append("%s: %d ERROR, %d CRITICAL, %d Traceback, %d restart marker(s) (%s)" % (
+            sym, c(r" \[ERROR"), c(r" \[CRITICAL"), c(r"Traceback \(most recent call last\)"),
+            c(r"OptionsBot \[[^\]]*\] STARTED|OptionsBot STOPPED|Main process exited|Scheduled restart"), p))
+    return out or ["(the folder %s is empty)" % d]
+
+
+def cash_problems(notes, sc):
+    """v1.2 -> [reason] the C1-C4 commentary is withheld: a dollar figure the scorer did not print (within $1), or the
+    paper dollars called "paper size"."""
+    txt = _txt(notes.get("cash_books"))
+    if not txt.strip():
+        return []
+    out = []
+    if re.search(r"paper[- ]siz", txt, re.I):
+        out.append('calls the paper dollars "paper size" (paper is sized as cash, on purpose)')
+    if TOP2.search(txt) and not BOTTOM2.search(txt):
+        out.append("names the two best trades without the two worst beside them (amendment 1: both or neither)")
+    figs = CB.figures(sc)
+    for m in re.finditer(r"\$\s?([0-9][0-9,]*(?:\.[0-9]+)?)", txt):
+        v = round(float(m.group(1).replace(",", "")))
+        if not any(abs(v - f) <= 1 for f in figs):
+            out.append("quotes $%s, which the scorer did not print" % m.group(1))
+    return out
+
+
 def item_format(text):
     """HOW + ADDING + the newest full item, as the model of an appended item."""
     how = SD.how_block(text)
@@ -231,6 +345,24 @@ def cmd_context(a):
     ]
     lines += ["  %s [%s] %s" % (it["id"], it["status"][:40], it["title"][:110]) for it in items
               if it["status"].upper().startswith(("OPEN", "FORWARD"))] or ["  (none)"]
+    lines += ["Queue items already DONE (never propose one again; the validator refuses a title that duplicates ANY "
+              "queue item):"]
+    lines += ["  %s %s" % (it["id"], it["title"][:110]) for it in items
+              if it["status"].upper().startswith("DONE")] or ["  (none)"]
+    lines += ["Each proposal names its setup (\"setup\": %s); PARK and Runaway studies come first (the operator, "
+              "2026-11-21)." % " / ".join(SD.SETUP_NAMES)]
+    lines += ["", "Bot-log extracts the conductor copied before the stop (ERROR / CRITICAL / Traceback / restarts):"]
+    lines += ["  " + b for b in botlog_summary(a.day, a.botlogs)]
+    try:
+        sc = CB.score(a.day, day=a.day, trades_dir=a.trades)
+        with open(os.path.join(a.work, "cash_books.json"), "w", encoding="utf-8") as fh:
+            json.dump(sc, fh, indent=1)
+        with open(os.path.join(a.work, "cash_books.md"), "w", encoding="utf-8") as fh:
+            fh.write(CB.render_md(sc))
+        lines += ["", "Cash candidate books C1-C4 (tools/cash_books.py, PREREG frozen): %s"
+                  % os.path.join(a.work, "cash_books.md")]
+    except Exception as e:                       # noqa: BLE001 - the recap goes on; the PDF says NOT MEASURED
+        lines += ["", "Cash candidate books C1-C4: NOT MEASURED (%s: %s)" % (type(e).__name__, e)]
     lines += ["", "Studies that reported since %s ET (RESULT.json folders):" % since.strftime("%Y-%m-%d %H:%M")]
     lines += ["  " + f for f in found] or ["  (none)"]
     lines += ["", "Queue items closed or carried forward in that span (their status lines):"]
@@ -270,10 +402,18 @@ def proposal_problems(p):
         out.append("names a retired strategy (butterfly, PARC, TCS, the original ORB)")
     if not re.search(r"\b(TUNE|TRIM|KEEP)\b", str(p.get("outcome") or "")):
         out.append("outcome names none of TUNE / TRIM / KEEP")
+    _v, why = setup_names(p)
+    if why:
+        out.append(why)
     return out
 
 
-def validate(notes):
+def is_priority(p):
+    v, _why = setup_names(p) if isinstance(p, dict) else ("", "")
+    return bool(v) and any(x.strip() in PRIORITY_NAMES for x in v.split(","))
+
+
+def validate(notes, queue_text=None, day=None):
     """-> (fatal, refused, mproblems): fatal = the notes cannot build the PDF; refused = {index: [reasons]};
     mproblems = what is wrong with the maintenance proposal (empty when it is good)."""
     if not isinstance(notes, dict):
@@ -290,10 +430,16 @@ def validate(notes):
     refused, accepted = {}, 0
     for i, p in enumerate(props):
         r = proposal_problems(p) if isinstance(p, dict) else ["not an object"]
-        if not r and accepted >= MAX_QUEUED_A_DAY:
-            r = ["over the daily cap of %d queued studies" % MAX_QUEUED_A_DAY]
+        if not r and queue_text:
+            d = dup_of(p.get("title"), queue_text, marker(day, i) if day else None)
+            if d:
+                r = ["duplicates %s's title (the near-duplicate rule, DUP_JACCARD %.1f)" % (d, DUP_JACCARD)]
         if r:
             refused[i] = r
+    # v1.2: the daily cap admits PARK / Runaway proposals first, then the rest, each in the order written
+    for i in sorted((i for i in range(len(props)) if i not in refused), key=lambda i: 0 if is_priority(props[i]) else 1):
+        if accepted >= MAX_QUEUED_A_DAY:
+            refused[i] = ["over the daily cap of %d queued studies" % MAX_QUEUED_A_DAY]
         else:
             accepted += 1
     m = notes.get("maintenance")
@@ -324,13 +470,23 @@ def _dump_atomic(obj, path):
     os.replace(tmp, path)
 
 
+def _queue_text(path):
+    try:
+        return open(path, encoding="utf-8").read() if path and os.path.exists(path) else None
+    except OSError:
+        return None
+
+
 def cmd_validate(a):
     try:
         notes = _load(a.notes)
     except (OSError, ValueError) as e:
         print("FATAL notes unreadable: %s" % e)
         return 2
-    fatal, refused, mp = validate(notes)
+    fatal, refused, mp = validate(notes, _queue_text(a.queue), a.day)
+    if a.cash_books and os.path.exists(a.cash_books):
+        for c in cash_problems(notes, _load(a.cash_books)):
+            print("CASHBOOKS commentary withheld: " + c)
     for f in fatal:
         print("FATAL " + f)
     for i, r in sorted(refused.items()):
@@ -354,7 +510,8 @@ def render(ws, day, i, p):
     title = re.sub(r"\s+", " ", str(p["title"]).strip())
     lines = ["### WS.%d — %s" % (ws, title),
              "- Status: OPEN (added %s by the daily recap; freeze the rule in FROZEN.json before any sealed day is "
-             "scored)" % day]
+             "scored)" % day,
+             "- Setup: %s" % setup_names(p)[0]]
     for k, lab in QFIELDS:
         v = re.sub(r"\s*\n\s*", " ", _txt(p.get(k)).strip())
         if k == "outcome" and "log-only" not in v.lower():
@@ -374,7 +531,7 @@ def render(ws, day, i, p):
 def append(text, day, notes):
     """-> (new_text, {index: ws_id}, skipped_reason) for the accepted proposals; text unchanged when there is nothing
     to add. Raises ValueError when the result does not parse as the dispatcher reads it."""
-    fatal, refused, _mp = validate(notes)
+    fatal, refused, _mp = validate(notes, text, day)
     if fatal:
         return text, {}, "notes fatal: " + "; ".join(fatal)
     if "## QUEUE" not in text:
@@ -420,7 +577,12 @@ def cmd_append(a):
     except ValueError as e:
         print("REFUSED the queue append would not parse: %s (queue untouched)" % e)
         return 1
-    _fatal, refused, _mp = validate(notes)
+    _fatal, refused, _mp = validate(notes, text, a.day)
+    if a.cash_books and os.path.exists(a.cash_books):
+        cp = cash_problems(notes, _load(a.cash_books))
+        if cp:                                          # the PDF prints the scoreboard and says why there is no comment
+            notes["cash_books_withheld"] = "; ".join(cp)
+            notes.pop("cash_books", None)
     for i, p in enumerate(notes.get("proposals") or []):
         if not isinstance(p, dict):
             continue
@@ -491,13 +653,18 @@ def main(argv=None):
     p.add_argument("--weekly", default=WEEKLY)
     p.add_argument("--otv5-backlog", default=OTV5_BACKLOG)
     p.add_argument("--hygiene", default=HYGIENE)
+    p.add_argument("--botlogs", default=BOTLOGS)
+    p.add_argument("--trades", default=CB.TRADES)
     p = sub.add_parser("validate")
     p.add_argument("--day", required=True)
     p.add_argument("--notes", required=True)
+    p.add_argument("--queue", default=QUEUE)
+    p.add_argument("--cash-books", default=None)
     p = sub.add_parser("append")
     p.add_argument("--day", required=True)
     p.add_argument("--notes", required=True)
     p.add_argument("--queue", default=QUEUE)
+    p.add_argument("--cash-books", default=None)
     p = sub.add_parser("notice")
     p.add_argument("--day", required=True)
     p.add_argument("--notes")

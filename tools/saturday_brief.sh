@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# day_trader_pro/tools/saturday_brief.sh — v2.2
+# day_trader_pro/tools/saturday_brief.sh — v2.3
+# v2.3 (2026-11-22) — dtp r572 / SD.3. The run parameters also name the week's WEEKNIGHT study runs (NIGHTLY: every
+#   <WORK>/study_dispatch_nightly_<date> folder present, or "none"), which 2B collects beside Friday's. Labels only.
 # v2.2 (2026-11-21) — dtp r570 / SAT.10 (the operator's new layout, 2026-11-21: "1) Trading- ... 2) Our edge- ...
 #   3) Bot performance- ... 4) Recommendations"; spec v3.0). LABELS ONLY: the run parameters name the new parts (the
 #   STUDIES line says 2B and its FALLBACK 1, the TREES line says 3A and 3B). The timer, the run order, the deadline export,
@@ -434,6 +436,9 @@ export STUDY_DISPATCH_DEADLINE_ET="$_deadline_hm"   # SAT.8: the box studies end
 # SAT.9: Friday night's dispatch writes into this brief's WORK; say whether it ran, so the session knows to collect
 if [ -f "$WORK/study_dispatch/state.json" ]; then _fri="state.json present (collect it)"
 else _fri="NO state.json: Friday's run did not happen (2B FALLBACK 1)"; fi
+# v2.3 (SD.3): the week's weeknight runs, Monday to Thursday night, each in its own folder of this WORK
+_nightly="$(ls -d "$WORK"/study_dispatch_nightly_20??-??-?? 2>/dev/null | tr '\n' ' ')"
+[ -n "$_nightly" ] || _nightly="none this week"
 timeout "$BUDGET_S" "$CLAUDE_BIN" -p $ISOLATE "$(cat "$PROMPT_FILE")
 
 RUN PARAMETERS (from the wrapper; use them exactly):
@@ -443,6 +448,7 @@ RUN PARAMETERS (from the wrapper; use them exactly):
   PRIOR_WORK  last week's working files (the --prior for botlog_scan and checker_sweep): $PRIOR_WORK
   TREES   the trees this brief reports on (3A, 3B and the header): $TREES
   STUDIES Friday night's study dispatch (2B): $WORK/study_dispatch — $_fri
+  NIGHTLY the week's weeknight study runs (2B, collect each with study_dispatch.py status --out): $_nightly
   DEADLINE    you are stopped at $_deadline_hm ET; have the file written well before it" \
   --allowedTools "$TOOLS" >> "$LOG" 2>&1
 rc=$?
