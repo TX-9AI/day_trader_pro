@@ -3,7 +3,7 @@ The operator is asleep. Nothing is sent: when they ask, a session shows them the
 index and then one section (or one part, 1A..4) at a time. The file you write is the brief.
 
 READ FIRST, IN THIS ORDER:
-  1. /home/ubuntu/day_trader_pro/docs/SATURDAY_BRIEF.md  the operator's spec (v3.2), in full. It is the authority
+  1. /home/ubuntu/day_trader_pro/docs/SATURDAY_BRIEF.md  the operator's spec (v3.3), in full. It is the authority
   2. /home/ubuntu/OTV5/docs/WORKING_AGREEMENT.md         §0, §0.1, §0.5, §12, §17, §31, §36a
   3. /home/ubuntu/OTV5/docs/GENESIS.md                   the last 12 rows
   4. /home/ubuntu/OTV5/docs/BACKLOG.md                   PART 1 (open rows), section H in full
@@ -104,6 +104,22 @@ THE NUMBERS FIRST (spec "The numbers (v3.0)"), before section 1 (about 30 s, S3 
        suite, /home/ubuntu/OTV5/tests/{stop_sweep,exit_replay,edge_scan}.py --from <Mon> --to <Fri> (the exit
        replay's positive control first; report a disagreement between tools, never pick one). A lead becomes a study,
        never a code change.
+     · THE RUNAWAY EQUITY WATCH (standing, every Saturday; dtp r575; the operator, 2026-11-22: "I would keep any poor
+       performers on runaway on notice to potentially be cut" and "Can you put a trend bar for runaway on the equities
+       to see if they are trending in the right direction or the wrong direction for that setup?"). Run the one scorer
+       (seconds, local files):
+         cd /home/ubuntu/day_trader_pro && ./venv/bin/python tools/runaway_watch.py --through <this Friday> \
+           --md <WORK>/runaway_watch.md --json <WORK>/runaway_watch.json
+       The list and the bar are FROZEN in ~/reviews/runaway_watch_20261122/WATCH.md (sealed before 2026-11-23; on
+       notice NVDA, AMD, META): a watch-list symbol is RECOMMENDED for cutting from Runaway when its Runaway trades from
+       2026-11-23 on number at least 8 AND their net EV a trade (at the mark, after fees) is below zero; at 8+ with EV
+       at or above zero it comes OFF THE LIST; past trades never count. Show its watch-list table (forward n, net, EV a
+       trade against the bar, status ON NOTICE / RECOMMEND CUT / OFF THE LIST) and its per-equity table (n, net, net EV
+       a trade, the DIRECTION arrow: the last 8 trades against the earlier ones with n beside, and the trend bar). Then
+       one paragraph: each watch-list status, which equities trend up and which down, n each time; fewer than 8
+       forward trades is a small sample: say so. A RECOMMEND CUT goes to section 4 as a recommendation for the
+       operator's yes, never a decision. QUOTE ITS FIGURES; never re-derive one; never a different bar or list, never a
+       cut of a symbol not on it. REPORT ONLY; never call the paper dollars "paper size".
      · DECISIONS IN PROGRESS, every Saturday brief dated on or before 2026-12-04 (the operator decides the Hunt and
        OGAP before the 12-04 cash test). REPORT ONLY; none of them makes an R-item in section 4.
      · OGAP (standing, every Saturday from 2026-11-16 through 2026-12-04; OTV5 OGAP.1, Park's friend's opening-gap trade, QQQ paper only). Its OWN
@@ -244,7 +260,7 @@ THE NUMBERS FIRST (spec "The numbers (v3.0)"), before section 1 (about 30 s, S3 
        ladder walk and fill, every exit's ladder, refusals and caps, feed episodes, the loss-limit state, order
        rejects, the 15:50/15:55 close, the broker's fills against the bot's record), written once, then carried.
      · 4.4 NEXT WEEK'S CALENDAR: the sessions from market_calendar (2026-11-26 closed, Thanksgiving; 2026-11-27 a
-       half day, the 13:00 ET close); the Fed and CPI from the bot's own economic-calendar source (OTV5
+       half day, the 13:00 ET close, a non-trading day: no entries, data only); the Fed and CPI from the bot's own economic-calendar source (OTV5
        config.FOREX_FACTORY_URL, current week only; its ff_calendar_nextweek.json sibling when it answers, else NOT
        MEASURED with the reason); earnings on our symbols: earnings.expected-report-date from the Friday's S3
        raw/market_metrics/dt=<Fri>/sym=<SYM>/ (TastyTrade), listed when it falls next week.
@@ -265,6 +281,11 @@ THE RULES (the spec explains each one):
   · Filter the OTV4TEST fleet's rows out of every warehouse measurement with
     OTV5 tests/warehouse_source.mainline(). 1A's EXCLUDED line names what it dropped, every week.
   · Fees are reported beside P&L and never inside EV.
+  · A 13:00 half day is a NON-TRADING day by the operator's ruling (2026-11-22: "Yes, just treat them as bank
+    holidays. No trading."; OTV5 r145 opens nothing, the boxes record data only; 2026-11-27, 2026-12-24). It is never
+    a session (weekly_facts, cash_books and runaway_watch all leave it out), zero trades on it is never a defect, a
+    non-event or a study, and a trade that opened on one IS a defect (OTV5 HALF.1): weekly_facts names it on a DEFECT
+    line, and 3A reports it.
   · Market data is TastyTrade's (S3); never yfinance here.
   · Never state what you did not measure (§0, §0.1). A measurement that could not be taken goes
     in NOT MEASURED, by name, with the reason (§0.5).

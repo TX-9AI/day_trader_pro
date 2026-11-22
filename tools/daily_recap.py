@@ -1,7 +1,19 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/daily_recap.py  v1.2
-v1.2  2026-11-22  dtp r572 / SD.3 + RECAP.2 + CASHBOOK.1 — FOUR ADDITIONS, ALL MECHANICAL.
+day_trader_pro/tools/daily_recap.py  v1.3
+v1.3  2026-11-22  dtp r575 / HALF.2 + RWATCH.1 — A HALF DAY IS A NON-TRADING DAY, AND THE RUNAWAY EQUITY WATCH.
+      (1) HALF DAYS. The operator, 2026-11-22: "Yes, just treat them as bank holidays. No trading." OTV5 r145 opens
+      nothing on a 13:00 half day (2026-11-27, 2026-12-24); the boxes still wake and record data. The recap still runs
+      (13:40 due, the 17:00 timer as before): the boxes ran, their bot logs, the data capture, the C1-C4 board and the
+      watch still deserve the day's page, and a trade OPENED on a half day is the one thing that would be a defect.
+      context opens with a HALF DAY block saying so (zero trades expected, never a defect, never a study), and validate
+      refuses every proposal on a half day by name (a non-trading day adds no evidence), so nothing is queued from it.
+      (2) THE RUNAWAY EQUITY WATCH (the operator, 2026-11-22: "I would keep any poor performers on runaway on notice to
+      potentially be cut"). context runs tools/runaway_watch.py (the one scorer; WATCH.md frozen and sealed) into
+      WORK/runaway_watch.{md,json}; the notes' "runaway_watch" paragraph is the session's commentary on it, withheld
+      (with --runaway-watch) when it quotes a dollar figure the scorer did not print or says "paper size", the cash_books
+      rule.
+v1.2v1.2  2026-11-22  dtp r572 / SD.3 + RECAP.2 + CASHBOOK.1 — FOUR ADDITIONS, ALL MECHANICAL.
       (1) PARK AND RUNAWAY FIRST (the operator, 2026-11-21: "Our studies going forward now should primarily focus on
       maximizing the PNL on those two trade set ups"). A proposal carries "setup" (the names study_dispatch.SETUP_NAMES
       knows, e.g. "PARK" or "Runaway, Hunt"); the appended item gets the dispatcher's `- Setup:` line right under its
@@ -52,7 +64,9 @@ Usage:
   python tools/daily_recap.py plan [--day D] [--now YYYY-MM-DDTHH:MM]
   python tools/daily_recap.py context --day D --work DIR [--queue Q] [--notes-dir N] [--botlogs B] [--trades T]
   python tools/daily_recap.py validate --day D --notes FILE [--queue Q] [--cash-books WORK/cash_books.json]
+                                       [--runaway-watch WORK/runaway_watch.json]
   python tools/daily_recap.py append --day D --notes FILE [--queue Q] [--cash-books WORK/cash_books.json]
+                                     [--runaway-watch WORK/runaway_watch.json]
   python tools/daily_recap.py notice --day D --notes FILE --summary FILE
 """
 import argparse
@@ -73,6 +87,7 @@ sys.path.insert(0, ROOT)
 import market_calendar        # noqa: E402
 import study_dispatch as SD   # noqa: E402  (parse_queue: the dispatcher's own reader is the proof)
 import cash_books as CB       # noqa: E402  (v1.2: the one C1-C4 scorer)
+import runaway_watch as RW    # noqa: E402  (v1.3: the one Runaway equity watch scorer)
 
 ET = ZoneInfo("America/New_York")
 HOME = os.path.expanduser("~")
@@ -101,7 +116,7 @@ QREQUIRED = ("why", "hypothesis", "arms", "data", "model", "positive_control", "
 PRIORITY_NAMES = tuple(k for k, v in SD.SETUP_NAMES.items() if v in SD.PRIORITY_SETUPS)
 PDF_KEYS = ("revision", "headline", "symbols", "studies_intro", "proposals", "code_intro", "cash_verdict")
 PARA_KEYS = ("headline", "day_note", "section1_close", "studies_intro", "study_recs", "proposals_intro", "code_intro",
-             "cash_verdict", "cash_books", "sources")       # daily_brief.normalize_notes reads a string as one paragraph
+             "cash_verdict", "cash_books", "runaway_watch", "sources")   # daily_brief.normalize_notes: a string = one paragraph
 MREQUIRED = ("id", "backlog", "title", "what", "risk", "when")
 FORBIDDEN = (
     (re.compile(r"resting\s+(take[- ]?profit|tp)\b|\bresting\s+(limit\s+)?(exit|target)\s+order", re.I),
@@ -115,6 +130,29 @@ TOP2 = re.compile(r"\b(top[- ](two|2)|(two|2) (best|biggest|largest) (trades|win
 BOTTOM2 = re.compile(r"\b(bottom[- ](two|2)|(two|2) (worst|largest) (trades|losers)|worst (two|2)|largest losers)",
                      re.I)                      # amendment 1: the top-two figure only ever beside the bottom-two
 LOGONLY = re.compile(r"\blog[- ]only\b|\bshadow\s+(mode|log|rule)\b", re.I)
+
+
+HALF_DAY_RULING = ('the operator, 2026-11-22: "Yes, just treat them as bank holidays. No trading."')
+HALF_DAY_REFUSAL = ("a 13:00 half day is a non-trading day (%s): no study is proposed from it" % HALF_DAY_RULING)
+
+
+def is_half(day):
+    """v1.3: the day is a 13:00 half day (dtp market_calendar), a non-trading day by the operator's ruling."""
+    try:
+        return bool(market_calendar.is_half_day(date.fromisoformat(str(day))))
+    except (TypeError, ValueError):
+        return False
+
+
+def half_day_lines(day):
+    """v1.3 -> the context's HALF DAY block (empty on a full session)."""
+    if not is_half(day):
+        return []
+    return ["HALF DAY: %s is a 13:00 early close, a NON-TRADING day by the operator's ruling (%s). OTV5 r145 opens "
+            "nothing all session; the boxes woke and recorded data only. ZERO TRADES IS EXPECTED: never a defect, "
+            "never a study, never a gap in the window. Any trade OPENED today IS a defect (OTV5 HALF.1). Proposals are "
+            "refused on a half day (the appender queues nothing); the maintenance proposal, the bot logs, the C1-C4 "
+            "board and the Runaway watch are as on any day." % (day, HALF_DAY_RULING), ""]
 
 
 # ── plan ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -296,6 +334,23 @@ def botlog_summary(day, root=BOTLOGS):
     return out or ["(the folder %s is empty)" % d]
 
 
+def watch_problems(notes, sc):
+    """v1.3 -> [reason] the Runaway watch commentary is withheld: a dollar figure the scorer did not print (within $1),
+    or the paper dollars called "paper size"."""
+    txt = _txt(notes.get("runaway_watch"))
+    if not txt.strip():
+        return []
+    out = []
+    if re.search(r"paper[- ]siz", txt, re.I):
+        out.append('calls the paper dollars "paper size" (paper is sized as cash, on purpose)')
+    figs = RW.figures(sc)
+    for m in re.finditer(r"\$\s?([0-9][0-9,]*(?:\.[0-9]+)?)", txt):
+        v = round(float(m.group(1).replace(",", "")))
+        if not any(abs(v - f) <= 1 for f in figs):
+            out.append("quotes $%s, which the scorer did not print" % m.group(1))
+    return out
+
+
 def cash_problems(notes, sc):
     """v1.2 -> [reason] the C1-C4 commentary is withheld: a dollar figure the scorer did not print (within $1), or the
     paper dollars called "paper size"."""
@@ -340,6 +395,7 @@ def cmd_context(a):
     lines = [
         "CONTEXT FOR THE DAILY RECAP OF %s (written by tools/daily_recap.py context)" % a.day,
         "",
+    ] + half_day_lines(a.day) + [
         "Next free study id: WS.%d (the appender assigns ids; you never write one)." % next_ws_id(qt),
         "Queue items already OPEN or FORWARD (never propose a duplicate of one):",
     ]
@@ -363,6 +419,17 @@ def cmd_context(a):
                   % os.path.join(a.work, "cash_books.md")]
     except Exception as e:                       # noqa: BLE001 - the recap goes on; the PDF says NOT MEASURED
         lines += ["", "Cash candidate books C1-C4: NOT MEASURED (%s: %s)" % (type(e).__name__, e)]
+    try:                                         # v1.3: the Runaway equity watch (WATCH.md frozen)
+        rw = RW.score(a.day, trades_dir=a.trades)
+        with open(os.path.join(a.work, "runaway_watch.json"), "w", encoding="utf-8") as fh:
+            json.dump(rw, fh, indent=1, ensure_ascii=False)
+        with open(os.path.join(a.work, "runaway_watch.md"), "w", encoding="utf-8") as fh:
+            fh.write(RW.render_md(rw))
+        lines += ["Runaway equity watch (tools/runaway_watch.py, WATCH.md frozen): %s — %s"
+                  % (os.path.join(a.work, "runaway_watch.md"),
+                     "; ".join("%s %s (forward n %d)" % (s, st, n) for s, n, _nt, _ev, _b, st in RW.watch_rows(rw)))]
+    except Exception as e:                       # noqa: BLE001 - the recap goes on; the PDF says NOT MEASURED
+        lines += ["Runaway equity watch: NOT MEASURED (%s: %s)" % (type(e).__name__, e)]
     lines += ["", "Studies that reported since %s ET (RESULT.json folders):" % since.strftime("%Y-%m-%d %H:%M")]
     lines += ["  " + f for f in found] or ["  (none)"]
     lines += ["", "Queue items closed or carried forward in that span (their status lines):"]
@@ -428,8 +495,11 @@ def validate(notes, queue_text=None, day=None):
         fatal.append("proposals is not a list")
         props = []
     refused, accepted = {}, 0
+    half = is_half(day) if day else False
     for i, p in enumerate(props):
         r = proposal_problems(p) if isinstance(p, dict) else ["not an object"]
+        if half:                                   # v1.3: a half day is a non-trading day; nothing is queued from it
+            r = [HALF_DAY_REFUSAL] + r
         if not r and queue_text:
             d = dup_of(p.get("title"), queue_text, marker(day, i) if day else None)
             if d:
@@ -487,6 +557,9 @@ def cmd_validate(a):
     if a.cash_books and os.path.exists(a.cash_books):
         for c in cash_problems(notes, _load(a.cash_books)):
             print("CASHBOOKS commentary withheld: " + c)
+    if a.runaway_watch and os.path.exists(a.runaway_watch):
+        for c in watch_problems(notes, _load(a.runaway_watch)):
+            print("RUNAWAYWATCH commentary withheld: " + c)
     for f in fatal:
         print("FATAL " + f)
     for i, r in sorted(refused.items()):
@@ -583,6 +656,11 @@ def cmd_append(a):
         if cp:                                          # the PDF prints the scoreboard and says why there is no comment
             notes["cash_books_withheld"] = "; ".join(cp)
             notes.pop("cash_books", None)
+    if a.runaway_watch and os.path.exists(a.runaway_watch):
+        wp = watch_problems(notes, _load(a.runaway_watch))
+        if wp:                                          # v1.3: the PDF prints the watch and says why there is no comment
+            notes["runaway_watch_withheld"] = "; ".join(wp)
+            notes.pop("runaway_watch", None)
     for i, p in enumerate(notes.get("proposals") or []):
         if not isinstance(p, dict):
             continue
@@ -660,11 +738,13 @@ def main(argv=None):
     p.add_argument("--notes", required=True)
     p.add_argument("--queue", default=QUEUE)
     p.add_argument("--cash-books", default=None)
+    p.add_argument("--runaway-watch", default=None)
     p = sub.add_parser("append")
     p.add_argument("--day", required=True)
     p.add_argument("--notes", required=True)
     p.add_argument("--queue", default=QUEUE)
     p.add_argument("--cash-books", default=None)
+    p.add_argument("--runaway-watch", default=None)
     p = sub.add_parser("notice")
     p.add_argument("--day", required=True)
     p.add_argument("--notes")

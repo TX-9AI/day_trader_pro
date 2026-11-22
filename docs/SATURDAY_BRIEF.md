@@ -1,4 +1,6 @@
-# THE SATURDAY BRIEF — spec v3.2
+# THE SATURDAY BRIEF — spec v3.3
+
+**v3.3 · 2026-11-22 · dtp r575 (HALF.2, RWATCH.1)**: two additions; the layout, the brief's own timer, the run order and the CLOSE are unchanged. (1) **A half day is a non-trading day.** The operator, 2026-11-22: *"Yes, just treat them as bank holidays. No trading."* OTV5 r145 opens nothing on a 13:00 half day (2026-11-27, 2026-12-24); the boxes still wake and record data. `tools/weekly_facts.py` v1.1 leaves half days out of the week's sessions the way `cash_books` does (r574), names them in its header, and puts any trade dated on one on a DEFECT line (it stays in every total). Rule 15 below; 4.4 says so. (2) **The Runaway equity watch (2A).** The operator, 2026-11-22: *"I would keep any poor performers on runaway on notice to potentially be cut"* and *"Can you put a trend bar for runaway on the equities to see if they are trending in the right direction or the wrong direction for that setup?"* The list (NVDA, AMD, META) and the cut bar are frozen in `~/reviews/runaway_watch_20261122/WATCH.md` (sealed); `tools/runaway_watch.py` v1.0 scores them; 2A quotes it every Saturday. Gate `tests/check_saturday_brief.py` v2.4 (S39, S40), `tests/check_runaway_watch.py` v1.0.
 
 **v3.2 · 2026-11-22 · dtp r572 (SD.3, CASHBOOK.1)**: two additions; the layout, the brief's own timer, the run order and the CLOSE are unchanged. (1) **2B collects the whole week's study runs.** The operator, 2026-11-21: *"Our studies going forward now should primarily focus on maximizing the PNL on those two trade set ups [PARK and Runaway] ... That should be our number one focus on our nightly studies. I say nightly because the amount of studies that I wanna try is gonna take more than a weekend to find the answer."* The same timer (`dtp-study-dispatch`, now Mon–Fri 17:15 ET) also runs the queue Monday to Thursday night after the day's daily recap, deadline 07:30 ET the next morning, at most 3 studies at once (`study_dispatch.NIGHTLY_MAX_PARALLEL`, a constant), PARK and Runaway items first (each item's `- Setup:` line), into `<WORK>/study_dispatch_nightly_<YYYY-MM-DD>`; Friday's run is unchanged. 2B reads every one of them (`study_dispatch.py status --out <folder>`) beside Friday's; the wrapper names them (NIGHTLY). (2) **1C carries the cash candidate books C1–C4** (the operator, 2026-11-22: *"On C1-C4, I would like some commentary on the daily and weekly recaps as to how each of them is performing"*): `tools/cash_books.py` v1.0, the one scorer of the books frozen in `~/reviews/cash_candidates_20261121/PREREG.md`, for the week, the forward window and combined, with a short commentary that quotes it. Report only. Gate `tests/check_saturday_brief.py` v2.2 (S36, S37).
 
@@ -152,6 +154,10 @@ with the Sunday work list; NOT MEASURED is the only thing after it.
 13. **Market data is TastyTrade's** (S3 `raw/candles`, `raw/ohlc`, `raw/market_metrics`). yfinance only ever for NQ/ES
     study inputs, never here.
 14. **Never proposed:** a config knob or study toggle, a resting take-profit (a closed topic), a new order rule.
+15. **A 13:00 half day is a non-trading day** (v3.3; the operator, 2026-11-22: *"Yes, just treat them as bank holidays.
+    No trading."*; OTV5 r145 opens nothing). It is never a session (`weekly_facts`, `cash_books`, `runaway_watch`), and
+    zero trades on it is never a defect, a non-event or a study. A trade that opened on one is a defect (OTV5 HALF.1),
+    reported in 3A.
 
 ---
 
@@ -331,6 +337,21 @@ the bundles is reported.
   The exit replay's positive control comes first. If replayed trades do not reconcile, every alternative is
   suspect, and the brief says so. When the two tools disagree, report the disagreement; do not pick one. A lead
   becomes a study (2B), never a code change: a candidate needs a sealed-holdout pass before code.
+
+**The Runaway equity watch (v3.3)**, standing, every Saturday. The operator, 2026-11-22: *"I would keep any poor
+performers on runaway on notice to potentially be cut"*; *"Can you put a trend bar for runaway on the equities to see if
+they are trending in the right direction or the wrong direction for that setup?"* The list and the bar are frozen in
+`~/reviews/runaway_watch_20261122/WATCH.md` (sealed before the 2026-11-23 open; on notice NVDA, AMD, META). A
+watch-list symbol is **recommended for cutting** from Runaway when its Runaway trades from 2026-11-23 on number at least
+8 and their net EV a trade (at the mark, after fees) is below zero; at 8 or more with EV at or above zero it comes
+**off the list**; past trades never count; half days are not sessions. One scorer computes it,
+`tools/runaway_watch.py --through <Fri> --md <WORK>/runaway_watch.md` (the trade CSVs, strategy RunawayContinuation,
+the 12 equities = every symbol but QQQ and SPX): the watch-list table (forward n, net, EV a trade against the bar,
+status ON NOTICE / RECOMMEND CUT / OFF THE LIST) and, per equity, n, net, net EV a trade, the cumulative-net trend bar
+since 2026-10-26 with the 11-23 marker and the DIRECTION arrow (the last 8 trades' net EV against the earlier ones',
+n beside). One paragraph of commentary quotes it, never re-derives it, and says while it is that fewer than 8 forward
+trades is a small sample. A RECOMMEND CUT goes to section 4 as a recommendation for the operator's yes, never a
+decision; the list and the bar are never re-argued. Report only.
 
 **Decisions in progress (every Saturday brief dated on or before 2026-12-04).** The operator decides the Hunt and
 OGAP before the 12-04 cash test; until then 2A shows the numbers they decide on. From 2026-12-05 the OGAP line and
@@ -661,7 +682,7 @@ QQQ only, the normal budget, one RTH session, with a careful log review after. O
 Anything else the week showed that would stop the test goes here as an OPEN item with its evidence.
 
 **4.4 Next week's calendar.** The sessions from `market_calendar` (holidays and half days: 2026-11-26 is closed,
-Thanksgiving; 2026-11-27 is a half day, the close at 13:00 ET); the Fed and CPI: high-impact USD events from the
+Thanksgiving; 2026-11-27 is a half day, the close at 13:00 ET, a non-trading day: no entries, data only); the Fed and CPI: high-impact USD events from the
 bot's own economic-calendar source (OTV5 `config.FOREX_FACTORY_URL`); it carries the current week only, so on
 Saturday it shows the week just ended: read its `ff_calendar_nextweek.json` sibling when it answers, else NOT
 MEASURED with that reason (the Monday wake's Fed-day read is the live check); earnings on our symbols: each box

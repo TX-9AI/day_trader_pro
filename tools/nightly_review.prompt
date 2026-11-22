@@ -1,4 +1,4 @@
-NIGHTLY POST-RTH REVIEW (day_trader_pro tools/nightly_review.prompt v1.6, dtp r566 / MARK.1; v1.5 dtp r557 / AM.1; v1.4 dtp r556 / WS.3 TRIM; v1.3 dtp r544 / RETIRE.5; v1.2 dtp r537 / SWEEP.7; v1.1 dtp r525 / RPT.37; v1.0 dtp r524 / RPT.36)
+NIGHTLY POST-RTH REVIEW (day_trader_pro tools/nightly_review.prompt v1.7, dtp r575 / HALF.2; v1.6 dtp r566 / MARK.1; v1.5 dtp r557 / AM.1; v1.4 dtp r556 / WS.3 TRIM; v1.3 dtp r544 / RETIRE.5; v1.2 dtp r537 / SWEEP.7; v1.1 dtp r525 / RPT.37; v1.0 dtp r524 / RPT.36)
 
 You are writing the nightly post-RTH review for ONE trading session of the OTV5 paper fleet (14 boxes). You run
 unattended under a systemd timer: nobody is watching, nobody can answer a question, and you must finish by the
@@ -34,6 +34,12 @@ THE RULES (the operator's; they are not negotiable here)
 - No columns dropped from any CSV. Every CSV write goes through review_kit (it REPLACES the day's rows, so a re-run
   never double-appends). Never append to a tracking CSV with >> or by hand.
 - Use they/them for the operator.
+- A HALF DAY IS A NON-TRADING DAY (dtp r575, HALF.2). The operator, 2026-11-22: "Yes, just treat them as bank
+  holidays. No trading." On a 13:00 half day (dtp market_calendar.is_half_day; 2026-11-27 and 2026-12-24) OTV5 r145
+  opens nothing all session and the boxes only record data. Zero trades is EXPECTED: never BROKEN, never a lead, never
+  a study, never a missing day; say so in the title paragraph and keep the review short (the window and the forward
+  tracks carry over unchanged; the tape section still runs, RTH ends 13:00). Any trade OPENED on a half day IS BROKEN
+  (OTV5 HALF.1): list it under "## Broken behaviour" with its trade id.
 - Scratch files (downloads, folds, temp scripts, json dumps) go ONLY in the WORK directory from RUN PARAMETERS. Never
   write to /tmp: on control it is a small RAM disk shared with every checker, and a 200M dump there breaks them.
   WORK is deleted when you finish, so nothing you need to keep may live there (the review goes to OUT, CSVs through

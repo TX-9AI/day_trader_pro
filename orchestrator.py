@@ -1,4 +1,9 @@
-# day_trader_pro/orchestrator.py — v0.8.2
+# day_trader_pro/orchestrator.py — v0.8.3
+# v0.8.3 (2026-11-22) — dtp r575 / HALF.2. THE HALF-DAY BANNER SAYS NO TRADING TODAY. The operator, 2026-11-22: "Yes,
+#   just treat them as bank holidays. No trading." OTV5 r145 (HALF.1) opens nothing on a 13:00 half day; the boxes still
+#   wake and record data. The banner's second line said exits would fire after the bell (true before OTV5 r268, stale
+#   since); it now reads "No trading today: the bots open nothing (OTV5 r145). The boxes record data only." The wake is
+#   unchanged. Gate tools/check_half_day_banner.py v1.2.
 # v0.8.2 (2026-11-14) — dtp r559 / B5.6 (the 11-14 Saturday brief section 5 item 6). _fmt_score is DELETED: no
 #   caller anywhere in dtp, OTV5, the units, the timers or the prompts. No behaviour change.
 #   Gate tests/check_dead_defs_gone.py.
@@ -563,16 +568,17 @@ def _format_ack(wake_list, baseline, resolved, missing, reached, dry_run):
     # ── HALF-DAY BANNER (r319 / DEP.12) ────────────────────────────────────
     # Operator, 2026-09-07: a banner ABOVE the symbols list. It sits here,
     # before the wake list, so it is the first thing under the title.
-    # 🔴 IT WARNS; IT CHANGES NOTHING. Every exit time in the fleet is still
-    # keyed to a 16:00 close - VERTICAL_HOLD_TO_ET 15:45, the 15:40 flatten
-    # ladder, the butterfly's 15:45 hard close - so on a 13:00 day they all
-    # fire after the bell. That is DEP.12 and it is UNFIXED.
+    # 🔴 IT INFORMS; IT CHANGES NOTHING HERE. v0.8.3 (dtp r575): a 13:00 half
+    # day is a non-trading day by the operator's ruling (2026-11-22: "Yes, just
+    # treat them as bank holidays. No trading."); OTV5 r145 (HALF.1) refuses every
+    # opening all session, so the boxes wake and record data only. The old
+    # second line (exits fire after the bell, DEP.12) went stale at OTV5 r268.
     # ⚠️ TELEGRAM-SAFE: no angle brackets and no ampersand. r290 cost a day to
     # a single "<" in a sent message.
     if market_calendar.is_half_day():
         lines.append("⚠️ *HALF DAY — the market closes 13:00 ET.*")
-        lines.append("_Exit times are still set for a 16:00 close; "
-                     "they will fire after the bell._")
+        lines.append("_No trading today: the bots open nothing (OTV5 r145). "
+                     "The boxes record data only._")
     lines.append(f"*{verb} {len(resolved)} server(s):*")
 
     for s in baseline:

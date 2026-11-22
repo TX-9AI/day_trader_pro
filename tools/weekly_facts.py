@@ -1,6 +1,13 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/weekly_facts.py  v1.0  -  the Saturday brief's numbers (spec v3.0 sections 1A, 1B, 1C, 2A).
+day_trader_pro/tools/weekly_facts.py  v1.1  -  the Saturday brief's numbers (spec v3.0 sections 1A, 1B, 1C, 2A).
+v1.1  2026-11-22  dtp r575 / HALF.2 - A 13:00 HALF DAY IS NOT A SESSION. The operator, 2026-11-22: "Yes, just treat them
+      as bank holidays. No trading." (OTV5 r145 opens nothing on one; the boxes record data only). week_days() leaves
+      out market_calendar.is_half_day the way cash_books.sessions() does (r574), so the brief's session count agrees
+      with the C1-C4 scoreboard (the week of 2026-11-23 is three sessions: 11-26 closed, 11-27 a half day). The week's
+      trades are every trade dated Monday..Friday, so a trade that opened on a half day anyway (a defect) still sits in
+      every total and is named on its own DEFECT line; the warehouse read covers the half day too. The header names
+      the sessions and the half days. Nothing else changes.
 v1.0  2026-11-21  dtp r570 / SAT.10 - THE BRIEF IS THE OPERATOR'S NEW LAYOUT, AND ITS NUMBERS HAVE ONE RIGHT ANSWER. The
       operator, 2026-11-21: "1) Trading- A. Summary of the week's trades, our EV per trade, gross and net totals by
       strategy after fees. MFE/MAE ... B. A breakdown of our give-back on exits and never right on entries, and how
@@ -66,10 +73,21 @@ def epoch_start():
 
 
 def week_days(fri):
+    """The week's SESSIONS, Monday..`fri`: trading days (dtp market_calendar) that are not 13:00 half days (v1.1)."""
     f = date.fromisoformat(fri)
     mon = f - timedelta(days=f.weekday())
     return [(mon + timedelta(days=i)).isoformat() for i in range(5)
-            if market_calendar.is_trading_day(mon + timedelta(days=i)) and mon + timedelta(days=i) <= f]
+            if market_calendar.is_trading_day(mon + timedelta(days=i)) and mon + timedelta(days=i) <= f
+            and not market_calendar.is_half_day(mon + timedelta(days=i))]
+
+
+def week_half_days(fri):
+    """v1.1: the week's 13:00 half days, Monday..`fri` - non-trading days by the operator's ruling, never sessions."""
+    f = date.fromisoformat(fri)
+    mon = f - timedelta(days=f.weekday())
+    return [(mon + timedelta(days=i)).isoformat() for i in range(5)
+            if mon + timedelta(days=i) <= f and market_calendar.is_trading_day(mon + timedelta(days=i))
+            and market_calendar.is_half_day(mon + timedelta(days=i))]
 
 
 def _et(s):
@@ -352,19 +370,23 @@ def warehouse_week(days):
 def compute(fri, use_wh=True, reviews=None):
     E = epoch_start()
     W = week_days(fri)
+    H = week_half_days(fri)                  # v1.1: not sessions; a trade on one is a defect, still counted
+    mon = (date.fromisoformat(fri) - timedelta(days=date.fromisoformat(fri).weekday())).isoformat()
     rows, excl = load_rows(E, fri, reviews)
-    wk = [x for x in rows if x["day"] in W]
-    prior = [x for x in rows if x["day"] < W[0]] if W else rows
+    wk = [x for x in rows if mon <= x["day"] <= fri]
+    prior = [x for x in rows if x["day"] < mon]
     wh, wrows, dropped, banner = {}, [], {}, "not read (--no-warehouse)"
-    if use_wh and W:
-        wrows, dropped, banner = warehouse_week(W)
+    if use_wh and (W or H):
+        wrows, dropped, banner = warehouse_week(sorted(W + H))
         wh = {r.get("trade_id"): r for r in wrows}
     ids_csv = {x["tid"] for x in wk}
     nonclosed = [r.get("trade_id") for r in wrows if str(r.get("status") or "") != "closed"]
     closed_ids = {r.get("trade_id") for r in wrows if str(r.get("status") or "") == "closed"}
     mism = [x["tid"] for x in wk if x["tid"] in wh and _f(wh[x["tid"]].get("pnl_usd")) is not None
             and round(_f(wh[x["tid"]]["pnl_usd"]), 2) != round(x["pnl"], 2)]
-    F = dict(fri=fri, epoch_start=E, week=W, basis="pnl_usd at the mark (the ladder's fill, mark or better); fees "
+    F = dict(fri=fri, epoch_start=E, week=W, half_days=H,
+             half_day_trades=[dict(day=x["day"], sym=x["sym"], strat=strat_label(x)) for x in wk if x["day"] in H],
+             basis="pnl_usd at the mark (the ladder's fill, mark or better); fees "
              "beside, never inside EV; net = gross - fees", warehouse=banner)
     F["excluded"] = dict(otv4test_dropped_warehouse=dropped, otv4test_rows_csv=excl["otv4test"],
                          blank_pnl_csv=excl["blank_pnl"], warehouse_not_closed=nonclosed,
@@ -448,7 +470,8 @@ def compute(fri, use_wh=True, reviews=None):
     F["cells_bottom"] = dict(rk[-6:][::-1]) if len(rk) > 6 else {}
     hunt = [x for x in rows if x["strat"] == RK.HUNT]
     F["hunt"] = dict(epoch={s: agg([x for x in hunt if x["side"] == s], 4000) for s in ("call", "put")},
-                     week={s: agg([x for x in hunt if x["side"] == s and x["day"] in W], 4000) for s in ("call", "put")})
+                     week={s: agg([x for x in hunt if x["side"] == s and mon <= x["day"] <= fri], 4000)
+                           for s in ("call", "put")})
     og = [x for x in rows if x["strat"] == RK.OGAP]
     F["ogap"] = dict(agg(og, 4000), before_1000=sum(1 for x in og if x["t_in"] and x["t_in"].hour < 10),
                      calls=sum(1 for x in og if x["side"] == "call"), puts=sum(1 for x in og if x["side"] == "put"),
@@ -506,7 +529,13 @@ def render(F):
     L = ["# WEEKLY FACTS — week %s..%s · epoch from %s" % (F["week"][0] if F["week"] else "?", F["fri"],
                                                             F["epoch_start"]),
          "", "Basis: %s. `x gross` is the ask/bid figure, a trailing data column only." % F["basis"],
-         "Warehouse: %s" % F["warehouse"]]
+         "Warehouse: %s" % F["warehouse"],
+         "Sessions this week: %d%s" % (len(F["week"]), (" · half days (13:00 close, non-trading days by the operator's "
+                                                         "ruling, not sessions): " + ", ".join(F["half_days"]))
+                                       if F.get("half_days") else "")]
+    if F.get("half_day_trades"):
+        L += ["**DEFECT: trades dated on a half day (OTV5 r145 opens nothing then):** " + "; ".join(
+            "%s %s %s" % (t["day"], t["sym"], t["strat"]) for t in F["half_day_trades"])]
     e = F["excluded"]
     L += ["", "**Excluded / completeness:** OTV4TEST dropped by mainline(): warehouse %s, CSV %d · blank-P&L rows %d %s · "
           "warehouse rows not closed %d %s · only in CSV %s · only in warehouse %s · P&L mismatches %s · fees estimated "

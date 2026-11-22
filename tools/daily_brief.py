@@ -1,6 +1,18 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/daily_brief.py  v1.2  -  the post-trading-day brief (PDF) for any session.
+day_trader_pro/tools/daily_brief.py  v1.3  -  the post-trading-day brief (PDF) for any session.
+v1.3  2026-11-22  dtp r575 / HALF.2 + RWATCH.1 — THE HALF-DAY LINE AND SECTION 5c, THE RUNAWAY EQUITY WATCH.
+      (1) A 13:00 half day (market_calendar.is_half_day) is a non-trading day by the operator's ruling (2026-11-22: "Yes,
+      just treat them as bank holidays. No trading."; OTV5 r145 opens nothing): under the title the brief says so
+      plainly (zero trades expected, data recorded only), names any trade that opened anyway as a DEFECT, and section 3
+      says no study is proposed from a non-trading day.
+      (2) Section 5c (the operator, 2026-11-22: "I would keep any poor performers on runaway on notice to potentially be
+      cut"; "Can you put a trend bar for runaway on the equities ..."): from tools/runaway_watch.py (the one scorer,
+      WATCH.md frozen and sealed): the watch-list table (forward n, net, EV a trade against the bar, status), one small
+      trend line per equity (cumulative net by Runaway trade since 2026-10-26, the 2026-11-23 forward marker, this
+      file's palette), and the per-equity table with the DIRECTION arrow (last 8 vs earlier, n beside); then the
+      session's "runaway_watch" commentary, or the validator's reason when it was withheld. Report only. A scorer
+      failure prints NOT MEASURED and the brief builds.
 v1.2  2026-11-22  dtp r572 / CASHBOOK.1 — SECTION 5b, THE CASH CANDIDATE BOOKS C1-C4. The operator, 2026-11-22: "On
       C1-C4, I would like some commentary on the daily and weekly recaps as to how each of them is performing". After
       section 5, one table from tools/cash_books.py (the one scorer, PREREG frozen; ~/reviews/trades CSVs, the mark,
@@ -570,7 +582,10 @@ def facts(day):
 
 
 PARA_KEYS = ("headline", "day_note", "section1_close", "studies_intro", "study_recs", "proposals_intro", "code_intro",
-             "cash_verdict", "cash_books", "sources")
+             "cash_verdict", "cash_books", "runaway_watch", "sources")
+HALF_DAY_LINE = ("HALF DAY — a non-trading day. The market closed at 13:00 ET, and by the operator's ruling (2026-11-22: "
+                 "\"Yes, just treat them as bank holidays. No trading.\") the bots open nothing (OTV5 r145); the boxes "
+                 "woke and recorded data only. Zero trades is expected, never a defect.")
 
 
 def normalize_notes(notes):
@@ -631,6 +646,55 @@ def cash_books_rows(day, trades_dir=None):
     return [head + ".", data, note]
 
 
+def runaway_watch_score(day, trades_dir=None):
+    """v1.3 -> the scorer's dict, or (None, reason)."""
+    try:
+        sys.path.insert(0, os.path.join(DTP_ROOT, "tools"))
+        import runaway_watch as RW                       # noqa: E402  (stdlib + market_calendar + review_kit only)
+        return RW, RW.score(day, trades_dir=trades_dir or RW.TRADES), None
+    except Exception as e:                               # noqa: BLE001
+        return None, None, "%s: %s" % (type(e).__name__, e)
+
+
+def watch_chart(RW, sc):
+    """v1.3: one small trend line per equity, cumulative net by Runaway trade, the forward marker dashed."""
+    eq = list(sc["equities"].items())
+    cols = 4
+    rows_ = max(1, math.ceil(len(eq) / cols))
+    fig, axes = plt.subplots(rows_, cols, figsize=(7.4, 1.05 * rows_ + 0.2), dpi=200, squeeze=False)
+    for k, ax in enumerate(axes.flat):
+        if k >= len(eq):
+            ax.axis("off")
+            continue
+        sym, e = eq[k]
+        ys = [0.0] + list(e["cum"])
+        xs = list(range(len(ys)))
+        col = LOSS if (e["net"] or 0) < 0 else WIN
+        ax.axhline(0, color=GRID, linewidth=0.6, zorder=1)
+        if e["forward_index"] is not None:
+            ax.axvline(e["forward_index"] + 0.5, color=ACCENT, linewidth=0.7, linestyle="--", zorder=2)
+        ax.plot(xs, ys, color=col, linewidth=1.1, zorder=3)
+        if len(ys) > 1:
+            ax.scatter([xs[-1]], [ys[-1]], s=8, color=col, zorder=4)
+        d = e["direction"]
+        tag = " · watch" if e.get("watch") else ""
+        ax.set_title("%s %s n %d · %s%s" % (sym, d["arrow"] if d["word"] != "n/a" else "", e["n"], money(e["net"], dec=0),
+                                           tag), fontsize=6.4, color=INK, loc="left",
+                     fontweight="bold" if e.get("watch") else "normal")
+        ax.tick_params(labelsize=5.2, length=2)
+        ax.set_xticks([])
+        ax.yaxis.set_major_locator(plt.MaxNLocator(3))
+        ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda y, _: f"{y/1e3:.1f}k" if abs(y) >= 1e3 else f"{y:.0f}"))
+        for s_ in ("top", "right"):
+            ax.spines[s_].set_visible(False)
+    fig.tight_layout(pad=0.3, h_pad=0.6, w_pad=0.6)
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png")
+    plt.close(fig)
+    buf.seek(0)
+    return buf, 1.05 * rows_ + 0.2
+
+
 def build(day, notes, out_dir):
     c = compute(day)
     trades, tmeta, dropped, by_sym = c["trades"], c["tmeta"], c["dropped"], c["by_sym"]
@@ -677,6 +741,13 @@ def build(day, notes, out_dir):
     st.append(P(f"{rev}  ·  {len(trades)} trades on {len(by_sym)} symbols  ·  paper day **{money(tot_p)}** at the "
                 f"mark, fees {money(tot_f, sign=False)} beside (net {money(tot_p - tot_f)})  ·  "
                 f"if cash (QQQ/SPX only): **{money(cash_p)}**, fees {money(cash_f, sign=False)} beside", "sub"))
+    half_day = market_calendar.is_half_day(dt.date.fromisoformat(day))
+    if half_day:                                          # v1.3: the operator's ruling, stated plainly
+        st.append(P("**" + HALF_DAY_LINE + "**"))
+        if trades:
+            st.append(P(f"**DEFECT: {len(trades)} trade(s) on a half day** (OTV5 r145 / HALF.1 should have refused every "
+                        f"opening): " + ", ".join(f"{r.get('symbol')} {SHORT.get(r.get('strategy'), r.get('strategy'))}"
+                                                  for r in trades) + "."))
     if notes.get("headline"):
         for h in notes["headline"]:
             st.append(P(h))
@@ -799,7 +870,8 @@ def build(day, notes, out_dir):
                 blk.append(Paragraph(f"<b>{lab}.</b> {esc(pr[key])}", S["body"]))
         st.append(KeepTogether(blk))
     if not notes.get("proposals"):
-        st.append(P("No proposals supplied for this day."))
+        st.append(P("No study is proposed from a half day: it is a non-trading day (the operator's ruling)."
+                    if half_day else "No proposals supplied for this day."))
 
     # ── Section 4 ──
     st.append(PageBreak())
@@ -863,6 +935,44 @@ def build(day, notes, out_dir):
     if notes.get("cash_books_withheld"):
         st.append(P("Commentary withheld by the recap's validator: " + notes["cash_books_withheld"] + ".", "small"))
     elif not notes.get("cash_books"):
+        st.append(P("No commentary supplied for this day.", "small"))
+
+    # ── Section 5c (v1.3): the Runaway equity watch, scored by tools/runaway_watch.py ──
+    st.append(Spacer(1, 8))
+    st.append(P("5c. The Runaway equity watch", "h1"))
+    RW, wsc, werr = runaway_watch_score(day)
+    if wsc is None:
+        st.append(P(f"Runaway watch: NOT MEASURED ({werr}).", "small"))
+    else:
+        st.append(P(f"Frozen in {wsc['watch']} (sealed 2026-11-22, before any forward data): on notice "
+                    f"{', '.join(wsc['watch_list'])}. A watch-list symbol is RECOMMENDED for cutting from Runaway when "
+                    f"its Runaway trades from {wsc['forward_start']} on number at least {wsc['cut_min_n']} and their "
+                    f"net EV a trade (at the mark, after fees) is below zero; at {wsc['cut_min_n']}+ with EV at or above "
+                    f"zero it comes off the list. Past trades never count. Any cut needs the operator's yes. "
+                    f"Forward sessions so far: {len(wsc['forward_sessions'])} (half days are not sessions).", "small"))
+        data = [["Symbol", "Fwd n", "Fwd net", "Fwd EV / trade", "Against the bar", "Status"]]
+        for s_, n_, net_, ev_, bar_, stt in RW.watch_rows(wsc):
+            data.append([s_, str(n_), money(net_, dec=0) if n_ else "-", money(ev_, dec=0) if ev_ is not None else "-",
+                         bar_, stt])
+        st.append(table(data, [x * inch for x in (0.7, 0.55, 0.85, 1.0, 2.6, 1.3)]))
+        img, h_in = watch_chart(RW, wsc)
+        st.append(Spacer(1, 3))
+        st.append(Image(img, width=7.4 * inch, height=h_in * inch))
+        st.append(P("Each line: the equity's cumulative net P&L (after fees, at the mark) by Runaway trade since "
+                    "2026-10-26; the dashed line is the 2026-11-23 forward marker; red ends below zero, green above; "
+                    "the arrow is the DIRECTION (the last 8 trades' net EV a trade against the earlier ones').", "small"))
+        data = [["Symbol", "n", "Net", "Net EV / trade", "Direction (last 8 vs earlier, n beside)", "Watch"]]
+        for s_, e in wsc["equities"].items():
+            data.append([s_, str(e["n"]), money(e["net"], dec=0), money(e["ev_net"], dec=0) if e["ev_net"] is not None
+                         else "-", RW.dir_text(e["direction"]), e.get("status", "-")])
+        st.append(table(data, [x * inch for x in (0.6, 0.4, 0.8, 0.9, 3.4, 0.95)]))
+        if wsc.get("fees_estimated"):
+            st.append(P(f"Fees estimated for {wsc['fees_estimated']} blank fee cell(s) (review_kit.est_fee).", "small"))
+    for h in notes.get("runaway_watch", []):
+        st.append(P(h))
+    if notes.get("runaway_watch_withheld"):
+        st.append(P("Commentary withheld by the recap's validator: " + notes["runaway_watch_withheld"] + ".", "small"))
+    elif not notes.get("runaway_watch"):
         st.append(P("No commentary supplied for this day.", "small"))
 
     # ── Section 6 (v1.1): the day's ONE maintenance proposal, for a yes ──

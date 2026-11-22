@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/check_half_day_banner.py  v1.1
+day_trader_pro/tools/check_half_day_banner.py  v1.2
+v1.2  2026-11-22  dtp r575 / HALF.2 - B4 and B5 RESTATED: a half day is a non-trading day (the operator, 2026-11-22:
+"Yes, just treat them as bank holidays. No trading."; OTV5 r145 opens nothing). B4 reads the new second line
+("_No trading today ..."), still Telegram-safe; B5 wants the banner to say no trading today and the boxes record data
+only, and the stale "they will fire after the bell" line gone from the code. B1-B3 unchanged (a half day is still a
+market_calendar trading day: the boxes wake).
 v1.1  2026-09-07  dtp r319 - B3 re-anchored on the AST. The string-position
 version went red on this delivery's OWN version header, which names the banner
 because §5 requires the entry. §20, sixth time this session.
@@ -100,14 +105,17 @@ def main() -> int:
 
     # B4 — Telegram safety of the literal banner strings.
     lits = re.findall(r'"(⚠️ \*HALF DAY[^"]*)"', src)
-    lits += re.findall(r'"(_Exit times[^"]*)"', src)
+    lits += re.findall(r'"(_No trading today[^"]*)"', src)
     bad = [c for lit in lits for c in "<>&" if c in lit]
     check("B4  the banner carries no <, > or & (r290)", not bad and bool(lits),
           f"{len(lits)} literal(s)")
 
-    # B5 — it must NOT claim the fleet handles it.
-    check("B5  the banner says exits still fire after the bell",
-          "after the bell" in src, "DEP.12 stays open and the message says so")
+    # B5 (v1.2) — the banner states the operator's ruling: no trading, data only; the stale exit line is gone.
+    code = "\n".join(ln for ln in src.splitlines() if not ln.lstrip().startswith("#"))
+    check("B5  the banner says no trading today and the boxes record data only",
+          "No trading today: the bots open nothing (OTV5 r145). " in code
+          and "The boxes record data only._" in code and "fire after the bell" not in code,
+          "OTV5 r145 (HALF.1); the pre-r268 exit line gone")
 
     print()
     if F:

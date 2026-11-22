@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
-# day_trader_pro/tools/daily_recap.sh — v1.1
+# day_trader_pro/tools/daily_recap.sh — v1.2
+# v1.2 (2026-11-22) — dtp r575 / HALF.2 + RWATCH.1. The session's RUN PARAMETERS name the Runaway equity watch context
+#   wrote (RWATCH, tools/runaway_watch.py), and validate / append read its JSON (--runaway-watch: a watch commentary
+#   quoting a figure the scorer did not print is withheld). A 13:00 half day is a non-trading day by the operator's
+#   ruling (2026-11-22: "Yes, just treat them as bank holidays. No trading."): it is still recapped (the boxes woke
+#   and recorded data; a trade opened on one is a defect), daily_recap.py says so in the context and the PDF, and its
+#   validator queues no study from it. No new knob.
 # v1.1 (2026-11-22) — dtp r572 / SD.3 + RECAP.2 + CASHBOOK.1. validate and append now read the queue (a proposal that
 #   duplicates any queue item's title is refused) and the C1-C4 scoreboard context wrote (WORK/cash_books.json: a
 #   commentary quoting a figure the scorer did not print is withheld). The session's RUN PARAMETERS name the bot-log
@@ -19,7 +25,7 @@
 #
 # WHEN (tools/dtp-daily-recap.{service,timer}): Mon-Fri 17:00 ET, Persistent. It recaps TODAY only: a weekend or
 #   holiday skips (daily_recap.py plan, dtp market_calendar), a session not yet closed + 40 min skips, a half day
-#   (13:00 close, 2026-11-27) is recapped at 17:00 like any other. It waits for the nightly review (~/reviews/DAY.md
+#   (13:00 close, 2026-11-27) is recapped at 17:00 like any other, as a non-trading day (v1.2: no study queued). It waits for the nightly review (~/reviews/DAY.md
 #   and dtp-nightly-review.service no longer running, up to DAILY_RECAP_REVIEW_WAIT_S), then runs. A day whose PDF
 #   exists stands down (it never runs twice for a day; delete the PDF to rebuild), and a second start while one runs
 #   stands down on the lock. Notes already written and valid for the day are reused (no second session).
@@ -160,6 +166,7 @@ RUN PARAMETERS (from the wrapper; use them exactly):
   CONTEXT   $WORK/context.md
   BOTLOGS   $OUTDIR/botlogs/$DAY (the day's bot-log extracts, one file a box, copied by the conductor before the stop)
   CASHBOOKS $WORK/cash_books.md (C1-C4, tools/cash_books.py; quote it, never re-derive it)
+  RWATCH    $WORK/runaway_watch.md (the Runaway equity watch, tools/runaway_watch.py; quote it, never re-derive it)
   MODEL     $MODEL_NOTES
   WORK      $WORK  - EVERY scratch file you make goes here (it is deleted when you finish); never /tmp
   DEADLINE  you are stopped at $_deadline_hm ET; have the file written well before it" \
@@ -179,11 +186,11 @@ fi
 # ── validate, queue the studies, build the PDF ──
 STATUS="PRODUCED"; QUEUED="-"
 if [ -f "$NOTES" ] && "$PY" "$HELPER" validate --day "$DAY" --notes "$NOTES" --queue "$QUEUE" \
-      --cash-books "$WORK/cash_books.json" > "$WORK/validate.txt" 2>&1; then
+      --cash-books "$WORK/cash_books.json" --runaway-watch "$WORK/runaway_watch.json" > "$WORK/validate.txt" 2>&1; then
   cat "$WORK/validate.txt" >> "$LOG"
   if [ -f "$QUEUE" ]; then
     QUEUED="$("$PY" "$HELPER" append --day "$DAY" --notes "$NOTES" --queue "$QUEUE" \
-      --cash-books "$WORK/cash_books.json" 2>&1)"; arc=$?
+      --cash-books "$WORK/cash_books.json" --runaway-watch "$WORK/runaway_watch.json" 2>&1)"; arc=$?
     log "$QUEUED"
     [ "$arc" = 0 ] || { STATUS="PARTIAL"; ledger "WARN queue_append_refused day=$DAY"; }
   else

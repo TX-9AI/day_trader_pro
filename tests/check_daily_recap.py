@@ -1,6 +1,17 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_daily_recap.py  v1.2
+day_trader_pro/tests/check_daily_recap.py  v1.3
+v1.3  2026-11-22  dtp r575 / HALF.2 + RWATCH.1 (daily_recap v1.3, daily_recap.sh v1.2, the prompt v1.4, daily_brief
+      v1.3). R11 wants daily_brief v1.3; R15's PARA_KEYS anchor names "runaway_watch" before "sources". NEW:
+  R17 a 13:00 half day is a non-trading day (the operator, 2026-11-22: "Yes, just treat them as bank holidays. No
+      trading."): the 11-27 recap still runs (R2), its context opens with the HALF DAY block (11-23's does not), every
+      proposal on 11-27 is refused by name and nothing is queued (the same notes on 11-23 queue), the PDF code states
+      the ruling under the title and in section 3 and names a half-day trade as a DEFECT, and the prompt says zero
+      trades is expected, never a defect, never a study
+  R18 the Runaway equity watch: context writes the scorer's runaway_watch.md / .json and names each watch status; a
+      commentary quoting a figure the scorer did not print, or saying "paper size", is withheld (append records
+      runaway_watch_withheld), a commentary quoting it is kept; the PDF has section 5c from tools/runaway_watch.py with
+      a trend line per equity; the wrapper passes RWATCH and --runaway-watch; the prompt carries the report-only rules
 v1.2  2026-11-22  dtp r572 / PREREG amendment 1. NEW R16: a C1-C4 commentary that names the two best trades (or a book
       "dependent on its best trades") without the two worst beside them is withheld, one that gives both is kept; the
       PDF's 5b column prints ex top-2 and ex bottom-2 together; the prompt says both or neither, never a qualifier.
@@ -525,7 +536,7 @@ try:
     comp = True
 except py_compile.PyCompileError:
     comp = False
-ck("R11", comp and "daily_brief.py  v1.2" in gs and 'NOTES_DIR = os.path.expanduser("~/reviews/daily_brief/notes")' in gs
+ck("R11", comp and "daily_brief.py  v1.3" in gs and 'NOTES_DIR = os.path.expanduser("~/reviews/daily_brief/notes")' in gs
    and "--facts" in gs and "--summary-json" in gs and "/home/ubuntu/venvs/daily_brief" in gs
    and not os.path.exists(os.path.join(TOOLS, "venv")) and not os.path.exists(os.path.join(TOOLS, "notes"))
    and "11-20 showed" not in gs and os.path.exists(os.path.join(TOOLS, "daily_brief.requirements.txt")),
@@ -633,7 +644,8 @@ ck("R15", os.path.exists(os.path.join(_w15, "cash_books.md")) and _sc15.get("win
    and DR.cash_problems(_good, _sc15) == [] and any("$9,999" in x for x in DR.cash_problems(_inv, _sc15))
    and any("paper size" in x for x in DR.cash_problems(_ps, _sc15))
    and "cash_books" not in _after15 and "$9,999" in _after15.get("cash_books_withheld", "")
-   and "5b. The cash candidate books C1-C4" in _bs and "cash_books_rows(day)" in _bs and '"cash_books", "sources")' in _bs
+   and "5b. The cash candidate books C1-C4" in _bs and "cash_books_rows(day)" in _bs
+   and '"cash_books", "runaway_watch", "sources")' in _bs
    and '"cash_books":' in _pr15 and "REPORT ONLY" in _pr15 and "paper size" in _pr15
    and "never in the window EV or the theories" in _pr15 and "never propose changing a book's definition" in _pr15
    and "CASHBOOKS $WORK/cash_books.md" in read(WRAP) and '--cash-books "$WORK/cash_books.json"' in read(WRAP),
@@ -651,6 +663,72 @@ ck("R16", any("amendment 1" in x for x in DR.cash_problems(_t1, _sc15))
    and '"Fwd ex top-2 / ex bottom-2"' in _bs16 and 'f["gross_ex_bottom2"]' in _bs16
    and "quote both or neither" in _pr16 and "never a qualifier" in _pr16 and "(gross without the top two)" not in _pr16,
    "the top-two figure alone is withheld, both together pass; the PDF and the prompt carry both or neither")
+
+# ── R17 (v1.3, HALF.2): a half day is a non-trading day ──────────────────────────────────────────────────────────────
+_ctx = lambda day, w, q, tr: DR.main(["context", "--day", day, "--work", w, "--queue", q,     # noqa: E731
+                                      "--notes-dir", os.path.join(TMP, "nd17"), "--studies", os.path.join(TMP, "st17"),
+                                      "--weekly", os.path.join(TMP, "wk17"), "--otv5-backlog", os.path.join(TMP, "nobl"),
+                                      "--hygiene", os.path.join(TMP, "hy17"), "--botlogs", os.path.join(TMP, "bl17"),
+                                      "--trades", tr])
+_q17 = os.path.join(TMP, "q17.md")
+write(_q17, QFIX)
+_w17h, _w17f = os.path.join(TMP, "w17h"), os.path.join(TMP, "w17f")
+_ctx("2026-11-27", _w17h, _q17, os.path.join(TMP, "tr17"))
+_ctx("2026-11-23", _w17f, _q17, os.path.join(TMP, "tr17"))
+_c17h, _c17f = read(os.path.join(_w17h, "context.md")), read(os.path.join(_w17f, "context.md"))
+_n17 = os.path.join(TMP, "n17.json")
+write(_n17, json.dumps(dict(NOTES_OK, proposals=[proposal("Runaway gap filter", setup="Runaway")])))
+_rc17 = DR.main(["append", "--day", "2026-11-27", "--notes", _n17, "--queue", _q17])
+_p17 = json.loads(read(_n17))["proposals"][0]
+_q17after = read(_q17)
+_fat17, _ref17, _ = DR.validate(json.loads(read(_n17)), QFIX, "2026-11-23")
+_pr17 = re.sub(r"\s+", " ", read(os.path.join(TOOLS, "daily_recap.prompt")))
+_bs17 = read(os.path.join(TOOLS, "daily_brief.py"))
+ck("R17", "HALF DAY: 2026-11-27 is a 13:00 early close, a NON-TRADING day" in _c17h and "HALF DAY" not in _c17f
+   and "ZERO TRADES IS EXPECTED" in _c17h and _rc17 == 0 and not _p17.get("ws_id")
+   and "non-trading day" in _p17.get("queue_refused", "") and _q17after == QFIX and not _ref17
+   and "A HALF DAY IS A NON-TRADING DAY" in _pr17 and "never a defect, never a study" in _pr17
+   and "Yes, just treat them as bank holidays. No trading." in _pr17
+   and "HALF_DAY_LINE" in _bs17 and "if half_day:" in _bs17 and "DEFECT: {len(trades)} trade(s) on a half day" in _bs17
+   and "No study is proposed from a half day" in _bs17,
+   "11-27's context says NON-TRADING (11-23's does not); its proposal refused (%s) and the queue untouched; the same "
+   "proposal valid on 11-23; prompt and PDF state the ruling" % _p17.get("queue_refused", "")[:60])
+
+# ── R18 (v1.3, RWATCH.1): the Runaway equity watch ───────────────────────────────────────────────────────────────────
+import runaway_watch as RW  # noqa: E402
+_tr18 = os.path.join(TMP, "tr18")
+write(os.path.join(_tr18, "2026-11-23.csv"),
+      "sym,trade_id,strategy,direction,contracts,entry_premium,exit_premium,pnl_usd,entry_time,exit_time,exit_reason,fee\n"
+      "NVDA,a,RunawayContinuation,long,2,1,2,-412.0,2026-11-23T14:40:00+00:00,2026-11-23T15:00:00+00:00,x,8.0\n"
+      "TSLA,b,RunawayContinuation,long,2,1,2,250.0,2026-11-23T14:41:00+00:00,2026-11-23T15:10:00+00:00,x,5.0\n")
+_w18 = os.path.join(TMP, "w18")
+_ctx("2026-11-23", _w18, _q17, _tr18)
+_c18 = read(os.path.join(_w18, "context.md"))
+_rj = os.path.join(_w18, "runaway_watch.json")
+_sc18 = json.loads(read(_rj)) if os.path.exists(_rj) else {}
+_g18 = dict(NOTES_OK, runaway_watch=["NVDA is ON NOTICE: 1 forward trade, net $420; 7 more are needed."])
+_i18 = dict(NOTES_OK, runaway_watch=["NVDA lost $9,999."])
+_ps18 = dict(NOTES_OK, runaway_watch=["At paper size NVDA lost $420."])
+_n18 = os.path.join(TMP, "n18.json")
+write(_n18, json.dumps(_i18))
+DR.main(["append", "--day", "2026-11-23", "--notes", _n18, "--queue", _q17, "--runaway-watch", _rj])
+_a18 = json.loads(read(_n18))
+_pr18 = re.sub(r"\s+", " ", read(os.path.join(TOOLS, "daily_recap.prompt")))
+_bs18 = read(os.path.join(TOOLS, "daily_brief.py"))
+_ws18 = read(WRAP)
+ck("R18", os.path.exists(os.path.join(_w18, "runaway_watch.md"))
+   and (_sc18.get("equities", {}).get("NVDA", {}).get("forward") or {}).get("net") == -420.0
+   and "NVDA ON NOTICE (forward n 1)" in _c18
+   and DR.watch_problems(_g18, _sc18) == [] and any("$9,999" in x for x in DR.watch_problems(_i18, _sc18))
+   and any("paper size" in x for x in DR.watch_problems(_ps18, _sc18))
+   and "runaway_watch" not in _a18 and "$9,999" in _a18.get("runaway_watch_withheld", "")
+   and "5c. The Runaway equity watch" in _bs18 and "watch_chart(RW, wsc)" in _bs18 and '"runaway_watch", "sources")' in _bs18
+   and "RWATCH    $WORK/runaway_watch.md" in _ws18 and _ws18.count('--runaway-watch "$WORK/runaway_watch.json"') == 2
+   and '"runaway_watch":' in _pr18 and "REPORT ONLY; never \"paper size\"" in _pr18
+   and "never a decision" in _pr18 and "never propose a different bar, a different list" in _pr18
+   and "RWATCH (RUN PARAMETERS)" in _pr18,
+   "the watch lands in WORK and its statuses in the context; an invented figure and 'paper size' withhold the "
+   "commentary, quoted figures pass; PDF section 5c, the wrapper and the prompt's report-only rules")
 
 shutil.rmtree(TMP, ignore_errors=True)
 print()

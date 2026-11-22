@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_saturday_brief.py  v2.3
+day_trader_pro/tests/check_saturday_brief.py  v2.4
+v2.4  2026-11-22  dtp r575 (HALF.2, RWATCH.1). S36's header anchor is spec v3.3. NEW S39: 2A carries the Runaway
+      equity watch (prompt and spec): the one scorer tools/runaway_watch.py run for the Friday, WATCH.md frozen, the bar
+      (8 forward trades from 2026-11-23, net EV a trade below zero after fees), the statuses, the DIRECTION arrow with
+      n, quoted never re-derived, a RECOMMEND CUT for the operator's yes, report only. NEW S40: a 13:00 half day is a
+      non-trading day: weekly_facts, DRIVEN for the week of 2026-11-23, counts three sessions (11-27 out, named), keeps
+      a trade dated 11-27 in the totals and names it on a DEFECT line; the prompt's rules and the spec's rule 15 say so.
 v2.3  2026-11-22  dtp r572 / PREREG amendment 1. NEW S38: the C1-C4 block in 1C (prompt and spec) shows gross without
       the two largest winners only beside gross without the two largest losers, as concentration context, never a
       qualifier, and never "dependent on its best trades" without the worst-trades figure; the one-sided wording is gone.
@@ -890,7 +896,7 @@ _b2 = _p36.split("### 2B.", 1)[-1].split("## 3.", 1)[0]
 _sh36 = open(SH).read()
 ck("S36", "<WORK>/study_dispatch_nightly_<YYYY-MM-DD>" in _b2 and "study_dispatch.py status --out <WORK>/study_dispatch_nightly_" in _b2
    and "2B covers EVERY run of the week" in _b2 and "at most 3 at once" in _b2 and "PARK and Runaway" in _b2
-   and "# THE SATURDAY BRIEF — spec v3.2" in spec and "**The whole week's runs (v3.2).**" in spec
+   and "# THE SATURDAY BRIEF — spec v3.3" in spec and "**The whole week's runs (v3.2).**" in spec
    and "study_dispatch_nightly_<YYYY-MM-DD>" in _s36 and "Mon–Fri 17:15 ET" in _s36
    and 'NIGHTLY the week' in _sh36 and "study_dispatch_nightly_20??-??-??" in _sh36
    and _sh36.index("_nightly=") < _sh36.index('timeout "$BUDGET_S"'),
@@ -912,6 +918,46 @@ ck("S38", "BESIDE gross without the two largest losers" in _c1 and "never a qual
    and "beside gross without the two largest losers" in _sc1 and "never a qualifier" in _sc1
    and "gross without the top two" not in _sc1 and "leans on its top two" not in _sc1,
    "1C's C1-C4 block: ex top-2 only beside ex bottom-2, concentration context, never a qualifier")
+
+# S39 (v2.4, dtp r575 / RWATCH.1): the Runaway equity watch in 2A
+_a2 = _p36.split("### 2A.", 1)[-1].split("### 2B.", 1)[0]
+_sa2 = _s36.split("### 2A. TOP EARNING SETUP CONDITIONS, AND WHERE TO LOOK FOR EDGE")[-1].split("### 2B.", 1)[0]
+ck("S39", "THE RUNAWAY EQUITY WATCH" in _a2 and "tools/runaway_watch.py --through <this Friday>" in _a2
+   and "runaway_watch_20261122/WATCH.md" in _a2 and "at least 8" in _a2 and "below zero" in _a2
+   and "ON NOTICE / RECOMMEND CUT / OFF THE LIST" in _a2 and "DIRECTION arrow" in _a2 and "QUOTE ITS FIGURES" in _a2
+   and "operator's yes, never a decision" in _a2 and "REPORT ONLY" in _a2 and '"paper size"' in _a2
+   and "small sample" in _a2 and "NVDA, AMD, META" in _a2
+   and "**The Runaway equity watch (v3.3)**" in _sa2 and "tools/runaway_watch.py --through <Fri>" in _sa2
+   and "WATCH.md" in _sa2 and "Report only" in _sa2 and "DIRECTION arrow" in _sa2,
+   "2A runs the one Runaway watch scorer for the Friday, quotes it, and keeps a cut the operator's yes")
+
+# S40 (v2.4, dtp r575 / HALF.2): a half day is not a session; weekly_facts DRIVEN for the week of 11-23
+_wf40 = tempfile.mkdtemp(prefix="chk_satbrief_wf40_")
+os.makedirs(os.path.join(_wf40, "trades"))
+for _d, _rs in {"2026-11-23": [("QQQ", "h1", "PARK", "long", 2, 1.00, 100.0, "11:01", 2.50, 1.80)],
+                "2026-11-27": [("NVDA", "h2", "RunawayContinuation", "long", 1, 2.00, -40.0, "09:45", 1.25, 2.00)]}.items():
+    with open(os.path.join(_wf40, "trades", _d + ".csv"), "w") as fh:
+        fh.write(_HDR + "\n")
+        for (sy, ti, stg, dr, c, ep, pnl, hm, fee, mfe) in _rs:
+            hh, mm = map(int, hm.split(":"))
+            fh.write("%s,%s,%s,%s,%d,%.2f,%.2f,%.2f,%sT%02d:%02d:00+00:00,%sT%02d:%02d:00+00:00,exit,%s,%.2f,,,,\n" % (
+                sy, ti, stg, dr, c, ep, ep + pnl / (c * 100), pnl, _d, hh + 5, mm, _d, hh + 6, mm, fee, mfe))
+_o40 = os.path.join(_wf40, "out")
+r40 = subprocess.run([sys.executable, "-I", WF, "--fri", "2026-11-27", "--out", _o40, "--no-warehouse"],
+                     capture_output=True, text=True, timeout=300, env=dict(os.environ, DTP_REVIEWS_DIR=_wf40))
+_j40 = json.load(open(os.path.join(_o40, "weekly_facts.json"))) if r40.returncode == 0 else {}
+_md40 = open(os.path.join(_o40, "weekly_facts.md")).read() if r40.returncode == 0 else ""
+shutil.rmtree(_wf40, ignore_errors=True)
+_rules = _p36.split("THE RULES (the spec explains each one):", 1)[-1].split("THE BOXES:", 1)[0]
+ck("S40", r40.returncode == 0 and _j40.get("week") == ["2026-11-23", "2026-11-24", "2026-11-25"]
+   and _j40.get("half_days") == ["2026-11-27"] and (_j40.get("week_book") or {}).get("n") == 2
+   and [t.get("sym") for t in _j40.get("half_day_trades", [])] == ["NVDA"]
+   and "Sessions this week: 3" in _md40 and "DEFECT: trades dated on a half day" in _md40
+   and "A 13:00 half day is a NON-TRADING day" in _rules and "never a session" in _rules
+   and "15. **A 13:00 half day is a non-trading day**" in spec and "a non-trading day: no entries, data only" in _p36
+   and "a non-trading day: no entries, data only" in _s36,
+   "weekly_facts: week of 11-23 = %s, half days %s, the 11-27 trade kept and named; the rules say so (rc=%s %s)" % (
+       _j40.get("week"), _j40.get("half_days"), r40.returncode, (r40.stderr or "")[-200:]))
 
 print()
 if FAILS:

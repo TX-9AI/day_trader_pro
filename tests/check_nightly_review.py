@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_nightly_review.py  v1.5
+day_trader_pro/tests/check_nightly_review.py  v1.6
+v1.6  2026-11-22  dtp r575 / HALF.2 — A 13:00 HALF DAY IS A NON-TRADING DAY (the operator, 2026-11-22: "Yes, just treat
+      them as bank holidays. No trading."; OTV5 r145 opens nothing). NEW N17: the prompt (v1.7) says zero trades on a
+      half day is expected, never BROKEN, never a lead or a study, and a trade opened on one IS broken; review_kit's
+      review of 2026-11-27 is due at 13:40 ET (not before) and its giveback of a day with no trades is n 0, no error.
 v1.5  2026-11-19  dtp r566 / MARK.1 — THE MARK IS THE ONLY BASIS. The operator, 2026-11-19: "I don't give a rat shit what
       the bid-ask is. Mark is the worst buy or sell we accept." N15 RESTATED (it pinned r557's executable lead): the
       prompt leads at the mark, sorts the theories by the mark EV, names the basis "the ladder's fill (mark or better)",
@@ -548,6 +552,17 @@ n13 = bool(_e) and abs(_e("SOFI", 87) - 31.75) < 1e-9 and abs(_e("AMD", 4) - 5.0
     and abs(_e("AMD", 12) - 13.00) < 1e-9 and abs(_e("SPX", 10) - 24.70) < 1e-9
 ck("N13", n13, "blank-fee estimate: SOFI 87 -> 31.75 (capped), AMD 4 -> 5.00, AMD 12 -> 13.00, SPX 10 -> 24.70 (no cap)"
    + ("" if _e else " - review_kit has no est_fee"))
+
+# N17 (v1.6, HALF.2): a half day is a non-trading day
+_pr17 = re.sub(r"\s+", " ", read(os.path.join(TOOLS, "nightly_review.prompt")))
+_g17 = K.giveback("2026-11-27", [])
+_d17a = K.due(datetime(2026, 11, 27, 13, 39, tzinfo=K.ET))
+_d17b = K.due(datetime(2026, 11, 27, 13, 40, tzinfo=K.ET))
+ck("N17", "A HALF DAY IS A NON-TRADING DAY" in _pr17 and "Yes, just treat them as bank holidays. No trading." in _pr17
+   and "Zero trades is EXPECTED: never BROKEN, never a lead, never a study" in _pr17
+   and "Any trade OPENED on a half day IS BROKEN" in _pr17 and "nightly_review.prompt v1.7" in _pr17
+   and _g17["n"] == 0 and _g17["pct"] is None and _d17b == "2026-11-27" and _d17a != "2026-11-27",
+   "the prompt states the ruling; 11-27 due at 13:40 (%s / %s); an empty day's giveback n=%d" % (_d17a, _d17b, _g17["n"]))
 
 shutil.rmtree(TMP, ignore_errors=True)
 print()
