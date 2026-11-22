@@ -64,6 +64,10 @@ aggregation. Protect it (see "Protect the EOD chain" below).
 Each unit ships in `tools/` and is installed by the operator with its `tools/install_*.sh` (never by the land).
 
 ```
+ 15:35 ET  dtp-held-page          tools/held_contracts_page.py (dtp r573): each running box's open options, read
+                                  read-only from its trades.db; ONE page when any is held (LIVE lines first with a
+                                  ready-to-paste tastytrade desk message, paper in a short list, an unreachable box
+                                  named). Skips holidays and 13:00 half days. Install: sudo bash tools/install_held_page.sh
  16:05 ET  dtp-eod-conductor      the drain: capture, purge, stop every box; first copies each box's day of
                                   ERROR/CRITICAL/Traceback lines and restarts to ~/reviews/daily_brief/botlogs/
                                   <date>/<SYM>.txt (dtp r572; bounded, never holds the stop)

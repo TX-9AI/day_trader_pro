@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_study_dispatch.py  v1.7
+day_trader_pro/tests/check_study_dispatch.py  v1.8
+v1.8  2026-11-22  dtp r573 / SD.4 — THE FRIDAY RUN LEAVES A RUNNING BOX ALONE TOO (study_dispatch v1.9). N8: a Friday
+      run (no --nightly) never claims, ssh's, wakes or stops a box that was RUNNING when it started (the conductor's
+      HELD box, or one the operator is on), on the first pick or a later one, and still runs every item on the boxes
+      it may take; running_at_start is recorded in state.json. A1b, A2, A3 and H3 re-pointed: FLEET's running boxes
+      (CCC, EEE, CRM) are no longer claimed or stopped as idle; the three items run on BBB and DDD. Red on r572 at
+      N8 (and the four re-pointed ids).
 v1.7  2026-11-22  dtp r572 / SD.3 — THE WEEKNIGHT QUEUE (study_dispatch v1.8, friday_studies.sh v1.3; the operator,
       2026-11-21: "That should be our number one focus on our nightly studies"). N1 the `- Setup:` line is read
       strictly (exact names, one line, the parent's for a sub-item; a title naming PARK with no line is tier 1); N2 a
@@ -283,12 +289,12 @@ touched = {c[1] if isinstance(c[1], str) else s for c in ops.calls for s in (c[1
 starts = [c[1] for c in ops.calls if c[0] == "start"]
 stops = [s for c in ops.calls if c[0] == "stop" for s in c[1]]
 ck("A1", "AAA" not in touched, "a box someone else claimed is left alone")
-ck("A1b", "CRM" in stops and "CRM" not in ops.items_on,
-   "v1.4: CRM is an ordinary box - running, unclaimed and unassigned, it is stopped like EEE")
-ck("A2", starts == [("BBB", "DDD")] and set(ops.items_on) == {"BBB", "CCC", "DDD"},
-   f"one item per box on unclaimed boxes; only the stopped chosen boxes are woken (start calls {starts})")
-ck("A3", "EEE" in stops and open(os.path.join(cl, "AAA")).read().startswith("park_cont"),
-   "the idle running box is stopped; the other owner's claim file is untouched")
+ck("A1b", "CRM" not in stops and "CRM" not in ops.items_on and "CRM" not in touched,
+   "v1.8 (SD.4): CRM is an ordinary box - running at the start, it is left alone like EEE and CCC")
+ck("A2", starts == [("BBB", "DDD")] and set(ops.items_on) == {"BBB", "DDD"},
+   f"items go to the unclaimed boxes that were stopped, which are woken (start calls {starts}); a running box is not taken")
+ck("A3", "EEE" not in stops and "CCC" not in stops and open(os.path.join(cl, "AAA")).read().startswith("park_cont"),
+   "v1.8 (SD.4): a box running at the start is not stopped as idle; the other owner's claim file is untouched")
 ck("A4", sorted(os.listdir(cl)) == ["AAA"] and all(b.get("released") for b in d.state["boxes"].values()),
    "every claim this run wrote is released at the end")
 qt = open(q).read()
@@ -301,7 +307,7 @@ ck("H2", os.path.exists(os.path.join(f1, "RESULT.json")) and os.path.exists(os.p
 cleans = [c for c in ops.calls if c[0] == "ssh" and "CLEAN_DONE" in c[2]]
 ck("H3", len(cleans) == 3 and all("rm -rf /home/ubuntu/study_sdTEST" in c[2] and
                                   "-home-ubuntu-study-sdTEST" in c[2] and "pkill" in c[2] for c in cleans)
-   and set(stops) >= {"BBB", "CCC", "DDD"},
+   and set(stops) == {"BBB", "DDD"},
    "every box: the session killed, the work dir and the transcripts removed, then stopped")
 sm = open(os.path.join(d.out, "summary.md")).read()
 ck("H4", "| WS.6a |" in sm and "trim it" in sm and "## NOT MEASURED" in sm, "summary.md carries the table and the recommendations")
@@ -857,8 +863,30 @@ if _HAS:
        and d.stop_idle is False,
        "the cap is a code constant of 3, never read from the environment or config; --max 10 --nightly is still 3")
     shutil.rmtree(root)
+    # N8 (v1.8, SD.4): the FRIDAY run (no --nightly) leaves a box running at its start alone, on every pick
+    _F8 = [("B1", "10.0.1.1", "running"), ("B2", "10.0.1.2", "stopped"), ("B3", "10.0.1.3", "running"),
+           ("B4", "10.0.1.4", "stopped")]
+    root, ops, d = _cenv(False, _F8)
+    d.run()
+    _touch = {c[1] for c in ops.calls if isinstance(c[1], str)} | {x for c in ops.calls if isinstance(c[1], tuple)
+                                                                    for x in c[1]}
+    _stops = [s for c in ops.calls if c[0] == "stop" for s in c[1]]
+    _done8 = [i for i, v in d.state["items"].items() if v["status"] == "DONE"]
+    root2, ops2, d2 = _cenv(False, [("B1", "10.0.1.1", "running"), ("B2", "10.0.1.2", "stopped")])
+    d2.pick_boxes(1)
+    ops2._fleet = [("B1", "10.0.1.1", "running"), ("B2", "10.0.1.2", "running")]
+    _again = d2.pick_boxes(5)
+    ck("N8", "B1" not in _touch and "B3" not in _touch and "B1" not in _stops and "B3" not in _stops
+       and {"B2", "B4"} <= _touch and len(_done8) == 7 and d.state.get("mode") == "friday"
+       and d.state.get("running_at_start") == ["B1", "B3"]
+       and not os.path.exists(os.path.join(root, "claims", "B1")) and not os.path.exists(os.path.join(root, "claims", "B3"))
+       and [s for s, _ip in _again] == [] and "B1" not in os.listdir(os.path.join(root2, "claims")),
+       f"a Friday run never claims, ssh's or stops a box RUNNING at its start (the conductor's HELD box), on a later "
+       f"pick too, and runs all 7 items on the others ({len(_done8)} DONE): touched {sorted(_touch)}, stops {sorted(set(_stops))}")
+    shutil.rmtree(root)
+    shutil.rmtree(root2)
 else:
-    for _n in ("N1", "N2", "N3", "N4", "N5"):
+    for _n in ("N1", "N2", "N3", "N4", "N5", "N8"):
         ck(_n, False, "study_dispatch has no Setup tiers or weeknight cap (item_setups / NIGHTLY_MAX_PARALLEL)")
 
 # N7 a COPY of the live queue (never the file itself): every `- Setup:` line there reads, PARK / RunawayContinuation

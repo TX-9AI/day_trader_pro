@@ -1,6 +1,14 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/study_dispatch.py  v1.8
+day_trader_pro/tools/study_dispatch.py  v1.9
+v1.9  2026-11-22  dtp r573 / SD.4 — THE FRIDAY RUN NEVER CLAIMS OR STOPS A BOX THAT WAS RUNNING WHEN IT STARTED.
+      v1.8 gave that rule to `--nightly` only, so the Friday 17:15 run could still claim a box the conductor HELD
+      (a drain that did not verify) or one the operator is on, and stop an idle running box as "idle unclaimed".
+      Now both modes take ONE snapshot of the fleet at the first pick (running_at_start): a box running then and
+      not this run's own is never claimed (no ssh, no wake, no claim file) and never stopped, on every later pick
+      too; `--nightly` keeps v1.8's wider skip (any running box that is not this run's). Friday's idle stop is
+      left only for a box that came up after the start and was not taken. Gate: tests/check_study_dispatch.py
+      v1.8 N8 (red on r572); A1b, A2, A3 and H3 re-pointed to the rule.
 v1.8  2026-11-22  dtp r572 / SD.3 — THE QUEUE RUNS EVERY WEEKNIGHT TOO, AT MOST THREE AT A TIME, PARK AND RUNAWAY FIRST.
       The operator, 2026-11-21: "Our studies going forward now should primarily focus on maximizing the PNL on those
       two trade set ups [PARK and Runaway] ... That should be our number one focus on our nightly studies. I say
@@ -677,6 +685,7 @@ class Dispatcher:
         self.claims_dir = claims_dir or CLAIMS
         self.studies = studies or STUDIES
         self.update_queue, self.stop_idle, self.only, self.max_boxes = update_queue, stop_idle, only, max_boxes
+        self.running_at_start = None                   # v1.9: the boxes running at the first pick, never claimed or stopped
         self.bucket = bucket if bucket is not None else getattr(ops, "bucket", "")
         self.run_id = run_id or "sd" + ops.now().strftime("%Y%m%dT%H%M")
         self.day = ops.now().strftime("%Y%m%d")
@@ -895,6 +904,9 @@ class Dispatcher:
 
     def pick_boxes(self, need):
         fleet = self.ops.fleet()
+        if self.running_at_start is None:              # v1.9: one snapshot, both modes
+            self.running_at_start = {sym for sym, _ip, st in fleet if st == "running"}
+            self.state["running_at_start"] = sorted(self.running_at_start)
         chosen, idle = [], []
         for sym, ip, st in fleet:
             if self.only and sym not in self.only:
@@ -902,6 +914,9 @@ class Dispatcher:
             owner = claim_owner(sym, self.claims_dir)
             if owner is not None:
                 self.log(f"skip {sym}: claimed by '{owner}'")
+                continue
+            if sym in self.running_at_start and sym not in self.state["boxes"]:
+                self.log(f"skip {sym}: running when the run started (held or in use), not claimed, not stopped")
                 continue
             if self.nightly and st == "running" and sym not in self.state["boxes"]:
                 self.log(f"skip {sym}: running at a weeknight start (held or in use), left as it is")
@@ -911,7 +926,7 @@ class Dispatcher:
                     chosen.append((sym, ip, st))
                     self.state["boxes"][sym] = {"ip": ip, "claimed": True, "released": False}
                 continue
-            if st == "running":
+            if st == "running" and sym not in self.running_at_start:
                 idle.append(sym)
         to_wake = [s for s, _ip, st in chosen if st != "running"]
         if to_wake:

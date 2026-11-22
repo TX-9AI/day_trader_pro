@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_checker_sweep.py  v1.1
+day_trader_pro/tests/check_checker_sweep.py  v1.2
+v1.2  2026-11-22  dtp r573 / LAND.13 — W9-W11: the sweep runs tools/check_land_discipline.py with --repo and, on a clean
+      tree, --rev HEAD (checker_sweep v1.4). W9 a clean fixture tree carrying this tree's REAL check_land_discipline.py,
+      its tip a landed "r2:" revision with a bumped module: GREEN (a bare run is red there by design); W10 the same
+      tree, its tip an "r3:" commit that edits the module without bumping it: RED, with the BUMP line in its log; W11
+      checker_args: --rev HEAD only on a clean tree, --repo alone on a dirty one, nothing for any other checker.
+      Red on r572 at W9-W11 (a bare run there fails BUMP "nothing differs" on both trees).
 v1.1  2026-11-08  dtp r537 / SWEEP.7 — W8: the headline counts the [env] red apart ("N run, R red, E env red").
 v1.0  2026-10-31  dtp r520 / SAT.4 — THE SATURDAY SWEEP GIVES EVERY CHECKER ITS OWN SCRATCH AND DIFFS BY CHECK ID.
 
@@ -119,6 +125,53 @@ ck("W6", files("newly_red") == ["tests/check_a_creates.py"]
    and "NEWLY RED: fx/tests/check_a_creates.py" in r2.stdout,
    f"the diff buckets: newly {files('newly_red')}, greened {files('green_that_was_red')}, "
    f"changed {changed}, new {files('new_checkers')}, gone {d.get('gone_checkers')}")
+
+# W9-W11 (v1.2): the land-discipline checker on a clean tree, green when the tip is disciplined and red when it is not
+import shutil  # noqa: E402
+lt = tempfile.mkdtemp(prefix="chk_sweep_land_")
+os.makedirs(os.path.join(lt, "tools"))
+shutil.copy(os.path.join(ROOT, "tools", "check_land_discipline.py"), os.path.join(lt, "tools", "check_land_discipline.py"))
+_genv = dict(os.environ, HOME=tempfile.mkdtemp(prefix="chk_sweep_home_"), GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t",
+             GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")
+_g = lambda *a: subprocess.run(["git", "-C", lt, *a], capture_output=True, text=True, env=_genv)
+_mod = lambda v, x, log: ("#!/usr/bin/env python3\n# mod.py — v%s\n%s\nX = %d\n" % (v, log, x))
+write(lt, "mod.py", _mod("1.0", 1, "# v1.0 (2026-01-01) — born."))
+_g("init", "-q")
+_g("add", "-A")
+_g("commit", "-qm", "r1: base")
+write(lt, "mod.py", _mod("1.1", 2, "# v1.1 (2026-02-01) — the change.\n# v1.0 (2026-01-01) — born."))
+_g("commit", "-qam", "r2: r2: the change")
+
+
+def _land_sweep(tag):
+    o = tempfile.mkdtemp(prefix="chk_sweep_%s_" % tag)
+    rr = subprocess.run([sys.executable, TOOL, "--out", o, "--tree", f"lt={lt}", "--timeout", "60"],
+                        capture_output=True, text=True, timeout=180, env=_genv)
+    jj = json.load(open(os.path.join(o, "sweep.json"))) if os.path.exists(os.path.join(o, "sweep.json")) else {"results": []}
+    rec = {x["file"]: x for x in jj["results"]}.get("tools/check_land_discipline.py", {"rc": None})
+    lp = os.path.join(o, "logs", "lt__tools_check_land_discipline.py.log")
+    return rec["rc"], (open(lp).read() if os.path.exists(lp) else rr.stdout + rr.stderr)
+
+
+_rc9, _log9 = _land_sweep("w9")
+ck("W9", _rc9 == 0 and "resolved to r2" in _log9 and "BUMP      PASS" in _log9,
+   f"a clean tree whose tip is a disciplined land: check_land_discipline GREEN in the sweep (rc {_rc9})"
+   + ("" if _rc9 == 0 else ": " + " | ".join(l.strip() for l in _log9.splitlines() if "✗" in l)[:200]))
+write(lt, "mod.py", _mod("1.1", 3, "# v1.1 (2026-02-01) — the change.\n# v1.0 (2026-01-01) — born."))
+_g("commit", "-qam", "r3: r3: an edit with no bump")
+_rc10, _log10 = _land_sweep("w10")
+ck("W10", _rc10 == 1 and "BUMP mod.py: title still v1.1" in _log10,
+   f"the same clean tree, its tip an unbumped edit: RED in the sweep (rc {_rc10})")
+_sw = __import__("importlib.util").util.spec_from_file_location("_sweep_mod", TOOL)
+_swm = __import__("importlib.util").util.module_from_spec(_sw)
+_sw.loader.exec_module(_swm)
+_a_clean = _swm.checker_args("tools/check_land_discipline.py", lt) if hasattr(_swm, "checker_args") else None
+write(lt, "scratch.txt", "dirty\n")
+_a_dirty = _swm.checker_args("tools/check_land_discipline.py", lt) if hasattr(_swm, "checker_args") else None
+_a_other = _swm.checker_args("tests/check_a_creates.py", lt) if hasattr(_swm, "checker_args") else None
+ck("W11", _a_clean == ["--repo", lt, "--rev", "HEAD"] and _a_dirty == ["--repo", lt] and _a_other == [],
+   f"checker_args: clean {_a_clean}, dirty {_a_dirty}, any other checker {_a_other}")
+shutil.rmtree(lt)
 
 import fnmatch  # noqa: E402
 ck("W7", not fnmatch.fnmatch("checker_sweep.py", "check_*.py"),

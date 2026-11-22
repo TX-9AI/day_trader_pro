@@ -1,5 +1,17 @@
 #!/usr/bin/env python3
-# day_trader_pro/tools/check_land_discipline.py — v1.3
+# day_trader_pro/tools/check_land_discipline.py — v1.4
+# v1.4 (2026-11-22) — dtp r573 / LAND.13. `--rev HEAD` CHECKS THE LAST LANDED
+#   REVISION, AS OTV5's COPY HAS SINCE ITS v5.3 (OTV5 r89, LAND.6). This copy
+#   read --rev only as a ledger label: dtp carries no docs/GENESIS.md, so the
+#   label was never looked up (GENESIS SKIP), and --against stayed HEAD, so a
+#   clean tree diffed against itself and BUMP failed "nothing differs from
+#   HEAD" whatever --rev said. The Saturday checker sweep ran this file bare and
+#   read that refusal as a red on every clean live tree. Now a --rev that is a
+#   git ref is resolved to the rNNN: label of that commit's subject, it must be
+#   the tip, and --against defaults to <ref>~1 when it was left at HEAD (OTV5's
+#   resolve_rev, the same refusals); a bare run with an empty diff names the
+#   --rev HEAD form. Labels (the lander's call) behave exactly as before. Gate:
+#   tests/check_land_discipline_ref.py D1-D6 (new in dtp).
 # v1.3 (2026-09-26) — dtp r435. NEW CHECK **LEDGER**, AND ITS ABSENCE HAD
 #   ALREADY COST EIGHT ROWS. v1.1's capability detection is right in principle
 #   — absent artifact => SKIP and say so by name, so dtp never cries wolf over
@@ -397,7 +409,9 @@ def check(repo, rev, ref, problems, notes, hook=False):
             return
         problems.append("BUMP: nothing differs from %s except generated or "
                         "append-only files. A land that changes no source is a "
-                        "land that did not happen." % ref)
+                        "land that did not happen. To check the last landed "
+                        "revision instead: --rev HEAD (resolves its rNNN: label, "
+                        "diffs against HEAD~1)" % ref)
         return
     checked = unversioned = 0
     for status, rel in files:
@@ -581,6 +595,38 @@ def selftest():
     return 0 if ok else 1
 
 
+LABEL = re.compile(r"^r\d+[a-z]?(?:_r\d+)?$")
+SUBJECT_LABEL = re.compile(r"^(r\d+[a-z]?(?:_r\d+)?):")
+
+
+def resolve_rev(repo, rev, against):
+    """v1.4 (OTV5 v5.3's, unchanged). A ledger label passes through unchanged.
+    Anything else is a git ref: it must name the tip, and it becomes the rNN:
+    label of its commit subject, with --against defaulting to <ref>~1.
+    Returns (label, against, error)."""
+    if not rev or LABEL.match(rev):
+        return rev, against, ""
+    repo = os.path.abspath(os.path.expanduser(repo))
+    p = sh(["git", "rev-parse", "--verify", "--quiet", rev + "^{commit}"], repo)
+    if p.returncode != 0:
+        return "", against, ("--rev %s is neither a ledger label (rNNN) nor a git ref in %s" % (rev, repo))
+    sha = p.stdout.strip()
+    head = sh(["git", "rev-parse", "HEAD"], repo).stdout.strip()
+    if sha != head:
+        return "", against, ("--rev %s is not the tip (HEAD). This tool checks the working tree and the ledger's "
+                             "last-row rule, so only the newest landed revision can be checked standalone; check "
+                             "out that commit first" % rev)
+    subj = sh(["git", "log", "-1", "--format=%s", sha], repo).stdout.strip()
+    m = SUBJECT_LABEL.match(subj)
+    if not m:
+        return "", against, ("--rev %s: its commit subject does not start with a revision label (rNNN:), so the "
+                             "ledger row cannot be named; pass --rev rNNN" % rev)
+    if against == "HEAD":
+        against = sha + "~1"
+    print("  --rev %s resolved to %s (commit %s), diffed against %s" % (rev, m.group(1), sha[:7], against))
+    return m.group(1), against, ""
+
+
 def main(argv):
     ap = argparse.ArgumentParser()
     ap.add_argument("--repo", default=".")
@@ -593,7 +639,12 @@ def main(argv):
     a = ap.parse_args(argv[1:])
     if a.selftest:
         return selftest()
-    return run(a.repo, a.rev, a.against, a.hook)
+    rev, against, err = resolve_rev(a.repo, a.rev, a.against)
+    if err:
+        print("check_land_discipline — %s" % a.repo)
+        print("\n  PROBLEMS (1):\n   ✗ " + err + "\n\nFAIL")
+        return 1
+    return run(a.repo, rev, against, a.hook)
 
 
 if __name__ == "__main__":

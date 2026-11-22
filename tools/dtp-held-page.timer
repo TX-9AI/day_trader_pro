@@ -1,0 +1,10 @@
+[Unit]
+Description=held-contracts page at 15:35 ET on weekdays (holidays and 13:00 half days: refused by the script) (dtp r573 / HELD.1)
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 15:35:00 America/New_York
+AccuracySec=1s
+Persistent=false
+
+[Install]
+WantedBy=timers.target

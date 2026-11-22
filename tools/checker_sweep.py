@@ -1,6 +1,14 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/checker_sweep.py — v1.3
+day_trader_pro/tools/checker_sweep.py — v1.4
+v1.4  2026-11-22  dtp r573 / LAND.13 — tools/check_land_discipline.py IS RUN WITH --repo AND, ON A CLEAN TREE, --rev HEAD.
+      A bare run checks a PENDING delivery, so on a clean live tree it fails BUMP "nothing differs from HEAD" by
+      design, and every sweep of a live tree listed it red (the 2026-11-22 r572 base sweep: the only red). checker_args()
+      now gives it `--repo <tree> --rev HEAD` when `git status --porcelain` is empty (the last landed revision: its
+      rNNN: label, its diff against HEAD~1, the tree's own ledger - OTV5's docs/GENESIS.md by its default, dtp's shared
+      ~/options-trader-v4 ledger by its LEDGER check), and `--repo <tree>` alone on a dirty tree (a build: the pending
+      delivery, as before). dtp's copy needed check_land_discipline v1.4 for --rev HEAD to mean anything there.
+      Every other checker still runs bare.
 v1.3  2026-11-15  dtp r563 / B5.10 (hygiene item 10) — the scratch env no longer sets OT_RESTING_DB or OT_RESTING_STOP_STATE:
       OTV5 r118 deleted the resting-offer store and r68 the resting stop, their only readers, and OTV5 r123 drops both
       from land.sh and boot_sweep. Every other scratch store unchanged.
@@ -56,6 +64,20 @@ FAIL_IDS = (
     re.compile(r"^FAILED: (.+)$", re.M),                                # "FAILED: S1, S2"
 )
 ENV_RED = re.compile(r"ModuleNotFoundError|ImportError: No module named")
+
+
+def _clean_tree(root: str) -> bool:
+    p = subprocess.run(["git", "-C", root, "status", "--porcelain"], capture_output=True, text=True)
+    return p.returncode == 0 and not p.stdout.strip()
+
+
+def checker_args(rel: str, root: str) -> list:
+    """v1.4: the arguments a checker needs to mean what the sweep asks of it. Only the land-discipline checker has any:
+    the tree it checks, and on a clean tree the last landed revision (a bare run checks a pending delivery)."""
+    if rel.replace(os.sep, "/") == "tools/check_land_discipline.py":
+        root = os.path.abspath(root)
+        return ["--repo", root] + (["--rev", "HEAD"] if _clean_tree(root) else [])
+    return []
 
 
 def scratch_env(s: str) -> dict:
@@ -117,7 +139,8 @@ def sweep(trees: dict, out: str, timeout: int, keep: bool = False) -> dict:
             s = tempfile.mkdtemp(prefix=f"sweep-{name}-")
             t0 = time.time()
             try:
-                r = subprocess.run([py, rel], cwd=root, env=scratch_env(s), capture_output=True, text=True,
+                r = subprocess.run([py, rel] + checker_args(rel, root), cwd=root, env=scratch_env(s),
+                                   capture_output=True, text=True,
                                    timeout=timeout)
                 rc, text = r.returncode, (r.stdout or "") + (r.stderr or "")
             except subprocess.TimeoutExpired as e:
