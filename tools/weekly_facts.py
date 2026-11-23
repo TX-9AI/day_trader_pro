@@ -1,6 +1,16 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/weekly_facts.py  v1.1  -  the Saturday brief's numbers (spec v3.0 sections 1A, 1B, 1C, 2A).
+day_trader_pro/tools/weekly_facts.py  v1.2  -  the Saturday brief's numbers (spec v3.0 sections 1A, 1B, 1C, 2A).
+v1.2  2026-11-22  dtp r578 / CAP.11 (control's half of OTV5 r151) - EVERY FIGURE IS "AS CASH WOULD HAVE TRADED". OTV5 r151
+      makes the daily catastrophic cap record only on a paper box (the operator, 2026-11-22: "there's no harm in
+      letting paper run & we can just note if the breaker would have popped"): a paper box trades on and tags what it
+      opens after the would-be trip after_cap = 1; a cash box books OGAP paper beside its cash rows (OTV5 r150).
+      load_rows gives every CSV row its book (review_kit.split, the one rule, per file) and returns the HEADLINE rows
+      only, so every table, EV, interval, giveback, streak and the OGAP vs PARK scale reads as cash would have traded;
+      the after_cap and paper_on_cash rows are kept apart (excluded["after_cap"], excluded["paper_on_cash"]), count as
+      in the CSV for the warehouse completeness check, and render prints one "extra paper after the breaker" line
+      (the week and the epoch: n, gross, fees, net) and one paper-on-a-cash-box line under 1A, each only when it has a
+      row. A week with neither renders as v1.1.
 v1.1  2026-11-22  dtp r575 / HALF.2 - A 13:00 HALF DAY IS NOT A SESSION. The operator, 2026-11-22: "Yes, just treat them
       as bank holidays. No trading." (OTV5 r145 opens nothing on one; the boxes record data only). week_days() leaves
       out market_calendar.is_half_day the way cash_books.sessions() does (r574), so the brief's session count agrees
@@ -119,13 +129,14 @@ def bucket(t):
 def load_rows(start, fri, reviews=None):
     """-> (rows, excluded): every closed trade in ~/reviews/trades/<day>.csv, start..fri, in one shape."""
     reviews = reviews or RK.REVIEWS
-    rows, excl = [], {"blank_pnl": [], "otv4test": 0}
+    rows, excl = [], {"blank_pnl": [], "otv4test": 0, "after_cap": [], "paper_on_cash": []}
     bf = RK.load_exec_backfill(os.path.join(reviews, "exec_basis_backfill.csv"))   # load_window's own source
     for fn in sorted(glob.glob(os.path.join(reviews, "trades", "20*.csv"))):
         day = os.path.basename(fn)[:10]
         if not (start <= day <= fri):
             continue
-        for r in csv.DictReader(open(fn)):
+        raw = list(csv.DictReader(open(fn)))
+        for r, bk in zip(raw, RK.split(raw, modes=RK.modes_for_file(fn))):         # v1.2 (CAP.11): the row's book, per the file's day
             if r.get("sym") in RK.OTV4TEST_SYMS:
                 excl["otv4test"] += 1
                 continue
@@ -144,6 +155,9 @@ def load_rows(start, fri, reviews=None):
                                else (bf.get(r.get("trade_id") or "") or (None, ""))[0]),
                      live=(SR.status(r["strategy"]) == SR.LIVE))
             x["bucket"] = bucket(ti) if ti else "?"
+            if bk != RK.HEADLINE:                      # v1.2: beside the as-cash figures, never inside
+                excl[bk].append(x)
+                continue
             rows.append(x)
     rows.sort(key=lambda x: (x["t_out"] or x["t_in"] or datetime.max.replace(tzinfo=ET)))
     return rows, excl
@@ -379,7 +393,8 @@ def compute(fri, use_wh=True, reviews=None):
     if use_wh and (W or H):
         wrows, dropped, banner = warehouse_week(sorted(W + H))
         wh = {r.get("trade_id"): r for r in wrows}
-    ids_csv = {x["tid"] for x in wk}
+    xwk = {k: [x for x in excl[k] if mon <= x["day"] <= fri] for k in ("after_cap", "paper_on_cash")}
+    ids_csv = {x["tid"] for x in wk} | {x["tid"] for k in xwk for x in xwk[k]}   # v1.2: still CSV rows
     nonclosed = [r.get("trade_id") for r in wrows if str(r.get("status") or "") != "closed"]
     closed_ids = {r.get("trade_id") for r in wrows if str(r.get("status") or "") == "closed"}
     mism = [x["tid"] for x in wk if x["tid"] in wh and _f(wh[x["tid"]].get("pnl_usd")) is not None
@@ -394,6 +409,10 @@ def compute(fri, use_wh=True, reviews=None):
                          only_in_warehouse=(sorted(closed_ids - ids_csv) if use_wh else None),
                          pnl_mismatch=mism, fees_estimated_week=sum(1 for x in wk if x["est"]),
                          mfe_missing_week=sum(1 for x in wk if x["mfe_usd"] is None))
+    # v1.2 (CAP.11): the extras, beside (each key only when it has a row)
+    for k in ("after_cap", "paper_on_cash"):
+        if excl[k]:
+            F["extra_" + k] = dict(week=agg(xwk[k], 0), epoch=agg(excl[k], 0))
     # 1A: the week
     F["week_book"] = agg(wk)
     F["week_by_strategy"] = {k: dict(agg(v, 4000), **excursions(v, wh))
@@ -544,6 +563,17 @@ def render(F):
                                     e["warehouse_not_closed"] or "", e["only_in_csv"], e["only_in_warehouse"],
                                     e["pnl_mismatch"], e["fees_estimated_week"], e["mfe_missing_week"])]
     L += ["", "## 1A the week"]
+    if F.get("extra_after_cap"):                 # v1.2 (CAP.11)
+        a, b = F["extra_after_cap"]["week"], F["extra_after_cap"]["epoch"]
+        L += ["", "**Extra paper after the breaker** (paper boxes trade on past the would-be catastrophic cap; NOT in "
+                  "any figure of this page, which are as cash would have traded): this week n %d, gross %s, fees %s, "
+                  "net %s · epoch n %d, gross %s, net %s" % (a["n"], m(a["gross"]), m(a["fees"]), m(a["net"]),
+                                                             b["n"], m(b["gross"]), m(b["net"]))]
+    if F.get("extra_paper_on_cash"):
+        a, b = F["extra_paper_on_cash"]["week"], F["extra_paper_on_cash"]["epoch"]
+        L += ["", "**Paper rows on a cash box** (OGAP's own evaluation; never in the cash figures): this week n %d, "
+                  "gross %s, net %s · epoch n %d, gross %s" % (a["n"], m(a["gross"]), m(a["net"]), b["n"],
+                                                              m(b["gross"]))]
     L += table("By setup", F["week_by_strategy"], F["week_book"])
     L += ["", "| setup | MFE median $ (n) | MAE median $ (n) | capture median |", "|---|---|---|---|"]
     for k, a in F["week_by_strategy"].items():

@@ -19,6 +19,15 @@ the ask/bid columns (x gross, *_exec*) may appear only as the last, trailing col
 Fees beside EV, never inside EV: EV is gross a trade; net = gross − fees is its own column next to gross. In every
 table the total adds up from the rows shown, on one basis. Every EV carries n and its day-bootstrap 95% interval.
 
+AS CASH WOULD HAVE TRADED IS THE HEADLINE (dtp r578, OTV5 r151 CAP.11; the operator, 2026-11-22: "there's no harm in
+letting paper run & we can just note if the breaker would have popped"). On a PAPER box the daily catastrophic cap is
+record only: the box trades on past the point the breaker would have popped and tags what it opens then
+after_cap = 1; on a CASH box OGAP
+books paper beside the cash rows. weekly_facts, review_kit, cash_books and runaway_watch already leave both out of
+every figure: quote their "extra paper after the breaker" lines BESIDE the headline (never added in; they are the
+evidence of whether the $3,000 cap helps), name each would-pop record (~/reviews/breaker/<day>.csv, reason
+daily_cap_would_pop: box, time, day net), and put a cash box's OGAP paper rows on OGAP's own line only.
+
 THE NUMBERS FIRST (spec "The numbers (v3.0)"), before section 1 (about 30 s, S3 reads only):
     /home/ubuntu/day_trader_pro/venv/bin/python -I /home/ubuntu/day_trader_pro/tools/weekly_facts.py \
         --fri <this Friday> --out <WORK>

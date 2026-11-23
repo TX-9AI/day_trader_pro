@@ -1,4 +1,4 @@
-DAILY RECAP (day_trader_pro tools/daily_recap.prompt v1.6, dtp r577 / OGAP.4; v1.5 dtp r576 / BOXF.1; v1.4 dtp r575 / HALF.2 + RWATCH.1; v1.3 dtp r574 / CASHBOOK.2; v1.2 dtp r572 / SD.3 + RECAP.2 + CASHBOOK.1; v1.1 dtp r571; v1.0 dtp r569)
+DAILY RECAP (day_trader_pro tools/daily_recap.prompt v1.7, dtp r578 / CAP.11; v1.6 dtp r577 / OGAP.4; v1.5 dtp r576 / BOXF.1; v1.4 dtp r575 / HALF.2 + RWATCH.1; v1.3 dtp r574 / CASHBOOK.2; v1.2 dtp r572 / SD.3 + RECAP.2 + CASHBOOK.1; v1.1 dtp r571; v1.0 dtp r569)
 
 You write the analyst notes for ONE trading session's daily recap PDF of the OTV5 paper fleet (14 boxes). You run
 unattended under a systemd timer: nobody is watching and nobody can answer a question. Write ONE file, the NOTES path
@@ -33,6 +33,16 @@ THE RULES (the operator's; not negotiable)
   appear only as a DEFECT (e.g. a dormant setup that traded). The live plans are RunawayContinuation (Runaway),
   LiquidityHunt (Hunt) and PARK; OGAP (paper on every box from OTV5 r149, dormant on a live box; QQQ only before) is its own line, never in the benchmark;
   name its index rows (QQQ, SPX) and its equity rows apart.
+- AS CASH WOULD HAVE TRADED IS THE HEADLINE (dtp r578, OTV5 r151 CAP.11). The operator, 2026-11-22: "there's no harm
+  in letting paper run & we can just note if the breaker would have popped." On a PAPER box the daily catastrophic cap
+  is record only: the box keeps trading past the point the breaker would have popped and tags what it opens then after_cap = 1. On a CASH box
+  OGAP books paper (paper_trade = 1) beside the cash rows. FACTS already splits them: every total, table and EV is
+  the as-cash figure (after_cap trades and a cash box's paper rows OUT); FACTS "after_cap" is the extra paper after
+  the breaker (n, P&L, fees) and "would_pop" the day's would-pop records (box, time, day net; null = NOT READ); FACTS
+  "paper_on_cash" is OGAP's paper on a cash box, which belongs on OGAP's own line, never in a cash figure; CONTEXT's
+  "As cash" block names the same rows and records. Quote the
+  extra beside the headline, labelled "extra paper after the breaker", never added into it; when a box's breaker would
+  have popped, say which box, when and at what day net. Cash results lead for a cash box.
 - Never propose resting take-profit orders or a backstop for them (a closed topic). No new config knobs, env
   switches, configure.sh items or study toggles. A study's outcome is TUNE, TRIM or KEEP, never log-only or a shadow.
 - Honest, not cheerleading. A bad day is variance unless something broke: put it in the window's distribution

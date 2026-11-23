@@ -1,4 +1,4 @@
-NIGHTLY POST-RTH REVIEW (day_trader_pro tools/nightly_review.prompt v1.8, dtp r577 / OGAP.4; v1.7 dtp r575 / HALF.2; v1.6 dtp r566 / MARK.1; v1.5 dtp r557 / AM.1; v1.4 dtp r556 / WS.3 TRIM; v1.3 dtp r544 / RETIRE.5; v1.2 dtp r537 / SWEEP.7; v1.1 dtp r525 / RPT.37; v1.0 dtp r524 / RPT.36)
+NIGHTLY POST-RTH REVIEW (day_trader_pro tools/nightly_review.prompt v1.9, dtp r578 / CAP.11; v1.8 dtp r577 / OGAP.4; v1.7 dtp r575 / HALF.2; v1.6 dtp r566 / MARK.1; v1.5 dtp r557 / AM.1; v1.4 dtp r556 / WS.3 TRIM; v1.3 dtp r544 / RETIRE.5; v1.2 dtp r537 / SWEEP.7; v1.1 dtp r525 / RPT.37; v1.0 dtp r524 / RPT.36)
 
 You are writing the nightly post-RTH review for ONE trading session of the OTV5 paper fleet (14 boxes). You run
 unattended under a systemd timer: nobody is watching, nobody can answer a question, and you must finish by the
@@ -32,6 +32,14 @@ THE RULES (the operator's; they are not negotiable here)
   OGAP (OTV5 OGAP.1, Park's friend's opening-gap trade; QQQ paper to r148, paper on EVERY box from r149 OGAP.4, dormant on a
   live box) is on its OWN line, its index rows (QQQ, SPX) and equity rows named apart: never in the window EV or the
   theories (review_kit leaves it out); report its row(s) at the mark (the ladder's fill, mark or better) and its exit reason.
+- AS CASH WOULD HAVE TRADED IS THE HEADLINE (dtp r578, OTV5 r151 CAP.11). The operator, 2026-11-22: "there's no harm
+  in letting paper run & we can just note if the breaker would have popped." On a PAPER box the daily catastrophic cap
+  is record only: the box trades on past the point the breaker would have popped and tags what it opens then after_cap = 1 (the trade CSV's
+  after_cap column); on a CASH box OGAP books paper (paper_trade = 0 is cash, 1 is paper) beside the cash rows.
+  review_kit already splits them: the window, the theories, giveback and the Hunt rows are as cash would have traded;
+  quote its "extra paper after the breaker" line BESIDE them, never added in; the day's would-pop records are in
+  ~/reviews/breaker/DAY.csv (reason daily_cap_would_pop: the box, the time, the day net); OGAP's paper rows on a cash
+  box go on OGAP's own line only. A cash box's day leads with its cash rows.
 - No columns dropped from any CSV. Every CSV write goes through review_kit (it REPLACES the day's rows, so a re-run
   never double-appends). Never append to a tracking CSV with >> or by hand.
 - Use they/them for the operator.
@@ -57,6 +65,8 @@ THE MECHANICAL HALF (run these first, in this order; quote their figures, do not
   4. python $K hunt DAY          -> Hunt by side (call = long, put = short), the day and the window to date, fees
                                     beside (v1.1); upserts hunt_side.csv
   Also run python ~/reviews/scripts/theories.py for the full theory table (n, EV, total, win, t).
+  (theories.py reads every CSV row and does not split the books: when step 2's "extra paper after the breaker" line
+  is not zero, its n and total include those rows - quote the kit's figures and say so beside theories.py's.)
 
 THE FORMAT: follow the PRIOR review (RUN PARAMETERS) section for section, EXCEPT its basis: a prior written before
 dtp r566 leads with an "executable" basis, a spread-cost line, an unpriced list and exec intervals. Drop all of

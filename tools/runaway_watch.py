@@ -1,6 +1,16 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/runaway_watch.py  v1.0
+day_trader_pro/tools/runaway_watch.py  v1.1
+v1.1  2026-11-22  dtp r578 / CAP.11 — THE WATCH MEASURES WHAT CASH WOULD HAVE DONE, WITH A NOTE BESIDE THE SEAL. OTV5 r151
+      makes the daily catastrophic cap record only on a paper box (the operator, 2026-11-22: "there's no harm in letting
+      paper run & we can just note if the breaker would have popped"): a paper box trades on past the would-be trip and
+      tags what it opens then after_cap = 1. load() gives every row its book through review_kit.split (the one rule;
+      per file) and keeps the HEADLINE rows only, so a Runaway trade cash would never have opened never counts toward
+      the bar, the trend or the direction; each equity also carries `extra` (n, net of its after_cap Runaway rows) and
+      the md prints one line for them when any exists (nothing otherwise, so every page before the first after_cap
+      trade is byte-identical). WATCH.md stays sealed (--check-seal unchanged); the rule is recorded as a NOTE in
+      NOTES.txt beside it (append-only, written before any after_cap trade exists), and render_md prints the first line
+      of every note under the seal line when the file exists.
 v1.0  2026-11-22  dtp r575 / RWATCH.1 — THE RUNAWAY EQUITY WATCH LIST AND ITS TREND BARS, SCORED THE ONE FROZEN WAY.
       The operator, 2026-11-22: "I would keep any poor performers on runaway on notice to potentially be cut", and "Can
       you put a trend bar for runaway on the equities to see if they are trending in the right direction or the wrong
@@ -50,6 +60,7 @@ TRADES = os.path.join(HOME, "reviews", "trades")
 WATCH = os.path.join(HOME, "reviews", "runaway_watch_20261122", "WATCH.md")
 WATCH_SHA = "eeb225665a2b73e8e71089c50a05c06abf56645ddfa90e9ab8aa43bdb2e6930c"
 WATCH_LIST = ("NVDA", "AMD", "META")         # frozen in WATCH.md
+NOTES = os.path.join(os.path.dirname(WATCH), "NOTES.txt")   # v1.1: append-only notes beside the seal (NOTE <n> (...)
 INDEX = ("QQQ", "SPX")
 RUNAWAY = "RunawayContinuation"
 HISTORY_START = "2026-10-26"
@@ -69,30 +80,40 @@ def _f(x):
         return None
 
 
-def load(through, trades_dir=TRADES):
+def load(through, trades_dir=TRADES, extras_out=None):
     """-> (rows, est_n): every Runaway row on a non-index symbol from HISTORY_START through `through`, in (day, entry)
-    order. A row: day, sym, pnl (the mark), fee, net, est (fee estimated), entry, half (dated on a half day)."""
-    rows, est = [], 0
+    order. A row: day, sym, pnl (the mark), fee, net, est (fee estimated), entry, half (dated on a half day). v1.1: the
+    headline rows only (as cash would have traded); the after_cap rows go to `extras_out` (day, sym, net) when given."""
+    rows, est, extras = [], 0, []
     for p in sorted(glob.glob(os.path.join(trades_dir, "20??-??-??.csv"))):
         d = os.path.basename(p)[:10]
         if not (HISTORY_START <= d <= through):
             continue
         with open(p, encoding="utf-8", newline="") as fh:
-            for r in csv.DictReader(fh):
-                sym = (r.get("sym") or "").upper()
-                if r.get("strategy") != RUNAWAY or sym in INDEX or sym in OTV4TEST_SYMS:
-                    continue
-                pnl = _f(r.get("pnl_usd"))
-                if pnl is None:
-                    continue
-                fee = _f(r.get("fee"))
-                e = fee is None
-                if e:
-                    fee = RK.est_fee(sym, r.get("contracts") or 0)
-                    est += 1
-                rows.append({"day": d, "sym": sym, "pnl": pnl, "fee": fee, "net": pnl - fee, "est": e,
-                             "entry": r.get("entry_time") or "", "half": market_calendar.is_half_day(date.fromisoformat(d))})
+            raw = list(csv.DictReader(fh))
+        for r, bk in zip(raw, RK.split(raw, modes=RK.modes_for_file(p))):              # v1.1 (CAP.11): the row's book, per the file's day
+            sym = (r.get("sym") or "").upper()
+            if r.get("strategy") != RUNAWAY or sym in INDEX or sym in OTV4TEST_SYMS:
+                continue
+            if bk != RK.HEADLINE:
+                if bk == RK.AFTER_CAP and _f(r.get("pnl_usd")) is not None:
+                    _fe = _f(r.get("fee"))
+                    extras.append({"day": d, "sym": sym, "net": _f(r.get("pnl_usd")) - (
+                        _fe if _fe is not None else RK.est_fee(sym, r.get("contracts") or 0))})
+                continue
+            pnl = _f(r.get("pnl_usd"))
+            if pnl is None:
+                continue
+            fee = _f(r.get("fee"))
+            e = fee is None
+            if e:
+                fee = RK.est_fee(sym, r.get("contracts") or 0)
+                est += 1
+            rows.append({"day": d, "sym": sym, "pnl": pnl, "fee": fee, "net": pnl - fee, "est": e,
+                         "entry": r.get("entry_time") or "", "half": market_calendar.is_half_day(date.fromisoformat(d))})
     rows.sort(key=lambda x: (x["day"], x["entry"], x["sym"]))
+    if extras_out is not None:
+        extras_out.extend(extras)
     return rows, est
 
 
@@ -134,8 +155,9 @@ def sparkline(series, marker):
 
 
 def score(through, trades_dir=TRADES):
-    rows, est = load(through, trades_dir)
-    syms = sorted({x["sym"] for x in rows} | set(WATCH_LIST))
+    xa = []
+    rows, est = load(through, trades_dir, extras_out=xa)
+    syms = sorted({x["sym"] for x in rows} | {x["sym"] for x in xa} | set(WATCH_LIST))
     out = {"through": through, "watch": WATCH, "watch_sha": WATCH_SHA, "watch_list": list(WATCH_LIST),
            "forward_start": FORWARD_START, "cut_min_n": CUT_MIN_N, "direction_n": DIRECTION_N,
            "basis": "the mark (pnl_usd); net = pnl_usd - fee, after fees", "fees_estimated": est,
@@ -151,6 +173,9 @@ def score(through, trades_dir=TRADES):
         e = dict(agg(v), forward=agg(fv), direction=direction(v), cum=cum, days=[x["day"] for x in v],
                  forward_index=mk, spark=sparkline(cum, mk), watch=s in WATCH_LIST,
                  half_day_trades=sorted({x["day"] for x in v if x["half"]}))
+        ex = [x for x in xa if x["sym"] == s]
+        if ex:                                       # v1.1 (CAP.11): the key exists only when there is an extra
+            e["extra"] = {"n": len(ex), "net": round(sum(x["net"] for x in ex), 2)}
         if e["watch"]:
             e["status"] = status(e["forward"])
             e["forward_needed"] = max(0, CUT_MIN_N - e["forward"]["n"])
@@ -203,8 +228,10 @@ def render_md(sc):
          "**Cut bar:** a watch-list symbol is RECOMMENDED for cutting from Runaway when its Runaway trades from %s on "
          "number at least %d AND their net EV a trade is below zero; at %d+ with net EV >= 0 it comes OFF THE LIST; "
          "past trades never count. Forward sessions so far: %d (half days are not sessions)." % (
-             sc["forward_start"], sc["cut_min_n"], sc["cut_min_n"], len(sc["forward_sessions"])), "",
-         "## The watch list", "",
+             sc["forward_start"], sc["cut_min_n"], sc["cut_min_n"], len(sc["forward_sessions"])), ""]
+    for n in note_lines():                       # v1.1: the notes beside the seal (append-only), first line each
+        L += ["Note: " + n, ""]
+    L += ["## The watch list", "",
          "| symbol | forward n | forward net | forward EV a trade | against the bar | status |", "|---|---|---|---|---|---|"]
     for s, n, net, ev, bar, st in watch_rows(sc):
         L.append("| %s | %d | %s | %s | %s | **%s** |" % (s, n, _m(net) if n else "-", _m(ev), bar, st))
@@ -219,6 +246,11 @@ def render_md(sc):
             s, e["n"], _m(e["gross"]), _m(e["fees"]).lstrip("+"), _m(e["net"]), _m(e["ev_net"]),
             dir_text(e["direction"]), e["spark"] or "-", e.get("status", "-")))
     half = {s: e["half_day_trades"] for s, e in sc["equities"].items() if e["half_day_trades"]}
+    xs = {s: e["extra"] for s, e in sc["equities"].items() if e.get("extra")}
+    if xs:                                       # v1.1 (CAP.11): only when an after_cap Runaway trade exists
+        L += ["", "Extra paper after the breaker (paper boxes trade on past the would-be cap; never in the figures "
+                  "above, which are as cash would have traded): " + "; ".join(
+                      "%s n=%d net %s" % (s, x["n"], _m(x["net"])) for s, x in xs.items()) + "."]
     L += ["", "Fees estimated (blank fee cells): %d." % sc["fees_estimated"]]
     if half:
         L += ["DEFECT: Runaway trades dated on a half day (OTV5 r145 opens nothing then): %s." % "; ".join(
@@ -232,11 +264,32 @@ def figures(sc):
     """Every dollar figure the scorer prints, rounded to the dollar (a commentary may quote only these)."""
     out = set()
     for e in sc["equities"].values():
+        if e.get("extra"):                           # v1.1: the extras line's figure
+            out.add(round(abs(e["extra"]["net"])))
         for m in (e, e["forward"], e["direction"]["last"], e["direction"]["earlier"]):
             for k in ("gross", "fees", "net", "ev_net"):
                 if m.get(k) is not None:
                     out.add(round(abs(m[k])))
     return out
+
+
+def note_lines(path=None):
+    """v1.1: the first line of every NOTE in NOTES.txt beside WATCH.md (a line holding "NOTE <n> ("), oldest first;
+    [] when there is none. A note never changes the seal or the bar's arithmetic."""
+    def _is_note(ln):
+        i = ln.find("NOTE ")
+        while i >= 0:
+            rest = ln[i + 5:]
+            k = len(rest) - len(rest.lstrip("0123456789"))
+            if k and rest[k:].startswith(" ("):
+                return True
+            i = ln.find("NOTE ", i + 1)
+        return False
+    try:
+        with open(path or NOTES, encoding="utf-8") as fh:
+            return [ln.strip() for ln in fh if _is_note(ln)]
+    except OSError:
+        return []
 
 
 def seal_sha(path=WATCH):

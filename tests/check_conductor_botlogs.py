@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_conductor_botlogs.py — v1.1
+day_trader_pro/tests/check_conductor_botlogs.py — v1.2
+v1.2  2026-11-22  dtp r578 / CAP.11 (control's half of OTV5 r151) — NEW L8: the box command also keeps the day's
+      "Service mode: LIVE|PAPER" start lines (review_kit.box_modes reads a cash box's day from them, traded or not) and
+      still drops another day's Service line and a line that only mentions the words. BORN RED on 9014b1f (r577, v2.19).
 v1.1  2026-11-22  dtp r576 / BOXF.1 (control's half of OTV5 r148) — NEW L7: the box command also keeps the day's
       "[flags]" start lines (OTV5 r148 logs one at every bot start: the box's effective saved settings, its file hash and
       the commit), a WARNING one with its REFUSED tail included, and still drops another day's [flags] line and a line
@@ -22,6 +25,7 @@ v1.0  2026-11-22  dtp r572 / RECAP.2 — new. eod_conductor_v2 v2.18 copies each
       gates, fleet_reconcile) copies nothing
   L5  the order: _run_close starts the copy over every box the close saw (HELD included) before takedown(), which joins
       it after the capture wait and before ec2ops.stop
+  L8  (v1.2) the day's "Service mode: LIVE|PAPER" start lines are kept; another day's and a mere mention are dropped
   L7  the day's "[flags]" start lines are kept (INFO and WARNING, the REFUSED tail with them); another day's [flags]
       line and an INFO line that merely mentions flags are dropped
   L6  it never reads an env file, a credential or a unit's Environment: the command reads bot.log* and the unit's
@@ -74,7 +78,7 @@ def main():
         import eod_conductor_v2 as C
         C.botlog_cmd, C.copy_botlogs, C.finish_botlogs  # noqa: B018
     except (ImportError, AttributeError) as e:
-        for n in ("L1", "L2", "L3", "L4", "L5", "L6", "L7"):
+        for n in ("L1", "L2", "L3", "L4", "L5", "L6", "L7", "L8"):
             ck(n, False, f"eod_conductor_v2 has no bot-log copy ({e})")
         print("\nRED — " + ", ".join(FAILS))
         return 1
@@ -110,6 +114,17 @@ def main():
         ck("L7", "commit=df5125207e \u00b7 schema v1: no keys" in r7 and "REFUSED: line 1 ogap = 'of'" in r7
            and "commit=0000000000" not in r7 and "nothing else" not in r7 and r7.count("[flags]") == 2,
            f"the [flags] lines were not kept as specified: {r7!r}")
+        # L8 (v1.2) — the Service mode start lines
+        home8 = os.path.join(tmp, "box8")
+        os.makedirs(os.path.join(home8, "options-trader"))
+        open(os.path.join(home8, "options-trader", "bot.log"), "w", encoding="utf-8").write(
+            "2026-11-19 09:15:02 [INFO ] __main__: Service mode: PAPER | QQQ | risk=$1050/trade | yesterday\n"
+            "2026-11-20 09:15:02 [INFO ] __main__: Service mode: LIVE | QQQ | risk=$1050/trade | "
+            "catastrophic_loss_cap=$3000 realized net\n"
+            "2026-11-20 09:15:04 [INFO ] main: the Service mode was read, nothing else\n")
+        r8 = run_box(cmd, home8).stdout
+        ck("L8", "Service mode: LIVE | QQQ" in r8 and "yesterday" not in r8 and "nothing else" not in r8,
+           f"the Service mode lines were not kept as specified: {r8!r}")
         # L2
         home2 = os.path.join(tmp, "box2")
         os.makedirs(os.path.join(home2, "options-trader"))

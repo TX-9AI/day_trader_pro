@@ -1,6 +1,19 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/daily_brief.py  v1.3  -  the post-trading-day brief (PDF) for any session.
+day_trader_pro/tools/daily_brief.py  v1.4  -  the post-trading-day brief (PDF) for any session.
+v1.4  2026-11-22  dtp r578 / CAP.11 (control's half of OTV5 r151) — THE BRIEF HEADLINES "AS CASH WOULD HAVE TRADED". OTV5
+      r151 makes the daily catastrophic cap record only on a paper box (the operator, 2026-11-22: "there's no harm in
+      letting paper run & we can just note if the breaker would have popped"): the box trades on and tags what it
+      opens after the would-be trip after_cap = 1; and a cash box books OGAP paper beside its cash rows (OTV5 r150).
+      load_day_trades gives every row its book (tools/review_kit.split, the one rule, with review_kit.box_modes: a paper row on a cash box's day - its
+      Service mode line in the conductor's extract, else a cash row - is paper_on_cash, else an after_cap row is after_cap, else headline). compute()'s trades, every
+      total, table, chart and the cash re-scale are the HEADLINE rows; the extras are carried beside (c["after_cap"],
+      c["paper_on_cash"]) and the day's would-pop records come from ~/reviews/breaker/DAY.csv (review_kit `trades`,
+      the nightly review). Section 1 prints, under the day totals, one "extra paper after the breaker" line (n, net,
+      fees beside, each would-pop record: box, time, day net) and one line for OGAP's paper rows on a cash box (OGAP's
+      own evaluation, never in the cash figures), each only when it has something; --facts carries all three always
+      (after_cap, paper_on_cash, would_pop: a list, or null when the breaker file was not written). A day with neither
+      builds the same pages as v1.3.
 v1.3  2026-11-22  dtp r575 / HALF.2 + RWATCH.1 — THE HALF-DAY LINE AND SECTION 5c, THE RUNAWAY EQUITY WATCH.
       (1) A 13:00 half day (market_calendar.is_half_day) is a non-trading day by the operator's ruling (2026-11-22: "Yes,
       just treat them as bank holidays. No trading."; OTV5 r145 opens nothing): under the title the brief says so
@@ -86,6 +99,8 @@ import warehouse_source as ws          # noqa: E402
 import fees as feemodel                # noqa: E402
 sys.path.append(DTP_ROOT)
 import market_calendar                 # noqa: E402  (dtp: the 13:00 close of a half day)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import review_kit as RK                # noqa: E402  (v1.4: split, the one as-cash rule; read_breaker)
 
 import matplotlib                      # noqa: E402
 matplotlib.use("Agg")
@@ -189,8 +204,9 @@ def load_day_trades(day):
     rows, meta = ws.load_trades([day])
     kept, dropped = ws.mainline(rows, lambda r: day)
     out = []
-    for r in kept:
+    for r, bk in zip(kept, RK.split(kept, sym_key="symbol", modes=RK.box_modes(day))):    # v1.4 (CAP.11): the row's book
         r = dict(r)
+        r["_book"] = bk
         r["_day"] = day
         r["_in"] = to_et(r.get("entry_time"))
         r["_out"] = to_et(r.get("exit_time"))
@@ -490,7 +506,10 @@ def trade_table(trades):
 
 def compute(day):
     """The data pass, shared by the PDF and --facts (v1.1): one place computes every figure both print."""
-    trades, tmeta, dropped = load_day_trades(day)
+    every, tmeta, dropped = load_day_trades(day)
+    trades = [r for r in every if r.get("_book", RK.HEADLINE) == RK.HEADLINE]   # v1.4: as cash would have traded
+    after_cap = [r for r in every if r.get("_book") == RK.AFTER_CAP]
+    paper_on_cash = [r for r in every if r.get("_book") == RK.PAPER_ON_CASH]
     by_sym = defaultdict(list)
     for r in trades:
         by_sym[r["symbol"]].append(r)
@@ -531,7 +550,48 @@ def compute(day):
         cash_rows.append((r, budget, prem, n_paper, n_cash, per, p_cash, f_cash))
     return {"trades": trades, "tmeta": tmeta, "dropped": dropped, "by_sym": by_sym, "sym_pnl": sym_pnl,
             "order": order, "bars": bars, "binfo": binfo, "proxied": proxied, "vix": vix, "tot_p": tot_p,
-            "tot_f": tot_f, "unpriced": unpriced, "nwin": nwin, "cash_rows": cash_rows}
+            "tot_f": tot_f, "unpriced": unpriced, "nwin": nwin, "cash_rows": cash_rows,
+            "after_cap": after_cap, "paper_on_cash": paper_on_cash, "would_pop": would_pop(day)}
+
+
+def would_pop(day):
+    """v1.4: the day's would-pop records ([{sym, event_time, notes}]) from ~/reviews/breaker/DAY.csv, or None when
+    the nightly review's `trades` did not write the file (NOT READ, never "none")."""
+    try:
+        rows = RK.read_breaker(day)
+    except Exception:                                           # noqa: BLE001
+        return None
+    if rows is None:
+        return None
+    return [{"sym": r.get("sym"), "event_time": r.get("event_time"), "notes": r.get("notes")}
+            for r in rows if r.get("reason") == RK.WOULD_POP]
+
+
+def _extra(rs):
+    return {"n": len(rs), "pnl_mark_usd": round(sum(r["_pnl"] or 0 for r in rs), 2),
+            "fees_usd": round(sum(r["_fee"] or 0 for r in rs), 2), "trade_ids": [r.get("trade_id") for r in rs]}
+
+
+def extras_lines(c):
+    """v1.4: the section-1 lines beside the day totals (each only when it has something)."""
+    out = []
+    xa, wp = c.get("after_cap") or [], c.get("would_pop")
+    if xa or wp:
+        e = _extra(xa)
+        pops = "; ".join("%s: %s" % (w["sym"], w["notes"]) for w in (wp or []))
+        out.append("Extra paper after the breaker (paper boxes trade on past the would-be catastrophic cap; NOT in "
+                   "the figures above, which are as cash would have traded): %d trade(s), %s at the mark, fees %s "
+                   "beside.%s" % (e["n"], money(e["pnl_mark_usd"]), money(e["fees_usd"], sign=False),
+                                  (" Would-pop record(s): " + pops + ".") if pops else ""))
+    po = c.get("paper_on_cash") or []
+    if po:
+        e = _extra(po)
+        out.append("Paper rows on a cash box (OGAP's own evaluation, never in the cash figures above): %d trade(s), %s "
+                   "at the mark, fees %s beside (%s)." % (e["n"], money(e["pnl_mark_usd"]),
+                                                          money(e["fees_usd"], sign=False),
+                                                          ", ".join(sorted({"%s %s" % (r.get("symbol"), SHORT.get(
+                                                              r.get("strategy"), r.get("strategy"))) for r in po}))))
+    return out
 
 
 def _jt(t):
@@ -576,6 +636,10 @@ def facts(day):
                               "fees": round(sum(r["_fee"] or 0 for r in c["by_sym"][s]), 2)} for s in c["order"]},
             "tape": tape, "bars": {s: v["bars"] for s, v in c["binfo"].items()}, "volume_proxy": c["proxied"],
             "trades": rows,
+            "as_cash": "every figure above is as cash would have traded: after_cap trades (paper past the would-be "
+                       "catastrophic cap) and a cash box's paper rows are beside, never inside (OTV5 r151, dtp r578)",
+            "after_cap": _extra(c["after_cap"]), "paper_on_cash": _extra(c["paper_on_cash"]),
+            "would_pop": c["would_pop"],
             "cash": [{"symbol": x[0]["symbol"], "strategy": SHORT.get(x[0]["strategy"]), "budget": x[1],
                       "entry_mark": x[2], "paper_qty": x[3], "cash_qty": x[4], "pnl_per_contract": round(x[5], 2),
                       "cash_pnl": round(x[6], 2), "cash_fees": round(x[7], 2)} for x in c["cash_rows"]]}
@@ -768,6 +832,8 @@ def build(day, notes, out_dir):
         n, p, f, w = by_strat["OGAP"]
         st.append(P(f"Benchmark setups only (PARK, Runaway, Hunt): {money(tot_p - p)} on {len(trades) - n} trades, "
                     f"fees {money(tot_f - f, sign=False)} beside.", "small"))
+    for _ln in extras_lines(c):                          # v1.4 (CAP.11): beside the as-cash totals, never inside
+        st.append(P(_ln, "small"))
     if unpriced:
         st.append(P(f"Fee model could not price {len(unpriced)} trade(s): {', '.join(map(str, unpriced))}.", "small"))
     # by symbol summary

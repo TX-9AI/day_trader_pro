@@ -1,6 +1,17 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/cash_books.py  v1.2
+day_trader_pro/tools/cash_books.py  v1.3
+v1.3  2026-11-22  dtp r578 / CAP.11, AMENDMENT 3 (proposed; to be written in AMENDMENTS.txt before any after_cap trade
+      exists, PREREG.md unchanged, its sha still holds). The books measure what CASH would have done. OTV5 r151 makes the
+      daily catastrophic cap record only on a paper box (the operator, 2026-11-22: "there's no harm in letting paper
+      run & we can just note if the breaker would have popped"): a paper box trades on past the would-be trip and tags
+      what it opens then after_cap = 1; and on a cash box OGAP books paper beside the cash rows (OTV5 r150). load()
+      gives every row its book through review_kit.split, the one rule (per file: a paper row on a cash box's day - its
+      Service mode line in the conductor's extract, else a cash row - is paper_on_cash, else an after_cap row is after_cap, else headline); the books and every PREREG metric
+      read the headline rows only, so a trade cash would never have opened is never in a book. Each window also counts
+      the extra paper after the breaker per book (n, gross: extras) and the md prints one line for it under a window
+      that has any; nothing prints when none exists, so every scoreboard before the first after_cap trade is
+      byte-identical (the in-sample block and --check-prereg included). The displaced-fire count reads every row as before.
 v1.2  2026-11-22  dtp r574 / CASHBOOK.2, AMENDMENT 2 (~/reviews/cash_candidates_20261121/AMENDMENTS.txt, written before
       any forward data; PREREG.md unchanged, its sha still holds). The operator, 2026-11-22: "I want the best risk to
       reward balance, the highest earning combination with as low as we can get drawdowns". (a) Every book and window
@@ -39,7 +50,7 @@ v1.0  2026-11-22  dtp r572 / CASHBOOK.1 — THE FOUR CASH CANDIDATE BOOKS, SCORE
       while a LiquidityHunt or OGAP position was open on the same box (entry <= fire < exit, from the trade files'
       times). A fire that never became a trade is not in the trade files, so it cannot be counted: NOT MEASURED.
       REPORT ONLY: the books are never in the window EV or the theories, and the choice of book is the operator's.
-      Standard library and dtp market_calendar only; read-only; never prints an environment.
+      Standard library and dtp market_calendar (v1.3: and review_kit.split) only; read-only; never prints an environment.
 
 Usage:
   python3 tools/cash_books.py --through YYYY-MM-DD [--day D] [--week-start D] [--trades DIR] [--json F] [--md F]
@@ -60,6 +71,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 import market_calendar  # noqa: E402
+sys.path.insert(0, HERE)
+import review_kit as RK  # noqa: E402  (v1.3: split, the one as-cash rule)
 
 HOME = os.path.expanduser("~")
 TRADES = os.path.join(HOME, "reviews", "trades")
@@ -117,10 +130,11 @@ def load(trades_dir=TRADES):
         d = os.path.basename(p)[:10]
         days.append(d)
         with open(p, encoding="utf-8", newline="") as fh:
-            for r in csv.DictReader(fh):
-                rows.append({"day": d, "sym": r.get("sym", ""), "strat": r.get("strategy", ""),
-                             "pnl": _f(r.get("pnl_usd")), "fee": _f(r.get("fee")),
-                             "entry": _t(r.get("entry_time")), "exit": _t(r.get("exit_time"))})
+            raw = list(csv.DictReader(fh))
+        for r, bk in zip(raw, RK.split(raw, modes=RK.modes_for_file(p))):            # v1.3 (CAP.11): the row's book, per the file's day
+            rows.append({"day": d, "sym": r.get("sym", ""), "strat": r.get("strategy", ""),
+                         "pnl": _f(r.get("pnl_usd")), "fee": _f(r.get("fee")),
+                         "entry": _t(r.get("entry_time")), "exit": _t(r.get("exit_time")), "book": bk})
     return rows, days
 
 
@@ -230,14 +244,22 @@ def score(through, day=None, week_start=None, trades_dir=TRADES):
     for name, lo, hi in wins:
         sess, missing = sessions(lo, hi, file_days)
         w = {"from": lo, "to": hi, "sessions": len(sess), "missing_trade_files": missing, "books": {}}
+        extras = {}
         for b, _desc in BOOKS:
-            br = [x for x in rows if lo <= x["day"] <= hi and x["day"] in sess and in_book(b, x["sym"], x["strat"])]
+            inb = [x for x in rows if lo <= x["day"] <= hi and x["day"] in sess and in_book(b, x["sym"], x["strat"])]
+            br = [x for x in inb if x.get("book", RK.HEADLINE) == RK.HEADLINE]      # v1.3: as cash would have traded
+            xa = [x for x in inb if x.get("book") == RK.AFTER_CAP]
+            if xa:
+                extras[b] = {"n": len(xa), "gross": round(sum(x["pnl"] for x in xa), 2),
+                                  "fees": round(sum(x["fee"] for x in xa), 2)}
             m = metrics(br, sess)
             if name.startswith("forward") or name in ("week", "day"):
                 k, bad = displaced(br, [x for x in rows if lo <= x["day"] <= hi])
                 m["displaced"] = k
                 m["displaced_unmeasurable"] = bad
             w["books"][b] = m
+        if extras:                                   # v1.3: the key exists only when a window has an extra
+            w["extras"] = extras
         out["windows"][name] = w
     out["ranking"] = ranking(out)
     return out
@@ -366,6 +388,11 @@ def render_md(sc):
                 row += " %d%s |" % (m["displaced"], " (+%d unmeasurable)" % m["displaced_unmeasurable"]
                                     if m["displaced_unmeasurable"] else "")
             L.append(row)
+        if w.get("extras"):                         # v1.3 (CAP.11): only a window that has any
+            L += ["", "Extra paper after the breaker (paper boxes trade on past the would-be cap; not in the book "
+                      "figures above, which are as cash would have traded): " + "; ".join(
+                          "%s n=%d gross %s" % (b, w["extras"][b]["n"], _m(w["extras"][b]["gross"]))
+                          for b in rank if b in w["extras"]) + "."]
     L += ["", "Displaced fires: the count is the book's trades that fired while a Hunt or OGAP position was open on "
               "the same box. A fire that a Hunt or OGAP position kept from becoming a trade is not in the trade files: "
               "NOT MEASURED.", ""]
@@ -382,6 +409,8 @@ def figures(sc):
                     out.add(round(abs(m[k])))
             for v in m.get("ci") or []:
                 out.add(round(abs(v)))
+        for x in (w.get("extras") or {}).values():          # v1.3: the extras line's figures
+            out.add(round(abs(x["gross"])))
     return out
 
 

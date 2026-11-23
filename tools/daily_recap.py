@@ -1,6 +1,15 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/daily_recap.py  v1.4
+day_trader_pro/tools/daily_recap.py  v1.5
+v1.5  2026-11-22  dtp r578 / CAP.11 (control's half of OTV5 r151) — ONE "As cash" BLOCK IN THE CONTEXT. OTV5 r151 makes the
+      daily catastrophic cap record only on a paper box (the operator, 2026-11-22: "there's no harm in letting paper run
+      & we can just note if the breaker would have popped"): the box trades on and tags what it opens after the breaker
+      would have popped after_cap = 1; a cash box books OGAP paper beside its cash rows (OTV5 r150). context reads the
+      day's trade CSV through review_kit.book_of (the one rule) and the day's breaker file (~/reviews/breaker/DAY.csv,
+      beside the trades folder; review_kit `trades` writes it) and says, under the C1-C4 and watch lines: the extra
+      paper after the breaker (n, net at the mark, the boxes), the paper rows on a cash box (OGAP's own line), and each
+      would-pop record (box, time, day net), or "none", or NOT READ when the breaker file is missing. The scorers and
+      FACTS already headline as cash would have traded; this block names what was left beside. Report only.
 v1.4  2026-11-22  dtp r576 / BOXF.1 (control's half of OTV5 r148) — ONE "Box flags" LINE IN THE CONTEXT. OTV5 r148 gives
       each box a saved settings file (deploy/box_flags/<SYM>, read once at the bot's start; the schema and defaults in
       utils/box_flags.py) and one "[flags]" start line, which eod_conductor_v2 v2.19 copies with the day's errors. context
@@ -99,6 +108,7 @@ import market_calendar        # noqa: E402
 import study_dispatch as SD   # noqa: E402  (parse_queue: the dispatcher's own reader is the proof)
 import cash_books as CB       # noqa: E402  (v1.2: the one C1-C4 scorer)
 import runaway_watch as RW    # noqa: E402  (v1.3: the one Runaway equity watch scorer)
+import review_kit as RK       # noqa: E402  (v1.5: book_of, the one as-cash rule)
 
 ET = ZoneInfo("America/New_York")
 HOME = os.path.expanduser("~")
@@ -473,6 +483,36 @@ def item_format(text):
     return "%s\n\n%s\n\nTHE NEWEST ITEM, THE MODEL OF THE FIELDS:\n%s\n" % (how, m.group(0).strip() if m else "", last)
 
 
+def as_cash_lines(day, trades_dir):
+    """v1.5 (CAP.11): what the as-cash headline left beside, from the day's trade CSV and breaker file."""
+    import csv as _csv
+    out = ["As cash (OTV5 r151 CAP.11; every scorer and FACTS headline as cash would have traded):"]
+    p = os.path.join(trades_dir, day + ".csv")
+    if not os.path.exists(p):
+        out.append("  trades: NOT READ (no %s)" % p)
+    else:
+        rows = list(_csv.DictReader(open(p, encoding="utf-8", newline="")))
+        g = RK.book_of(rows, modes=RK.modes_for_file(p))
+
+        def _s(rs):
+            net = sum(float(r["pnl_usd"]) for r in rs if r.get("pnl_usd") not in (None, ""))
+            return "n %d, %s%s at the mark (%s)" % (len(rs), "-" if net < 0 else "+", "$%s" % format(abs(net), ",.2f"),
+                                                   ", ".join(sorted({"%s %s" % (r.get("sym"), r.get("strategy"))
+                                                                     for r in rs})) or "none")
+        out.append("  extra paper after the breaker (beside the headline, never in it): "
+                   + (_s(g[RK.AFTER_CAP]) if g[RK.AFTER_CAP] else "none"))
+        out.append("  paper rows on a cash box (OGAP's own line, never a cash figure): "
+                   + (_s(g[RK.PAPER_ON_CASH]) if g[RK.PAPER_ON_CASH] else "none"))
+    bp = os.path.join(os.path.dirname(os.path.abspath(trades_dir)), "breaker", day + ".csv")
+    if not os.path.exists(bp):
+        out.append("  would-pop records: NOT READ (no %s)" % bp)
+    else:
+        ev = [r for r in _csv.DictReader(open(bp, encoding="utf-8", newline="")) if r.get("reason") == RK.WOULD_POP]
+        out.append("  would-pop records: " + ("; ".join("%s: %s" % (r.get("sym"), r.get("notes")) for r in ev)
+                                              if ev else "none"))
+    return out
+
+
 def cmd_context(a):
     os.makedirs(a.work, exist_ok=True)
     qt = open(a.queue, encoding="utf-8").read() if os.path.exists(a.queue) else ""
@@ -526,6 +566,7 @@ def cmd_context(a):
                      "; ".join("%s %s (forward n %d)" % (s, st, n) for s, n, _nt, _ev, _b, st in RW.watch_rows(rw)))]
     except Exception as e:                       # noqa: BLE001 - the recap goes on; the PDF says NOT MEASURED
         lines += ["Runaway equity watch: NOT MEASURED (%s: %s)" % (type(e).__name__, e)]
+    lines += as_cash_lines(a.day, a.trades)      # v1.5 (CAP.11)
     lines += ["", "Studies that reported since %s ET (RESULT.json folders):" % since.strftime("%Y-%m-%d %H:%M")]
     lines += ["  " + f for f in found] or ["  (none)"]
     lines += ["", "Queue items closed or carried forward in that span (their status lines):"]

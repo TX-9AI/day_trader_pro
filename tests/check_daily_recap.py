@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_daily_recap.py  v1.4
+day_trader_pro/tests/check_daily_recap.py  v1.5
+v1.5  2026-11-22  dtp r578 / CAP.11 (daily_recap v1.5, daily_brief v1.4, the prompt v1.7). R11 wants daily_brief v1.4. The
+      as-cash context block, the brief's extras lines and the prompt's rule are pinned by tests/check_as_cash.py A7-A9.
 v1.4  2026-11-22  dtp r576 / BOXF.1 (daily_recap v1.4, the prompt v1.5). NEW:
   R19 the Box flags block: from the conductor's extracts (each box's LAST [flags] line of the day) and a stand-in OTV5
       show tool (--otv5 on a scratch tree): a default box is listed plainly, a box with a difference and a REFUSED tail
@@ -543,11 +545,11 @@ try:
     comp = True
 except py_compile.PyCompileError:
     comp = False
-ck("R11", comp and "daily_brief.py  v1.3" in gs and 'NOTES_DIR = os.path.expanduser("~/reviews/daily_brief/notes")' in gs
+ck("R11", comp and "daily_brief.py  v1.4" in gs and 'NOTES_DIR = os.path.expanduser("~/reviews/daily_brief/notes")' in gs
    and "--facts" in gs and "--summary-json" in gs and "/home/ubuntu/venvs/daily_brief" in gs
    and not os.path.exists(os.path.join(TOOLS, "venv")) and not os.path.exists(os.path.join(TOOLS, "notes"))
    and "11-20 showed" not in gs and os.path.exists(os.path.join(TOOLS, "daily_brief.requirements.txt")),
-   "tools/daily_brief.py v1.2 compiles; notes under ~/reviews/daily_brief/notes; no venv or notes in the repo")
+   "tools/daily_brief.py v1.4 compiles; notes under ~/reviews/daily_brief/notes; no venv or notes in the repo")
 
 # ── R12 ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
 _r12q = os.path.join(TMP, "q12.md")

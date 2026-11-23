@@ -1,6 +1,22 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/review_kit.py — v1.6
+day_trader_pro/tools/review_kit.py — v1.7
+v1.7  2026-11-22  dtp r578 / CAP.11 (control's half of OTV5 r151) — THE REPORTS READ THE AS-CASH ROWS. OTV5 r151 makes the
+      daily catastrophic cap RECORD ONLY on a paper box (the operator, 2026-11-22: "Is there any way we can make the
+      catastrophic cap only apply to cash? As in, there's no harm in letting paper run & we can just note if the breaker
+      would have popped."; "Yes"): it notes the would-be trip (circuit_breaker_events daily_cap_would_pop) and tags every
+      trade opened while it stands after_cap = 1; and on a cash box OGAP books paper beside the cash rows (OTV5 r150,
+      paper_trade = 1). ONE RULE, here, that every report calls (book_of / split): per box and day, a paper row on a CASH
+      box's day (box_modes: the day's "Service mode: LIVE" start line from the conductor's bot-log extract, so a cash box
+      that traded nothing still counts; else the presence of a cash row) is PAPER_ON_CASH (OGAP's own evaluation lines, never a cash headline), else an
+      after_cap row is AFTER_CAP (the extra paper after the breaker, shown beside, never in a headline figure), else the
+      row is HEADLINE ("as cash would have traded"). A blank paper_trade (a CSV before this revision) reads paper, a
+      blank after_cap reads not after the cap, so every day before OTV5 r151 is HEADLINE throughout and every figure,
+      CSV row and theory is byte-identical. `trades` carries paper_trade and after_cap as two new TRAILING columns
+      (nothing dropped) and, in a real run, writes the day's breaker events (~/reviews/breaker/DAY.csv, from S3
+      raw/circuit_breaker, the would-pop record included; never in the trades folder). `window`, the OGAP line,
+      `giveback` and `hunt` use the headline rows; `window` prints one "extra paper after the breaker" line (n, net,
+      the window to date and the day) and the OGAP line its own extra. Every CSV header unchanged.
 v1.6  2026-11-19  dtp r566 / MARK.1 — THE WINDOW LEADS WITH THE MARK, AND ONLY THE MARK IS DISCUSSED. The operator,
       2026-11-19: "I don't give a rat shit what the bid-ask is. Mark is the worst buy or sell we accept." and "I just
       want the brief to reflect how we actually trade—which is the ladder." The entry ladder never fills worse than
@@ -58,6 +74,9 @@ SUBCOMMANDS (every one reads only; the CSV writers REPLACE the day's rows, so a 
                        ~/reviews/trades/DAY.csv (the existing columns, in order, plus mfe_premium at the end); the
                        fee column from the control fee model (fees_bridge.trade_fee, the figure the 10-26..11-03
                        window rows carry), empty when the model cannot price a row.
+                       v1.7: paper_trade and after_cap trail the row (OTV5 r151), and a real run also writes the day's
+                       breaker events (S3 raw/circuit_breaker) to ~/reviews/breaker/DAY.csv (BREAKER_COLS); a failed read
+                       says NOT READ and leaves the trades file standing.
   window DAY           the window 10-26..DAY from ~/reviews/trades/20*.csv: n, realized, EV a trade with a
                        day-bootstrap 95% interval (seed 7, 20,000 draws), fees BESIDE (the row's fee, else the
                        estimate $1.25 a contract, $2.47 on SPX, marked estimated), EV ex the worst setup and ex the
@@ -113,7 +132,102 @@ def est_fee(sym, contracts):
 TRADE_COLS = ["sym", "trade_id", "strategy", "direction", "contracts", "entry_premium", "exit_premium", "pnl_usd",
               "entry_time", "exit_time", "exit_reason", "fee", "mfe_premium",
               # v1.4 (AM.1, OTV5 r111): the executable basis, appended; empty on rows before r111
-              "entry_exec_premium", "exit_exec_premium", "pnl_exec_usd", "would_fill_live"]
+              "entry_exec_premium", "exit_exec_premium", "pnl_exec_usd", "would_fill_live",
+              # v1.7 (CAP.11, OTV5 r151): the row's book, appended; paper_trade 1 = paper (0 = cash), after_cap 1 = a
+              # paper trade opened while the record-only cap stood tripped; empty on rows written before
+              "paper_trade", "after_cap"]
+BREAKER_COLS = ["sym", "event_time", "reason", "session_losses", "notes"]      # v1.7: ~/reviews/breaker/DAY.csv
+HEADLINE, AFTER_CAP, PAPER_ON_CASH = "headline", "after_cap", "paper_on_cash"   # v1.7: the three books of a row
+WOULD_POP = "daily_cap_would_pop"            # v1.7: OTV5 r151's record-only breaker row (circuit_breaker_events.reason)
+
+
+def _truthy(v):
+    return str("" if v is None else v).strip().lower() in ("1", "1.0", "true")
+
+
+def is_paper(r):
+    """v1.7: paper_trade 0 is cash; anything else (1, blank on an old CSV) is paper - the schema's default is 1."""
+    v = r.get("paper_trade")
+    return not (v is not None and str(v).strip().lower() in ("0", "0.0", "false"))
+
+
+def is_after_cap(r):
+    """v1.7: after_cap 1 only; blank or absent (every row before OTV5 r151) is not after the cap."""
+    return _truthy(r.get("after_cap"))
+
+
+def box_modes(day, botlogs=None):
+    """v1.7 (CAP.11) - {SYM: "LIVE" | "PAPER"} for `day` from the conductor's bot-log extracts
+    (~/reviews/daily_brief/botlogs/DAY/SYM.txt, eod_conductor_v2 v2.20): the LAST "Service mode: LIVE|PAPER" line of
+    the day, else the last "OptionsBot [LIVE|PAPER] STARTED" marker. A box with neither (no extract, NOT READ, no start
+    that day) is absent: split then falls back to the presence of a cash row. Never raises."""
+    d = os.path.join(botlogs or os.path.join(REVIEWS, "daily_brief", "botlogs"), str(day))
+    out = {}
+    try:
+        names = sorted(os.listdir(d))
+    except OSError:
+        return out
+    for fn in names:
+        if not fn.endswith(".txt"):
+            continue
+        svc = start = None
+        try:
+            for ln in open(os.path.join(d, fn), encoding="utf-8", errors="replace"):
+                for mode in ("LIVE", "PAPER"):
+                    if ": Service mode: %s " % mode in ln or ln.rstrip().endswith(": Service mode: %s" % mode):
+                        svc = mode
+                    if "OptionsBot [%s] STARTED" % mode in ln:
+                        start = mode
+        except OSError:
+            continue
+        if svc or start:
+            out[fn[:-4].upper()] = svc or start
+    return out
+
+
+def modes_for_file(path):
+    """v1.7: box_modes for a trade CSV ~/reviews/trades/DAY.csv: the extracts of its day under the same reviews root
+    (daily_brief/botlogs/DAY/), so a fixture tree carries its own."""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(path)))
+    return box_modes(os.path.basename(path)[:10], os.path.join(root, "daily_brief", "botlogs"))
+
+
+def split(rows, sym_key="sym", day_of=None, modes=None):
+    """v1.7 (CAP.11) - THE ONE RULE. -> [book] for `rows` (one book per row, in order): PAPER_ON_CASH for a paper row
+    on a CASH box's day (OGAP's paper beside or instead of a cash box's trades), else AFTER_CAP for a row tagged
+    after_cap, else HEADLINE. A box is a cash box that day when `modes` ({SYM: LIVE|PAPER}, box_modes: the day's own
+    start lines, so a cash box that traded nothing still counts) says LIVE, or when it has a cash row that day (the
+    fallback, and always decisive). `day_of(row)` gives the day (default: one day, every row)."""
+    day_of = day_of or (lambda r: "")
+    live = {str(k).upper() for k, v in (modes or {}).items() if str(v).upper() == "LIVE"}
+    cash = {(str(r.get(sym_key) or "").upper(), day_of(r)) for r in rows if not is_paper(r)}
+    cash |= {(str(r.get(sym_key) or "").upper(), day_of(r)) for r in rows
+             if str(r.get(sym_key) or "").upper() in live}
+    out = []
+    for r in rows:
+        if is_paper(r) and (str(r.get(sym_key) or "").upper(), day_of(r)) in cash:
+            out.append(PAPER_ON_CASH)
+        elif is_after_cap(r):
+            out.append(AFTER_CAP)
+        else:
+            out.append(HEADLINE)
+    return out
+
+
+def book_of(rows, sym_key="sym", day_of=None, modes=None):
+    """v1.7: -> {book: [rows]} (split() grouped), each book present even when empty."""
+    g = {HEADLINE: [], AFTER_CAP: [], PAPER_ON_CASH: []}
+    for r, b in zip(rows, split(rows, sym_key, day_of, modes)):
+        g[b].append(r)
+    return g
+
+
+def _csv_rows(path):
+    """v1.7: one trades CSV's rows, each with its book (`_book`), split per the file's own day."""
+    rows = list(csv.DictReader(open(path)))
+    for r, b in zip(rows, split(rows, modes=modes_for_file(path))):
+        r["_book"] = b
+    return rows
 EXEC_BACKFILL = os.path.join(REVIEWS, "exec_basis_backfill.csv")
 WINDOW_HDR_V1 = "date,trades,realized,fees,ev_per_trade,ev_ex_worst_setup,worst_setup,ev_ex_worst_symbol,worst_symbol"
 WINDOW_HDR = WINDOW_HDR_V1 + (",trades_exec,realized_exec,ev_exec_per_trade,ev_exec_lo,ev_exec_hi,ev_exec_ex_worst_setup,"
@@ -175,7 +289,8 @@ def trade_rows(day, recs, fee_of=None):
     return out
 
 
-def cmd_trades(day, recs=None, fee_of=None):
+def cmd_trades(day, recs=None, fee_of=None, breaker_of=None):
+    _given = recs is not None
     if fee_of is None:
         import fees_bridge
         fee_of = fees_bridge.trade_fee if fees_bridge.available() else (lambda r: None)
@@ -190,6 +305,7 @@ def cmd_trades(day, recs=None, fee_of=None):
         recs, dropped = ws.mainline(raw)
         if dropped:
             print("OTV4TEST rows dropped: %s" % dropped)
+    real_run = breaker_of is None and not _given
     rows = trade_rows(day, recs, fee_of)
     path = os.path.join(REVIEWS, "trades", day + ".csv")
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -200,7 +316,75 @@ def cmd_trades(day, recs=None, fee_of=None):
         w.writerows(rows)
     os.replace(tmp, path)
     print("%s: %d closed trades -> %s" % (day, len(rows), path))
+    # v1.7 (CAP.11): the day's breaker events (a paper box's would-pop record, a cash box's hit), beside the trades
+    if breaker_of is not None or real_run:
+        try:
+            ev = breaker_rows(day, (breaker_of or breaker_from_warehouse)(day))
+            write_breaker(day, ev)
+        except Exception as e:                   # noqa: BLE001 - the trades file stands; the recap says NOT READ
+            print("breaker events NOT READ for %s (%s: %s)" % (day, type(e).__name__, e))
     return rows
+
+
+def breaker_from_warehouse(day):
+    """v1.7: raw/circuit_breaker records for `day` and the next push date (a late push lands in the next dt=), as
+    dicts with `box`; dtp warehouse_reader.read_prefix, the S3 read `trades` already makes."""
+    import warehouse_reader as wr
+    s3 = wr._client()
+    nxt = (date.fromisoformat(day) + timedelta(days=1)).isoformat()
+    out = []
+    for d in (day, nxt):
+        for sym, env in wr.read_prefix(s3, "circuit_breaker", d):
+            b = dict(env.get("record") or {})
+            b["box"] = sym
+            out.append(b)
+    return out
+
+
+def breaker_rows(day, recs):
+    """v1.7: breaker records -> the day's rows (event_time in ET == day; OTV4TEST boxes out), sorted, de-duplicated."""
+    out, seen = [], set()
+    for r in recs:
+        sym = str(r.get("box") or r.get("symbol") or "").upper()
+        t = r.get("event_time")
+        if not t or sym in OTV4TEST_SYMS:
+            continue
+        try:
+            if et_date(t) != day:
+                continue
+        except ValueError:
+            continue
+        key = (sym, str(t), str(r.get("reason") or ""))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({"sym": sym, "event_time": t, "reason": r.get("reason") or "",
+                    "session_losses": "" if r.get("session_losses") is None else r.get("session_losses"),
+                    "notes": r.get("notes") or ""})
+    out.sort(key=lambda x: (str(x["event_time"]), x["sym"]))
+    return out
+
+
+def write_breaker(day, rows):
+    path = os.path.join(REVIEWS, "breaker", day + ".csv")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=BREAKER_COLS)
+        w.writeheader()
+        w.writerows(rows)
+    os.replace(tmp, path)
+    print("%s: %d breaker event(s) -> %s (%d would-pop)" % (day, len(rows), path,
+                                                          sum(1 for r in rows if r["reason"] == WOULD_POP)))
+    return path
+
+
+def read_breaker(day):
+    """v1.7: the day's breaker rows from ~/reviews/breaker/DAY.csv, or None when the file was never written."""
+    path = os.path.join(REVIEWS, "breaker", day + ".csv")
+    if not os.path.exists(path):
+        return None
+    return list(csv.DictReader(open(path)))
 
 
 # ── upsert ──────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -258,10 +442,12 @@ def load_window(cut):
     bf = load_exec_backfill()
     rows = []
     for f in sorted(glob.glob(os.path.join(REVIEWS, "trades", "20*.csv"))):
-        for r in csv.DictReader(open(f)):
+        for r in _csv_rows(f):
             if r.get("pnl_usd") in (None, "") or not r.get("entry_time"):
                 continue
             if r.get("strategy") == OGAP:              # v1.5 (OGAP.1): its own line, never in the benchmark
+                continue
+            if r["_book"] != HEADLINE:                 # v1.7 (CAP.11): as cash would have traded; extras beside
                 continue
             x = T.norm(r["sym"], r["strategy"], r["pnl_usd"], r["entry_time"])
             if not (WINDOW_START <= x["day"] <= cut):
@@ -282,13 +468,36 @@ def load_window(cut):
     return rows
 
 
-def ogap_rows(cut):
-    """v1.5 (OGAP.1) - every OGAP row through `cut` (its own line), in load_window's shape."""
+def extra_rows(cut, ogap=False):
+    """v1.7 (CAP.11) - the extra paper after the breaker through `cut`: every AFTER_CAP row (OGAP's when `ogap`, else
+    every other setup's), in load_window's shape (pnl, day, fee). Never in a headline figure."""
     T = _theories()
     out = []
     for f in sorted(glob.glob(os.path.join(REVIEWS, "trades", "20*.csv"))):
-        for r in csv.DictReader(open(f)):
+        for r in _csv_rows(f):
+            if r["_book"] != AFTER_CAP or r.get("pnl_usd") in (None, "") or not r.get("entry_time"):
+                continue
+            if (r.get("strategy") == OGAP) != bool(ogap):
+                continue
+            x = T.norm(r["sym"], r["strategy"], r["pnl_usd"], r["entry_time"])
+            if not ((WINDOW_START if not ogap else "") <= x["day"] <= cut):
+                continue
+            x["fee"] = float(r["fee"]) if r.get("fee") not in (None, "") else est_fee(r["sym"], r["contracts"])
+            out.append(x)
+    return out
+
+
+def ogap_rows(cut):
+    """v1.5 (OGAP.1) - every OGAP row through `cut` (its own line), in load_window's shape. v1.7 (CAP.11): as cash
+    would have counted the box's cap: an OGAP opened after a paper box's breaker would have popped is an extra
+    (extra_rows(ogap=True)); OGAP's paper rows on a cash box are its own evaluation and stay in."""
+    T = _theories()
+    out = []
+    for f in sorted(glob.glob(os.path.join(REVIEWS, "trades", "20*.csv"))):
+        for r in _csv_rows(f):
             if r.get("strategy") != OGAP or r.get("pnl_usd") in (None, "") or not r.get("entry_time"):
+                continue
+            if r["_book"] == AFTER_CAP:
                 continue
             x = T.norm(r["sym"], r["strategy"], r["pnl_usd"], r["entry_time"])
             if x["day"] > cut:
@@ -358,7 +567,11 @@ def window(cut):
                            sum(x["pnl_exec"] for x in er if x["day"] != OUTLIER_DAY)),
                post_decay=(sum(1 for x in er if x["day"] >= POST_DECAY),
                            sum(x["pnl_exec"] for x in er if x["day"] >= POST_DECAY)))
+    xa = extra_rows(cut)                          # v1.7 (CAP.11): the extra paper after the breaker, beside
+    extra = dict(n=len(xa), total=sum(x["pnl"] for x in xa), fees=sum(x["fee"] for x in xa),
+                 day_n=sum(1 for x in xa if x["day"] == cut), day_total=sum(x["pnl"] for x in xa if x["day"] == cut))
     return dict(cut=cut, n=n, total=tot, ev=tot / n, lo=lo, hi=hi, fees=sum(x["fee"] for x in rows), exec=exe,
+                after_cap=extra,
                 fees_est=sum(x["fee"] for x in rows if x["est"]), worst_setup=ws, ev_ex_setup=evs, worst_sym=wy,
                 ev_ex_sym=evy, theories=th, no_outlier=(len(no), sum(x["pnl"] for x in no)),
                 post_decay=(len(pd), sum(x["pnl"] for x in pd)), days=len({x["day"] for x in rows}))
@@ -407,6 +620,10 @@ def cmd_window(cut, write=True):
     print("window %s..%s AT THE MARK (the ladder's fill, mark or better): %d trades over %d days, realized %+.2f, EV %+.2f"
           " a trade, 95%% day-bootstrap [%s, %s]" % (WINDOW_START, w["cut"], w["n"], w["days"], w["total"], w["ev"], lo, hi))
     print("  fees beside (never inside): %.2f, of which estimated %.2f" % (w["fees"], w["fees_est"]))
+    xa = w["after_cap"]                          # v1.7 (CAP.11): headline = as cash would have traded
+    print("  extra paper after the breaker (paper boxes keep trading past the would-be cap; not in any figure here): "
+          "window n=%d net %+.2f, fees beside %.2f | this day n=%d net %+.2f" % (xa["n"], xa["total"], xa["fees"],
+                                                                                xa["day_n"], xa["day_total"]))
     print("  ex worst setup (%s) %+.2f | ex worst symbol (%s) %+.2f" % (w["worst_setup"], w["ev_ex_setup"],
                                                                          w["worst_sym"], w["ev_ex_sym"]))
     n0, t0 = w["no_outlier"]
@@ -422,6 +639,10 @@ def cmd_window(cut, write=True):
         _t = sum(x["pnl"] for x in og)
         print("  OGAP (its own line, never in the window): n=%d total %+.2f EV %+.2f a row, fees beside %.2f" % (
             len(og), _t, _t / len(og), sum(x["fee"] for x in og)))
+    ox = extra_rows(w["cut"], ogap=True)
+    if ox:
+        print("  OGAP extra paper after the breaker (not in its line): n=%d net %+.2f" % (len(ox),
+                                                                                   sum(x["pnl"] for x in ox)))
     if write:
         wp, tp = os.path.join(REVIEWS, "window_ev.csv"), os.path.join(REVIEWS, "theories.csv")
         migrate_header(wp, WINDOW_HDR_V1, WINDOW_HDR)
@@ -508,9 +729,10 @@ def migrate_giveback(path):
 def cmd_giveback(day, write=True):
     day = _day(day)
     path = os.path.join(REVIEWS, "trades", day + ".csv")
-    rows = list(csv.DictReader(open(path)))
+    rows = _csv_rows(path)
     if rows and "mfe_premium" not in rows[0]:
         raise SystemExit("review_kit: %s has no mfe_premium column - run `review_kit.py trades %s` first" % (path, day))
+    rows = [r for r in rows if r["_book"] == HEADLINE]       # v1.7 (CAP.11): as cash would have traded
     g = giveback(day, rows)
     print("%s: n=%d giveback $%.2f of a $%.2f peak open profit (%s%%), realized on those $%.2f; green-to-red %d for $%.2f"
           % (day, g["n"], g["giveback"], g["peak_open"], _pct(g["pct"]) or "n/a", g["kept"], g["g2r_n"],
@@ -542,8 +764,10 @@ def hunt_rows(cut):
     out = []
     for f in _trade_files(cut):
         day = os.path.basename(f)[:10]
-        for r in csv.DictReader(open(f)):
+        for r in _csv_rows(f):
             if r.get("strategy") != HUNT or r.get("pnl_usd") in (None, "") or r.get("sym") in OTV4TEST_SYMS:
+                continue
+            if r["_book"] != HEADLINE:                 # v1.7 (CAP.11): as cash would have traded
                 continue
             d = (r.get("direction") or "").lower()
             side = "call" if d in ("long", "call") else "put" if d in ("short", "put") else None
@@ -615,7 +839,7 @@ def cmd_backfill(frm, to):
     mism = []
     days = [os.path.basename(f)[:10] for f in _trade_files(to) if os.path.basename(f)[:10] >= frm]
     for day in days:
-        rows = list(csv.DictReader(open(os.path.join(REVIEWS, "trades", day + ".csv"))))
+        rows = [r for r in _csv_rows(os.path.join(REVIEWS, "trades", day + ".csv")) if r["_book"] == HEADLINE]
         g = giveback(day, rows)
         mine = giveback_cells_v1(day, g)
         old = rec.get(day)
