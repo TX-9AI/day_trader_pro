@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_saturday_brief.py  v2.4
+day_trader_pro/tests/check_saturday_brief.py  v2.5
+v2.5  2026-11-23  dtp r579 (TRIM.2). S32: LiquidityHunt and OGAP are retired (OTV5 r153; strategy_registry v1.13
+      HISTORICAL), so the fixture's history line holds five rows (GEXPinButterfly 1, LiquidityHunt 2, OGAP 2), not one,
+      and weekly_facts.md names no LiquidityHunt either. Expectation only; weekly_facts unchanged.
 v2.4  2026-11-22  dtp r575 (HALF.2, RWATCH.1). S36's header anchor is spec v3.3. NEW S39: 2A carries the Runaway
       equity watch (prompt and spec): the one scorer tools/runaway_watch.py run for the Friday, WATCH.md frozen, the bar
       (8 forward trades from 2026-11-23, net EV a trade below zero after fees), the statuses, the DIRECTION arrow with
@@ -865,8 +868,9 @@ ck("S31", r.returncode == 0 and _net_ok and _wk.get("n") == 5 and abs(_wk.get("g
    "(rc=%s %s)" % (r.returncode, (r.stderr or "")[-200:]))
 _ex = _j.get("excluded", {})
 _eb = _j.get("epoch_by_strategy", {})
-ck("S32", r.returncode == 0 and "GEXPinButterfly" not in _md and "setups no longer trading (history)" in _eb
-   and _eb["setups no longer trading (history)"]["n"] == 1 and _ex.get("otv4test_rows_csv") == 1
+ck("S32", r.returncode == 0 and "GEXPinButterfly" not in _md and "LiquidityHunt" not in _md   # v2.5 (r579)
+   and "setups no longer trading (history)" in _eb
+   and _eb["setups no longer trading (history)"]["n"] == 5 and _ex.get("otv4test_rows_csv") == 1   # GEXB 1 + Hunt 2 + OGAP 2
    and _j.get("epoch_book", {}).get("n") == 10 and _j.get("epoch_start") == "2026-10-26",
    "weekly_facts: a setup that no longer trades is one unnamed history line, the OTV4TEST row is dropped and counted, "
    "the epoch starts 2026-10-26")

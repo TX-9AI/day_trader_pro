@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-# day_trader_pro/tests/check_fit_trades.py — v1.1
+# day_trader_pro/tests/check_fit_trades.py — v1.2
+# v1.2 (2026-11-23) — dtp r579 / TRIM.2. T6 and T11 render their live setup as RunawayContinuation: LiquidityHunt is
+#   retired (OTV5 r153; strategy_registry v1.13 HISTORICAL), so the report rightly no longer lists it. Fixture only.
 # v1.1 (2026-11-08) — dtp r532 / OTV4DEP.1. T11: the report lists only strategy_registry's LIVE setups. A retired
 #   strategy (TrendCreditSpread) and a management plan (CreditRoll) with rows in the window are not named; one line
 #   counts them, names and rows, so nothing vanishes silently. The operator, 2026-10-31: "don't list the retired
@@ -111,7 +113,7 @@ def main():
           "40 closed trade(s)" in why5 and "5000 fired signal row(s)" in why5, why5[:80])
 
     # ══ T6 — nothing dropped from the report: trades, fired and declined all print ════════════════════════════
-    txt = F.render({"LiquidityHunt": {**rec, "plans": Counter(), "vec_fired": {}, "vec_declined": {}}},
+    txt = F.render({"RunawayContinuation": {**rec, "plans": Counter(), "vec_fired": {}, "vec_declined": {}}},
                    days)
     check("T6 the report prints the trades line", "trades       12" in txt, "")
     check("T6b fired still prints, labelled as signal rows", "fired      4383" in txt and "NOT trades" in txt)
@@ -119,12 +121,12 @@ def main():
 
     # ══ T11 — v1.10: only LIVE setups are listed; the rest are counted, never named ══════════════════════════
     _blank = {"plans": Counter(), "vec_fired": {}, "vec_declined": {}}
-    txt11 = F.render({"LiquidityHunt": {**rec, **_blank},
+    txt11 = F.render({"RunawayContinuation": {**rec, **_blank},
                       "TrendCreditSpread": {**rec, **_blank, "fired": 7, "declined": 3},
                       "CreditRoll": {**rec, **_blank, "fired": 0, "declined": 5}}, days)
     check("T11 a retired strategy and a management plan are not listed",
           "TrendCreditSpread" not in txt11 and "CreditRoll" not in txt11, "")
-    check("T11b the live setup still is", "  LiquidityHunt" in txt11, "")
+    check("T11b the live setup still is", "  RunawayContinuation" in txt11, "")
     check("T11c the hidden names are COUNTED, with their rows",
           "Not listed: 2 retired or non-strategy name(s) with 15 row(s)" in txt11,
           txt11.split("Not listed:")[1][:70] if "Not listed:" in txt11 else "no count line")

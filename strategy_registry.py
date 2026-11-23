@@ -1,4 +1,9 @@
-# day_trader_pro/strategy_registry.py — v1.12
+# day_trader_pro/strategy_registry.py — v1.13
+# v1.13 (2026-11-23) — dtp r579 / TRIM.2 (control's half of OTV5 r153). LiquidityHunt and OGAP leave REGISTRY for
+#   HISTORICAL: OTV5 r153 makes both DORMANT with no switch and no flag key on every box (the operator, 2026-11-23: "The
+#   hunt & OGAP are trash. Retire them both after this session today."). Their codes HUNT and OGAP stay, so their
+#   warehouse rows (to 2026-11-23) decode as before; the OTV5 code is kept for the purge. check_strategy_registry R11
+#   pins the move. Breakout's r556 pattern; the dtp report purge comes later.
 # v1.12 (2026-11-22) — dtp r577 / OGAP.4 — COMMENT ONLY: OGAP is no longer "QQQ paper only"; OTV5 r149 paper-trades it
 #   on every box (the operator, 2026-11-22: "I honestly want it paper Trading on all of them"), dormant on a live box. Its code, lineage and row are unchanged.
 # v1.11 (2026-11-14) — dtp r559 / B5.6 (the 11-14 Saturday brief section 5 item 6). lineages_for is DELETED: no
@@ -199,12 +204,8 @@ LIVE, RETIRED = "live", "retired"
 # turns this red until it is moved here or to HISTORICAL. The lineages say which engines have written the name.
 REGISTRY = {
     "RunawayContinuation":  ("RWAY", LIVE,    (MAIN, TEST, OTV5), None),
-    "LiquidityHunt":        ("HUNT", LIVE,    (TEST, OTV5),       None),
     # r519 — OTV5's PARK (strategy/park.py, the 11:00 debit held to 15:45). Was the unregistered "?PAR".
     "PARK":                 ("PARK", LIVE,    (OTV5,),            None),
-    # OGAP.1 (2026-11-14) — OTV5's OGAP (strategy/ogap.py), Park's friend's ORB-GAP; QQQ paper to OTV5 r148, every box on
-    # paper from r149 (OGAP.4; dormant on a live box).
-    "OGAP":                 ("OGAP", LIVE,    (OTV5,),            None),
 }
 
 # ── retired: a DECODE TABLE for rows already written, NOT a list ───────────
@@ -219,6 +220,9 @@ HISTORICAL = {
     "ATPButterfly":         ("ATPB", (TEST,),      None, "off 2026-10-02, operator: \"Turn off the ATP\""),
     "GEXPinButterfly":      ("GEXB", (MAIN, TEST, OTV5), None, "cut 2026-11-09 (OTV5 r97), code removed OTV5 r103; operator: \"I concur on both, in that order\""),
     "Breakout":             ("BRKO", (TEST, OTV5),       None, "dormant from 2026-11-16 (OTV5 r110, WS.3 TRIM; code kept); operator: \"Concur\""),
+    "LiquidityHunt":        ("HUNT", (TEST, OTV5),       None, "retired 2026-11-23 after the session (OTV5 r153, TRIM.2; code kept for the purge); operator: \"The hunt & OGAP are trash\""),
+    # OGAP.1 (2026-11-14) — OTV5's OGAP (strategy/ogap.py), Park's friend's ORB-GAP; paper on every box from OTV5 r149.
+    "OGAP":                 ("OGAP", (OTV5,),            None, "retired 2026-11-23 after the session (OTV5 r153, TRIM.2; code kept for the purge); operator: \"Retire them both\""),
     "SweepCreditSpread":    ("SWPT", (MAIN, TEST), None, "retired 2026-10-03, operator: \"Retire the sweep & TCS\""),
     # TCS: retired as a trade 2026-10-03; its OTV5 r57 log-only shadow was deleted by OTV5 r88 (RETIRE.3, 2026-11-08,
     # operator: "Delete") without ever booking a row. The code stays to decode its historical trades.

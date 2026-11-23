@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """
-tests/check_strategy_registry.py  v1.7
+tests/check_strategy_registry.py  v1.8
+v1.8  2026-11-23  dtp r579 / TRIM.2 (control's half of OTV5 r153) — HISTORY_CODES gains LiquidityHunt -> HUNT and OGAP -> OGAP:
+      OTV5 r153 makes both DORMANT with no switch (OGAP's schema key gone), so R11 wants them out of REGISTRY and R12 wants
+      their rows still decoded. Red on ad4ca34 at R11 once OTV5 r153 is HEAD (LiquidityHunt, OGAP listed, not active);
+      red here on OTV5 r152 (both still active there), so OTV5 r153 lands first. R5: a code the frozen otv4 mirror lacks
+      is allowed for a LIVE name or a HISTORICAL name whose only lineage is OTV5 (OGAP; otv4 is frozen and never saw it).
 v1.7  2026-11-22  dtp r577 / OGAP.4 (control's half of OTV5 r149) — R11 READS THE BOX FLAG SCHEMA TOO. OTV5 r148 put the
       per-box setup roster in utils/box_flags.py SCHEMA, and r149 moves OGAP there: its plan_state.TABLE default is FLAG
       (no ACTIVE literal; the default is the schema's `ogap`, on). R11's OTV5 active set is now the TABLE's ACTIVE HOUR
@@ -73,7 +78,9 @@ HISTORY_CODES = {"ORBStrategy": "ORBS", "VOLT": "VOLT", "ATPButterfly": "ATPB", 
                  "TrendCreditSpread": "TCST", "OpeningRangeCreditSpread": "ORCS", "IronCondorStrategy": "CNDR",
                  "SweepReversal": "SWPR", "ContinuationStrategy": "CONT",
                  "GEXPinButterfly": "GEXB",   # v1.5 (r544, RETIRE.5): the GEX pin fly is history
-                 "Breakout": "BRKO"}          # v1.6 (WS.3 TRIM): Breakout is dormant, its rows decode
+                 "Breakout": "BRKO",          # v1.6 (WS.3 TRIM): Breakout is dormant, its rows decode
+                 "LiquidityHunt": "HUNT",     # v1.8 (r579, TRIM.2): the Hunt is retired, its rows decode
+                 "OGAP": "OGAP"}              # v1.8 (r579, TRIM.2): OGAP is retired, its rows decode
 
 # 📊 MEASURED from the SOFI box 2026-09-25, not assumed: the strategy names
 # TEST declares. If TEST adds one, R2 goes red until it is registered — which
@@ -235,7 +242,9 @@ def main():
         # v1.4 — otv4 is FROZEN (OTV5 since 10-24), so its mirror is history: every code it prints must decode the
         # same here, and an entry it lacks is allowed only if it is LIVE in OTV5's era (PARK, r519).
         diff = {k: (codes.get(k), mirror.get(k)) for k in mirror if codes.get(k) != mirror.get(k)}
-        extra = sorted(k for k in set(codes) - set(mirror) if k not in SR.REGISTRY)
+        # v1.8 (r579): or a HISTORICAL name that only ever ran on OTV5 (OGAP, retired by OTV5 r153; otv4 never saw it)
+        o5_only = {n for n, h in getattr(SR, "HISTORICAL", {}).items() if tuple(h[1]) == (SR.OTV5,)}
+        extra = sorted(k for k in set(codes) - set(mirror) if k not in SR.REGISTRY and k not in o5_only)
         ck("R5", not diff and not extra,
            f"all {len(mirror)} codes in the frozen otv4/query.py decode the same here; OTV5-era only: "
            f"{sorted(set(codes) - set(mirror))}"
