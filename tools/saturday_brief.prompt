@@ -28,6 +28,9 @@ every figure: quote their "extra paper after the breaker" lines BESIDE the headl
 evidence of whether the $3,000 cap helps), name each would-pop record (~/reviews/breaker/<day>.csv, reason
 daily_cap_would_pop: box, time, day net), and put a cash box's OGAP paper rows on OGAP's own line only.
 
+THE LIVE SETUPS ARE PARK AND RunawayContinuation ONLY (dtp r580 wording). The operator retired LiquidityHunt (Hunt) and OGAP on 2026-11-23 (OTV5 r153 TRIM.2: "The hunt & OGAP are trash. Retire them both after this session today."): both are DORMANT on every box from 2026-11-24, so a day with zero Hunt or OGAP trades is EXPECTED, never a defect, never a study, never a missing feed; their rows to 2026-11-23 are history; a Hunt or OGAP trade after 2026-11-23 is a DEFECT. The standing Hunt
+and OGAP items below report their history to 2026-11-23 and say RETIRED; they make no R-item and no decision is pending.
+
 THE NUMBERS FIRST (spec "The numbers (v3.0)"), before section 1 (about 30 s, S3 reads only):
     /home/ubuntu/day_trader_pro/venv/bin/python -I /home/ubuntu/day_trader_pro/tools/weekly_facts.py \
         --fri <this Friday> --out <WORK>
@@ -274,6 +277,10 @@ THE NUMBERS FIRST (spec "The numbers (v3.0)"), before section 1 (about 30 s, S3 
        config.FOREX_FACTORY_URL, current week only; its ff_calendar_nextweek.json sibling when it answers, else NOT
        MEASURED with the reason); earnings on our symbols: earnings.expected-report-date from the Friday's S3
        raw/market_metrics/dt=<Fri>/sym=<SYM>/ (TastyTrade), listed when it falls next week.
+       THE SCHEDULE (dtp r580 / CAL.1, read only): run
+         /home/ubuntu/day_trader_pro/venv/bin/python -I /home/ubuntu/day_trader_pro/tools/calendar_view.py --days 7
+       and put its load line, its COLLISIONS list and its timeline table in 4.4 as printed (control's timers, the box
+       windows, the coordinator's ~/reviews/schedule/planned.tsv). Name each COLLISION; never move or run a job.
      · 4.5 THE SUNDAY WORK LIST, LAST: every item for a yes (from 4.1, 3B, 3C, 2B), one line each: id, what lands,
        its gate, its size, DELICATE (the live order path, entries, exits, sizing, a box service, anything that
        trades) or ROUTINE (control-only tools, docs, studies, tests); DELICATE first. The brief ENDS with it.

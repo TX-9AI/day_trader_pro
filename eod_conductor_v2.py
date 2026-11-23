@@ -1,6 +1,13 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/eod_conductor_v2.py — v2.20
+day_trader_pro/eod_conductor_v2.py — v2.21
+v2.21 2026-11-23 — dtp r580 / LOCK.1 — THE CLOSE HOLDS THE FLEET LOCK. On 2026-11-23 a wake_and_bake run at 16:12 ET
+      (`flock /tmp/claude-fleet.lock ... wake_and_bake.py`) restarted 13 boxes under this close (16:05-16:19). A real
+      run (not --dry-run) now takes the same lock, FLEET_LOCK, exclusively before it touches a box and keeps it until
+      the process exits (reports included), so a bake or wake simply waits, and so does a close that starts while a
+      bake holds it. Taken inside main(), so the unit is unchanged. Nothing this close runs takes that lock (only
+      tools/study_dispatch.py's fleet_lock() does, around its own power calls, and the close never runs it); NEVER wrap
+      this script in flock on that path, it would wait on itself. Gate tests/check_conductor_lock.py.
 v2.20 2026-11-22 — dtp r578 / CAP.11 (control's half of OTV5 r151) — THE BOX'S "Service mode: LIVE|PAPER" START LINE COMES TO
       CONTROL TOO. The copy's awk also keeps the day's lines holding ": Service mode: " (main logs one at every service
       start: "Service mode: PAPER | QQQ | risk=..."), beside the "OptionsBot [MODE] STARTED" markers it already kept, so
@@ -188,6 +195,7 @@ Run:  python3 eod_conductor_v2.py                 # live
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import os
 import re
@@ -210,6 +218,21 @@ except Exception:                                               # noqa: BLE001
     notify = None
 
 INSTALL_DIR = getattr(config, "INSTALL_DIR", "~/options-trader")
+
+# v2.21 (LOCK.1): the one fleet lock; wake_and_bake runs under `flock` on it and study_dispatch.fleet_lock() takes it.
+FLEET_LOCK = "/tmp/claude-fleet.lock"
+
+
+def take_fleet_lock(path=None):
+    """Hold the fleet lock until this process exits. Waits (blocking) for a bake or wake that holds it."""
+    fh = open(path or FLEET_LOCK, "a")
+    try:
+        fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        _log("LOCK", f"{path or FLEET_LOCK} is held (a bake or wake is running) - waiting for it")
+        fcntl.flock(fh, fcntl.LOCK_EX)
+    _log("LOCK", f"holding {path or FLEET_LOCK} for the close")
+    return fh
 
 # ⚠️ A DRAIN+VERIFY IS MINUTES OF WORK, NOT SECONDS. Generous on purpose: the
 # cost of waiting is a slower close, the cost of timing out is a box held up
@@ -935,6 +958,9 @@ def main(argv=None) -> int:
     date = ettime.today_et()
     dry = a.dry_run
     _log("START", f"EOD conductor v2 — {date}" + ("  [DRY-RUN]" if dry else ""))
+    # v2.21 (LOCK.1): no bake or wake runs under the close. Taken BEFORE the fleet is read, so a bake it waited on is
+    # seen as it left the boxes. Kept open (never closed) so the lock lives exactly as long as this process.
+    lock_fh = take_fleet_lock() if not dry else None                    # noqa: F841
 
     only = ([s.strip().upper() for s in a.only.split(",")] if a.only else None)
     running = [s for s, _ip, st in fleet.get_fleet(only) if st == "running"]

@@ -1,6 +1,13 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/daily_brief.py  v1.4  -  the post-trading-day brief (PDF) for any session.
+day_trader_pro/tools/daily_brief.py  v1.5  -  the post-trading-day brief (PDF) for any session.
+v1.5  2026-11-23  dtp r580 / CAL.1 + RECAP.3 — THE SPX CASH BUDGET IS DATE-AWARE: cash_budget(sym, day) is $5,000 an SPX
+      entry before 2026-11-23 and $4,200 from it (QQQ $1,050 unchanged); section 5's re-scale and its sizing line use the
+      day's figure (it was a flat $5,000 every day). SECTION 7, THE SCHEDULE. The operator, 2026-11-23: "We just want to prevent
+      unscheduled work from colliding with planned jobs." One table from tools/calendar_view.py (read only), built when
+      the PDF is built: now to tomorrow 17:00 ET, control's timers, the box windows (wake + sweep, RTH, the close, the
+      study dispatch) and ~/reviews/schedule/planned.tsv, a COLLISION flag on a planned box row that overlaps one, and
+      the one-line load summary. A failed read prints NOT READ with the reason; nothing else in the brief changes.
 v1.4  2026-11-22  dtp r578 / CAP.11 (control's half of OTV5 r151) — THE BRIEF HEADLINES "AS CASH WOULD HAVE TRADED". OTV5
       r151 makes the daily catastrophic cap record only on a paper box (the operator, 2026-11-22: "there's no harm in
       letting paper run & we can just note if the breaker would have popped"): the box trades on and tags what it
@@ -120,7 +127,14 @@ from reportlab.platypus import (Image, KeepTogether, PageBreak, Paragraph,  # no
 
 ET = ZoneInfo("America/New_York")
 INDEX_FIRST = ("SPX", "QQQ")
-CASH_BUDGET = {"QQQ": 1050.0, "SPX": 5000.0}
+CASH_BUDGET = {"QQQ": 1050.0, "SPX": 5000.0}            # before 2026-11-23; cash_budget() applies the change below
+CASH_BUDGET_FROM = {"SPX": ("2026-11-23", 4200.0)}       # v1.5: SPX $4,200 an entry from 2026-11-23 (was $5,000)
+
+
+def cash_budget(sym, day):
+    """v1.5 -> the per-entry cash budget for `sym` on `day` (ISO date)."""
+    since, usd = CASH_BUDGET_FROM.get(sym, (None, None))
+    return usd if since and day >= since else CASH_BUDGET[sym]
 CASH_STRATEGIES = ("PARK", "RunawayContinuation", "LiquidityHunt", "OGAP")
 WINDOW_SETUPS = ("PARK", "RunawayContinuation", "LiquidityHunt")   # OGAP is its own line
 SHORT = {"RunawayContinuation": "Runaway", "LiquidityHunt": "Hunt", "PARK": "PARK", "OGAP": "OGAP"}
@@ -540,7 +554,7 @@ def compute(day):
     for r in trades:
         if r["symbol"] not in CASH_BUDGET or r.get("strategy") not in CASH_STRATEGIES:
             continue
-        budget = CASH_BUDGET[r["symbol"]]
+        budget = cash_budget(r["symbol"], day)
         prem = float(r["entry_premium"])
         n_cash = int(math.floor(budget / (prem * 100) + 1e-9))
         n_paper = int(r.get("contracts") or 0)
@@ -718,6 +732,16 @@ def runaway_watch_score(day, trades_dir=None):
         return RW, RW.score(day, trades_dir=trades_dir or RW.TRADES), None
     except Exception as e:                               # noqa: BLE001
         return None, None, "%s: %s" % (type(e).__name__, e)
+
+
+def schedule(now=None):
+    """v1.5 -> (tools/calendar_view.build's dict, None) or (None, reason)."""
+    try:
+        sys.path.insert(0, os.path.join(DTP_ROOT, "tools"))
+        import calendar_view as CV                       # noqa: E402  (stdlib + market_calendar only)
+        return CV.build(now), None
+    except Exception as e:                               # noqa: BLE001
+        return None, "%s: %s" % (type(e).__name__, e)
 
 
 def watch_chart(RW, sc):
@@ -964,8 +988,8 @@ def build(day, notes, out_dir):
     st.append(P("5. If this had been cash", "h1"))
     st.append(P(f"Sizing assumption: only QQQ and SPX trade cash, strategies PARK, Runaway, Hunt and OGAP. Each "
                 f"{day} QQQ/SPX trade is re-sized to contracts = floor(budget ÷ (entry mark × 100)) at "
-                f"the operator's per-entry budgets, QQQ {money(CASH_BUDGET['QQQ'], sign=False, dec=0)} and SPX "
-                f"{money(CASH_BUDGET['SPX'], sign=False, dec=0)}. That is the bot's budget rule "
+                f"the operator's per-entry budgets, QQQ {money(cash_budget('QQQ', day), sign=False, dec=0)} and SPX "
+                f"{money(cash_budget('SPX', day), sign=False, dec=0)}. That is the bot's budget rule "
                 f"(risk_manager._size_budget, SIZE_ON_RISK off, grade multiplier 1.0) and OGAP's own rule "
                 f"(floor(RISK_PER_TRADE_USD ÷ (mark × 100)), r131/r136); Runaway, Hunt, PARK and OGAP size on "
                 f"OT_RISK_USD alone (Saturday brief 11-21, R5: the ramp top sizes nothing live). "
@@ -1054,6 +1078,22 @@ def build(day, notes, out_dir):
         st.append(Paragraph(f"<b>When.</b> {esc(when or '?')}"
                             + (f" — {esc(mt['when_reason'])}" if mt.get("when_reason") else ""), S["body"]))
         st.append(P("Nothing is built until the operator says yes.", "small"))
+
+    # ── Section 7 (v1.5): the schedule, now to tomorrow 17:00 ET (tools/calendar_view.py, read only) ──
+    st.append(Spacer(1, 8))
+    st.append(P("7. The schedule, now to tomorrow 17:00 ET", "h1"))
+    cal, cerr = schedule()
+    if cal is None:
+        st.append(P(f"Schedule: NOT READ ({cerr}).", "small"))
+    else:
+        CV = sys.modules["calendar_view"]
+        st.append(P(cal["summary"] + (f" · COLLISIONS: {len(cal['collisions'])}" if cal["collisions"] else ""), "body"))
+        for pr_ in cal["problems"]:
+            st.append(P("Note: " + pr_, "small"))
+        st.append(table(CV.table_rows(cal), [x * inch for x in (1.05, 0.7, 3.0, 0.6, 1.05, 1.0)]))
+        st.append(P("Planned work is ~/reviews/schedule/planned.tsv (the coordinator's file). A planned row that "
+                    "touches the boxes and overlaps RTH, the close, the wake + sweep, the study dispatch or another "
+                    "planned box row is flagged COLLISION. Report only: nothing here runs or moves a job.", "small"))
 
     # ── sources ──
     st.append(Spacer(1, 10))

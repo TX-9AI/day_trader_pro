@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_nightly_review.py  v1.8
+day_trader_pro/tests/check_nightly_review.py  v1.9
+v1.9  2026-11-23  dtp r580 / TRIM.2 wording — N17 reads the prompt's own version (v1.10: PARK and RunawayContinuation
+      are the only live setups; the wording is pinned by tests/check_live_setups_wording.py). Same checks otherwise.
 v1.8  2026-11-22  dtp r578 / CAP.11 — N17 reads the prompt's own version (v1.9: as cash would have traded is the headline;
       the as-cash rule itself is pinned by tests/check_as_cash.py A9). Same checks otherwise.
 v1.7  2026-11-22  dtp r577 / OGAP.4 — N17 reads the prompt's own version (v1.8: OGAP paper on every box from OTV5 r149);
@@ -564,7 +566,7 @@ _d17a = K.due(datetime(2026, 11, 27, 13, 39, tzinfo=K.ET))
 _d17b = K.due(datetime(2026, 11, 27, 13, 40, tzinfo=K.ET))
 ck("N17", "A HALF DAY IS A NON-TRADING DAY" in _pr17 and "Yes, just treat them as bank holidays. No trading." in _pr17
    and "Zero trades is EXPECTED: never BROKEN, never a lead, never a study" in _pr17
-   and "Any trade OPENED on a half day IS BROKEN" in _pr17 and "nightly_review.prompt v1.9" in _pr17
+   and "Any trade OPENED on a half day IS BROKEN" in _pr17 and "nightly_review.prompt v1.10" in _pr17
    and _g17["n"] == 0 and _g17["pct"] is None and _d17b == "2026-11-27" and _d17a != "2026-11-27",
    "the prompt states the ruling; 11-27 due at 13:40 (%s / %s); an empty day's giveback n=%d" % (_d17a, _d17b, _g17["n"]))
 

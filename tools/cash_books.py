@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/cash_books.py  v1.3
+day_trader_pro/tools/cash_books.py  v1.4
+v1.4  2026-11-23  dtp r580 / RECAP.3 — THE SCOREBOARD PRINTS ITS SIZE BASIS. The daily recap prompt asks the C1-C4
+      commentary to name the SPX size change ($4,200 an entry from 2026-11-23, was $5,000), and the validator withheld the
+      11-23 commentary for quoting $4,200 and $5,000, figures the scorer never printed. score() now carries "sizes"
+      (SIZES: the per-entry sizes the boxes trade; paper is sized as cash) and render_md prints them as one "Entry sizes"
+      line; figures() includes them. Report only: no book, window or metric changes, PREREG's sha holds.
 v1.3  2026-11-22  dtp r578 / CAP.11, AMENDMENT 3 (proposed; to be written in AMENDMENTS.txt before any after_cap trade
       exists, PREREG.md unchanged, its sha still holds). The books measure what CASH would have done. OTV5 r151 makes the
       daily catastrophic cap record only on a paper box (the operator, 2026-11-22: "there's no harm in letting paper
@@ -87,6 +92,9 @@ HOLDERS = ("LiquidityHunt", "OGAP")          # the paper setups whose open posit
 IN_SAMPLE = ("2026-10-26", "2026-11-20")
 FORWARD = ("2026-11-23", "2026-12-03")
 BOOT_N, BOOT_SEED = 5000, 1
+# v1.4 (RECAP.3): the per-entry sizes the boxes trade (paper is sized as cash): (symbol, dollars, since, was). Printed
+# as the scoreboard's "Entry sizes" line so the commentary may quote them; nothing is re-scaled by them.
+SIZES = (("QQQ", 1050, None, None), ("SPX", 4200, "2026-11-23", 5000))
 BOOKS = (
     ("C1", "QQQ and SPX only: Runaway and PARK"),
     ("C2", "All 14 symbols: PARK and Runaway"),
@@ -240,7 +248,8 @@ def score(through, day=None, week_start=None, trades_dir=TRADES):
         wins.append(("day", day, day))
     out = {"through": through, "prereg": PREREG, "prereg_sha": PREREG_SHA, "basis": "the mark (pnl_usd); fees beside",
            "amendment": amendment_line(), "amendments": amendment_lines(), "concentration": CONCENTRATION,
-           "books": dict(BOOKS), "windows": {}}
+           "books": dict(BOOKS), "windows": {},
+           "sizes": [{"sym": a, "usd": u, "since": f, "was": w} for a, u, f, w in SIZES]}
     for name, lo, hi in wins:
         sess, missing = sessions(lo, hi, file_days)
         w = {"from": lo, "to": hi, "sessions": len(sess), "missing_trade_files": missing, "books": {}}
@@ -349,6 +358,8 @@ def render_md(sc):
     L = ["# Cash candidate books C1-C4, through %s" % sc["through"], "",
          "Frozen in %s (sha256 %s). Basis: the mark (pnl_usd); fees beside, never inside EV. Report only: never in the "
          "window EV or the theories; the choice of book is the operator's." % (sc["prereg"], sc["prereg_sha"][:12]), ""]
+    if size_line(sc):                                        # v1.4 (RECAP.3)
+        L += [size_line(sc), ""]
     for a in sc.get("amendments") or ([sc["amendment"]] if sc.get("amendment") else []):
         L += ["Amendment: " + a, ""]
     comb = (sc["windows"].get("combined") or {}).get("books") or {}
@@ -411,7 +422,21 @@ def figures(sc):
                 out.add(round(abs(v)))
         for x in (w.get("extras") or {}).values():          # v1.3: the extras line's figures
             out.add(round(abs(x["gross"])))
+    for z in sc.get("sizes") or []:                          # v1.4: the Entry sizes line
+        for k in ("usd", "was"):
+            if z.get(k) is not None:
+                out.add(round(abs(z[k])))
     return out
+
+
+def size_line(sc):
+    """v1.4: the scoreboard's one "Entry sizes" line, or None for a scoreboard without sizes."""
+    zs = sc.get("sizes") or []
+    if not zs:
+        return None
+    return ("Entry sizes (per entry, as the boxes trade them; paper is sized as cash): " + "; ".join(
+        "%s %s%s" % (z["sym"], _m(z["usd"]), (" from %s (was %s)" % (z["since"], _m(z["was"]))) if z.get("since") else "")
+        for z in zs) + "; per contract unchanged.")
 
 
 def main(argv=None):

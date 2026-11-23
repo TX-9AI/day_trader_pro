@@ -1,6 +1,20 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_daily_recap.py  v1.5
+day_trader_pro/tests/check_daily_recap.py  v1.6
+v1.6  2026-11-23  dtp r580 / RECAP.3 + CAL.1 (cash_books v1.4, daily_brief v1.5, the prompt v1.8). R11 wants daily_brief
+      v1.5. NEW:
+  R20 the scoreboard prints its size basis: score() carries "sizes" (QQQ $1,050; SPX $4,200 from 2026-11-23, was
+      $5,000), the md prints the "Entry sizes" line, figures() holds 1050, 4200 and 5000, so a commentary naming the SPX
+      size change is kept; a commentary quoting a setup's FACTS day figure the scoreboard never printed (the 11-23 case:
+      the Runaway's +$127) is still withheld; the prompt says FACTS day figures never go in this commentary and to use
+      "The day" rows. BORN RED on 613fb1d (the 11-23 commentary withheld for $4,200 and $5,000).
+  R22 the PDF's cash re-scale is date-aware: daily_brief.cash_budget is SPX $5,000 on 2026-11-20, $4,200 on 2026-11-23
+      and after, QQQ $1,050 on both; compute() and section 5's sizing line call it (no flat CASH_BUDGET[...] read left)
+  R21 the PDF has section 7, the schedule, from tools/calendar_view.py (build, table_rows, the load summary, NOT READ
+      on a failure)
+  R7 (fixed) the copy of the real queue renames the real 11-23 recap items' markers before the fixture appends as
+      2026-11-23 (red on 613fb1d since the 11-23 recap queued WS.38-WS.39: the fixture's P1 and P2 read as already
+      appended)
 v1.5  2026-11-22  dtp r578 / CAP.11 (daily_recap v1.5, daily_brief v1.4, the prompt v1.7). R11 wants daily_brief v1.4. The
       as-cash context block, the brief's extras lines and the prompt's rule are pinned by tests/check_as_cash.py A7-A9.
 v1.4  2026-11-22  dtp r576 / BOXF.1 (daily_recap v1.4, the prompt v1.5). NEW:
@@ -454,7 +468,9 @@ def r7_on(text, label):
 
 ok7a, d7a = r7_on(QFIX, "fixture")
 if os.path.exists(real_q):
-    ok7b, d7b = r7_on(read(real_q), "realcopy")
+    # v1.6: the real queue now holds the 11-23 recap's own items, "(daily recap 2026-11-23, Pn)", which read as this
+    # fixture's earlier append (an item's own earlier append appends nothing): rename them in the copy only
+    ok7b, d7b = r7_on(read(real_q).replace("(daily recap 2026-11-23, P", "(daily recap 2026-11-23 real, P"), "realcopy")
 else:
     ok7b, d7b = True, "real queue not readable here (fixture only)"
 ck("R7", ok7a and ok7b and DR.next_ws_id(QFIX) == 25,
@@ -545,11 +561,11 @@ try:
     comp = True
 except py_compile.PyCompileError:
     comp = False
-ck("R11", comp and "daily_brief.py  v1.4" in gs and 'NOTES_DIR = os.path.expanduser("~/reviews/daily_brief/notes")' in gs
+ck("R11", comp and "daily_brief.py  v1.5" in gs and 'NOTES_DIR = os.path.expanduser("~/reviews/daily_brief/notes")' in gs
    and "--facts" in gs and "--summary-json" in gs and "/home/ubuntu/venvs/daily_brief" in gs
    and not os.path.exists(os.path.join(TOOLS, "venv")) and not os.path.exists(os.path.join(TOOLS, "notes"))
    and "11-20 showed" not in gs and os.path.exists(os.path.join(TOOLS, "daily_brief.requirements.txt")),
-   "tools/daily_brief.py v1.4 compiles; notes under ~/reviews/daily_brief/notes; no venv or notes in the repo")
+   "tools/daily_brief.py v1.5 compiles; notes under ~/reviews/daily_brief/notes; no venv or notes in the repo")
 
 # ── R12 ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
 _r12q = os.path.join(TMP, "q12.md")
@@ -794,6 +810,44 @@ ck("R19", _f19[0] == "defaults, as HEAD: QQQ"
    and not re.search(r"Environment|r19-secret|TT_REFRESH|account number", _c19)
    and 'CONTEXT\'s "Box flags" block' in _pr19 and "Report only: never propose a flag change" in _pr19,
    "box flags: %s / %s / %s; calls %s" % (_f19, _f19b, _f19c, _calls19))
+
+# ── R20 (v1.6, RECAP.3): the size basis is printed, a FACTS day figure is not ─────────────────────────────────────
+_md20 = read(os.path.join(_w15, "cash_books.md")) if os.path.exists(os.path.join(_w15, "cash_books.md")) else ""
+_f20 = CB.figures(_sc15) if _sc15 else set()
+_sz = dict(NOTES_OK, cash_books=["SPX entries size on $4,200 from 2026-11-23 (was $5,000); QQQ on $1,050. "
+                                 "C1 netted $1,224 on the day."])
+_rw = dict(NOTES_OK, cash_books=["The Runaway made $127 on the day; C1 netted $1,224."])
+_pr20 = re.sub(r"\s+", " ", read(os.path.join(TOOLS, "daily_recap.prompt")))
+ck("R20", {1050, 4200, 5000} <= _f20 and 127 not in _f20
+   and "Entry sizes (per entry, as the boxes trade them; paper is sized as cash): QQQ $1,050; SPX $4,200 from "
+       "2026-11-23 (was $5,000); per contract unchanged." in _md20
+   and DR.cash_problems(_sz, _sc15) == [] and any("$127" in x for x in DR.cash_problems(_rw, _sc15))
+   and 'its "Entry sizes" line included; for the day, its "The day" rows' in _pr20
+   and "is not a scoreboard figure and never goes in this commentary" in _pr20,
+   "sizes %s; kept %s; withheld %s" % (sorted(x for x in _f20 if x in (127, 1050, 4200, 5000)),
+                                         DR.cash_problems(_sz, _sc15) if _sc15 else "?",
+                                         DR.cash_problems(_rw, _sc15) if _sc15 else "?"))
+
+# ── R21 (v1.6, CAL.1): the PDF's schedule section ────────────────────────────────────────────────────────────────
+_bs21 = read(os.path.join(TOOLS, "daily_brief.py"))
+ck("R21", '"7. The schedule, now to tomorrow 17:00 ET"' in _bs21 and "import calendar_view as CV" in _bs21
+   and "CV.build(now)" in _bs21 and "CV.table_rows(cal)" in _bs21 and 'cal["summary"]' in _bs21
+   and 'f"Schedule: NOT READ ({cerr}).' in _bs21
+   and _bs21.find("7. The schedule") < _bs21.find("# ── sources ──"),
+   "daily_brief section 7 from tools/calendar_view.py")
+
+# ── R22 (v1.6, RECAP.3): the SPX cash budget follows the 2026-11-23 change ───────────────────────────────────────
+_bs22 = read(os.path.join(TOOLS, "daily_brief.py"))
+_ns22 = {}
+_m22 = re.search(r"^CASH_BUDGET = .*?^def cash_budget\(sym, day\):.*?(?=^\S)", _bs22, re.M | re.S)
+if _m22:
+    exec(compile(_m22.group(0), "daily_brief.cash_budget", "exec"), _ns22)
+_cb22 = _ns22.get("cash_budget")
+ck("R22", bool(_cb22) and _cb22("SPX", "2026-11-20") == 5000.0 and _cb22("SPX", "2026-11-23") == 4200.0
+   and _cb22("SPX", "2026-12-07") == 4200.0 and _cb22("QQQ", "2026-11-20") == _cb22("QQQ", "2026-11-23") == 1050.0
+   and 'budget = cash_budget(r["symbol"], day)' in _bs22 and "money(cash_budget('SPX', day)" in _bs22
+   and "CASH_BUDGET[" not in _bs22.replace("CASH_BUDGET[sym]", ""),
+   "SPX 5000 before 2026-11-23, 4200 from it; QQQ 1050; the re-scale and the sizing line use it")
 
 shutil.rmtree(TMP, ignore_errors=True)
 print()

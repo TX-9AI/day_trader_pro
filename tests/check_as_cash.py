@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_as_cash.py  v1.0
+day_trader_pro/tests/check_as_cash.py  v1.1
+v1.1  2026-11-23  dtp r580 — A9 reads the prompts' own versions (daily recap v1.8, nightly review v1.10: the live-setup
+      wording after OTV5 r153). Same checks otherwise.
 v1.0  2026-11-22  dtp r578 / CAP.11 (control's half of OTV5 r151) — new. THE REPORTS HEADLINE "AS CASH WOULD HAVE TRADED".
       OTV5 r151 makes the daily catastrophic cap record only on a paper box (the operator, 2026-11-22: "Is there any way
       we can make the catastrophic cap only apply to cash? As in, there's no harm in letting paper run & we can just note
@@ -372,8 +374,8 @@ def main():
             need = ("AS CASH WOULD HAVE TRADED IS THE HEADLINE", "after_cap", "would-pop", "OGAP",
                     "never added in", "there's no harm")
             miss = {n: [x for x in need if x not in t] for n, t in pr_.items()}
-            ok = (all(not v for v in miss.values()) and "daily_recap.prompt v1.7" in pr_["daily_recap.prompt"]
-                  and "nightly_review.prompt v1.9" in pr_["nightly_review.prompt"]
+            ok = (all(not v for v in miss.values()) and "daily_recap.prompt v1.8" in pr_["daily_recap.prompt"]
+                  and "nightly_review.prompt v1.10" in pr_["nightly_review.prompt"]
                   and "breaker/" in pr_["nightly_review.prompt"] and "breaker/" in pr_["saturday_brief.prompt"])
             ck("A9", ok, "missing=%s" % miss)
         except Exception as e:                                   # noqa: BLE001

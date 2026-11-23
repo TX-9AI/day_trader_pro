@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-# day_trader_pro/warehouse_reader.py — v2.3
+# day_trader_pro/warehouse_reader.py — v2.4
+# v2.4 (2026-11-23) — dtp r580 / BRK.1 — `config` IS dtp's config.py, BY PATH. review_kit's breaker read ran headless after
+#   fees_bridge, which puts ~/OTV5/tests first, and ~/OTV5/tests/fees.py puts ~/OTV5 at sys.path[0], so `import config`
+#   found ~/OTV5/config.py (no WAREHOUSE_BUCKET): "breaker events NOT READ" on 2026-11-23. _dtp_config() reuses the
+#   loaded `config` only when it is the file beside this one, else loads that file as module "dtp_config".
+#   Gate tests/check_breaker_import.py.
 # v2.3 (2026-11-08) — dtp r535 / CONST.1 — the bucket is config.WAREHOUSE_BUCKET (the one dtp copy; tests/check_const_parity.py pins it to OTV5's).
 # v2.2 (2026-10-11) — r479 / OPS.22 — zone "US/Eastern" -> "America/New_York": the legacy link tzdata 2026c moved out of the default install. Same rules; no behaviour change.
 # v2.1 (2026-09-05) — dtp r287 / TZ.1. `et_day` and `et_bounds` MOVED TO
@@ -181,8 +186,25 @@ from zoneinfo import ZoneInfo
 
 import boto3
 
-import config
-import consolidate_trades as CT
+
+
+def _dtp_config():
+    """v2.4: dtp's config.py (the file beside this one), never another tree's `config` that sys.path found first."""
+    import importlib.util
+    here = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.py")
+    for name in ("config", "dtp_config"):
+        m = sys.modules.get(name)
+        if m is not None and os.path.abspath(getattr(m, "__file__", "") or "") == here:
+            return m
+    spec = importlib.util.spec_from_file_location("dtp_config", here)
+    m = importlib.util.module_from_spec(spec)
+    sys.modules["dtp_config"] = m
+    spec.loader.exec_module(m)
+    return m
+
+
+config = _dtp_config()
+import consolidate_trades as CT                                  # noqa: E402
 
 BUCKET = config.WAREHOUSE_BUCKET
 REGION = os.environ.get("OT_S3_REGION", "us-east-2")
