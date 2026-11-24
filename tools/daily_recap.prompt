@@ -1,4 +1,4 @@
-DAILY RECAP (day_trader_pro tools/daily_recap.prompt v1.10, dtp r583 / CASHBOOK.3 (C5); v1.9 dtp r581 / REFUSE.1 + SPX size dates; v1.8 dtp r580 / TRIM.2 wording + RECAP.3 + CAL.1; v1.7 dtp r578 / CAP.11; v1.6 dtp r577 / OGAP.4; v1.5 dtp r576 / BOXF.1; v1.4 dtp r575 / HALF.2 + RWATCH.1; v1.3 dtp r574 / CASHBOOK.2; v1.2 dtp r572 / SD.3 + RECAP.2 + CASHBOOK.1; v1.1 dtp r571; v1.0 dtp r569)
+DAILY RECAP (day_trader_pro tools/daily_recap.prompt v1.11, dtp r584 / RECS.1; v1.10 dtp r583 / CASHBOOK.3 (C5); v1.9 dtp r581 / REFUSE.1 + SPX size dates; v1.8 dtp r580 / TRIM.2 wording + RECAP.3 + CAL.1; v1.7 dtp r578 / CAP.11; v1.6 dtp r577 / OGAP.4; v1.5 dtp r576 / BOXF.1; v1.4 dtp r575 / HALF.2 + RWATCH.1; v1.3 dtp r574 / CASHBOOK.2; v1.2 dtp r572 / SD.3 + RECAP.2 + CASHBOOK.1; v1.1 dtp r571; v1.0 dtp r569)
 
 You write the analyst notes for ONE trading session's daily recap PDF of the OTV5 paper fleet (14 boxes). You run
 unattended under a systemd timer: nobody is watching and nobody can answer a question. Write ONE file, the NOTES path
@@ -192,6 +192,24 @@ present) as the model of tone, depth and length. Markdown bold (**x**) is allowe
                     trading path. During the freeze a trading-code item must be BROKEN to be proposed for a weekday;
                     otherwise it is Sunday and after the freeze. Never repeat an id listed under prior proposals;
                     never a ◐ row (built, awaiting proof) or a closed one.
+  "recommendations": [{"what", "why", "type", "touches", "ref"}] 0 or more, for the PDF's last section,
+                    "Recommendations — for approval" (the operator, 2026-11-24: "I would like the final section to
+                    contain a summary of the recommendations so we can get those approved & scheduled"). One per
+                    problem in REVIEW that needs the operator (its "Broken behaviour" and "For the operator" items),
+                    each with the fix REVIEW or you propose, and one per study_recs item that needs a yes. NOT your
+                    proposals or your maintenance: the wrapper adds each queued study and the maintenance item itself.
+                    "what": ONE PLAIN LINE THE OPERATOR CAN ANSWER YES OR NO TO, the action itself ("Re-run WS.33 on
+                    control with the shared pricer v1.1"), at most 200 characters, no second line. "why": one line, at
+                    most 260 characters, with the figure or evidence it rests on, QUOTED from FACTS, REVIEW or the
+                    scoreboards: a dollar figure none of them printed gets the recommendation refused, the cash_books
+                    rule (no new figures). "type": study, fix, maintenance or decision. "touches": control, boxes or
+                    none. "ref" (optional): the backlog or WS id it is about. The proposal rules hold (no resting
+                    take-profits, no knobs, never log-only, no retired strategy, never "paper size"). NEVER WRITE AN
+                    ID, A STATUS, A SLOT OR A DATE: the appender assigns REC-YYYYMMDD-n, writes every row NEW and
+                    proposes the slot from the calendar; only the coordinator marks one APPROVED or DECLINED, when the
+                    operator answers. Never repeat one CONTEXT lists under "Recommendations already in the ledger"
+                    (the appender drops a duplicate). The cash-readiness review runs after you (about 17:45 ET): its
+                    rows reach the next trading day's recap by themselves, as CARRIED; never write them.
   "sources":        ["..."] the files you read, one line each (durable paths: the review, study folders, the backlog;
                     name FACTS/CONTEXT as "the recap's data pass" / "the recap's context", never their WORK path).
 Write it with the Write tool (or python json.dump) to the NOTES path, then check it parses:

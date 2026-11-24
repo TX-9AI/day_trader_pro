@@ -1,6 +1,14 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/daily_brief.py  v1.7  -  the post-trading-day brief (PDF) for any session.
+day_trader_pro/tools/daily_brief.py  v1.8  -  the post-trading-day brief (PDF) for any session.
+v1.8  2026-11-24  dtp r584 / RECS.1 — SECTION 8, "RECOMMENDATIONS — FOR APPROVAL", THE LAST SECTION. The operator,
+      2026-11-24: "I would like the final section to contain a summary of the recommendations so we can get those
+      approved & scheduled." After section 7 (only the Sources list follows): one numbered table from
+      ~/reviews/schedule/recommendations.tsv (--recs; tools/daily_recap.rec_section, read only): id, what, why, type,
+      touches, the proposed slot (the next free fitting window from tools/calendar_view.build over seven days) and the
+      status (NEW, CARRIED from an earlier day, APPROVED-scheduled with its slot, DECLINED). The recap appends; the
+      coordinator records each answer; this file never writes the ledger. The validator's refusals are named under the
+      table. A failed read prints NOT READ with the reason. Sections 1-7 are unchanged.
 v1.7  2026-11-24  dtp r583 / CASHBOOK.3 — SECTION 5b SHOWS C5 BESIDE C1-C4. tools/cash_books.py v1.6 scores a fifth book,
       C5 (frozen 2026-11-24 in ~/reviews/cash_candidate_c5_20261124/PREREG.md; its equity list was chosen in hindsight).
       cash_books_rows lists every book the scorer scored; C5's Fwd columns are its own forward window (from 2026-11-24,
@@ -73,7 +81,7 @@ v1.0  2026-11-21  the first build, by hand, outside the repo (the 11-20 brief).
 Usage:
   /home/ubuntu/venvs/daily_brief/bin/python -I tools/daily_brief.py --date 2026-11-20 \
       [--notes ~/reviews/daily_brief/notes/2026-11-20.json] [--out ~/reviews/daily_brief] \
-      [--facts FILE.json] [--summary-json FILE.json]
+      [--facts FILE.json] [--summary-json FILE.json] [--recs ~/reviews/schedule/recommendations.tsv]
 
 READ-ONLY. Reads the S3 warehouse (control's read-only role) and local files; writes one PDF
 (<out>/daily_brief_<date>.pdf), or with --facts one JSON file, and nothing else. No box, no broker, no service
@@ -765,6 +773,24 @@ def schedule(now=None):
         return None, "%s: %s" % (type(e).__name__, e)
 
 
+RECS_DEFAULT = os.path.expanduser("~/reviews/schedule/recommendations.tsv")
+
+
+def recommendations(day, ledger=None, now=None):
+    """v1.8 -> (tools/daily_recap.rec_section's dict, None) or (None, reason). Read only."""
+    try:
+        sys.path.insert(0, os.path.join(DTP_ROOT, "tools"))
+        import daily_recap as DR                         # noqa: E402  (stdlib + dtp modules only)
+        import calendar_view as CV                       # noqa: E402
+        try:
+            cal, cerr = CV.build(now, 7), None
+        except Exception as e:                           # noqa: BLE001 - the table still prints, slots say NOT READ
+            cal, cerr = None, "%s: %s" % (type(e).__name__, e)
+        return DR.rec_section(day, ledger or RECS_DEFAULT, cal, cerr, now), None
+    except Exception as e:                               # noqa: BLE001
+        return None, "%s: %s" % (type(e).__name__, e)
+
+
 def watch_chart(RW, sc):
     """v1.3: one small trend line per equity, cumulative net by Runaway trade, the forward marker dashed."""
     eq = list(sc["equities"].items())
@@ -804,7 +830,7 @@ def watch_chart(RW, sc):
     return buf, 1.05 * rows_ + 0.2
 
 
-def build(day, notes, out_dir):
+def build(day, notes, out_dir, recs=None):
     c = compute(day)
     trades, tmeta, dropped, by_sym = c["trades"], c["tmeta"], c["dropped"], c["by_sym"]
     sym_pnl, order, bars, binfo, proxied, vix = (c["sym_pnl"], c["order"], c["bars"], c["binfo"], c["proxied"],
@@ -1116,6 +1142,29 @@ def build(day, notes, out_dir):
                     "touches the boxes and overlaps RTH, the close, the wake + sweep, the study dispatch or another "
                     "planned box row is flagged COLLISION. Report only: nothing here runs or moves a job.", "small"))
 
+    # ── Section 8 (v1.8): the recommendations, for approval — the LAST section (only the Sources list follows) ──
+    st.append(PageBreak())
+    st.append(P("8. Recommendations — for approval", "h1"))
+    st.append(P("Each line is for a yes or a no, by its id. The recap appends its own proposals to "
+                "~/reviews/schedule/recommendations.tsv as NEW and never marks one approved; the coordinator records "
+                "each answer there (APPROVED with its slot, or DECLINED). An open item carries forward on every recap "
+                "until it is decided. The proposed slot is the calendar's next free fitting window (section 7's "
+                "sources over seven days): a study runs in the next study dispatch, control work in a free weekday "
+                "evening hour, box work on a Sunday. The cash-readiness review runs at about 17:45 ET, after this "
+                "recap: its problems and fixes appear on the next trading day's recap as CARRIED.", "small"))
+    rsec, rerr = recommendations(day, recs)
+    if rsec is None:
+        st.append(P(f"Recommendations: NOT READ ({rerr}).", "small"))
+    else:
+        if len(rsec["rows"]) > 1:
+            st.append(table(rsec["rows"], [x * inch for x in (0.2, 0.92, 1.8, 1.93, 0.76, 0.55, 0.78, 0.46)]))
+        else:
+            st.append(P("No recommendation is open, and none was decided since the last recap."))
+        for pr_ in rsec["problems"]:
+            st.append(P("Note: " + pr_, "small"))
+    for rf_ in notes.get("recommendations_refused") or []:
+        st.append(P("Refused by the recap's validator (not in the ledger): " + rf_ + ".", "small"))
+
     # ── sources ──
     st.append(Spacer(1, 10))
     st.append(P("Sources", "h2"))
@@ -1142,6 +1191,7 @@ def main():
     ap.add_argument("--out", default=os.path.expanduser("~/reviews/daily_brief"))
     ap.add_argument("--facts", default=None, help="write the data pass to this JSON file and build no PDF")
     ap.add_argument("--summary-json", default=None, help="also write the run summary to this JSON file")
+    ap.add_argument("--recs", default=None, help="the recommendations ledger (default %s)" % RECS_DEFAULT)
     a = ap.parse_args()
     day = ws._valid(a.date)
     if a.facts:
@@ -1152,7 +1202,7 @@ def main():
     npath = a.notes or os.path.join(NOTES_DIR, f"{day}.json")
     notes = json.load(open(npath)) if os.path.exists(npath) else None
     print(f"notes: {npath if notes else 'none (data-only brief)'}")
-    path, summ = build(day, notes, a.out)
+    path, summ = build(day, notes, a.out, a.recs)
     print(path)
     print(json.dumps(summ, indent=1, default=str))
     if a.summary_json:

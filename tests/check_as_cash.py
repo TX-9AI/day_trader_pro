@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_as_cash.py  v1.3
+day_trader_pro/tests/check_as_cash.py  v1.4
+v1.4  2026-11-24  dtp r584 / RECS.1 — A9 reads the daily recap prompt's own version (v1.11: the recommendations for
+      the PDF's last section). Same checks otherwise.
 v1.3  2026-11-24  dtp r583 / CASHBOOK.3 — A9 reads the daily recap prompt's own version (v1.10: C5 beside C1-C4). Same
       checks otherwise.
 v1.2  2026-11-23  dtp r581 / REFUSE.1 — A9 reads the prompts' own versions (daily recap v1.9, nightly review v1.11).
@@ -378,7 +380,7 @@ def main():
             need = ("AS CASH WOULD HAVE TRADED IS THE HEADLINE", "after_cap", "would-pop", "OGAP",
                     "never added in", "there's no harm")
             miss = {n: [x for x in need if x not in t] for n, t in pr_.items()}
-            ok = (all(not v for v in miss.values()) and "daily_recap.prompt v1.10" in pr_["daily_recap.prompt"]
+            ok = (all(not v for v in miss.values()) and "daily_recap.prompt v1.11" in pr_["daily_recap.prompt"]
                   and "nightly_review.prompt v1.11" in pr_["nightly_review.prompt"]
                   and "breaker/" in pr_["nightly_review.prompt"] and "breaker/" in pr_["saturday_brief.prompt"])
             ck("A9", ok, "missing=%s" % miss)

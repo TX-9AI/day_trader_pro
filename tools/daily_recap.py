@@ -1,6 +1,33 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/daily_recap.py  v1.6
+day_trader_pro/tools/daily_recap.py  v1.7
+v1.7  2026-11-24  dtp r584 / RECS.1 — THE RECOMMENDATIONS LEDGER AND THE PDF'S LAST SECTION. The operator, 2026-11-24: "I
+      would like the final section to contain a summary of the recommendations so we can get those approved &
+      scheduled." NEW `recs` (the wrapper runs it after `append`) appends the day's recommendations to
+      ~/reviews/schedule/recommendations.tsv (REC_COLS; created with its header when missing), each as status NEW with
+      a stable id REC-YYYYMMDD-n, from three sources, merged and de-duplicated:
+        1. the recap's own: each proposal the appender queued (its WS id; "Run study WS.n blind in the nightly queue")
+           and the ONE maintenance proposal ("Build <id>"); a proposal that was not queued is not a recommendation
+        2. the notes' "recommendations" (the session's, from the nightly review's problems that need the operator,
+           each with its fix): one plain line each, type study / fix / maintenance / decision, touches control /
+           boxes / none; refused by name for a missing field, a second line, a line over REC_WHAT_MAX / REC_WHY_MAX,
+           the proposal rules (FORBIDDEN, RETIRED, LOGONLY), "paper size", or a dollar figure that neither the
+           scorers (cash_books, runaway_watch), FACTS nor the nightly review printed (within $1, the cash_problems
+           rule); an id, status, slot or date the session writes is ignored
+        3. ~/reviews/cash_readiness/<D>.tsv (what, why, type, touches; the coordinator's cash-readiness review) for
+           the seven days to DAY: that review runs at about 17:45 ET, AFTER the 17:00 recap, so its rows are read by
+           the NEXT trading day's recap, dated their own day, and show there as CARRIED
+      De-duplication (simple): a candidate whose "[ref X]" (a WS id or backlog id) or whose "what" (the _words /
+      DUP_JACCARD rule of the queue) matches ANY ledger row, whatever its status, or an earlier candidate, is not
+      appended; a re-run for the same day appends nothing. THE RECAP ONLY APPENDS: every row it writes is NEW, every
+      existing line is kept byte for byte, and it never writes APPROVED or DECLINED (the coordinator edits the ledger
+      when the operator answers). rec_section (read only) gives daily_brief's section 8 its rows: every NEW row (NEW
+      on its own day, else CARRIED from its day), an APPROVED row while its slot is ahead or it was decided since the
+      previous trading day (APPROVED-scheduled, its slot), a DECLINED row decided since the previous trading day; and
+      for an open row a proposed slot, the next free fitting window from tools/calendar_view.build (a study on the
+      boxes: the next study dispatch; control: a free weekday-evening hour, 18:30-21:30 ET, clear of every planned row; boxes: a free
+      Sunday 10:00-16:00 two-hour block; a decision or touches none: the operator's reply), each window used once.
+      context lists the ledger's rows so the session never repeats one.
 v1.6  2026-11-23  dtp r581 / REFUSE.1 — ONE "Fires that booked no trade" BLOCK IN THE CONTEXT. The 11-23 recap and review
       read refused fires as possible fill failures. context reads ~/reviews/refusals/DAY.csv (review_kit `refusals`, the
       nightly review's step 5: each fired plan with no trade_ids joined to its tick's signal_journal disposition) and
@@ -91,6 +118,8 @@ Usage:
                                        [--runaway-watch WORK/runaway_watch.json]
   python tools/daily_recap.py append --day D --notes FILE [--queue Q] [--cash-books WORK/cash_books.json]
                                      [--runaway-watch WORK/runaway_watch.json]
+  python tools/daily_recap.py recs --day D --notes FILE [--ledger L] [--cash-ready DIR] [--facts F] [--review R]
+                                   [--cash-books WORK/cash_books.json] [--runaway-watch WORK/runaway_watch.json]
   python tools/daily_recap.py notice --day D --notes FILE --summary FILE
 """
 import argparse
@@ -127,6 +156,8 @@ OTV5_BACKLOG = os.path.join(HOME, "OTV5", "docs", "BACKLOG.md")
 OTV5 = os.path.join(HOME, "OTV5")            # v1.4: the box flags show tool runs from this tree's HEAD
 HYGIENE = os.path.join(REVIEWS, "hygiene")
 BOTLOGS = os.path.join(OUT, "botlogs")       # v1.2: eod_conductor_v2 v2.18 writes <date>/<SYM>.txt before the stop
+RECS = os.path.join(REVIEWS, "schedule", "recommendations.tsv")   # v1.7: the coordinator's ledger (the recap appends)
+CASH_READY = os.path.join(REVIEWS, "cash_readiness")              # v1.7: <D>.tsv, the ~17:45 ET cash-readiness review
 DUP_JACCARD = 0.8                            # v1.2: the near-duplicate title bar (word sets), documented above
 DUP_STOPWORDS = ("the", "and", "for", "with", "from", "into", "its", "our", "than", "then")   # not words of a title
 DUE_AFTER_MIN = 40             # after the close, as the nightly review (review_kit.DUE_AFTER_MIN)
@@ -589,6 +620,10 @@ def cmd_context(a):
     lines += ["  " + f for f in found] or ["  (none)"]
     lines += ["", "Queue items closed or carried forward in that span (their status lines):"]
     lines += ["  " + c for c in closed] or ["  (none)"]
+    lines += ["", "Recommendations already in the ledger %s (never repeat one; the appender de-duplicates and "
+              "adds your proposals and maintenance itself):" % a.recs]
+    lines += ["  %s %s %s: %s" % (r["id"], r["date"], r["status"], r["what"][:110]) for r in read_ledger(a.recs)[0]
+              if r["date"] <= a.day] or ["  (none)"]
     lines += ["", "Maintenance already proposed by earlier recaps (do not repeat an id):"]
     lines += ["  " + r for r in prior_maintenance(a.notes_dir, a.day)] or ["  (none)"]
     lines += ["", "Open backlog rows: %s" % os.path.join(a.work, "backlog_open.txt"),
@@ -840,6 +875,350 @@ def cmd_append(a):
     return 0
 
 
+# ── recommendations (v1.7, RECS.1) ───────────────────────────────────────────────────────────────────────────────────
+REC_COLS = ("id", "date", "what", "why", "type", "touches", "status", "slot", "decided_on", "note")
+REC_TYPES = ("study", "fix", "maintenance", "decision")
+REC_TOUCHES = ("control", "boxes", "none")
+REC_STATUSES = ("NEW", "APPROVED", "DECLINED")     # the recap writes NEW only; the coordinator writes the other two
+REC_WHAT_MAX, REC_WHY_MAX = 200, 260
+CR_COLS = ("what", "why", "type", "touches")       # ~/reviews/cash_readiness/<D>.tsv (an optional fifth column: ref)
+REC_HEADER = (
+    "# The recommendations ledger (dtp r584 / RECS.1). One row per recommendation, tab-separated.\n"
+    "# The daily recap APPENDS its own as status NEW (tools/daily_recap.py recs) and never edits a row.\n"
+    "# The coordinator edits a row when the operator answers: status APPROVED with slot (when it runs) and decided_on\n"
+    "# (YYYY-MM-DD), or DECLINED with decided_on. An open (NEW) row carries forward on every recap until it is decided.\n"
+    "# type: study|fix|maintenance|decision; touches: control|boxes|none; note: the source and [ref ...].\n"
+    + "\t".join(REC_COLS) + "\n")
+REF_RX = re.compile(r"\[ref ([^\]]+)\]")
+
+
+def _cell(v):
+    return re.sub(r"\s+", " ", str(v if v is not None else "")).strip()
+
+
+def read_ledger(path):
+    """-> (rows, problems). A missing file is no rows; comment and blank lines are skipped; the header is required."""
+    if not path or not os.path.exists(path):
+        return [], []
+    import csv as _csv
+    with open(path, encoding="utf-8", newline="") as fh:
+        rd = _csv.DictReader((ln for ln in fh if ln.strip() and not ln.lstrip().startswith("#")), delimiter="\t",
+                             quoting=_csv.QUOTE_NONE)
+        if tuple(c.strip() for c in (rd.fieldnames or [])) != REC_COLS:
+            return [], ["ledger header is %s, not %s" % (rd.fieldnames, "\t".join(REC_COLS))]
+        rows, bad = [], []
+        for i, r in enumerate(rd, 1):
+            r = {k: _cell(r.get(k)) for k in REC_COLS}
+            r["status"] = r["status"].upper()
+            if r["status"] not in REC_STATUSES:
+                bad.append("ledger row %s: status %r is not one of %s" % (r["id"] or i, r["status"],
+                                                                         " / ".join(REC_STATUSES)))
+            rows.append(r)
+    return rows, bad
+
+
+def _first_sentence(s, cap=REC_WHY_MAX):
+    s = _cell(s).replace("**", "")
+    s = re.split(r"(?<=[.!?])\s+(?=[A-Z(\"'])", s)[0] if s else ""
+    if len(s) > cap:
+        s = s[:cap].rsplit(" ", 1)[0].rstrip(",;:") + " ..."
+    return s
+
+
+def own_recs(day, notes):
+    """Source 1 -> candidates from the recap's own proposals (queued ones only) and its ONE maintenance proposal."""
+    out = []
+    for i, p in enumerate((notes or {}).get("proposals") or []):
+        if not isinstance(p, dict) or not p.get("ws_id"):
+            continue
+        out.append({"what": _cell("Run study %s blind in the nightly queue: %s" % (p["ws_id"], _cell(p.get("title"))))
+                    [:REC_WHAT_MAX], "why": _first_sentence(p.get("why") or p.get("evidence")), "type": "study",
+                    "touches": "boxes", "note": "daily recap %s P%d [ref %s]" % (day, i + 1, p["ws_id"])})
+    m = (notes or {}).get("maintenance")
+    if isinstance(m, dict) and _cell(m.get("id")):
+        when = _cell(m.get("when"))
+        out.append({"what": _cell("Build %s (%s backlog, %s): %s" % (m["id"], _cell(m.get("backlog")) or "?", when or "?",
+                                                                    _cell(m.get("title"))))[:REC_WHAT_MAX],
+                    "why": _first_sentence(m.get("why") or m.get("what")), "type": "maintenance",
+                    "touches": "boxes" if when == "Sunday" else "control",
+                    "note": "daily recap %s maintenance, %s [ref %s]" % (day, when or "?", _cell(m["id"]))})
+    return out
+
+
+def _numbers(o, out):
+    if isinstance(o, bool):
+        return
+    if isinstance(o, (int, float)):
+        out.add(round(abs(float(o))))
+    elif isinstance(o, dict):
+        for v in o.values():
+            _numbers(v, out)
+    elif isinstance(o, list):
+        for v in o:
+            _numbers(v, out)
+    elif isinstance(o, str):
+        for m in re.finditer(r"\$\s?([0-9][0-9,]*(?:\.[0-9]+)?)", o):
+            out.add(round(float(m.group(1).replace(",", ""))))
+
+
+def rec_figures(cash_books=None, runaway_watch=None, facts=None, review=None):
+    """-> the dollar figures a session recommendation may quote: the scorers', FACTS' and the nightly review's."""
+    figs = set()
+    if cash_books:
+        figs |= {round(abs(f)) for f in CB.figures(cash_books)}
+    if runaway_watch:
+        figs |= {round(abs(f)) for f in RW.figures(runaway_watch)}
+    if facts:
+        _numbers(facts, figs)
+    if review:
+        _numbers(review, figs)
+    return figs
+
+
+def rec_problems(r, figs=None):
+    """-> [reason] a recommendation is refused (never appended). figs None = no figure check (a coordinator file)."""
+    if not isinstance(r, dict):
+        return ["not an object"]
+    out = []
+    bad = [k for k in ("what", "why", "type", "touches") if not _cell(r.get(k))]
+    if bad:
+        out.append("missing " + ", ".join(bad))
+    for k, cap in (("what", REC_WHAT_MAX), ("why", REC_WHY_MAX)):
+        v = str(r.get(k) or "")
+        if "\n" in v.strip() or "\t" in v:
+            out.append("%s is more than one line" % k)
+        if len(_cell(v)) > cap:
+            out.append("%s is over %d characters (one plain line)" % (k, cap))
+    if _cell(r.get("type")) and _cell(r.get("type")) not in REC_TYPES:
+        out.append("type %r is not one of %s" % (_cell(r.get("type")), " / ".join(REC_TYPES)))
+    if _cell(r.get("touches")) and _cell(r.get("touches")) not in REC_TOUCHES:
+        out.append("touches %r is not one of %s" % (_cell(r.get("touches")), " / ".join(REC_TOUCHES)))
+    txt = _cell(r.get("what")) + " " + _cell(r.get("why"))
+    for rx, why in FORBIDDEN:
+        if rx.search(txt):
+            out.append(why)
+    if LOGONLY.search(re.sub(r"(?i)\b(never|not|no)\s+(becomes\s+)?log[- ]only\b", "", txt)):
+        out.append("never log-only or a shadow (the operator, 2026-11-07)")
+    if RETIRED.search(_cell(r.get("what"))):
+        out.append("names a retired strategy (butterfly, PARC, TCS, the original ORB)")
+    if re.search(r"paper[- ]siz", txt, re.I):
+        out.append('calls the paper dollars "paper size" (paper is sized as cash, on purpose)')
+    if figs is not None:
+        for m in re.finditer(r"\$\s?([0-9][0-9,]*(?:\.[0-9]+)?)", txt):
+            v = round(float(m.group(1).replace(",", "")))
+            if not any(abs(v - f) <= 1 for f in figs):
+                out.append("quotes $%s, which no scorer, FACTS or the review printed" % m.group(1))
+    return out
+
+
+def session_recs(day, notes, figs):
+    """Source 2 -> (candidates, refused [(what, reasons)]) from the notes' "recommendations"."""
+    good, refused = [], []
+    for i, r in enumerate((notes or {}).get("recommendations") or []):
+        why = rec_problems(r, figs)
+        if why:
+            refused.append(((_cell(r.get("what")) if isinstance(r, dict) else "?")[:120] or "R%d" % (i + 1), why))
+            continue
+        ref = _cell(r.get("ref"))
+        good.append({"what": _cell(r["what"]), "why": _cell(r["why"]), "type": _cell(r["type"]),
+                     "touches": _cell(r["touches"]),
+                     "note": "daily recap %s R%d%s" % (day, i + 1, (" [ref %s]" % ref) if ref else "")})
+    return good, refused
+
+
+def cash_ready_recs(day, root, days=7):
+    """Source 3 -> (candidates with their own date, refused) from <root>/<D>.tsv, D in the seven days to `day`."""
+    import csv as _csv
+    good, refused = [], []
+    d0 = date.fromisoformat(day)
+    for k in range(days, -1, -1):
+        d = (d0 - timedelta(days=k)).isoformat()
+        p = os.path.join(root, d + ".tsv")
+        if not os.path.exists(p):
+            continue
+        with open(p, encoding="utf-8", newline="") as fh:
+            rd = _csv.DictReader((ln for ln in fh if ln.strip() and not ln.lstrip().startswith("#")), delimiter="\t",
+                                 quoting=_csv.QUOTE_NONE)
+            if tuple(c.strip() for c in (rd.fieldnames or []))[:4] != CR_COLS:
+                refused.append(("%s (the file)" % p, ["header is %s, not %s" % (rd.fieldnames, "\t".join(CR_COLS))]))
+                continue
+            for i, r in enumerate(rd, 1):
+                why = rec_problems(r)
+                if why:
+                    refused.append(("%s row %d" % (os.path.basename(p), i), why))
+                    continue
+                ref = _cell(r.get("ref"))
+                good.append({"date": d, "what": _cell(r["what"]), "why": _cell(r["why"]), "type": _cell(r["type"]),
+                             "touches": _cell(r["touches"]),
+                             "note": "cash-readiness review %s row %d%s" % (d, i, (" [ref %s]" % ref) if ref else "")})
+    return good, refused
+
+
+def rec_dup(c, rows):
+    """-> the id (or "an earlier candidate") a candidate duplicates, by its [ref] or its "what" words, else None."""
+    refs = set(REF_RX.findall(c.get("note", "")))
+    mine = _words(c["what"])
+    for r in rows:
+        if refs & set(REF_RX.findall(r.get("note", ""))):
+            return r.get("id") or "an earlier candidate"
+        theirs = _words(r.get("what"))
+        if mine and theirs and (mine == theirs or len(mine & theirs) / len(mine | theirs) >= DUP_JACCARD):
+            return r.get("id") or "an earlier candidate"
+    return None
+
+
+def rec_append(day, notes, ledger, cash_ready=CASH_READY, figs=None):
+    """-> (appended rows, dups [(what, id)], refused [(what, reasons)], problems). Appends to `ledger` (created with
+    REC_HEADER when missing); every existing byte is kept, every new row is NEW. Raises ValueError on a bad header."""
+    rows, problems = read_ledger(ledger)
+    if problems and problems[0].startswith("ledger header"):
+        raise ValueError(problems[0])
+    sr, refused = session_recs(day, notes, figs if figs is not None else set())
+    cr, crefused = cash_ready_recs(day, cash_ready)
+    cands = [dict(c, date=day) for c in own_recs(day, notes) + sr] + cr
+    seen, new, dups = list(rows), [], []
+    for c in cands:
+        d = rec_dup(c, seen)
+        if d:
+            dups.append((c["what"][:80], d))
+            continue
+        pre = "REC-%s-" % c["date"].replace("-", "")
+        n = 1 + max([int(r["id"][len(pre):]) for r in seen if r.get("id", "").startswith(pre)
+                     and r["id"][len(pre):].isdigit()] or [0])
+        row = {k: "" for k in REC_COLS}
+        row.update({"id": pre + str(n), "date": c["date"], "what": c["what"], "why": c["why"], "type": c["type"],
+                    "touches": c["touches"], "status": "NEW", "note": c["note"]})
+        seen.append(row)
+        new.append(row)
+    if new:
+        old = open(ledger, encoding="utf-8").read() if os.path.exists(ledger) else REC_HEADER
+        if old and not old.endswith("\n"):
+            old += "\n"
+        add = "".join("\t".join(_cell(r[k]) for k in REC_COLS) + "\n" for r in new)
+        d = os.path.dirname(os.path.abspath(ledger))
+        os.makedirs(d, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(prefix=".recs_", dir=d)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(old + add)
+        if os.path.exists(ledger):
+            shutil.copymode(ledger, tmp)
+        os.replace(tmp, ledger)
+    return new, dups, refused + crefused, problems
+
+
+def _slot_ok(a, b, busy):
+    return all(not (a < y and x < b) for x, y in busy)
+
+
+def proposed_slot(row, cal, now, taken):
+    """-> the proposed slot text for an open row: the next free fitting window, each used once (`taken`)."""
+    if row["type"] == "decision" or row["touches"] == "none":
+        return "your reply (no slot needed)"
+    if cal is None:
+        return "calendar NOT READ"
+    if row["type"] == "study" and row["touches"] == "boxes":     # a box study runs in the dispatcher's own window
+        nxt = sorted(b["start"] for b in cal["rows"] if b.get("source") == "dtp-study-dispatch.timer"
+                     and b["start"] > now)
+        if not nxt:
+            return "no study dispatch in the calendar's window"
+        queued = re.search(r"^daily recap \S+ P\d+ \[ref WS\.", row["note"]) is not None
+        return "next study dispatch %s ET%s" % (nxt[0].strftime("%a %m-%d %H:%M"),
+                                                " (queued: it runs unless declined)" if queued else "")
+    busy = [(b["start"], b["end"] or b["start"] + timedelta(minutes=1)) for b in cal["rows"]
+            if b.get("source") == "planned" and b.get("touches") != "none" and not b.get("timeless")] + list(taken)
+    if row["touches"] == "boxes":                 # box work: a Sunday block, never a weekday (the fleet's own windows)
+        busy += [(b["start"], b["end"] or b["start"]) for b in cal["rows"]
+                 if b.get("touches") == "boxes" and b.get("source") != "planned"]
+        starts, span = [time(h, 0) for h in (10, 12, 14)], timedelta(hours=2)
+        days_ = [now.date() + timedelta(days=k) for k in range(0, 8) if (now.date() + timedelta(days=k)).weekday() == 6]
+        lab = "Sunday box work"
+    else:                                         # control work: a weekday evening hour, after the cash-readiness review
+        starts, span = [time(18, 30), time(19, 30), time(20, 30)], timedelta(hours=1)
+        days_ = [now.date() + timedelta(days=k) for k in range(0, 8) if (now.date() + timedelta(days=k)).weekday() < 5]
+        lab = "control"
+    for d in days_:
+        for t in starts:
+            a = datetime.combine(d, t, ET)
+            b = a + span
+            if a <= now or b > cal["hi"] + timedelta(days=1):
+                continue
+            if _slot_ok(a, b, busy):
+                taken.append((a, b))
+                return "%s %s-%s ET (%s)" % (a.strftime("%a %m-%d"), a.strftime("%H:%M"), b.strftime("%H:%M"), lab)
+    return "no free %s window in the next 7 days" % lab
+
+
+REC_ORDER = {"NEW": 0, "CARRIED": 1, "APPROVED": 2, "DECLINED": 3}
+
+
+def rec_section(day, ledger=RECS, cal=None, cal_err=None, now=None):
+    """-> {"rows": [[#, id, what, why, type, touches, slot, status]] (header first), "problems": [..]} for the PDF's
+    last section. Read only."""
+    rows, problems = read_ledger(ledger)
+    now = (now or datetime.now(ET)).astimezone(ET)
+    since = prev_trading_day(date.fromisoformat(day)).isoformat()
+    show, taken = [], []
+    for r in rows:
+        if not r["date"] or r["date"] > day:
+            continue
+        st = r["status"]
+        if st == "NEW":
+            disp = "NEW" if r["date"] == day else "CARRIED from %s" % r["date"][5:]
+            show.append(("NEW" if r["date"] == day else "CARRIED", r, disp, None))
+        elif st == "APPROVED":
+            m = re.match(r"\d{4}-\d\d-\d\d", r["slot"])
+            if (r["decided_on"] or "9999") >= since or (m and m.group(0) >= day) or not r["slot"]:
+                show.append(("APPROVED", r, "APPROVED-scheduled", r["slot"] or "slot not yet set"))
+        elif st == "DECLINED":
+            if (r["decided_on"] or "9999") >= since:
+                show.append(("DECLINED", r, "DECLINED %s" % r["decided_on"][5:], "-"))
+        else:
+            show.append(("NEW", r, "? (%s)" % st, None))
+    show.sort(key=lambda x: (REC_ORDER.get(x[0], 9), x[1]["date"], x[1]["id"]))
+    out = [["#", "ID", "What", "Why", "Type", "Touches", "Proposed slot", "Status"]]
+    for k, (_g, r, disp, slot) in enumerate(show, 1):
+        if slot is None:
+            slot = proposed_slot(r, cal, now, taken) if cal is not None else (
+                "your reply (no slot needed)" if r["type"] == "decision" or r["touches"] == "none"
+                else "calendar NOT READ (%s)" % (cal_err or "no calendar"))
+        out.append([str(k), r["id"], r["what"], r["why"], r["type"], r["touches"], slot, disp])
+    if cal is None and cal_err:
+        problems.append("calendar NOT READ (%s): no slot proposed" % cal_err)
+    return {"rows": out, "problems": problems}
+
+
+def cmd_recs(a):
+    try:
+        notes = _load(a.notes) if a.notes and os.path.exists(a.notes) else {}
+    except (OSError, ValueError):
+        notes = {}
+    srcs = {}
+    for k, pth in (("cash_books", a.cash_books), ("runaway_watch", a.runaway_watch), ("facts", a.facts)):
+        try:
+            srcs[k] = _load(pth) if pth and os.path.exists(pth) else None
+        except (OSError, ValueError):
+            srcs[k] = None
+    srcs["review"] = open(a.review, encoding="utf-8").read() if a.review and os.path.exists(a.review) else None
+    figs = rec_figures(**srcs)
+    try:
+        new, dups, refused, problems = rec_append(a.day, notes if isinstance(notes, dict) else {}, a.ledger,
+                                                  a.cash_ready, figs)
+    except ValueError as e:
+        print("REFUSED the ledger is not readable: %s (ledger untouched)" % e)
+        return 1
+    for p in problems:
+        print("RECS note: " + p)
+    for w, d in dups:
+        print("RECS duplicate of %s, not appended: %s" % (d, w))
+    for w, why in refused:
+        print("RECS refused %s: %s" % (w, "; ".join(why)))
+    if isinstance(notes, dict) and a.notes and os.path.exists(a.notes):
+        notes["recommendations_refused"] = ["%s: %s" % (w, "; ".join(why)) for w, why in refused]
+        _dump_atomic(notes, a.notes)
+    print("RECS appended %s" % (" ".join(r["id"] for r in new) if new else "none"))
+    return 0
+
+
 # ── notice ───────────────────────────────────────────────────────────────────────────────────────────────────────────
 def _m(x):
     x = float(x or 0)
@@ -889,6 +1268,7 @@ def main(argv=None):
     p.add_argument("--botlogs", default=BOTLOGS)
     p.add_argument("--otv5", default=OTV5)
     p.add_argument("--trades", default=CB.TRADES)
+    p.add_argument("--recs", default=RECS)       # v1.7: the ledger, listed read only
     p = sub.add_parser("validate")
     p.add_argument("--day", required=True)
     p.add_argument("--notes", required=True)
@@ -901,13 +1281,22 @@ def main(argv=None):
     p.add_argument("--queue", default=QUEUE)
     p.add_argument("--cash-books", default=None)
     p.add_argument("--runaway-watch", default=None)
+    p = sub.add_parser("recs")                   # v1.7 (RECS.1)
+    p.add_argument("--day", required=True)
+    p.add_argument("--notes", required=True)
+    p.add_argument("--ledger", default=RECS)
+    p.add_argument("--cash-ready", default=CASH_READY)
+    p.add_argument("--facts", default=None)
+    p.add_argument("--review", default=None)
+    p.add_argument("--cash-books", default=None)
+    p.add_argument("--runaway-watch", default=None)
     p = sub.add_parser("notice")
     p.add_argument("--day", required=True)
     p.add_argument("--notes")
     p.add_argument("--summary", required=True)
     a = ap.parse_args(argv)
     return {"plan": cmd_plan, "context": cmd_context, "validate": cmd_validate, "append": cmd_append,
-            "notice": cmd_notice}[a.cmd](a)
+            "notice": cmd_notice, "recs": cmd_recs}[a.cmd](a)
 
 
 if __name__ == "__main__":

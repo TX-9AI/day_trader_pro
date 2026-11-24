@@ -1,6 +1,34 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_daily_recap.py  v1.8
+day_trader_pro/tests/check_daily_recap.py  v1.9
+v1.9  2026-11-24  dtp r584 / RECS.1 (daily_recap v1.7, daily_recap.sh v1.3, daily_brief v1.8, the prompt v1.11). The
+      operator, 2026-11-24: "I would like the final section to contain a summary of the recommendations so we can get
+      those approved & scheduled." R11 wants daily_brief v1.8; R23 the prompt v1.11; R18 counts three --runaway-watch
+      passes in the wrapper (validate, append and now recs); R6 allows the wrapper's write to
+      the sandbox ledger (REV/schedule/recommendations.tsv) and wants the real ~/reviews/schedule/recommendations.tsv
+      untouched. NEW (each BORN RED on dbe68da):
+  R26 the section exists and is LAST: daily_brief has "8. Recommendations — for approval" after section 7, no h1 after
+      it (only the Sources list), its table from daily_recap.rec_section (#, ID, What, Why, Type, Touches, Proposed
+      slot, Status) and the refusals under it; the wrapper passes --recs to context, the recs step and the brief
+  R27 the ledger append: created with its header; the queued proposal and the maintenance item become NEW rows
+      REC-20261124-1/-2 (an unqueued proposal does not); a session line is kept, and refused by name for a bad type, a
+      second line, an invented dollar figure, a retired strategy, an over-long line, a missing field and a resting
+      take-profit; a cash-readiness file's row is dated its own day (REC-20261123-1, CARRIED on 11-24), a bad one is
+      refused; DE-DUPES: a near-duplicate line in the same notes, a re-run (bytes unchanged), a line matching a
+      DECLINED row's words and a maintenance id already in the ledger ([ref]) append nothing
+  R28 it carries open ledger items: on 11-24 an 11-20 NEW row reads "CARRIED from 11-20", an 11-24 NEW row NEW, an
+      APPROVED row decided 11-23 "APPROVED-scheduled" with its slot, a DECLINED row decided 11-23 "DECLINED 11-23";
+      an old APPROVED (slot past), an old DECLINED and a future row are left out; NEW, CARRIED, APPROVED, DECLINED in
+      that order; slots from a fixed calendar: a queued box study the next study dispatch, control work a free
+      weekday-evening hour clear of a planned row (each hour used once), box work a Sunday block, a decision the
+      operator's reply; no calendar: NOT READ
+  R29 it never sets APPROVED: a session line carrying "status": "APPROVED", an id and a slot is appended NEW with the
+      appender's id and no slot; every existing line (the coordinator's APPROVED and DECLINED rows) is a byte prefix
+      of the new file; the append path (rec_append, own_recs, session_recs, cash_ready_recs) holds no "APPROVED" or
+      "DECLINED" literal; `recs` through main() records the refusals in the notes
+  R30 the wrapper's run appends the sandbox notes' two queued studies and maintenance (3 NEW rows); context lists the
+      ledger; the prompt says one plain line for a yes or no, no new figures, never an id / status / slot / date, the
+      cash-readiness rows come as CARRIED
 v1.8  2026-11-24  dtp r583 / CASHBOOK.3 (cash_books v1.6, daily_brief v1.7, the prompt v1.10). R11 wants daily_brief
       v1.7; R23 the prompt v1.10. NEW:
   R25 C5 beside C1-C4 in the recap: on a fixture through 2026-11-25 the board (context's cash_books.md) carries C5's
@@ -417,11 +445,15 @@ real_out = os.path.expanduser("~/reviews/daily_brief")
 rq0 = os.stat(real_q).st_mtime_ns if os.path.exists(real_q) else None
 ro0 = snapshot(real_out) if os.path.isdir(real_out) else {}
 before = snapshot(SB)
+real_recs = os.path.expanduser("~/reviews/schedule/recommendations.tsv")
+rr0 = os.stat(real_recs).st_mtime_ns if os.path.exists(real_recs) else None
+SBRECS = os.path.join(REV, "schedule", "recommendations.tsv")              # v1.9: the sandbox ledger
 r6 = wrap([], "2026-11-23T17:00")
 after = snapshot(SB)
+R6_LEDGER = read(SBRECS) if os.path.exists(SBRECS) else ""
 allowed = (NOTESD + "/", OUTD + "/", QUEUE, LEDGER, LOG, WROOT + "/")
 changed = [p for p in after if before.get(p) != after[p]]
-outside = [p for p in changed if not (p == QUEUE or p.startswith(QUEUE + ".bak_recap_") or p in (LEDGER, LOG)
+outside = [p for p in changed if not (p == QUEUE or p.startswith(QUEUE + ".bak_recap_") or p in (LEDGER, LOG, SBRECS)
                                       or p.startswith(NOTESD + "/") or p.startswith(OUTD + "/")
                                       or p.startswith(WROOT + "/"))]
 work_left = [d for d in os.listdir(WROOT) if d.startswith("2026-")] if os.path.isdir(WROOT) else []
@@ -436,12 +468,13 @@ r6b = wrap([], "2026-11-23T17:00", {"FAKE_TOUCH_QUEUE": "1"})
 q1 = read(QUEUE)
 restored = "JUNK FROM THE SESSION" not in q1 and "QUEUE_RESTORED day=2026-11-23" in ledger() and "### WS.25 —" in q1
 rq1 = os.stat(real_q).st_mtime_ns if os.path.exists(real_q) else None
+rr1 = os.stat(real_recs).st_mtime_ns if os.path.exists(real_recs) else None
 ro1 = snapshot(real_out) if os.path.isdir(real_out) else {}
 ck("R6", r6.returncode == 0 and not outside and not work_left and iso and unatt and perm and restored
-   and rq0 == rq1 and ro0 == ro1,
+   and rq0 == rq1 and ro0 == ro1 and rr0 == rr1,
    "changed outside the allowed paths: %s; WORK left: %s; isolated %s, unattended+TMPDIR %s, acceptEdits+add-dir %s; "
    "a session's queue edit restored (then the appender's own items): %s; the real queue and ~/reviews/daily_brief "
-   "untouched" % (outside[:3], work_left, iso, unatt, perm, restored))
+   "and the real recommendations ledger untouched" % (outside[:3], work_left, iso, unatt, perm, restored))
 
 # ── R7 ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
 import study_dispatch as SD  # noqa: E402
@@ -578,11 +611,11 @@ try:
     comp = True
 except py_compile.PyCompileError:
     comp = False
-ck("R11", comp and "daily_brief.py  v1.7" in gs and 'NOTES_DIR = os.path.expanduser("~/reviews/daily_brief/notes")' in gs
+ck("R11", comp and "daily_brief.py  v1.8" in gs and 'NOTES_DIR = os.path.expanduser("~/reviews/daily_brief/notes")' in gs
    and "--facts" in gs and "--summary-json" in gs and "/home/ubuntu/venvs/daily_brief" in gs
    and not os.path.exists(os.path.join(TOOLS, "venv")) and not os.path.exists(os.path.join(TOOLS, "notes"))
    and "11-20 showed" not in gs and os.path.exists(os.path.join(TOOLS, "daily_brief.requirements.txt")),
-   "tools/daily_brief.py v1.7 compiles; notes under ~/reviews/daily_brief/notes; no venv or notes in the repo")
+   "tools/daily_brief.py v1.8 compiles; notes under ~/reviews/daily_brief/notes; no venv or notes in the repo")
 
 # ── R12 ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
 _r12q = os.path.join(TMP, "q12.md")
@@ -765,7 +798,7 @@ ck("R18", os.path.exists(os.path.join(_w18, "runaway_watch.md"))
    and any("paper size" in x for x in DR.watch_problems(_ps18, _sc18))
    and "runaway_watch" not in _a18 and "$9,999" in _a18.get("runaway_watch_withheld", "")
    and "5c. The Runaway equity watch" in _bs18 and "watch_chart(RW, wsc)" in _bs18 and '"runaway_watch", "sources")' in _bs18
-   and "RWATCH    $WORK/runaway_watch.md" in _ws18 and _ws18.count('--runaway-watch "$WORK/runaway_watch.json"') == 2
+   and "RWATCH    $WORK/runaway_watch.md" in _ws18 and _ws18.count('--runaway-watch "$WORK/runaway_watch.json"') == 3   # v1.9: validate, append, recs
    and '"runaway_watch":' in _pr18 and "REPORT ONLY; never \"paper size\"" in _pr18
    and "never a decision" in _pr18 and "never propose a different bar, a different list" in _pr18
    and "RWATCH (RUN PARAMETERS)" in _pr18,
@@ -890,7 +923,7 @@ ck("R23", bool(_rf) and "Fires that booked no trade" in _c15 and any("NOT READ" 
    and "NVDA LiquidityHunt long: 1 fire(s) 10:29:48-10:29:48, none traded; no fill x1" in _j23
    and _j23.count("no fill") == 2 and _j23.count("no fill x") == 1
    and 'write "no fill" ONLY where the block says "no fill"' in _pr23
-   and "A FIRE THAT DID NOT TRADE IS A REFUSAL, NOT A FILL FAILURE" in _pr23 and "daily_recap.prompt v1.10" in _pr23,
+   and "A FIRE THAT DID NOT TRADE IS A REFUSAL, NOT A FILL FAILURE" in _pr23 and "daily_recap.prompt v1.11" in _pr23,
    "refusal block: %s" % (_r23[1:] or _nr23))
 
 # ── R24 (v1.7): SPX $5,000 again from 2026-11-24, $4,200 on 2026-11-23 only ─────────────────────────────────────────
@@ -946,6 +979,213 @@ try:
 except Exception as e:                                   # noqa: BLE001 (HEAD: no C5)
     _m25 = "%s: %s" % (type(e).__name__, e)
 ck("R25", _ok25, _m25)
+
+# ── R26-R30 (v1.9, RECS.1): the recommendations section and its ledger ─────────────────────────────────────────────
+_HDR26 = ["#", "ID", "What", "Why", "Type", "Touches", "Proposed slot", "Status"]
+_LH = "id\tdate\twhat\twhy\ttype\ttouches\tstatus\tslot\tdecided_on\tnote\n"
+
+
+def _lrow(i, d, what, st, slot="", dec="", note="", typ="fix", tch="control", why="w"):
+    return "\t".join([i, d, what, why, typ, tch, st, slot, dec, note]) + "\n"
+
+
+def _ledger_rows(path):
+    return [dict(zip(_LH.strip().split("\t"), ln.rstrip("\n").split("\t"))) for ln in read(path).splitlines()
+            if ln and not ln.startswith("#") and not ln.startswith("id\t")]
+
+
+# R26
+try:
+    _bs26 = read(os.path.join(TOOLS, "daily_brief.py"))
+    _ws26 = read(WRAP)
+    _i8 = _bs26.find('P("8. Recommendations — for approval", "h1")')
+    _after8 = _bs26[_i8:] if _i8 >= 0 else ""
+    _sec = DR.rec_section("2026-11-24", os.path.join(TMP, "no_ledger.tsv"), None, "x")
+    _ok26 = (_i8 > _bs26.find('P("7. The schedule, now to tomorrow 17:00 ET", "h1")') > 0
+             and _i8 < _bs26.find("# ── sources ──") and _after8.count('"h1")') == 1
+             and "DR.rec_section(day, ledger or RECS_DEFAULT, cal, cerr, now)" in _bs26
+             and "rsec, rerr = recommendations(day, recs)" in _bs26 and 'notes.get("recommendations_refused")' in _bs26
+             and 'f"Recommendations: NOT READ ({rerr}).' in _bs26 and _sec["rows"] == [_HDR26]
+             and '--recs "$RECS"' in _ws26 and _ws26.count('"$RECS"') >= 3 and 'recs --day "$DAY"' in _ws26)
+    _m26 = "section 8 at %d (section 7 before it, sources after it, %d h1 from it); header %s" % (
+        _i8, _after8.count('"h1")'), _sec["rows"][0])
+except Exception as e:                                   # noqa: BLE001 (HEAD: no section 8, no rec_section)
+    _ok26, _m26 = False, "%s: %s" % (type(e).__name__, e)
+ck("R26", _ok26, _m26)
+
+# R27
+try:
+    _d27 = os.path.join(TMP, "r27")
+    _L27 = os.path.join(_d27, "schedule", "recommendations.tsv")
+    _cr27 = os.path.join(_d27, "cash_readiness")
+    write(os.path.join(_cr27, "2026-11-23.tsv"), "what\twhy\ttype\ttouches\n"
+          "Pin the QQQ ladder's cancel time in the cash checklist\tThe 11-23 replay walked four rungs.\tfix\tboxes\n")
+    write(os.path.join(_cr27, "2026-11-24.tsv"), "what\twhy\ttype\ttouches\nA bad row\tx\tfix\tfleet\n")
+    _n27 = dict(NOTES_OK)
+    _n27["proposals"] = [dict(proposal("Queued idea"), ws_id="WS.25", why="QQQ lost $100.00 today. More."),
+                         proposal("Not queued idea")]
+    _n27["recommendations"] = [
+        {"what": "Re-run capture_all for the 11-23 candles", "why": "QQQ lost $100.00 on the day.", "type": "fix",
+         "touches": "control"},
+        {"what": "Re-run capture_all for the 11-23 candles!", "why": "again", "type": "fix", "touches": "control"},
+        {"what": "Do x", "why": "y", "type": "chore", "touches": "control"},
+        {"what": "Do two\nlines", "why": "y", "type": "fix", "touches": "control"},
+        {"what": "Cut AMD", "why": "It lost $9,999.", "type": "decision", "touches": "none"},
+        {"what": "Bring back the butterfly", "why": "y", "type": "study", "touches": "boxes"},
+        {"what": "x" * 230, "why": "y", "type": "fix", "touches": "control"},
+        {"what": "No touches", "why": "y", "type": "fix"},
+        {"what": "Place a resting take-profit order at +50%", "why": "y", "type": "fix", "touches": "boxes"}]
+    _f27 = DR.rec_figures(facts={"pnl_mark_usd": -100.0})
+    _new27, _dup27, _ref27, _ = DR.rec_append("2026-11-24", _n27, _L27, _cr27, _f27)
+    _b27 = read(_L27)
+    _rows27 = _ledger_rows(_L27)
+    _ids27 = [r["id"] for r in _rows27]
+    _byid = {r["id"]: r for r in _rows27}
+    _refj = " | ".join("%s: %s" % (w, "; ".join(y)) for w, y in _ref27)
+    _new27b, _dup27b, _, _ = DR.rec_append("2026-11-24", _n27, _L27, _cr27, _f27)
+    _same = read(_L27) == _b27
+    # a DECLINED row's words, and a maintenance id already in the ledger, append nothing
+    write(_L27, read(_L27) + _lrow("REC-20261120-1", "2026-11-20", "Rename the handoff label now the sweep is retired",
+                                   "DECLINED", dec="2026-11-23"))
+    _n27c = dict(NOTES_OK, proposals=[], recommendations=[
+        {"what": "Rename the handoff label, now the sweep is retired", "why": "y", "type": "decision", "touches": "none"}])
+    _new27c, _dup27c, _, _ = DR.rec_append("2026-11-25", _n27c, _L27, os.path.join(_d27, "none"), _f27)
+    _ok27 = (_b27.startswith("# The recommendations ledger") and "\n" + _LH in _b27
+             and _ids27 == ["REC-20261124-1", "REC-20261124-2", "REC-20261124-3", "REC-20261123-1"]
+             and _byid["REC-20261124-1"]["type"] == "study" and _byid["REC-20261124-1"]["touches"] == "boxes"
+             and "WS.25" in _byid["REC-20261124-1"]["what"] and "[ref WS.25]" in _byid["REC-20261124-1"]["note"]
+             and _byid["REC-20261124-1"]["why"] == "QQQ lost $100.00 today."
+             and _byid["REC-20261124-2"]["type"] == "maintenance" and "HYG.9" in _byid["REC-20261124-2"]["what"]
+             and _byid["REC-20261124-2"]["touches"] == "control"
+             and _byid["REC-20261124-3"]["what"] == "Re-run capture_all for the 11-23 candles"
+             and _byid["REC-20261123-1"]["date"] == "2026-11-23" and "cash-readiness review 2026-11-23" in
+             _byid["REC-20261123-1"]["note"]
+             and all(r["status"] == "NEW" and r["slot"] == "" and r["decided_on"] == "" for r in _rows27)
+             and "Not queued idea" not in _b27 and len(_dup27) == 1
+             and all(x in _refj for x in ("type 'chore'", "what is more than one line", "$9,999", "retired strategy",
+                                          "over 200 characters", "missing touches", "resting take-profit",
+                                          "touches 'fleet'"))
+             and _new27b == [] and _same and _new27c == [] and ("Rename the handoff label, now the sweep is retired", "REC-20261120-1") in _dup27c)
+    _n27d = dict(NOTES_OK, proposals=[])                 # the maintenance HYG.9 again, on another day: its [ref]
+    _new27d, _dup27d, _, _ = DR.rec_append("2026-11-25", _n27d, _L27, os.path.join(_d27, "none"), _f27)
+    _ok27 = _ok27 and _new27d == [] and _dup27d and _dup27d[0][1] == "REC-20261124-2"
+    _m27 = "ids %s; dups %s / %s / %s; refused %s" % (_ids27, _dup27, _dup27c, _dup27d if "_dup27d" in dir() else "?",
+                                                     _refj[:300])
+except Exception as e:                                   # noqa: BLE001 (HEAD: no rec_append)
+    _ok27, _m27 = False, "%s: %s" % (type(e).__name__, e)
+ck("R27", _ok27, _m27)
+
+# R28
+try:
+    import calendar_view as CV  # noqa: E402
+    _L28 = os.path.join(TMP, "r28", "recommendations.tsv")
+    write(_L28, "# c\n" + _LH
+          + _lrow("REC-20261120-1", "2026-11-20", "Old open control fix", "NEW")
+          + _lrow("REC-20261124-1", "2026-11-24", "Run study WS.25 blind in the nightly queue: x", "NEW", typ="study",
+                  tch="boxes", note="daily recap 2026-11-24 P1 [ref WS.25]")
+          + _lrow("REC-20261124-2", "2026-11-24", "Second control fix", "NEW")
+          + _lrow("REC-20261124-3", "2026-11-24", "Sunday box fix", "NEW", tch="boxes")
+          + _lrow("REC-20261124-4", "2026-11-24", "A decision", "NEW", typ="decision", tch="none")
+          + _lrow("REC-20261123-1", "2026-11-23", "Approved recently", "APPROVED", slot="2026-11-29 10:00-12:00 ET",
+                  dec="2026-11-23")
+          + _lrow("REC-20261110-1", "2026-11-10", "Approved long ago", "APPROVED", slot="2026-11-12 18:30 ET",
+                  dec="2026-11-10")
+          + _lrow("REC-20261123-2", "2026-11-23", "Declined recently", "DECLINED", dec="2026-11-23")
+          + _lrow("REC-20261110-2", "2026-11-10", "Declined long ago", "DECLINED", dec="2026-11-10")
+          + _lrow("REC-20261125-1", "2026-11-25", "From the future", "NEW"))
+    _now28 = datetime(2026, 11, 24, 17, 10, tzinfo=ET)
+    _units28 = [
+        {"id": "dtp-morning.timer", "calendars": ["Mon..Fri *-*-* 09:15:00 America/New_York"], "last_min": 1.0},
+        {"id": "dtp-eod-conductor.timer", "calendars": ["Mon..Fri *-*-* 16:05:00 America/New_York"], "last_min": 14.0},
+        {"id": "dtp-study-dispatch.timer", "calendars": ["Mon..Thu *-*-* 17:15:00 America/New_York",
+                                                         "Fri *-*-* 17:15:00 America/New_York"], "last_min": None}]
+    _p28 = os.path.join(TMP, "r28", "planned.tsv")
+    write(_p28, "date\tstart\tend\twhat\ttouches\n2026-11-24\t~17:45\t19:30\tcash-readiness review\tcontrol\n"
+                "2026-11-29\t10:00\t12:00\tSunday fleet update\tboxes\n")
+    _cal28 = CV.build(_now28, 7, _p28, units=_units28)
+    _s28 = DR.rec_section("2026-11-24", _L28, _cal28, None, _now28)
+    _r28 = {r[1]: r for r in _s28["rows"][1:]}
+    _nc = DR.rec_section("2026-11-24", _L28, None, "no systemd", _now28)
+    _rnc = {r[1]: r for r in _nc["rows"][1:]}
+    _ok28 = ([r[1] for r in _s28["rows"][1:]] == ["REC-20261124-1", "REC-20261124-2", "REC-20261124-3",
+                                                   "REC-20261124-4", "REC-20261120-1", "REC-20261123-1",
+                                                   "REC-20261123-2"]
+             and [r[0] for r in _s28["rows"][1:]] == [str(i) for i in range(1, 8)]
+             and _r28["REC-20261120-1"][7] == "CARRIED from 11-20" and _r28["REC-20261124-2"][7] == "NEW"
+             and _r28["REC-20261123-1"][7] == "APPROVED-scheduled" and _r28["REC-20261123-1"][6] == "2026-11-29 10:00-12:00 ET"
+             and _r28["REC-20261123-2"][7] == "DECLINED 11-23"
+             and _r28["REC-20261124-1"][6] == "next study dispatch Tue 11-24 17:15 ET (queued: it runs unless declined)"
+             and _r28["REC-20261124-2"][6] == "Tue 11-24 19:30-20:30 ET (control)"
+             and _r28["REC-20261120-1"][6] == "Tue 11-24 20:30-21:30 ET (control)"
+             and _r28["REC-20261124-3"][6] == "Sun 11-29 12:00-14:00 ET (Sunday box work)"
+             and _r28["REC-20261124-4"][6] == "your reply (no slot needed)"
+             and _rnc["REC-20261124-2"][6].startswith("calendar NOT READ (no systemd)")
+             and _rnc["REC-20261124-4"][6] == "your reply (no slot needed)"
+             and any("calendar NOT READ" in x for x in _nc["problems"]))
+    _m28 = "; ".join("%s %s [%s]" % (r[1], r[7], r[6]) for r in _s28["rows"][1:])
+except Exception as e:                                   # noqa: BLE001 (HEAD: no rec_section)
+    _ok28, _m28 = False, "%s: %s" % (type(e).__name__, e)
+ck("R28", _ok28, _m28)
+
+# R29
+try:
+    import ast as _ast
+    _L29 = os.path.join(TMP, "r29", "recommendations.tsv")
+    _pre29 = ("# c\n" + _LH + _lrow("REC-20261123-1", "2026-11-23", "Approved by the operator", "APPROVED",
+                                    slot="2026-11-25 18:30 ET", dec="2026-11-23")
+              + _lrow("REC-20261123-2", "2026-11-23", "Declined by the operator", "DECLINED", dec="2026-11-23"))
+    write(_L29, _pre29)
+    _n29p = os.path.join(TMP, "r29", "notes.json")
+    write(_n29p, json.dumps(dict(NOTES_OK, proposals=[], maintenance={}, recommendations=[
+        {"what": "Self-approved line", "why": "y", "type": "fix", "touches": "control", "status": "APPROVED",
+         "id": "REC-20991231-9", "slot": "2026-11-25 18:30 ET", "decided_on": "2026-11-24"},
+        {"what": "Bad line", "why": "y", "type": "nope", "touches": "control"}])))
+    _rc29 = DR.main(["recs", "--day", "2026-11-24", "--notes", _n29p, "--ledger", _L29,
+                     "--cash-ready", os.path.join(TMP, "r29", "none")])
+    _t29 = read(_L29)
+    _rows29 = _ledger_rows(_L29)
+    _src = read(HELPER)
+    _tree = _ast.parse(_src)
+    _fns = {n.name: _ast.get_source_segment(_src, n) for n in _tree.body if isinstance(n, _ast.FunctionDef)}
+    _path = "".join(_fns.get(k, "MISSING") for k in ("rec_append", "own_recs", "session_recs", "cash_ready_recs"))
+    _nn29 = json.loads(read(_n29p))
+    _ok29 = (_rc29 == 0 and _t29.startswith(_pre29) and len(_rows29) == 3
+             and _rows29[2]["id"] == "REC-20261124-1" and _rows29[2]["status"] == "NEW"
+             and _rows29[2]["slot"] == "" and _rows29[2]["decided_on"] == ""
+             and [r["status"] for r in _rows29[:2]] == ["APPROVED", "DECLINED"]
+             and "MISSING" not in _path and "APPROVED" not in _path and "DECLINED" not in _path
+             and any("type 'nope'" in x for x in _nn29.get("recommendations_refused", [])))
+    _m29 = "rows %s" % [(r["id"], r["status"], r["slot"]) for r in _rows29]
+except Exception as e:                                   # noqa: BLE001 (HEAD: no recs)
+    _ok29, _m29 = False, "%s: %s" % (type(e).__name__, e)
+except SystemExit as e:                                  # HEAD: argparse refuses the unknown `recs`
+    _ok29, _m29 = False, "SystemExit %s (no `recs` command)" % e
+ck("R29", _ok29, _m29)
+
+# R30
+try:
+    _rows30 = [ln.split("\t") for ln in R6_LEDGER.splitlines() if ln.startswith("REC-")]
+    _pr30 = re.sub(r"\s+", " ", read(os.path.join(TOOLS, "daily_recap.prompt")))
+    _w30 = os.path.join(TMP, "w30")
+    DR.main(["context", "--day", "2026-11-24", "--work", _w30, "--queue", _q17, "--notes-dir", os.path.join(TMP, "nd30"),
+             "--studies", os.path.join(TMP, "st30"), "--weekly", os.path.join(TMP, "wk30"),
+             "--otv5-backlog", os.path.join(TMP, "nobl"), "--hygiene", os.path.join(TMP, "hy30"),
+             "--botlogs", os.path.join(TMP, "bl30"), "--trades", os.path.join(TMP, "tr30"), "--recs", _L28])
+    _c30 = read(os.path.join(_w30, "context.md"))
+    _ok30 = ([r[0] for r in _rows30] == ["REC-20261123-1", "REC-20261123-2", "REC-20261123-3"]
+             and all(r[6] == "NEW" for r in _rows30) and "WS.25" in _rows30[0][2] and "WS.26" in _rows30[1][2]
+             and "HYG.9" in _rows30[2][2]
+             and "Recommendations already in the ledger" in _c30 and "REC-20261123-2 2026-11-23 DECLINED" in _c30
+             and "REC-20261125-1" not in _c30
+             and '"recommendations":' in _pr30 and "ONE PLAIN LINE THE OPERATOR CAN ANSWER YES OR NO TO" in _pr30
+             and "NEVER WRITE AN ID, A STATUS, A SLOT OR A DATE" in _pr30 and "no new figures" in _pr30
+             and "only the coordinator marks one APPROVED or DECLINED" in _pr30 and "as CARRIED" in _pr30)
+    _m30 = "wrapper ledger rows %s" % [(r[0], r[6], r[2][:30]) for r in _rows30]
+except Exception as e:                                   # noqa: BLE001
+    _ok30, _m30 = False, "%s: %s" % (type(e).__name__, e)
+except SystemExit as e:                                  # HEAD: argparse refuses context's unknown --recs
+    _ok30, _m30 = False, "SystemExit %s (context takes no --recs)" % e
+ck("R30", _ok30, _m30)
 
 shutil.rmtree(TMP, ignore_errors=True)
 print()
