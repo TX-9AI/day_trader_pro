@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/daily_brief.py  v1.5  -  the post-trading-day brief (PDF) for any session.
+day_trader_pro/tools/daily_brief.py  v1.6  -  the post-trading-day brief (PDF) for any session.
+v1.6  2026-11-23  dtp r581 — SPX IS BACK ON $5,000. The operator, 2026-11-23: "I'm going to just bump it back up to $5K for
+      consistency's sake" (applied 18:41 ET). cash_budget: SPX $5,000 an entry, except $4,200 on 2026-11-23 ONLY
+      (CASH_BUDGET_DATED, inclusive windows); QQQ $1,050 unchanged.
 v1.5  2026-11-23  dtp r580 / CAL.1 + RECAP.3 — THE SPX CASH BUDGET IS DATE-AWARE: cash_budget(sym, day) is $5,000 an SPX
       entry before 2026-11-23 and $4,200 from it (QQQ $1,050 unchanged); section 5's re-scale and its sizing line use the
       day's figure (it was a flat $5,000 every day). SECTION 7, THE SCHEDULE. The operator, 2026-11-23: "We just want to prevent
@@ -78,7 +81,7 @@ Data rules (the operator's):
     (OTV5 tests/fees.py fees_for, the same model review_kit uses); always BESIDE P&L, never inside it
   - candles: TastyTrade-sourced 1m bars from S3 raw/candles/dt=<D>/sym=<S>/interval=1m/
     (latest pushed_at wins per bar); RTH 09:30-15:59 ET only; no yfinance
-  - cash re-scale: contracts = floor(budget / (entry mark x 100)), QQQ $1,050 and SPX $5,000 per entry;
+  - cash re-scale: contracts = floor(budget / (entry mark x 100)), QQQ $1,050 and SPX $5,000 per entry ($4,200 on 2026-11-23 only);
     a trade whose single contract costs more than its budget is refused (0 contracts)
 
 Narrative: per-symbol synopses and sections 2-4 come from the --notes JSON (written by the analyst).
@@ -127,14 +130,16 @@ from reportlab.platypus import (Image, KeepTogether, PageBreak, Paragraph,  # no
 
 ET = ZoneInfo("America/New_York")
 INDEX_FIRST = ("SPX", "QQQ")
-CASH_BUDGET = {"QQQ": 1050.0, "SPX": 5000.0}            # before 2026-11-23; cash_budget() applies the change below
-CASH_BUDGET_FROM = {"SPX": ("2026-11-23", 4200.0)}       # v1.5: SPX $4,200 an entry from 2026-11-23 (was $5,000)
+CASH_BUDGET = {"QQQ": 1050.0, "SPX": 5000.0}            # every day outside a dated window below
+CASH_BUDGET_DATED = {"SPX": (("2026-11-23", "2026-11-23", 4200.0),)}   # v1.6: (from, to inclusive, usd): 11-23 only
 
 
 def cash_budget(sym, day):
-    """v1.5 -> the per-entry cash budget for `sym` on `day` (ISO date)."""
-    since, usd = CASH_BUDGET_FROM.get(sym, (None, None))
-    return usd if since and day >= since else CASH_BUDGET[sym]
+    """v1.6 -> the per-entry cash budget for `sym` on `day` (ISO date)."""
+    for lo, hi, usd in CASH_BUDGET_DATED.get(sym, ()):
+        if lo <= day <= hi:
+            return usd
+    return CASH_BUDGET[sym]
 CASH_STRATEGIES = ("PARK", "RunawayContinuation", "LiquidityHunt", "OGAP")
 WINDOW_SETUPS = ("PARK", "RunawayContinuation", "LiquidityHunt")   # OGAP is its own line
 SHORT = {"RunawayContinuation": "Runaway", "LiquidityHunt": "Hunt", "PARK": "PARK", "OGAP": "OGAP"}

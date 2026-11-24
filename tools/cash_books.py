@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/cash_books.py  v1.4
+day_trader_pro/tools/cash_books.py  v1.5
+v1.5  2026-11-23  dtp r581 — SPX IS BACK ON $5,000. The operator, 2026-11-23: "I'm going to just bump it back up to $5K for
+      consistency's sake" (applied 18:41 ET). SIZES is a base size and dated windows: SPX $5,000, except $4,200 on
+      2026-11-23 ONLY; the Entry sizes line names the size of the scored day (through) and the window beside it, and
+      figures() holds every size printed. Report only: no book, window or metric changes, PREREG's sha holds.
 v1.4  2026-11-23  dtp r580 / RECAP.3 — THE SCOREBOARD PRINTS ITS SIZE BASIS. The daily recap prompt asks the C1-C4
       commentary to name the SPX size change ($4,200 an entry from 2026-11-23, was $5,000), and the validator withheld the
       11-23 commentary for quoting $4,200 and $5,000, figures the scorer never printed. score() now carries "sizes"
@@ -94,7 +98,19 @@ FORWARD = ("2026-11-23", "2026-12-03")
 BOOT_N, BOOT_SEED = 5000, 1
 # v1.4 (RECAP.3): the per-entry sizes the boxes trade (paper is sized as cash): (symbol, dollars, since, was). Printed
 # as the scoreboard's "Entry sizes" line so the commentary may quote them; nothing is re-scaled by them.
-SIZES = (("QQQ", 1050, None, None), ("SPX", 4200, "2026-11-23", 5000))
+# v1.5: (symbol, base dollars, dated windows (from, to inclusive, dollars)).
+SIZES = (("QQQ", 1050, ()), ("SPX", 5000, (("2026-11-23", "2026-11-23", 4200),)))
+
+
+def size_on(sym, day):
+    """v1.5 -> the per-entry size of `sym` on `day` (ISO date), or None for a symbol not in SIZES."""
+    for a, base, dated in SIZES:
+        if a == sym:
+            for lo, hi, usd in dated:
+                if lo <= day <= hi:
+                    return usd
+            return base
+    return None
 BOOKS = (
     ("C1", "QQQ and SPX only: Runaway and PARK"),
     ("C2", "All 14 symbols: PARK and Runaway"),
@@ -249,7 +265,8 @@ def score(through, day=None, week_start=None, trades_dir=TRADES):
     out = {"through": through, "prereg": PREREG, "prereg_sha": PREREG_SHA, "basis": "the mark (pnl_usd); fees beside",
            "amendment": amendment_line(), "amendments": amendment_lines(), "concentration": CONCENTRATION,
            "books": dict(BOOKS), "windows": {},
-           "sizes": [{"sym": a, "usd": u, "since": f, "was": w} for a, u, f, w in SIZES]}
+           "sizes": [{"sym": a, "usd": size_on(a, through), "base": u,
+                      "dated": [{"from": lo, "to": hi, "usd": x} for lo, hi, x in dated]} for a, u, dated in SIZES]}
     for name, lo, hi in wins:
         sess, missing = sessions(lo, hi, file_days)
         w = {"from": lo, "to": hi, "sessions": len(sess), "missing_trade_files": missing, "books": {}}
@@ -422,10 +439,10 @@ def figures(sc):
                 out.add(round(abs(v)))
         for x in (w.get("extras") or {}).values():          # v1.3: the extras line's figures
             out.add(round(abs(x["gross"])))
-    for z in sc.get("sizes") or []:                          # v1.4: the Entry sizes line
-        for k in ("usd", "was"):
-            if z.get(k) is not None:
-                out.add(round(abs(z[k])))
+    for z in sc.get("sizes") or []:                          # v1.4: the Entry sizes line (v1.5: base + dated)
+        for x in [z.get("usd"), z.get("base"), z.get("was")] + [d.get("usd") for d in z.get("dated") or []]:
+            if x is not None:
+                out.add(round(abs(x)))
     return out
 
 
@@ -434,9 +451,17 @@ def size_line(sc):
     zs = sc.get("sizes") or []
     if not zs:
         return None
-    return ("Entry sizes (per entry, as the boxes trade them; paper is sized as cash): " + "; ".join(
-        "%s %s%s" % (z["sym"], _m(z["usd"]), (" from %s (was %s)" % (z["since"], _m(z["was"]))) if z.get("since") else "")
-        for z in zs) + "; per contract unchanged.")
+    def one(z):
+        ds = z.get("dated") or []
+        if not ds:
+            return "%s %s" % (z["sym"], _m(z["usd"]))
+        win = ", ".join("%s on %s only" % (_m(d["usd"]), d["from"]) if d["from"] == d["to"]
+                        else "%s %s..%s" % (_m(d["usd"]), d["from"], d["to"]) for d in ds)
+        if z["usd"] != z.get("base"):
+            return "%s %s, %s every other day" % (z["sym"], win, _m(z["base"]))
+        return "%s %s (%s)" % (z["sym"], _m(z["usd"]), win)
+    return ("Entry sizes (per entry, as the boxes trade them; paper is sized as cash): " + "; ".join(one(z) for z in zs)
+            + "; per contract unchanged.")
 
 
 def main(argv=None):

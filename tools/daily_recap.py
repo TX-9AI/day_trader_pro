@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/daily_recap.py  v1.5
+day_trader_pro/tools/daily_recap.py  v1.6
+v1.6  2026-11-23  dtp r581 / REFUSE.1 — ONE "Fires that booked no trade" BLOCK IN THE CONTEXT. The 11-23 recap and review
+      read refused fires as possible fill failures. context reads ~/reviews/refusals/DAY.csv (review_kit `refusals`, the
+      nightly review's step 5: each fired plan with no trade_ids joined to its tick's signal_journal disposition) and
+      prints review_kit.refusal_lines: per box, setup and side, the fires, each refusal reason with its count, the last
+      plan's state; "no fill" only where the tick has no disposition; NOT READ when the file is missing. Report only.
 v1.5  2026-11-22  dtp r578 / CAP.11 (control's half of OTV5 r151) — ONE "As cash" BLOCK IN THE CONTEXT. OTV5 r151 makes the
       daily catastrophic cap record only on a paper box (the operator, 2026-11-22: "there's no harm in letting paper run
       & we can just note if the breaker would have popped"): the box trades on and tags what it opens after the breaker
@@ -513,6 +518,18 @@ def as_cash_lines(day, trades_dir):
     return out
 
 
+def refusal_block(day, trades_dir):
+    """v1.6 (REFUSE.1): the day's fires that booked no trade, each with its refusal reason, from the refusals file."""
+    import csv as _csv
+    out = ["Fires that booked no trade (review_kit refusals: the plan ledger joined to each tick's signal_journal "
+           "disposition; \"no fill\" only where the tick has none):"]
+    p = os.path.join(os.path.dirname(os.path.abspath(trades_dir)), "refusals", day + ".csv")
+    if not os.path.exists(p):
+        return out + ["  NOT READ (no %s)" % p]
+    rows = list(_csv.DictReader(open(p, encoding="utf-8", newline="")))
+    return out + (["  " + x for x in RK.refusal_lines(rows)] or ["  none"])
+
+
 def cmd_context(a):
     os.makedirs(a.work, exist_ok=True)
     qt = open(a.queue, encoding="utf-8").read() if os.path.exists(a.queue) else ""
@@ -567,6 +584,7 @@ def cmd_context(a):
     except Exception as e:                       # noqa: BLE001 - the recap goes on; the PDF says NOT MEASURED
         lines += ["Runaway equity watch: NOT MEASURED (%s: %s)" % (type(e).__name__, e)]
     lines += as_cash_lines(a.day, a.trades)      # v1.5 (CAP.11)
+    lines += refusal_block(a.day, a.trades)      # v1.6 (REFUSE.1)
     lines += ["", "Studies that reported since %s ET (RESULT.json folders):" % since.strftime("%Y-%m-%d %H:%M")]
     lines += ["  " + f for f in found] or ["  (none)"]
     lines += ["", "Queue items closed or carried forward in that span (their status lines):"]

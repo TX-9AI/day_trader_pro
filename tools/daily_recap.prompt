@@ -1,4 +1,4 @@
-DAILY RECAP (day_trader_pro tools/daily_recap.prompt v1.8, dtp r580 / TRIM.2 wording + RECAP.3 + CAL.1; v1.7 dtp r578 / CAP.11; v1.6 dtp r577 / OGAP.4; v1.5 dtp r576 / BOXF.1; v1.4 dtp r575 / HALF.2 + RWATCH.1; v1.3 dtp r574 / CASHBOOK.2; v1.2 dtp r572 / SD.3 + RECAP.2 + CASHBOOK.1; v1.1 dtp r571; v1.0 dtp r569)
+DAILY RECAP (day_trader_pro tools/daily_recap.prompt v1.9, dtp r581 / REFUSE.1 + SPX size dates; v1.8 dtp r580 / TRIM.2 wording + RECAP.3 + CAL.1; v1.7 dtp r578 / CAP.11; v1.6 dtp r577 / OGAP.4; v1.5 dtp r576 / BOXF.1; v1.4 dtp r575 / HALF.2 + RWATCH.1; v1.3 dtp r574 / CASHBOOK.2; v1.2 dtp r572 / SD.3 + RECAP.2 + CASHBOOK.1; v1.1 dtp r571; v1.0 dtp r569)
 
 You write the analyst notes for ONE trading session's daily recap PDF of the OTV5 paper fleet (14 boxes). You run
 unattended under a systemd timer: nobody is watching and nobody can answer a question. Write ONE file, the NOTES path
@@ -43,6 +43,11 @@ THE RULES (the operator's; not negotiable)
   "As cash" block names the same rows and records. Quote the
   extra beside the headline, labelled "extra paper after the breaker", never added into it; when a box's breaker would
   have popped, say which box, when and at what day net. Cash results lead for a cash box.
+- A FIRE THAT DID NOT TRADE IS A REFUSAL, NOT A FILL FAILURE (dtp r581, REFUSE.1). CONTEXT's "Fires that booked no
+  trade" block joins each plan that fired with no trade (TRIGGERED or "superseded — never filled") to its tick's
+  signal_journal disposition: quote its reason (gate_block:..., sizing_rejected ..., pin_proximity ...) for each box,
+  setup and side; write "no fill" ONLY where the block says "no fill" (no disposition at that tick), and never ask for a box
+  read for a fire the block gives a reason for. A refusal by a gate or the sizer is the bot following its rule.
 - Never propose resting take-profit orders or a backstop for them (a closed topic). No new config knobs, env
   switches, configure.sh items or study toggles. A study's outcome is TUNE, TRIM or KEEP, never log-only or a shadow.
 - Honest, not cheerleading. A bad day is variance unless something broke: put it in the window's distribution
@@ -132,7 +137,7 @@ present) as the model of tone, depth and length. Markdown bold (**x**) is allowe
   "code":           [{"title", "when", "effect", "status", "detail": [..]}] each code behaviour that touched the day:
                     defects, gates that refused, recent fixes seen working; status says FIXED rN / OPEN backlog id /
                     TO SPEC.
-  "cash_verdict":   1-3 paragraphs: "If this had been cash" - the FACTS cash rows (QQQ $1,050, SPX $4,200 an entry from 2026-11-23 (was $5,000),
+  "cash_verdict":   1-3 paragraphs: "If this had been cash" - the FACTS cash rows (QQQ $1,050, SPX $5,000 an entry ($4,200 on 2026-11-23 only),
                     PARK/Runaway/Hunt/OGAP), at the mark with fees beside, and an honest verdict.
   "cash_books":     1-3 paragraphs, the commentary on the C1-C4 scoreboard (CASHBOOKS), for the operator (2026-11-22:
                     "On C1-C4, I would like some commentary on the daily and weekly recaps as to how each of them is
@@ -140,8 +145,8 @@ present) as the model of tone, depth and length. Markdown bold (**x**) is allowe
                     (amendment 2; the operator, 2026-11-22: "I want the best risk to reward balance, the highest
                     earning combination with as low as we can get drawdowns"): the combined order, each book's forward
                     figure beside it, and whether the forward days are confirming or eroding it (seven forward
-                    sessions is a small sample: say so while it is). SPX entries size on $4,200 from 2026-11-23 (was
-                    $5,000; per contract unchanged): name the change when an SPX day moves a book. Then: which book
+                    sessions is a small sample: say so while it is). SPX entries size on $5,000, except $4,200 on
+                    2026-11-23 only (per contract unchanged): name it when that SPX day moves a book. Then: which book
                     the day favoured and why (e.g. a big index PARK day, a Runaway equity
                     day), and whether any book's standing changed on the forward and combined lines. CONCENTRATION
                     (amendment 1; the operator, 2026-11-22: "I don't know if I'm on board with cutting the 2 best

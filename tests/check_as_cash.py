@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_as_cash.py  v1.1
+day_trader_pro/tests/check_as_cash.py  v1.2
+v1.2  2026-11-23  dtp r581 / REFUSE.1 — A9 reads the prompts' own versions (daily recap v1.9, nightly review v1.11).
+      Same checks otherwise.
 v1.1  2026-11-23  dtp r580 — A9 reads the prompts' own versions (daily recap v1.8, nightly review v1.10: the live-setup
       wording after OTV5 r153). Same checks otherwise.
 v1.0  2026-11-22  dtp r578 / CAP.11 (control's half of OTV5 r151) — new. THE REPORTS HEADLINE "AS CASH WOULD HAVE TRADED".
@@ -374,8 +376,8 @@ def main():
             need = ("AS CASH WOULD HAVE TRADED IS THE HEADLINE", "after_cap", "would-pop", "OGAP",
                     "never added in", "there's no harm")
             miss = {n: [x for x in need if x not in t] for n, t in pr_.items()}
-            ok = (all(not v for v in miss.values()) and "daily_recap.prompt v1.8" in pr_["daily_recap.prompt"]
-                  and "nightly_review.prompt v1.10" in pr_["nightly_review.prompt"]
+            ok = (all(not v for v in miss.values()) and "daily_recap.prompt v1.9" in pr_["daily_recap.prompt"]
+                  and "nightly_review.prompt v1.11" in pr_["nightly_review.prompt"]
                   and "breaker/" in pr_["nightly_review.prompt"] and "breaker/" in pr_["saturday_brief.prompt"])
             ck("A9", ok, "missing=%s" % miss)
         except Exception as e:                                   # noqa: BLE001

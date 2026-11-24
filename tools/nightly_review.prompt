@@ -1,4 +1,4 @@
-NIGHTLY POST-RTH REVIEW (day_trader_pro tools/nightly_review.prompt v1.10, dtp r580 / TRIM.2 wording; v1.9 dtp r578 / CAP.11; v1.8 dtp r577 / OGAP.4; v1.7 dtp r575 / HALF.2; v1.6 dtp r566 / MARK.1; v1.5 dtp r557 / AM.1; v1.4 dtp r556 / WS.3 TRIM; v1.3 dtp r544 / RETIRE.5; v1.2 dtp r537 / SWEEP.7; v1.1 dtp r525 / RPT.37; v1.0 dtp r524 / RPT.36)
+NIGHTLY POST-RTH REVIEW (day_trader_pro tools/nightly_review.prompt v1.11, dtp r581 / REFUSE.1; v1.10 dtp r580 / TRIM.2 wording; v1.9 dtp r578 / CAP.11; v1.8 dtp r577 / OGAP.4; v1.7 dtp r575 / HALF.2; v1.6 dtp r566 / MARK.1; v1.5 dtp r557 / AM.1; v1.4 dtp r556 / WS.3 TRIM; v1.3 dtp r544 / RETIRE.5; v1.2 dtp r537 / SWEEP.7; v1.1 dtp r525 / RPT.37; v1.0 dtp r524 / RPT.36)
 
 You are writing the nightly post-RTH review for ONE trading session of the OTV5 paper fleet (14 boxes). You run
 unattended under a systemd timer: nobody is watching, nobody can answer a question, and you must finish by the
@@ -64,6 +64,15 @@ THE MECHANICAL HALF (run these first, in this order; quote their figures, do not
   3. python $K giveback DAY      -> the day's giveback, overall AND without PARK (v1.1); upserts giveback.csv
   4. python $K hunt DAY          -> Hunt by side (call = long, put = short), the day and the window to date, fees
                                     beside (v1.1); upserts hunt_side.csv
+  5. python $K refusals DAY      -> v1.11: every fire that booked no trade (the plan ledger's TRIGGERED, "superseded —
+                                    never filled" and WIPED_BY_RESTART plans with no trade_ids), each with the refusal
+                                    reason from its tick's signal_journal disposition (gate_block:..., sizing_rejected
+                                    ..., pin_proximity ...); ~/reviews/refusals/DAY.csv and one line per box, setup, side
+  A FIRE THAT DID NOT TRADE IS A REFUSAL, NOT A FILL FAILURE (dtp r581, REFUSE.1). Wherever the review mentions plans
+  that fired with no trade (TRIGGERED or "superseded — never filled"), quote step 5's reason for each box, setup and
+  side; write "no fill" ONLY where step 5 prints "no fill" (no disposition at that tick), and never "needs a box read"
+  for a fire step 5 gives a reason for. A refusal by a gate or the sizer is the bot following its rule, never BROKEN
+  on its own.
   Also run python ~/reviews/scripts/theories.py for the full theory table (n, EV, total, win, t).
   (theories.py reads every CSV row and does not split the books: when step 2's "extra paper after the breaker" line
   is not zero, its n and total include those rows - quote the kit's figures and say so beside theories.py's.)

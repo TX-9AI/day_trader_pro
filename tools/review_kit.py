@@ -1,6 +1,15 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/review_kit.py — v1.7
+day_trader_pro/tools/review_kit.py — v1.8
+v1.8  2026-11-23  dtp r581 / REFUSE.1 — A FIRE THAT DID NOT TRADE SAYS WHY. The 11-23 review read the refused fires as
+      possible fill failures: OTV5 opens a plan TRIGGERED at each fire, an entry the bot refuses links no trade, the next
+      fire closes it "superseded — never filled", and the last of a chain stays TRIGGERED (QQQ cfe099c9 09:53:48, SPX
+      e1fe67d1 09:41:48) - while the refusal reason sits in S3 signal_journal (event disposition, outcome
+      gate_block:commit_abandoned, sizing_rejected insufficient_capital ..., pin_proximity ...). NEW `refusals DAY`: every
+      plan that fired and booked no trade (TRIGGERED, superseded — never filled, or WIPED_BY_RESTART; no trade_ids),
+      joined to its own tick's disposition (same box, setup and side, within JOIN_S), written to
+      ~/reviews/refusals/DAY.csv (REFUSAL_COLS) with one summary line per box, setup and side; the reason is the
+      disposition's outcome, and "no fill" is printed ONLY when the tick has no disposition. Read only (S3 reads).
 v1.7  2026-11-22  dtp r578 / CAP.11 (control's half of OTV5 r151) — THE REPORTS READ THE AS-CASH ROWS. OTV5 r151 makes the
       daily catastrophic cap RECORD ONLY on a paper box (the operator, 2026-11-22: "Is there any way we can make the
       catastrophic cap only apply to cash? As in, there's no harm in letting paper run & we can just note if the breaker
@@ -77,6 +86,9 @@ SUBCOMMANDS (every one reads only; the CSV writers REPLACE the day's rows, so a 
                        v1.7: paper_trade and after_cap trail the row (OTV5 r151), and a real run also writes the day's
                        breaker events (S3 raw/circuit_breaker) to ~/reviews/breaker/DAY.csv (BREAKER_COLS); a failed read
                        says NOT READ and leaves the trades file standing.
+  refusals DAY         v1.8: the day's fires that booked no trade (plan_ledger, no trade_ids), each with its tick's
+                       signal_journal disposition as the refusal reason ("no fill" only when there is none), to
+                       ~/reviews/refusals/DAY.csv and one line per box, setup and side.
   window DAY           the window 10-26..DAY from ~/reviews/trades/20*.csv: n, realized, EV a trade with a
                        day-bootstrap 95% interval (seed 7, 20,000 draws), fees BESIDE (the row's fee, else the
                        estimate $1.25 a contract, $2.47 on SPX, marked estimated), EV ex the worst setup and ex the
@@ -92,10 +104,11 @@ SUBCOMMANDS (every one reads only; the CSV writers REPLACE the day's rows, so a 
                        must match FILE's header exactly). The one door for the other nightly CSVs. A row whose first
                        cell is not a date (giveback.csv's '--help' row, 11-07) is dropped on every rewrite.
 
-NEVER: a box read, a wake, an S3 write, a network call except the S3 read in `trades`, or a fee inside EV.
+NEVER: a box read, a wake, an S3 write, a network call except the S3 reads in `trades` and `refusals`, or a fee inside EV.
 """
 import csv
 import glob
+import json
 import os
 import random
 import statistics as st
@@ -385,6 +398,163 @@ def read_breaker(day):
     if not os.path.exists(path):
         return None
     return list(csv.DictReader(open(path)))
+
+
+# ── refusals (v1.8, REFUSE.1) ───────────────────────────────────────────────────────────────────────────────────────
+REFUSAL_COLS = ["sym", "strategy", "direction", "plan_id", "fired_et", "state", "terminal_reason", "outcome", "reason"]
+NO_FILL = "no fill"          # printed ONLY when the fire's tick has no signal_journal disposition
+JOIN_S = 2.0                 # a disposition joins a plan when its ts_et is within 2 s of the plan's created_ts (same tick)
+
+
+def _ids(v):
+    if v in (None, "", "[]"):
+        return []
+    try:
+        x = json.loads(v) if isinstance(v, str) else v
+        return list(x or [])
+    except ValueError:
+        return [v]
+
+
+def fired_unfilled(plans):
+    """v1.8: the plans that FIRED and booked no trade. OTV5 strategy/plan.py opens a plan TRIGGERED at the fire; one whose
+    entry is refused links no trade and is closed 'superseded — never filled' at the next fire, or stays TRIGGERED (the
+    last of a chain), or is CANCELLED WIPED_BY_RESTART at a boot."""
+    out = []
+    for p in plans:
+        if _ids(p.get("trade_ids")):
+            continue
+        st, tr = str(p.get("state") or "").upper(), str(p.get("terminal_reason") or "")
+        if st == "TRIGGERED" or "never filled" in tr or tr == "WIPED_BY_RESTART":
+            out.append(p)
+    return out
+
+
+def _reason(outcome, rec):
+    """the disposition's outcome, with its detail when the record carries one in a field of its own."""
+    det = [str(rec.get(k)) for k in ("reason", "detail", "message", "error") if rec.get(k) not in (None, "")]
+    det = [x for x in det if x not in outcome]
+    return outcome + ((" " + "; ".join(det)) if det else "")
+
+
+def refusal_rows(day, plans, dispositions):
+    """v1.8: each fired-unfilled plan joined to its tick's signal_journal disposition (same box, strategy and direction,
+    ts_et within JOIN_S of created_ts, the nearest). reason = the disposition's outcome; NO_FILL only when none exists.
+    `dispositions`: dicts as the journal writes them (ts_et, outcome, signal{strategy, direction}) plus `box`."""
+    by = {}
+    for d in dispositions:
+        sig = d.get("signal") or {}
+        try:
+            t = datetime.fromisoformat(str(d.get("ts_et"))).timestamp()
+        except ValueError:
+            continue
+        k = (str(d.get("box") or d.get("symbol") or "").upper(), str(sig.get("strategy") or ""),
+             str(sig.get("direction") or ""))
+        by.setdefault(k, []).append((t, d))
+    out = []
+    for p in fired_unfilled(plans):
+        sym = str(p.get("symbol") or "").upper()
+        if sym in OTV4TEST_SYMS:
+            continue
+        c = float(p.get("created_ts") or 0)
+        if datetime.fromtimestamp(c, ET).date().isoformat() != day:
+            continue
+        key = (sym, str(p.get("strategy") or ""), str(p.get("direction") or ""))
+        near = [(abs(t - c), d) for t, d in by.get(key, []) if abs(t - c) <= JOIN_S]
+        d = min(near, key=lambda x: x[0])[1] if near else None
+        oc = str(d.get("outcome") or "") if d else ""
+        out.append({"sym": sym, "strategy": p.get("strategy") or "", "direction": p.get("direction") or "",
+                    "plan_id": p.get("plan_id") or "",
+                    "fired_et": datetime.fromtimestamp(c, ET).strftime("%H:%M:%S"),
+                    "state": p.get("state") or "", "terminal_reason": p.get("terminal_reason") or "",
+                    "outcome": oc, "reason": _reason(oc, d) if oc else NO_FILL})
+    out.sort(key=lambda r: (r["fired_et"], r["sym"], r["plan_id"]))
+    return out
+
+
+def refusal_lines(rows):
+    """v1.8: one line per box, setup and side: fires, the span, each reason with its count, the last plan's state."""
+    g = {}
+    for r in sorted(rows, key=lambda r: (r["sym"], r["strategy"], r["direction"], r["fired_et"])):
+        g.setdefault((r["sym"], r["strategy"], r["direction"]), []).append(r)
+    out = []
+    for (s, st, dr), rs in g.items():
+        kinds = {}                               # reason kind (its first word) -> [count, first full reason]
+        for r in rs:
+            k = kinds.setdefault(r["reason"].split(" ")[0] if r["reason"] != NO_FILL else NO_FILL, [0, r["reason"]])
+            k[0] += 1
+        last = rs[-1]
+        out.append("%s %s %s: %d fire(s) %s-%s, none traded; %s; last plan %s %s" % (
+            s, st, dr, len(rs), rs[0]["fired_et"], last["fired_et"],
+            ", ".join(("%s x%d" % (k, n)) + ((" (first: %s)" % ex) if ex != k else "")
+                      for k, (n, ex) in sorted(kinds.items(), key=lambda kv: -kv[1][0])), last["plan_id"][:8],
+            last["state"] + (" " + last["terminal_reason"] if last["terminal_reason"] else "")))
+    return out
+
+
+def refusals_from_warehouse(day):
+    """v1.8: the day's plan ledger (dtp warehouse_reader.load_derived) and, for each fired-unfilled plan, the
+    signal_journal objects of its tick only (keys are named by the record's epoch ms: listed, then fetched by second)."""
+    import warehouse_reader as wr
+    s3 = wr._client()
+    plans, _meta = wr.load_derived("plan_ledger", [day], s3=s3)
+    want = {}
+    for p in fired_unfilled(plans):
+        c = float(p.get("created_ts") or 0)
+        want.setdefault(str(p.get("symbol") or "").upper(), set()).update(
+            range(int(c - JOIN_S) - 1, int(c + JOIN_S) + 2))
+    nxt = (date.fromisoformat(day) + timedelta(days=1)).isoformat()
+    out = []
+    pg = s3.get_paginator("list_objects_v2")
+    for sym, secs in sorted(want.items()):
+        for d in (day, nxt):
+            for page in pg.paginate(Bucket=wr.BUCKET, Prefix="%s/signal_journal/dt=%s/sym=%s/" % (wr.PREFIX, d, sym)):
+                for o in page.get("Contents", []) or []:
+                    try:
+                        sec = int(o["Key"].rsplit("/", 1)[1].split("-")[0]) // 1000
+                    except ValueError:
+                        continue
+                    if sec not in secs:
+                        continue
+                    env = json.loads(s3.get_object(Bucket=wr.BUCKET, Key=o["Key"])["Body"].read())
+                    rec = dict(env.get("record") or {})
+                    if (rec.get("event") or env.get("event")) != "disposition":
+                        continue
+                    rec["box"] = sym
+                    out.append(rec)
+    return plans, out
+
+
+def write_refusals(day, rows):
+    path = os.path.join(REVIEWS, "refusals", day + ".csv")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=REFUSAL_COLS)
+        w.writeheader()
+        w.writerows(rows)
+    os.replace(tmp, path)
+    return path
+
+
+def read_refusals(day):
+    """v1.8: the day's rows from ~/reviews/refusals/DAY.csv, or None when `refusals DAY` never wrote it."""
+    path = os.path.join(REVIEWS, "refusals", day + ".csv")
+    if not os.path.exists(path):
+        return None
+    return list(csv.DictReader(open(path)))
+
+
+def cmd_refusals(day, source=None):
+    plans, disp = (source or refusals_from_warehouse)(day)
+    rows = refusal_rows(day, plans, disp)
+    path = write_refusals(day, rows)
+    nf = sum(1 for r in rows if r["reason"] == NO_FILL)
+    print("%s: %d fire(s) that booked no trade, %d with a refusal reason, %d no fill (no disposition) -> %s"
+          % (day, len(rows), len(rows) - nf, nf, path))
+    for ln in refusal_lines(rows):
+        print("  " + ln)
+    return rows
 
 
 # ── upsert ──────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -876,6 +1046,9 @@ def main(argv=None):
         return 1
     if cmd == "trades" and len(rest) == 1:
         cmd_trades(_day(rest[0]))
+        return 0
+    if cmd == "refusals" and len(rest) == 1:
+        cmd_refusals(_day(rest[0]))
         return 0
     if cmd == "window" and len(rest) == 1:
         cmd_window(rest[0])

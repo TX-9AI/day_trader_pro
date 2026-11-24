@@ -1,6 +1,16 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_daily_recap.py  v1.6
+day_trader_pro/tests/check_daily_recap.py  v1.7
+v1.7  2026-11-23  dtp r581 / REFUSE.1 + the SPX size dates (daily_recap v1.6, cash_books v1.5, daily_brief v1.6, the
+      prompt v1.9). The operator moved SPX back to $5,000 (2026-11-23 18:41 ET): R11 wants daily_brief v1.6; R20's
+      Entry sizes line is the 11-23 one (SPX $4,200 on 2026-11-23 only, $5,000 every other day); R22 cash_budget is SPX
+      $5,000 on 2026-11-20, $4,200 on 2026-11-23, $5,000 on 2026-11-24 and 2026-12-07. NEW:
+  R23 context's "Fires that booked no trade" block: NOT READ with no refusals file; from a file, one line per box,
+      setup and side with each reason and its count, "no fill" only for the rows that say so; the prompt quotes the
+      reason and writes "no fill" only where the block does. BORN RED on 5621ada.
+  R24 cash_books.size_on: SPX 5000 / 4200 / 5000 on 2026-11-20 / 2026-11-23 / 2026-11-24 (QQQ 1050 throughout); the
+      line for a 2026-11-24 board reads SPX $5,000 ($4,200 on 2026-11-23 only); figures() holds 1050, 4200, 5000; the
+      recap and Saturday prompts no longer say SPX sizes on $4,200 from 2026-11-23. BORN RED on 5621ada.
 v1.6  2026-11-23  dtp r580 / RECAP.3 + CAL.1 (cash_books v1.4, daily_brief v1.5, the prompt v1.8). R11 wants daily_brief
       v1.5. NEW:
   R20 the scoreboard prints its size basis: score() carries "sizes" (QQQ $1,050; SPX $4,200 from 2026-11-23, was
@@ -561,11 +571,11 @@ try:
     comp = True
 except py_compile.PyCompileError:
     comp = False
-ck("R11", comp and "daily_brief.py  v1.5" in gs and 'NOTES_DIR = os.path.expanduser("~/reviews/daily_brief/notes")' in gs
+ck("R11", comp and "daily_brief.py  v1.6" in gs and 'NOTES_DIR = os.path.expanduser("~/reviews/daily_brief/notes")' in gs
    and "--facts" in gs and "--summary-json" in gs and "/home/ubuntu/venvs/daily_brief" in gs
    and not os.path.exists(os.path.join(TOOLS, "venv")) and not os.path.exists(os.path.join(TOOLS, "notes"))
    and "11-20 showed" not in gs and os.path.exists(os.path.join(TOOLS, "daily_brief.requirements.txt")),
-   "tools/daily_brief.py v1.5 compiles; notes under ~/reviews/daily_brief/notes; no venv or notes in the repo")
+   "tools/daily_brief.py v1.6 compiles; notes under ~/reviews/daily_brief/notes; no venv or notes in the repo")
 
 # ── R12 ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
 _r12q = os.path.join(TMP, "q12.md")
@@ -814,13 +824,13 @@ ck("R19", _f19[0] == "defaults, as HEAD: QQQ"
 # ── R20 (v1.6, RECAP.3): the size basis is printed, a FACTS day figure is not ─────────────────────────────────────
 _md20 = read(os.path.join(_w15, "cash_books.md")) if os.path.exists(os.path.join(_w15, "cash_books.md")) else ""
 _f20 = CB.figures(_sc15) if _sc15 else set()
-_sz = dict(NOTES_OK, cash_books=["SPX entries size on $4,200 from 2026-11-23 (was $5,000); QQQ on $1,050. "
+_sz = dict(NOTES_OK, cash_books=["SPX entries sized on $4,200 on 2026-11-23 only ($5,000 otherwise); QQQ on $1,050. "
                                  "C1 netted $1,224 on the day."])
 _rw = dict(NOTES_OK, cash_books=["The Runaway made $127 on the day; C1 netted $1,224."])
 _pr20 = re.sub(r"\s+", " ", read(os.path.join(TOOLS, "daily_recap.prompt")))
 ck("R20", {1050, 4200, 5000} <= _f20 and 127 not in _f20
-   and "Entry sizes (per entry, as the boxes trade them; paper is sized as cash): QQQ $1,050; SPX $4,200 from "
-       "2026-11-23 (was $5,000); per contract unchanged." in _md20
+   and "Entry sizes (per entry, as the boxes trade them; paper is sized as cash): QQQ $1,050; SPX $4,200 on "
+       "2026-11-23 only, $5,000 every other day; per contract unchanged." in _md20
    and DR.cash_problems(_sz, _sc15) == [] and any("$127" in x for x in DR.cash_problems(_rw, _sc15))
    and 'its "Entry sizes" line included; for the day, its "The day" rows' in _pr20
    and "is not a scoreboard figure and never goes in this commentary" in _pr20,
@@ -844,10 +854,53 @@ if _m22:
     exec(compile(_m22.group(0), "daily_brief.cash_budget", "exec"), _ns22)
 _cb22 = _ns22.get("cash_budget")
 ck("R22", bool(_cb22) and _cb22("SPX", "2026-11-20") == 5000.0 and _cb22("SPX", "2026-11-23") == 4200.0
-   and _cb22("SPX", "2026-12-07") == 4200.0 and _cb22("QQQ", "2026-11-20") == _cb22("QQQ", "2026-11-23") == 1050.0
+   and _cb22("SPX", "2026-11-24") == 5000.0 and _cb22("SPX", "2026-12-07") == 5000.0 and _cb22("QQQ", "2026-11-20") == _cb22("QQQ", "2026-11-23") == 1050.0
    and 'budget = cash_budget(r["symbol"], day)' in _bs22 and "money(cash_budget('SPX', day)" in _bs22
    and "CASH_BUDGET[" not in _bs22.replace("CASH_BUDGET[sym]", ""),
-   "SPX 5000 before 2026-11-23, 4200 from it; QQQ 1050; the re-scale and the sizing line use it")
+   "SPX 5000 on 11-20, 4200 on 11-23 only, 5000 on 11-24 and 12-07; QQQ 1050; the re-scale and the sizing line use it")
+
+# ── R23 (v1.7, REFUSE.1): the recap context names each fire's refusal reason ──────────────────────────────────────
+_c15 = read(os.path.join(_w15, "context.md")) if os.path.exists(os.path.join(_w15, "context.md")) else ""
+_rf = getattr(DR, "refusal_block", None)
+_tr23 = os.path.join(TMP, "r23", "trades")
+os.makedirs(_tr23, exist_ok=True)
+_nr23 = _rf("2026-11-23", _tr23) if _rf else []
+write(os.path.join(TMP, "r23", "refusals", "2026-11-23.csv"),
+      "sym,strategy,direction,plan_id,fired_et,state,terminal_reason,outcome,reason\n"
+      "SPX,RunawayContinuation,short,aaaa1111,09:40:04,EXPIRED,superseded — never filled,sizing_rejected insufficient_"
+      "capital: need $4340.00/contract,sizing_rejected insufficient_capital: need $4340.00/contract\n"
+      "SPX,RunawayContinuation,short,bbbb2222,09:41:48,TRIGGERED,,gate_block:commit_abandoned,gate_block:commit_abandoned\n"
+      "QQQ,RunawayContinuation,short,cccc3333,09:53:48,TRIGGERED,,gate_block:commit_abandoned,gate_block:commit_abandoned\n"
+      "NVDA,LiquidityHunt,long,dddd4444,10:29:48,TRIGGERED,,,no fill\n")
+_r23 = _rf("2026-11-23", _tr23) if _rf else []
+_j23 = "\n".join(_r23)
+_pr23 = re.sub(r"\s+", " ", read(os.path.join(TOOLS, "daily_recap.prompt")))
+ck("R23", bool(_rf) and "Fires that booked no trade" in _c15 and any("NOT READ" in x for x in _nr23)
+   and "SPX RunawayContinuation short: 2 fire(s) 09:40:04-09:41:48, none traded" in _j23
+   and "sizing_rejected x1" in _j23 and "gate_block:commit_abandoned x1" in _j23
+   and "QQQ RunawayContinuation short: 1 fire(s) 09:53:48-09:53:48, none traded; gate_block:commit_abandoned x1; "
+       "last plan cccc3333 TRIGGERED" in _j23
+   and "NVDA LiquidityHunt long: 1 fire(s) 10:29:48-10:29:48, none traded; no fill x1" in _j23
+   and _j23.count("no fill") == 2 and _j23.count("no fill x") == 1
+   and 'write "no fill" ONLY where the block says "no fill"' in _pr23
+   and "A FIRE THAT DID NOT TRADE IS A REFUSAL, NOT A FILL FAILURE" in _pr23 and "daily_recap.prompt v1.9" in _pr23,
+   "refusal block: %s" % (_r23[1:] or _nr23))
+
+# ── R24 (v1.7): SPX $5,000 again from 2026-11-24, $4,200 on 2026-11-23 only ─────────────────────────────────────────
+_so = getattr(CB, "size_on", None)
+_sc24 = {"sizes": [{"sym": a, "usd": _so(a, "2026-11-24"), "base": u,
+                    "dated": [{"from": lo, "to": hi, "usd": x} for lo, hi, x in dt]} for a, u, dt in CB.SIZES]} if _so else {}
+_pb24 = read(os.path.join(TOOLS, "saturday_brief.prompt"))
+ck("R24", bool(_so) and [_so("SPX", d) for d in ("2026-11-20", "2026-11-23", "2026-11-24")] == [5000, 4200, 5000]
+   and {_so("QQQ", d) for d in ("2026-11-20", "2026-11-23", "2026-11-24")} == {1050}
+   and CB.size_line(_sc24) == "Entry sizes (per entry, as the boxes trade them; paper is sized as cash): QQQ $1,050; "
+                              "SPX $5,000 ($4,200 on 2026-11-23 only); per contract unchanged."
+   and {1050, 4200, 5000} <= CB.figures(dict(_sc24, windows={}))
+   and "$4,200 from 2026-11-23" not in _pr23 and "$4,200 an entry from 2026-11-23" not in _pr23
+   and "SPX $5,000 an entry ($4,200 on 2026-11-23 only)" in _pr23
+   and "SPX sizes on $4,200 from 2026-11-23" not in _pb24 and "SPX sizes on $5,000, except $4,200 on 2026-11-23 only." in _pb24,
+   "size_on SPX 11-20/11-23/11-24 %s; line %s" % ([_so("SPX", d) for d in ("2026-11-20", "2026-11-23", "2026-11-24")]
+                                                  if _so else "?", CB.size_line(_sc24) if _so else "?"))
 
 shutil.rmtree(TMP, ignore_errors=True)
 print()
