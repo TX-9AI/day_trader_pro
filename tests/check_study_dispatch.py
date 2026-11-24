@@ -1,6 +1,13 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_study_dispatch.py  v1.8
+day_trader_pro/tests/check_study_dispatch.py  v1.9
+v1.9  2026-11-24  dtp r582 / SD.5 — THE SHARED STUDY TOOLS SHIP WITH EVERY ITEM (study_dispatch v1.10; the operator,
+      2026-11-24: "Yes"). C1 SHARED_CTX holds the v1.1 pricer, WS.19's fill kit, the C1-C4 PREREG folder and the
+      Runaway watch, and an item whose text names none of them still gets each at ctx/<path>, read-only, with the
+      brief's SHARED TOOLS line naming ../ctx/<path>; its own prior folder still ships. C2 the caches (ws1415_cache,
+      tape, cache, __pycache__) never ship. C3 with a prior folder bigger than the cap, the shared tools still ship
+      first and the ctx stays within CTX_TOTAL_MAX. C4 the real list on control's ~/reviews: every path exists and
+      the kit (queue, CSVs, shared) fits the 40 MB cap. Red on r581 (no SHARED_CTX: C1-C4).
 v1.8  2026-11-22  dtp r573 / SD.4 — THE FRIDAY RUN LEAVES A RUNNING BOX ALONE TOO (study_dispatch v1.9). N8: a Friday
       run (no --nightly) never claims, ssh's, wakes or stops a box that was RUNNING when it started (the conductor's
       HELD box, or one the operator is on), on the first pick or a later one, and still runs every item on the boxes
@@ -933,6 +940,102 @@ ck("N6", "would run (nightly)" in _mon and "--nightly" in _mon and "deadline 07:
    and (7 * 60 + 30) * 60 - sd.MARGIN_S + 15 * 60 + 15 * 60 < (sd.RTH_START[0] * 60 + sd.RTH_START[1]) * 60,
    f"Mon {_mon.strip()[:90]!r} | 11-26 {_hol.strip()[:60]!r} | Fri {_fri.strip()[:70]!r} | timeout {_to}s >= {_need:.0f}s")
 shutil.rmtree(_tmp)
+
+# ── v1.9 (SD.5) the shared study tools ─────────────────────────────────────────────────────────────────────────
+SHARED_WANT = ("studies/pricer_ws1415_v11_20261122", "studies/WS.19_20261121", "cash_candidates_20261121",
+               "runaway_watch_20261122")
+_shared = getattr(sd, "SHARED_CTX", ())
+_spaths = tuple(p for p, _w in _shared)
+
+
+def _shared_tree(rv):
+    """A ~/reviews fixture holding the shared folders (with their caches) and one prior study."""
+    for rel in SHARED_WANT:
+        os.makedirs(os.path.join(rv, rel), exist_ok=True)
+        open(os.path.join(rv, rel, "README.md"), "w").write(f"{rel} readme")
+    open(os.path.join(rv, "studies/pricer_ws1415_v11_20261122/replay.py"), "w").write("# pricer\n")
+    for cache in ("studies/pricer_ws1415_v11_20261122/ws1415_cache", "studies/WS.19_20261121/data/tape",
+                  "studies/WS.19_20261121/cache", "studies/WS.19_20261121/__pycache__"):
+        os.makedirs(os.path.join(rv, cache), exist_ok=True)
+        open(os.path.join(rv, cache, "blob.json"), "w").write("{}")
+    open(os.path.join(rv, "studies/WS.19_20261121/data/tick_sizes.json"), "w").write("{}")
+    open(os.path.join(rv, "cash_candidates_20261121/PREREG.md"), "w").write("C1-C4")
+    open(os.path.join(rv, "cash_candidates_20261121/SEAL.txt"), "w").write("seal")
+    os.makedirs(os.path.join(rv, "studies", "hunt_direction_1109"), exist_ok=True)
+    open(os.path.join(rv, "studies", "hunt_direction_1109", "BLIND_RESULT.md"), "w").write("prior result")
+    open(os.path.join(rv, "hunt_side.csv"), "w").write("date,n\n")
+
+
+def _kit(rv, text, kit_dir):
+    q = os.path.join(rv, "WEEKEND_STUDIES.md")
+    if not os.path.exists(q):
+        open(q, "w").write(QUEUE)
+    it = {"id": "WS.99", "text": text}
+    tgz = sd.build_kit(it, "HOW", "sdC", "b", 60, kit_dir, q, studies=os.path.join(rv, "studies"))
+    with tarfile.open(tgz) as t:
+        mem = {m.name: m for m in t.getmembers() if m.isfile()}
+        brief = t.extractfile("WS.99/brief.txt").read().decode()
+    return mem, brief
+
+
+_tmp = tempfile.mkdtemp(prefix="cksd_c_")
+_rv = os.path.join(_tmp, "reviews")
+_shared_tree(_rv)
+_mem, _brief = _kit(_rv, "### WS.99 — Runaway exits\n- Data: the S3 warehouse. Prior: `~/reviews/studies/hunt_direction_1109`.",
+                    os.path.join(_tmp, "k1"))
+_ro = all(("WS.99/ctx/" + r + "/README.md") in _mem and not (_mem["WS.99/ctx/" + r + "/README.md"].mode & 0o222)
+          for r in SHARED_WANT)
+ck("C1", set(SHARED_WANT) <= set(_spaths) and _ro
+   and "WS.99/ctx/cash_candidates_20261121/PREREG.md" in _mem and "WS.99/ctx/studies/WS.19_20261121/data/tick_sizes.json" in _mem
+   and "WS.99/ctx/studies/hunt_direction_1109/BLIND_RESULT.md" in _mem
+   and "SHARED TOOLS" in _brief and all(f"../ctx/{r} " in _brief for r in SHARED_WANT) and "never rebuild" in _brief,
+   f"SHARED_CTX {list(_spaths)}: an item naming none of them gets each at ctx/<path>, read-only, named in the brief")
+_bad = [k for k in _mem if any(f"/{c}/" in k for c in ("ws1415_cache", "tape", "cache", "__pycache__"))]
+ck("C2", _shared and not _bad and set(getattr(sd, "CTX_SKIP_DIRS", ())) >= {"ws1415_cache", "tape", "cache", "__pycache__"},
+   f"the caches never ship (shipped: {_bad})")
+_big = os.path.join(_rv, "studies", "big_prior_1123")
+os.makedirs(_big)
+for i in range(8):
+    open(os.path.join(_big, f"part{i}.json"), "w").write("x" * 40000)
+_cap = sd.CTX_TOTAL_MAX
+sd.CTX_TOTAL_MAX = 100000
+try:
+    _mem3, _ = _kit(_rv, "Prior: `big_prior_1123` and studies/hunt_direction_1109.", os.path.join(_tmp, "k3"))
+finally:
+    sd.CTX_TOTAL_MAX = _cap
+_ctx3 = sum(m.size for k, m in _mem3.items() if "/ctx/" in k)
+ck("C3", _shared and all(("WS.99/ctx/" + r + "/README.md") in _mem3 for r in SHARED_WANT)
+   and _ctx3 <= 100000 and any("big_prior_1123/part" in k for k in _mem3)
+   and not all(f"WS.99/ctx/studies/big_prior_1123/part{i}.json" in _mem3 for i in range(8)),
+   f"a prior folder over the cap: the shared tools ship first, ctx {_ctx3} B within the 100000 B test cap")
+shutil.rmtree(_tmp)
+
+_real = os.path.dirname(sd.STUDIES)
+if os.path.isdir(sd.STUDIES):
+    _tmp = tempfile.mkdtemp(prefix="cksd_r_")
+    try:
+        _sizes = {}
+        for r in _spaths:
+            n = 0
+            for root, dirs, files in os.walk(os.path.join(_real, r)):
+                dirs[:] = [x for x in dirs if x not in getattr(sd, "CTX_SKIP_DIRS", ())]
+                n += sum(os.path.getsize(os.path.join(root, f)) for f in files if f.endswith(sd.CTX_EXT)
+                         and os.path.getsize(os.path.join(root, f)) <= sd.CTX_FILE_MAX)
+            _sizes[r] = n
+        it = {"id": "WS.99", "text": "names nothing"}
+        tgz = sd.build_kit(it, "HOW", "sdR", "b", 60, os.path.join(_tmp, "k"), sd.QUEUE)
+        with tarfile.open(tgz) as t:
+            _ctx = sum(m.size for m in t.getmembers() if m.isfile() and "/ctx/" in m.name)
+            _names = [m.name for m in t.getmembers()]
+        ck("C4", _shared and all(os.path.isdir(os.path.join(_real, r)) for r in _spaths)
+           and all(any(n.startswith(f"WS.99/ctx/{r}/") for n in _names) for r in _spaths)
+           and sum(_sizes.values()) < sd.CTX_TOTAL_MAX and _ctx < sd.CTX_TOTAL_MAX,
+           f"the real list on {_real}: " + ", ".join(f"{r} {v / 2**20:.2f} MiB" for r, v in _sizes.items())
+           + f"; whole ctx {_ctx / 2**20:.2f} MiB < {sd.CTX_TOTAL_MAX / 2**20:.0f} MiB")
+    finally:
+        shutil.rmtree(_tmp)
+else:
+    ck("C4", False, f"no {sd.STUDIES}: run this gate on control")
 
 print()
 if FAILS:

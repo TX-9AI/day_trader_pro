@@ -1,6 +1,15 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/study_dispatch.py  v1.9
+day_trader_pro/tools/study_dispatch.py  v1.10
+v1.10 2026-11-24  dtp r582 / SD.5 — EVERY ITEM GETS THE SHARED STUDY TOOLS. The kit shipped a prior study folder only
+      when the item's own text named it (`studies/<name>` or a backticked `<name>_<dddd>`): WS.14 named the pricer
+      folder on its Data line and got it; WS.33 (11-23) did not, rebuilt a weaker pricer on the box and went
+      INVALID; WS.36's fill model was soft without WS.19's fill kit; every item skipped the C1-C4 report because
+      ~/reviews/cash_candidates_20261121 is outside studies/ and was never shipped. Now SHARED_CTX (one constant,
+      one line per tool, paths under ~/reviews) ships with EVERY item, read-only, at ../ctx/<path>, before the
+      item's own prior folders and inside CTX_TOTAL_MAX; the brief lists them and says to use them, not rebuild.
+      Every ctx walk skips the CTX_SKIP_DIRS caches (__pycache__, cache, ws1415_cache, tape: WS.19's 47 MB tape
+      would otherwise eat the cap). The operator, 2026-11-24: "Yes". Gate: tests/check_study_dispatch.py v1.9 C1-C4.
 v1.9  2026-11-22  dtp r573 / SD.4 — THE FRIDAY RUN NEVER CLAIMS OR STOPS A BOX THAT WAS RUNNING WHEN IT STARTED.
       v1.8 gave that rule to `--nightly` only, so the Friday 17:15 run could still claim a box the conductor HELD
       (a drain that did not verify) or one the operator is on, and stop an idle running box as "idle unclaimed".
@@ -111,7 +120,8 @@ since v1.1; the Saturday brief starts it itself only as a fallback):
   3. Every power call (start / stop) goes through ec2ops (the one logged power chokepoint) under
      flock /tmp/claude-fleet.lock. Unassigned, unclaimed boxes that are running are stopped.
   4. Ships a kit to ~/study_<run>/<ID>/ on the box: brief.txt (the item, the queue's HOW block, the rules),
-     runner.sh, ctx/ (~/reviews/*.csv, the queue file, the prior study folders the item names, text only).
+     runner.sh, ctx/ (~/reviews/*.csv, the queue file, v1.10 the SHARED_CTX tools read-only, the prior study
+     folders the item names; text only, caches skipped).
      runner.sh stops optionsbot and candle-feed, reads the research token from SSM with the box's venv boto3
      (never printed, never copied from control), and runs `timeout N claude -p` with stdin closed.
   5. v1.3: SEAL.txt is written by the dispatcher on control (into ~/reviews/studies/<ID>_<YYYYMMDD>/) BEFORE the
@@ -177,6 +187,15 @@ POLL_S = 60
 CTX_FILE_MAX = 2 * 1024 * 1024
 CTX_TOTAL_MAX = 40 * 1024 * 1024
 CTX_EXT = (".md", ".txt", ".json", ".csv", ".py")
+# v1.10 (SD.5): shipped with EVERY item, read-only, at ../ctx/<path> on the box (path under ~/reviews). Adding a
+# shared tool is one line here. Keep the whole list well inside CTX_TOTAL_MAX (1.9 MB on 2026-11-24).
+SHARED_CTX = (
+    ("studies/pricer_ws1415_v11_20261122", "the shared tick-level option pricer v1.1 (replay.py, wdata.py, control.py)"),
+    ("studies/WS.19_20261121", "WS.19's fill-or-miss kit on the r133 live entry ladder (sim.py, common.py, extract.py)"),
+    ("cash_candidates_20261121", "the C1-C4 cash books: PREREG.md, AMENDMENTS.txt, SEAL.txt (never re-define them)"),
+    ("runaway_watch_20261122", "the sealed Runaway watch (WATCH.md, NOTES.txt, SEAL.txt)"),
+)
+CTX_SKIP_DIRS = ("__pycache__", "cache", "ws1415_cache", "tape")   # v1.10: data caches never ship
 RESULT_KEYS = ("n", "ev", "ci", "window_ev", "window_ci", "verdict", "outcome")
 NIGHTLY_MAX_PARALLEL = 3                  # v1.8: agents at once on a weeknight. A constant, never a knob (2026-11-15)
 # v1.8: the names a `- Setup:` line may carry, exactly as written -> the strategy they mean. `fleet` = no one setup.
@@ -479,7 +498,7 @@ then stop.
 
 WHERE YOU WORK: only inside {work} (your current directory). Context is in ../ctx (the queue file
 WEEKEND_STUDIES.md, ~/reviews CSVs, and the prior study folders this item names). Never write anywhere else.
-
+{shared}
 RULES (the operator's; not negotiable):
 - READ ONLY outside your directory. No git, no systemctl, no sudo, no config or service changes, no edits to any
   file under ~/options-trader. Never write to S3. Never print or copy a token, credential or environment block.
@@ -531,10 +550,18 @@ def make_seal(item, run_id, sealed_at_utc):
             f"--- the item as sealed (its sealed days and pass bar are the pre-registration) ---\n{body}\n")
 
 
-def build_brief(item, how, run_id, bucket, minutes, work):
+def shared_note(shared):
+    """v1.10: the brief's line on the shared tools that shipped (shared = [(path, what)])."""
+    if not shared:
+        return ""
+    return ("SHARED TOOLS (shipped with every item, read-only; use these, never rebuild one; a ~/reviews/<path> in the item\n"
+            "is ../ctx/<path> here): " + "; ".join(f"../ctx/{p} = {w}" for p, w in shared) + ".\n")
+
+
+def build_brief(item, how, run_id, bucket, minutes, work, shared=()):
     return BRIEF_HEAD.format(run_id=run_id, work=work, bucket=bucket or "(config.WAREHOUSE_BUCKET)",
                              minutes=minutes, item_id=item["id"], how=how, item=item["text"],
-                             box_venv_bin=BOX_VENV_BIN, box_repo=BOX_REPO)
+                             box_venv_bin=BOX_VENV_BIN, box_repo=BOX_REPO, shared=shared_note(shared))
 
 
 def _prior_dirs(item_text, studies=None):
@@ -552,26 +579,38 @@ def build_kit(item, how, run_id, bucket, minutes, kit_dir, queue_path, studies=N
     if seal_text is not None:
         os.makedirs(os.path.join(kit_dir, "work"), exist_ok=True)
         open(os.path.join(kit_dir, "work", "SEAL.txt"), "w").write(seal_text)
-    open(os.path.join(kit_dir, "brief.txt"), "w").write(build_brief(item, how, run_id, bucket, minutes, work))
     open(os.path.join(kit_dir, "runner.sh"), "w").write(RUNNER)
+    reviews = os.path.dirname(studies)
     total = 0
-    srcs = [queue_path] + sorted(os.path.join(os.path.dirname(studies), f)
-                                 for f in os.listdir(os.path.dirname(studies)) if f.endswith(".csv"))
+    srcs = [queue_path] + sorted(os.path.join(reviews, f) for f in os.listdir(reviews) if f.endswith(".csv"))
     for s in srcs:
         if os.path.isfile(s):
             shutil.copy2(s, os.path.join(kit_dir, "ctx", os.path.basename(s)))
             total += os.path.getsize(s)
-    for name in _prior_dirs(item["text"], studies):
-        for root, _d, files in os.walk(os.path.join(studies, name)):
-            for f in files:
+
+    def ship(src_dir, read_only=False):
+        nonlocal total
+        for root, dirs, files in os.walk(src_dir):
+            dirs[:] = sorted(d for d in dirs if d not in CTX_SKIP_DIRS)
+            for f in sorted(files):
                 p = os.path.join(root, f)
                 sz = os.path.getsize(p)
                 if not f.endswith(CTX_EXT) or sz > CTX_FILE_MAX or total + sz > CTX_TOTAL_MAX:
                     continue
-                rel = os.path.relpath(p, studies)
-                os.makedirs(os.path.join(kit_dir, "ctx", "studies", os.path.dirname(rel)), exist_ok=True)
-                shutil.copy2(p, os.path.join(kit_dir, "ctx", "studies", rel))
+                dst = os.path.join(kit_dir, "ctx", os.path.relpath(p, reviews))
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                shutil.copy2(p, dst)
+                if read_only:
+                    os.chmod(dst, 0o444)
                 total += sz
+
+    shared = [(p, w) for p, w in SHARED_CTX if os.path.isdir(os.path.join(reviews, p))]   # v1.10 (SD.5): first
+    for p, _w in shared:
+        ship(os.path.join(reviews, p), read_only=True)
+    for name in _prior_dirs(item["text"], studies):
+        if os.path.join("studies", name) not in {p for p, _w in shared}:
+            ship(os.path.join(studies, name))
+    open(os.path.join(kit_dir, "brief.txt"), "w").write(build_brief(item, how, run_id, bucket, minutes, work, shared))
     tgz = kit_dir.rstrip("/") + ".tar.gz"
     with tarfile.open(tgz, "w:gz") as t:
         t.add(kit_dir, arcname=item["id"])
