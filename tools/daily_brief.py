@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/daily_brief.py  v1.6  -  the post-trading-day brief (PDF) for any session.
+day_trader_pro/tools/daily_brief.py  v1.7  -  the post-trading-day brief (PDF) for any session.
+v1.7  2026-11-24  dtp r583 / CASHBOOK.3 — SECTION 5b SHOWS C5 BESIDE C1-C4. tools/cash_books.py v1.6 scores a fifth book,
+      C5 (frozen 2026-11-24 in ~/reviews/cash_candidate_c5_20261124/PREREG.md; its equity list was chosen in hindsight).
+      cash_books_rows lists every book the scorer scored; C5's Fwd columns are its own forward window (from 2026-11-24,
+      "forward_c5", "-" until then), never C1-C4's (from 11-23); its Day column is "-" before 11-24; the head line says
+      C5's combined figure is hindsight, reference only. C1-C4's rows are unchanged.
 v1.6  2026-11-23  dtp r581 — SPX IS BACK ON $5,000. The operator, 2026-11-23: "I'm going to just bump it back up to $5K for
       consistency's sake" (applied 18:41 ET). cash_budget: SPX $5,000 an entry, except $4,200 on 2026-11-23 ONLY
       (CASH_BUDGET_DATED, inclusive windows); QQQ $1,050 unchanged.
@@ -707,9 +712,12 @@ def cash_books_rows(day, trades_dir=None):
              "Fwd ex top-2 / ex bottom-2",
              "Beside H/O", "Comb. net"]]
     for b, _d in CB.BOOKS:
-        dm, cm = W["day"]["books"][b], cb["books"][b]
-        f = (fwc or {}).get("books", {}).get(b) if fwc else None
-        data.append([b, "%d / %s" % (dm["n"], money(dm["net"], dec=0)),
+        if b not in sc["books"]:                         # v1.7: the books the scorer scored
+            continue
+        dm, cm = W["day"]["books"].get(b), cb["books"][b]
+        src = W.get("forward_c5") if b == "C5" else fwc  # v1.7: C5's own forward window, never C1-C4's
+        f = (src or {}).get("books", {}).get(b) if src else None
+        data.append([b, "%d / %s" % (dm["n"], money(dm["net"], dec=0)) if dm else "-",
                      str(f["n"]) if f else "-", money(f["gross"], dec=0) if f else "-",
                      money(f["fees"], sign=False, dec=0) if f else "-", money(f["net"], dec=0) if f else "-",
                      ev(f) if f else "-",
@@ -717,10 +725,18 @@ def cash_books_rows(day, trades_dir=None):
                      str(f.get("displaced", "-")) if f else "-",
                      "%s (n %d, EV %s)" % (money(cm["net"], dec=0), cm["n"], ev(cm))])
     head = ("Frozen in PREREG (%s, sealed 2026-11-21): " % os.path.basename(sc["prereg"])
-            + "; ".join("%s %s" % (b, d) for b, d in CB.BOOKS) + ". At the mark, fees beside, never inside EV. "
+            + "; ".join("%s %s" % (b, d) for b, d in CB.BOOKS if b in CB.PREREG_BOOKS) + ". At the mark, fees beside, never inside EV. "
             "Forward %s..%s (%d of 8 sessions so far)" % (fwc["from"], fwc["to"], fwc["sessions"]) if fwc else
             "Frozen in PREREG (sealed 2026-11-21). The forward window starts 2026-11-23; until then only the in-sample "
             "(hindsight) figures exist")
+    if sc.get("c5"):                                     # v1.7 (CASHBOOK.3)
+        c5 = sc["c5"]
+        head += (". C5 is frozen in its own PREREG (%s, sealed 2026-11-24 before the open%s): %s %s. Its equity list "
+                 "was chosen in hindsight: its Comb. net is reference only, never evidence; its Fwd columns are its own "
+                 "forward window from %s (%s), apart from C1-C4's" % (
+                     os.path.basename(os.path.dirname(c5["prereg"])), "" if c5["sealed"] else "; SEAL BROKEN",
+                     "C5", dict(CB.BOOKS)["C5"], c5["forward_from"],
+                     ("%d session(s) so far" % W["forward_c5"]["sessions"]) if W.get("forward_c5") else "none yet"))
     note = ("'Ex top-2 / ex bottom-2': " + CB.CONCENTRATION + ". "
             + ("Amendment: " + sc["amendment"] + " " if sc.get("amendment") else "") +
             "'Beside H/O' counts the forward trades that fired while a Hunt or OGAP position was open on the same box; "
@@ -1017,9 +1033,9 @@ def build(day, notes, out_dir):
     for h in notes.get("cash_verdict", []):
         st.append(P(h))
 
-    # ── Section 5b (v1.2): the cash candidate books C1-C4, scored by tools/cash_books.py ──
+    # ── Section 5b (v1.2): the cash candidate books C1-C4 (v1.7: and C5), scored by tools/cash_books.py ──
     st.append(Spacer(1, 8))
-    st.append(P("5b. The cash candidate books C1-C4", "h1"))
+    st.append(P("5b. The cash candidate books C1-C4 and C5", "h1"))
     for row in cash_books_rows(day):
         if isinstance(row, str):
             st.append(P(row, "small"))

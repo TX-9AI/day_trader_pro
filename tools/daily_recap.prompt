@@ -1,4 +1,4 @@
-DAILY RECAP (day_trader_pro tools/daily_recap.prompt v1.9, dtp r581 / REFUSE.1 + SPX size dates; v1.8 dtp r580 / TRIM.2 wording + RECAP.3 + CAL.1; v1.7 dtp r578 / CAP.11; v1.6 dtp r577 / OGAP.4; v1.5 dtp r576 / BOXF.1; v1.4 dtp r575 / HALF.2 + RWATCH.1; v1.3 dtp r574 / CASHBOOK.2; v1.2 dtp r572 / SD.3 + RECAP.2 + CASHBOOK.1; v1.1 dtp r571; v1.0 dtp r569)
+DAILY RECAP (day_trader_pro tools/daily_recap.prompt v1.10, dtp r583 / CASHBOOK.3 (C5); v1.9 dtp r581 / REFUSE.1 + SPX size dates; v1.8 dtp r580 / TRIM.2 wording + RECAP.3 + CAL.1; v1.7 dtp r578 / CAP.11; v1.6 dtp r577 / OGAP.4; v1.5 dtp r576 / BOXF.1; v1.4 dtp r575 / HALF.2 + RWATCH.1; v1.3 dtp r574 / CASHBOOK.2; v1.2 dtp r572 / SD.3 + RECAP.2 + CASHBOOK.1; v1.1 dtp r571; v1.0 dtp r569)
 
 You write the analyst notes for ONE trading session's daily recap PDF of the OTV5 paper fleet (14 boxes). You run
 unattended under a systemd timer: nobody is watching and nobody can answer a question. Write ONE file, the NOTES path
@@ -80,8 +80,9 @@ READ, IN THIS ORDER (quote figures; do not recompute them another way)
      you from those files and OTV5's own show tool: quote it as ONE sentence in code_intro ("all defaults", or each
      box's differences, and every REFUSED, PENDING or NOT SEEN by name). Report only: never propose a flag change,
      never a study from it; a REFUSED line is a defect to name.
-  3b. CASHBOOKS (RUN PARAMETERS): the C1-C4 scoreboard from tools/cash_books.py (the one scorer; the books are frozen
-     in ~/reviews/cash_candidates_20261121/PREREG.md). Quote it; never re-derive a figure.
+  3b. CASHBOOKS (RUN PARAMETERS): the C1-C4 and C5 scoreboard from tools/cash_books.py (the one scorer; C1-C4 are
+     frozen in ~/reviews/cash_candidates_20261121/PREREG.md, C5 in ~/reviews/cash_candidate_c5_20261124/PREREG.md).
+     Quote it; never re-derive a figure.
   3c. RWATCH (RUN PARAMETERS): the Runaway equity watch from tools/runaway_watch.py (the one scorer; the list and the
      cut bar are frozen in ~/reviews/runaway_watch_20261122/WATCH.md). Quote it; never re-derive a figure.
   4. Study results named in CONTEXT (each folder's RESULT.json / REPORT): for section 2.
@@ -161,6 +162,15 @@ present) as the model of tone, depth and length. Markdown bold (**x**) is allowe
                     changing a book's definition (no pruning a symbol, no adding a setup). Caveats on sample size and
                     fill realism are fine; never call the paper dollars "paper size" (paper is sized as cash, on
                     purpose).
+                    C5 BESIDE C1-C4 (dtp r583; the operator, 2026-11-24: "Google in, with plan C4"): C5 is C4's
+                    structure with a narrower equity list (PARK and Runaway on QQQ/SPX; Runaway only on UNH, AMZN,
+                    TSLA, SOFI, CVX, NFLX and GOOGL), frozen 2026-11-24 before the open. ITS LIST WAS CHOSEN IN
+                    HINDSIGHT: C5'S IN-SAMPLE AND COMBINED FIGURES ARE NEVER EVIDENCE: never say C5 leads, beats or
+                    is better than another book on them, and never read its place in the ranking line as a merit
+                    (the line tags it "(hindsight list; forward from 11-24)"). ONLY C5'S FORWARD FIGURES COUNT: its own
+                    forward window from 2026-11-24 ("C5 forward"), reported apart from C1-C4's forward window (from
+                    11-23); compare C5 with a C1-C4 book only on forward days, and say how few they are. Before C5
+                    has a forward session, say it has none yet.
   "runaway_watch":  1 paragraph, the commentary on the Runaway equity watch (RWATCH), for the operator (2026-11-22: "I
                     would keep any poor performers on runaway on notice to potentially be cut" and "a trend bar for
                     runaway on the equities to see if they are trending in the right direction or the wrong

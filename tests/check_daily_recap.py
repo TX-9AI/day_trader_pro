@@ -1,6 +1,13 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_daily_recap.py  v1.7
+day_trader_pro/tests/check_daily_recap.py  v1.8
+v1.8  2026-11-24  dtp r583 / CASHBOOK.3 (cash_books v1.6, daily_brief v1.7, the prompt v1.10). R11 wants daily_brief
+      v1.7; R23 the prompt v1.10. NEW:
+  R25 C5 beside C1-C4 in the recap: on a fixture through 2026-11-25 the board (context's cash_books.md) carries C5's
+      own forward window, the hindsight tag and note, and the validator passes a commentary quoting C5's forward
+      figures; daily_brief v1.7 section 5b lists every scored book and takes C5's Fwd columns from forward_c5, never
+      C1-C4's forward window; the prompt says C5's in-sample and combined figures are never evidence and only its
+      forward figures count (from 2026-11-24, apart from C1-C4's 11-23). BORN RED on 926bf64.
 v1.7  2026-11-23  dtp r581 / REFUSE.1 + the SPX size dates (daily_recap v1.6, cash_books v1.5, daily_brief v1.6, the
       prompt v1.9). The operator moved SPX back to $5,000 (2026-11-23 18:41 ET): R11 wants daily_brief v1.6; R20's
       Entry sizes line is the 11-23 one (SPX $4,200 on 2026-11-23 only, $5,000 every other day); R22 cash_budget is SPX
@@ -571,11 +578,11 @@ try:
     comp = True
 except py_compile.PyCompileError:
     comp = False
-ck("R11", comp and "daily_brief.py  v1.6" in gs and 'NOTES_DIR = os.path.expanduser("~/reviews/daily_brief/notes")' in gs
+ck("R11", comp and "daily_brief.py  v1.7" in gs and 'NOTES_DIR = os.path.expanduser("~/reviews/daily_brief/notes")' in gs
    and "--facts" in gs and "--summary-json" in gs and "/home/ubuntu/venvs/daily_brief" in gs
    and not os.path.exists(os.path.join(TOOLS, "venv")) and not os.path.exists(os.path.join(TOOLS, "notes"))
    and "11-20 showed" not in gs and os.path.exists(os.path.join(TOOLS, "daily_brief.requirements.txt")),
-   "tools/daily_brief.py v1.6 compiles; notes under ~/reviews/daily_brief/notes; no venv or notes in the repo")
+   "tools/daily_brief.py v1.7 compiles; notes under ~/reviews/daily_brief/notes; no venv or notes in the repo")
 
 # ── R12 ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
 _r12q = os.path.join(TMP, "q12.md")
@@ -883,7 +890,7 @@ ck("R23", bool(_rf) and "Fires that booked no trade" in _c15 and any("NOT READ" 
    and "NVDA LiquidityHunt long: 1 fire(s) 10:29:48-10:29:48, none traded; no fill x1" in _j23
    and _j23.count("no fill") == 2 and _j23.count("no fill x") == 1
    and 'write "no fill" ONLY where the block says "no fill"' in _pr23
-   and "A FIRE THAT DID NOT TRADE IS A REFUSAL, NOT A FILL FAILURE" in _pr23 and "daily_recap.prompt v1.9" in _pr23,
+   and "A FIRE THAT DID NOT TRADE IS A REFUSAL, NOT A FILL FAILURE" in _pr23 and "daily_recap.prompt v1.10" in _pr23,
    "refusal block: %s" % (_r23[1:] or _nr23))
 
 # ── R24 (v1.7): SPX $5,000 again from 2026-11-24, $4,200 on 2026-11-23 only ─────────────────────────────────────────
@@ -901,6 +908,44 @@ ck("R24", bool(_so) and [_so("SPX", d) for d in ("2026-11-20", "2026-11-23", "20
    and "SPX sizes on $4,200 from 2026-11-23" not in _pb24 and "SPX sizes on $5,000, except $4,200 on 2026-11-23 only." in _pb24,
    "size_on SPX 11-20/11-23/11-24 %s; line %s" % ([_so("SPX", d) for d in ("2026-11-20", "2026-11-23", "2026-11-24")]
                                                   if _so else "?", CB.size_line(_sc24) if _so else "?"))
+
+# ── R25 (v1.8, CASHBOOK.3): C5 beside C1-C4 ─────────────────────────────────────────────────────────────────────────
+_ok25, _m25 = False, ""
+try:
+    _t25 = os.path.join(TMP, "trades25")
+    os.makedirs(_t25, exist_ok=True)
+    _h25 = ("sym,trade_id,strategy,direction,contracts,entry_premium,exit_premium,pnl_usd,entry_time,exit_time,"
+            "exit_reason,fee\n")
+    for _d, _rows in (("2026-11-20", [("UNH", "RunawayContinuation", 300, 2)]),
+                      ("2026-11-23", [("QQQ", "PARK", 500, 3)]),
+                      ("2026-11-24", [("SPX", "RunawayContinuation", 1234, 2), ("NVDA", "RunawayContinuation", -900, 2)]),
+                      ("2026-11-25", [("CVX", "RunawayContinuation", -50, 1)])):
+        with open(os.path.join(_t25, _d + ".csv"), "w") as _fh:
+            _fh.write(_h25 + "".join("%s,t,%s,long,1,1,1,%s,%sT15:00:00+00:00,%sT16:00:00+00:00,x,%s\n"
+                                     % (s, st, pn, _d, _d, fe) for s, st, pn, fe in _rows))
+    _sc25 = CB.score("2026-11-25", day="2026-11-25", trades_dir=_t25)
+    _md25 = CB.render_md(_sc25)
+    _f25 = (_sc25["windows"].get("forward_c5") or {}).get("books", {}).get("C5") or {}
+    _good25 = dict(NOTES_OK, cash_books=["C5 has two forward sessions: net $1,181 on its own forward window from "
+                                         "11-24 (n 2); a small sample."])
+    _bs25 = read(os.path.join(TOOLS, "daily_brief.py"))
+    _pb25 = re.sub(r"\s+", " ", read(os.path.join(TOOLS, "saturday_brief.prompt")))
+    _ok25 = (_f25.get("n") == 2 and _f25.get("net") == 1181 and "C5" not in _sc25["windows"]["forward"]["books"]
+             and "## C5 forward" in _md25 and "(hindsight list; forward from 11-24)" in _md25
+             and CB.HINDSIGHT_NOTE in _md25 and DR.cash_problems(_good25, _sc25) == []
+             and any("$9,999" in x for x in DR.cash_problems(dict(NOTES_OK, cash_books=["C5 made $9,999."]), _sc25))
+             and 'src = W.get("forward_c5") if b == "C5" else fwc' in _bs25 and 'if b not in sc["books"]:' in _bs25
+             and "5b. The cash candidate books C1-C4 and C5" in _bs25
+             and "C5'S IN-SAMPLE AND COMBINED FIGURES ARE NEVER EVIDENCE" in _pr23
+             and "ONLY C5'S FORWARD FIGURES COUNT" in _pr23 and "cash_candidate_c5_20261124/PREREG.md" in _pr23
+             and "(hindsight list; forward from 11-24)" in _pr23 and "apart from C1-C4's forward window" in _pr23
+             and "C5'S IN-SAMPLE AND COMBINED FIGURES ARE NEVER EVIDENCE" in _pb25
+             and "ONLY C5'S FORWARD FIGURES COUNT" in _pb25 and "cash_candidate_c5_20261124/PREREG.md" in _pb25)
+    _m25 = "C5 forward %s; board tag %s" % ({k: _f25.get(k) for k in ("n", "net")},
+                                            "(hindsight list; forward from 11-24)" in _md25)
+except Exception as e:                                   # noqa: BLE001 (HEAD: no C5)
+    _m25 = "%s: %s" % (type(e).__name__, e)
+ck("R25", _ok25, _m25)
 
 shutil.rmtree(TMP, ignore_errors=True)
 print()

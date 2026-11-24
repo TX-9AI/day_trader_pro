@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_saturday_brief.py  v2.5
+day_trader_pro/tests/check_saturday_brief.py  v2.6
+v2.6  2026-11-24  dtp r583 (CASHBOOK.3). NEW S41: 1C shows C5 beside C1-C4 (prompt): the same scorer, C5 frozen in
+      ~/reviews/cash_candidate_c5_20261124/PREREG.md, its own "C5 forward" table from 2026-11-24 apart from C1-C4's
+      forward window, the ranking tag, and C5's in-sample and combined figures never evidence (only its forward figures
+      count). Prompt only; spec v3.3 unchanged. BORN RED on 926bf64.
 v2.5  2026-11-23  dtp r579 (TRIM.2). S32: LiquidityHunt and OGAP are retired (OTV5 r153; strategy_registry v1.13
       HISTORICAL), so the fixture's history line holds five rows (GEXPinButterfly 1, LiquidityHunt 2, OGAP 2), not one,
       and weekly_facts.md names no LiquidityHunt either. Expectation only; weekly_facts unchanged.
@@ -962,6 +966,14 @@ ck("S40", r40.returncode == 0 and _j40.get("week") == ["2026-11-23", "2026-11-24
    and "a non-trading day: no entries, data only" in _s36,
    "weekly_facts: week of 11-23 = %s, half days %s, the 11-27 trade kept and named; the rules say so (rc=%s %s)" % (
        _j40.get("week"), _j40.get("half_days"), r40.returncode, (r40.stderr or "")[-200:]))
+
+# S41 (v2.6, dtp r583 / CASHBOOK.3): C5 beside C1-C4 in 1C
+ck("S41", "C5 BESIDE C1-C4" in _c1 and "cash_candidate_c5_20261124/PREREG.md" in _c1
+   and "UNH, AMZN, TSLA, SOFI, CVX, NFLX and GOOGL" in _c1 and '"C5 forward" table (from 2026-11-24' in _c1
+   and "apart from C1-C4's forward window, which starts 11-23" in _c1
+   and "C5'S IN-SAMPLE AND COMBINED FIGURES ARE NEVER EVIDENCE" in _c1 and "ONLY C5'S FORWARD FIGURES COUNT" in _c1
+   and '"(hindsight list; forward from 11-24)"' in _c1 and _c1.find("C5 BESIDE C1-C4") > _c1.find("THE CASH CANDIDATE BOOKS C1-C4"),
+   "1C shows C5 beside C1-C4: its own forward table from 11-24, hindsight in-sample never evidence")
 
 print()
 if FAILS:

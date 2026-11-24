@@ -1,6 +1,17 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/cash_books.py  v1.5
+day_trader_pro/tools/cash_books.py  v1.6
+v1.6  2026-11-24  dtp r583 / CASHBOOK.3 — A FIFTH BOOK, C5, SCORED BESIDE C1-C4. The operator, 2026-11-24: "Under the solid
+      header, I like the diversified strata... It would be nice to keep one representative." Then: "Google in, with plan
+      C4". C5 is frozen in ~/reviews/cash_candidate_c5_20261124/PREREG.md (sealed 2026-11-24T13:55:24Z before the open,
+      sha256 in SEAL.txt beside it; C5_PREREG_SHA below): PARK and Runaway on QQQ/SPX, Runaway only on UNH, AMZN, TSLA,
+      SOFI, CVX, NFLX and GOOGL. Its equity list was picked after seeing 10-26..11-20, so its in-sample and combined rows
+      are hindsight, reference only; ITS forward window starts 2026-11-24 ("forward_c5", open-ended, C5 alone), apart
+      from C1-C4's forward window (11-23..), which never holds C5; in the day and week windows C5 counts only from
+      2026-11-24. Same basis, metrics, ranking and exclusions as C1-C4 (amendments 1-3). The ranking line carries C5 with
+      "(hindsight list; forward from 11-24)". score(books=PREREG_BOOKS) (--books C1,C2,C3,C4) omits C5 and is
+      byte-for-byte the v1.5 output (json, md and --check-prereg; tests/check_cash_books.py B11); --check-prereg also
+      verifies C5's seal. Report only: no C1-C4 book, window or metric changes, PREREG's sha holds.
 v1.5  2026-11-23  dtp r581 — SPX IS BACK ON $5,000. The operator, 2026-11-23: "I'm going to just bump it back up to $5K for
       consistency's sake" (applied 18:41 ET). SIZES is a base size and dated windows: SPX $5,000, except $4,200 on
       2026-11-23 ONLY; the Entry sizes line names the size of the scored day (through) and the window beside it, and
@@ -63,7 +74,9 @@ v1.0  2026-11-22  dtp r572 / CASHBOOK.1 — THE FOUR CASH CANDIDATE BOOKS, SCORE
 
 Usage:
   python3 tools/cash_books.py --through YYYY-MM-DD [--day D] [--week-start D] [--trades DIR] [--json F] [--md F]
-  python3 tools/cash_books.py --check-prereg       the in-sample block against PREREG's table (exit 1 on a mismatch)
+                              [--books C1,C2,C3,C4]   (v1.6: the books scored; default all five)
+  python3 tools/cash_books.py --check-prereg       the in-sample block against PREREG's table (exit 1 on a mismatch);
+                                                   v1.6: and C5's seal (unless --books leaves C5 out)
 """
 import argparse
 import csv
@@ -116,11 +129,22 @@ BOOKS = (
     ("C2", "All 14 symbols: PARK and Runaway"),
     ("C3", "All 14: PARK on the indexes (QQQ, SPX), Runaway on the 12 equities"),
     ("C4", "All 14: PARK and Runaway on the indexes, Runaway only on the equities"),
+    ("C5", "C4's structure with a narrower equity list: PARK and Runaway on the indexes (QQQ, SPX); Runaway only on "
+           "UNH, AMZN, TSLA, SOFI, CVX, NFLX and GOOGL"),
 )
+PREREG_BOOKS = ("C1", "C2", "C3", "C4")       # v1.6: the 2026-11-21 PREREG's books; score(books=PREREG_BOOKS) is v1.5
+# v1.6 (CASHBOOK.3): C5, frozen 2026-11-24 before the open in its own PREREG (sha256 in SEAL.txt beside it).
+C5_PREREG = os.path.join(HOME, "reviews", "cash_candidate_c5_20261124", "PREREG.md")
+C5_PREREG_SHA = "693bb7338bf9cc67d252d8c395dcde971f4db280e3015b66d90abf16ad4327ec"
+C5_EQUITIES = ("UNH", "AMZN", "TSLA", "SOFI", "CVX", "NFLX", "GOOGL")
+C5_FORWARD_FROM = "2026-11-24"
+C5_TAG = "(hindsight list; forward from 11-24)"
+HINDSIGHT_NOTE = ("C5's row here is hindsight (its equity list was picked after seeing 10-26..11-20): reference only, "
+                  "never evidence; only its forward window, from 2026-11-24, counts.")
 
 
 def in_book(book, sym, strat):
-    """PREREG's four definitions, word for word; nothing else decides membership."""
+    """PREREG's four definitions and C5's PREREG (v1.6), word for word; nothing else decides membership."""
     idx = sym in INDEX
     if book == "C1":
         return idx and strat in (PARK, RUNAWAY)
@@ -130,6 +154,8 @@ def in_book(book, sym, strat):
         return (idx and strat == PARK) or (not idx and strat == RUNAWAY)
     if book == "C4":
         return (idx and strat in (PARK, RUNAWAY)) or (not idx and strat == RUNAWAY)
+    if book == "C5":
+        return (idx and strat in (PARK, RUNAWAY)) or (sym in C5_EQUITIES and strat == RUNAWAY)
     raise ValueError(book)
 
 
@@ -241,7 +267,7 @@ def ranking(sc):
     """v1.2 (amendment 2): the books in the order of the COMBINED window's rtd, highest first. No drawdown ranks first;
     PREREG's order breaks ties. -> [book]."""
     comb = (sc.get("windows", {}).get("combined") or {}).get("books") or {}
-    order = [b for b, _d in BOOKS]
+    order = [b for b, _d in BOOKS if b in (sc.get("books") or dict(BOOKS))]      # v1.6: the books scored
 
     def key(b):
         r = (comb.get(b) or {}).get("rtd")
@@ -249,8 +275,11 @@ def ranking(sc):
     return sorted(order, key=key)
 
 
-def score(through, day=None, week_start=None, trades_dir=TRADES):
-    """-> dict: per window, per book, the PREREG metrics (+ the forward displaced-fire count)."""
+def score(through, day=None, week_start=None, trades_dir=TRADES, books=None):
+    """-> dict: per window, per book, the PREREG metrics (+ the forward displaced-fire count). v1.6: `books` the books
+    scored (default all five); PREREG_BOOKS leaves C5 out and is the v1.5 dict exactly."""
+    books = tuple(b for b, _d in BOOKS if books is None or b in books)
+    c5 = "C5" in books
     rows, file_days = load(trades_dir)
     wins = [("in_sample", IN_SAMPLE[0], min(IN_SAMPLE[1], through))]
     if through >= FORWARD[0]:
@@ -262,25 +291,43 @@ def score(through, day=None, week_start=None, trades_dir=TRADES):
         wins.append(("week", week_start, through))
     if day:
         wins.append(("day", day, day))
+    if c5 and through >= C5_FORWARD_FROM:                    # v1.6: C5's own forward window, apart from C1-C4's
+        wins.insert(len(wins) - (1 + bool(week_start) + bool(day)), ("forward_c5", C5_FORWARD_FROM, through))
     out = {"through": through, "prereg": PREREG, "prereg_sha": PREREG_SHA, "basis": "the mark (pnl_usd); fees beside",
            "amendment": amendment_line(), "amendments": amendment_lines(), "concentration": CONCENTRATION,
-           "books": dict(BOOKS), "windows": {},
+           "books": {b: d for b, d in BOOKS if b in books}, "windows": {},
            "sizes": [{"sym": a, "usd": size_on(a, through), "base": u,
                       "dated": [{"from": lo, "to": hi, "usd": x} for lo, hi, x in dated]} for a, u, dated in SIZES]}
+    if c5:                                                   # v1.6: C5's frozen file and its seal, checked every run
+        sha = prereg_sha(C5_PREREG)
+        out["c5"] = {"prereg": C5_PREREG, "prereg_sha": C5_PREREG_SHA, "sealed": sha == C5_PREREG_SHA, "file_sha": sha,
+                     "forward_from": C5_FORWARD_FROM, "equities": list(C5_EQUITIES), "hindsight": True}
     for name, lo, hi in wins:
         sess, missing = sessions(lo, hi, file_days)
         w = {"from": lo, "to": hi, "sessions": len(sess), "missing_trade_files": missing, "books": {}}
         extras = {}
-        for b, _desc in BOOKS:
-            inb = [x for x in rows if lo <= x["day"] <= hi and x["day"] in sess and in_book(b, x["sym"], x["strat"])]
+        for b in books:
+            blo, bsess = lo, sess
+            if b == "C5":                                    # v1.6: C5 is never in C1-C4's forward windows; in the
+                if name in ("forward", "forward_cumulative"):    # day and week it counts from its forward start
+                    continue
+                if name in ("week", "day") and lo < C5_FORWARD_FROM:
+                    blo = C5_FORWARD_FROM
+                    if blo > hi:
+                        continue
+                    bsess = [d for d in sess if d >= blo]
+            elif name == "forward_c5":
+                continue
+            inb = [x for x in rows if blo <= x["day"] <= hi and x["day"] in bsess
+                   and in_book(b, x["sym"], x["strat"])]
             br = [x for x in inb if x.get("book", RK.HEADLINE) == RK.HEADLINE]      # v1.3: as cash would have traded
             xa = [x for x in inb if x.get("book") == RK.AFTER_CAP]
             if xa:
                 extras[b] = {"n": len(xa), "gross": round(sum(x["pnl"] for x in xa), 2),
                                   "fees": round(sum(x["fee"] for x in xa), 2)}
-            m = metrics(br, sess)
+            m = metrics(br, bsess)
             if name.startswith("forward") or name in ("week", "day"):
-                k, bad = displaced(br, [x for x in rows if lo <= x["day"] <= hi])
+                k, bad = displaced(br, [x for x in rows if blo <= x["day"] <= hi])
                 m["displaced"] = k
                 m["displaced_unmeasurable"] = bad
             w["books"][b] = m
@@ -371,29 +418,44 @@ def render_md(sc):
     """The scoreboard as markdown: one table per window, the mark as the basis, fees beside."""
     lab = {"in_sample": "In-sample (seen, hindsight)", "forward": "Forward (unseen; 7 sessions, amendment 2)",
            "forward_cumulative": "Forward, cumulative past 12-03", "combined": "Combined", "week": "The week",
-           "day": "The day"}
-    L = ["# Cash candidate books C1-C4, through %s" % sc["through"], "",
+           "day": "The day", "forward_c5": "C5 forward (unseen; from 2026-11-24, apart from C1-C4's forward window)"}
+    c5 = sc.get("c5")
+    L = ["# Cash candidate books C1-C4%s, through %s" % (" and C5" if c5 else "", sc["through"]), "",
          "Frozen in %s (sha256 %s). Basis: the mark (pnl_usd); fees beside, never inside EV. Report only: never in the "
          "window EV or the theories; the choice of book is the operator's." % (sc["prereg"], sc["prereg_sha"][:12]), ""]
+    if c5:                                                   # v1.6 (CASHBOOK.3)
+        L += ["C5 frozen 2026-11-24 before the open in %s (sha256 %s; %s). Its equity list was chosen in hindsight: its "
+              "in-sample and combined rows are reference only, never evidence; only its forward window (from %s, "
+              "apart from C1-C4's) counts. In the day and week tables C5 counts from %s only. Same basis, metrics, "
+              "ranking and exclusions as C1-C4 (amendments 1-3)." % (
+                  c5["prereg"], c5["prereg_sha"][:12],
+                  "seal verified" if c5["sealed"] else "SEAL BROKEN: the file's sha256 is %s" % c5["file_sha"],
+                  c5["forward_from"], c5["forward_from"]), ""]
     if size_line(sc):                                        # v1.4 (RECAP.3)
         L += [size_line(sc), ""]
     for a in sc.get("amendments") or ([sc["amendment"]] if sc.get("amendment") else []):
         L += ["Amendment: " + a, ""]
     comb = (sc["windows"].get("combined") or {}).get("books") or {}
     fwd = (sc["windows"].get("forward") or {}).get("books") or {}
+    fc5 = (sc["windows"].get("forward_c5") or {}).get("books") or {}
 
     def _r(m):
         if not m:
             return "-"
         return "no drawdown" if m.get("rtd") is None else "%.2f" % m["rtd"]
-    rank = sc.get("ranking") or [b for b, _d in BOOKS]
+    rank = sc.get("ranking") or [b for b, _d in BOOKS if b in (sc.get("books") or PREREG_BOOKS)]
+
+    def _rk(b):
+        if b == "C5":                                        # v1.6: its own forward window, and the tag
+            return "%s %s%s %s" % (b, _r(comb.get(b)), (" (forward %s)" % _r(fc5.get(b))) if fc5 else "", C5_TAG)
+        return "%s %s%s" % (b, _r(comb.get(b)), (" (forward %s)" % _r(fwd.get(b))) if fwd else "")
     L += ["**Ranking, return to drawdown (net / |max DD|, amendment 2; higher is better), combined window:** "
-          + " > ".join("%s %s%s" % (b, _r(comb.get(b)), (" (forward %s)" % _r(fwd.get(b))) if fwd else "")
-                       for b in rank), ""]
+          + " > ".join(_rk(b) for b in rank), ""]
     L += ["Ex top-2 / ex bottom-2: " + CONCENTRATION + ".", ""]
     for b, d in BOOKS:
-        L.append("- %s: %s" % (b, d))
-    for name in ("day", "week", "forward", "forward_cumulative", "in_sample", "combined"):
+        if b in (sc.get("books") or PREREG_BOOKS):
+            L.append("- %s: %s%s" % (b, d, (" " + C5_TAG) if b == "C5" else ""))
+    for name in ("day", "week", "forward", "forward_cumulative", "forward_c5", "in_sample", "combined"):
         w = sc["windows"].get(name)
         if not w:
             continue
@@ -406,6 +468,8 @@ def render_md(sc):
                  + (" fired beside a Hunt/OGAP position |" if disp else ""))
         L.append("|---|---|---|---|---|---|---|---|---|---|---|" + ("---|" if disp else ""))
         for b in rank:
+            if b not in w["books"]:                          # v1.6: C5 is not in every window
+                continue
             m = w["books"][b]
             ev = "-" if m["ev"] is None else "%s [%s, %s]" % (_m(m["ev"], 1), _m(m["ci"][0]) if m["ci"] else "-",
                                                               _m(m["ci"][1]) if m["ci"] else "-")
@@ -416,6 +480,8 @@ def render_md(sc):
                 row += " %d%s |" % (m["displaced"], " (+%d unmeasurable)" % m["displaced_unmeasurable"]
                                     if m["displaced_unmeasurable"] else "")
             L.append(row)
+        if "C5" in w["books"] and name in ("in_sample", "combined"):     # v1.6
+            L += ["", HINDSIGHT_NOTE]
         if w.get("extras"):                         # v1.3 (CAP.11): only a window that has any
             L += ["", "Extra paper after the breaker (paper boxes trade on past the would-be cap; not in the book "
                       "figures above, which are as cash would have traded): " + "; ".join(
@@ -474,10 +540,15 @@ def main(argv=None):
     ap.add_argument("--md", default=None)
     ap.add_argument("--check-prereg", action="store_true")
     ap.add_argument("--prereg", default=PREREG)
+    ap.add_argument("--c5-prereg", default=C5_PREREG)
+    ap.add_argument("--books", default=None, help="v1.6: comma list of the books scored (default all five)")
     a = ap.parse_args(argv)
+    books = tuple(x.strip() for x in a.books.split(",") if x.strip()) if a.books else None
+    if books and set(books) - set(dict(BOOKS)):
+        ap.error("unknown book(s): %s" % ", ".join(sorted(set(books) - set(dict(BOOKS)))))
     if a.check_prereg:
         sha = prereg_sha(a.prereg)
-        sc = score(IN_SAMPLE[1], trades_dir=a.trades)
+        sc = score(IN_SAMPLE[1], trades_dir=a.trades, books=PREREG_BOOKS)
         bad = check_prereg(sc, a.prereg)
         if sha != PREREG_SHA:
             bad.insert(0, "PREREG sha256 %s is not the sealed %s" % (sha, PREREG_SHA))
@@ -485,12 +556,18 @@ def main(argv=None):
             print("MISMATCH " + b)
         print("AMENDMENT %s" % (amendment_line() or "none"))
         print("PREREG %s" % ("REPRODUCED (4 books, in-sample)" if not bad else "NOT REPRODUCED"))
-        return 1 if bad else 0
+        c5bad = False
+        if books is None or "C5" in books:                   # v1.6: C5's seal (its in-sample is hindsight: no table)
+            s5 = prereg_sha(a.c5_prereg)
+            c5bad = s5 != C5_PREREG_SHA
+            print("C5 PREREG %s" % ("SEALED (sha256 %s)" % C5_PREREG_SHA[:12] if not c5bad else
+                                    "SEAL BROKEN: sha256 %s is not the sealed %s" % (s5, C5_PREREG_SHA)))
+        return 1 if bad or c5bad else 0
     through = a.through
     if not through:
         _r, days = load(a.trades)
         through = days[-1] if days else IN_SAMPLE[1]
-    sc = score(through, day=a.day, week_start=a.week_start, trades_dir=a.trades)
+    sc = score(through, day=a.day, week_start=a.week_start, trades_dir=a.trades, books=books)
     md = render_md(sc)
     if a.json:
         with open(a.json, "w", encoding="utf-8") as fh:
