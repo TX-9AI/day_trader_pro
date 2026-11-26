@@ -1,6 +1,25 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/daily_recap.py  v1.7
+day_trader_pro/tools/daily_recap.py  v1.8
+v1.8  2026-11-26  dtp r585 / LEADS.1 — THE RECAP SHOWS THE STANDING LEADS THAT MOVED TODAY. The operator, 2026-11-26:
+      "If you could include in the daily recap any standing leads under evaluation that made forward progress
+      (further study, shadow, seeded a new study, or recommend incorporating)." NEW lead_section (read only) gives
+      daily_brief's new section 8, "Leads — forward progress" (the recommendations move to section 9, still last), its
+      rows from the coordinator's leads ledger ~/reviews/schedule/leads.tsv (LEAD_COLS, tab-separated; --leads):
+      ONLY the leads whose last_progress is the recap's DAY, at most LEAD_ROWS_MAX rows (recommend-incorporating
+      first, then FORWARD, FORWARD-SHADOW, CHECKING, RUNNING, INPUT, PARKED, the rest, CLOSED last; the rest on one
+      "Also progressed" line). A FORWARD or FORWARD-SHADOW lead also shows its forward scorer's cumulative line: the
+      Status line of the newest FORWARD*SUMMARY.md (never a *_TEST* dry run) in each study folder its source_study
+      names under ~/reviews/studies (a name without its date suffix resolves to the one folder that starts with
+      it), labelled with the file's own date and time (the nightly scorers write after the 17:00 recap, so it is the
+      previous evening's; one written after DAY's 17:00 says so), beside the lead's decision_read. Nothing moved: one
+      line "No lead progress today" and one line counting the standing leads by status (closed ones apart). A
+      missing ledger, a bad header or a malformed row (wrong field count, no id, a last_progress that is not a date)
+      never stops the recap: NOT READ with the reason, or the row skipped with a note. `recs` gains a fourth source,
+      lead_recs: a lead that progressed on DAY and is marked recommend incorporating (status RECOMMEND..., or a
+      progress_note saying "recommend incorporating") becomes a NEW decision row "Incorporate lead L-nn: ..." with
+      [ref L-nn], de-duplicated like the rest (a re-run appends nothing). context lists the day's progressed leads.
+      No config knob, no env toggle: the ledger path is the wrapper's $REVIEWS/schedule/leads.tsv.
 v1.7  2026-11-24  dtp r584 / RECS.1 — THE RECOMMENDATIONS LEDGER AND THE PDF'S LAST SECTION. The operator, 2026-11-24: "I
       would like the final section to contain a summary of the recommendations so we can get those approved &
       scheduled." NEW `recs` (the wrapper runs it after `append`) appends the day's recommendations to
@@ -21,9 +40,9 @@ v1.7  2026-11-24  dtp r584 / RECS.1 — THE RECOMMENDATIONS LEDGER AND THE PDF'S
       DUP_JACCARD rule of the queue) matches ANY ledger row, whatever its status, or an earlier candidate, is not
       appended; a re-run for the same day appends nothing. THE RECAP ONLY APPENDS: every row it writes is NEW, every
       existing line is kept byte for byte, and it never writes APPROVED or DECLINED (the coordinator edits the ledger
-      when the operator answers). rec_section (read only) gives daily_brief's section 8 its rows: every NEW row (NEW
-      on its own day, else CARRIED from its day), an APPROVED row while its slot is ahead or it was decided since the
-      previous trading day (APPROVED-scheduled, its slot), a DECLINED row decided since the previous trading day; and
+      when the operator answers). rec_section (read only) gives daily_brief's section 8 (section 9 from daily_brief
+      v1.9) its rows: every NEW row (NEW on its own day, else CARRIED from its day), an APPROVED row while its slot
+      is ahead or it was decided since the previous trading day (APPROVED-scheduled, its slot), a DECLINED row decided since the previous trading day; and
       for an open row a proposed slot, the next free fitting window from tools/calendar_view.build (a study on the
       boxes: the next study dispatch; control: a free weekday-evening hour, 18:30-21:30 ET, clear of every planned row; boxes: a free
       Sunday 10:00-16:00 two-hour block; a decision or touches none: the operator's reply), each window used once.
@@ -118,7 +137,8 @@ Usage:
                                        [--runaway-watch WORK/runaway_watch.json]
   python tools/daily_recap.py append --day D --notes FILE [--queue Q] [--cash-books WORK/cash_books.json]
                                      [--runaway-watch WORK/runaway_watch.json]
-  python tools/daily_recap.py recs --day D --notes FILE [--ledger L] [--cash-ready DIR] [--facts F] [--review R]
+  python tools/daily_recap.py recs --day D --notes FILE [--ledger L] [--cash-ready DIR] [--leads LEADS] [--facts F]
+                                   [--review R]
                                    [--cash-books WORK/cash_books.json] [--runaway-watch WORK/runaway_watch.json]
   python tools/daily_recap.py notice --day D --notes FILE --summary FILE
 """
@@ -158,6 +178,7 @@ HYGIENE = os.path.join(REVIEWS, "hygiene")
 BOTLOGS = os.path.join(OUT, "botlogs")       # v1.2: eod_conductor_v2 v2.18 writes <date>/<SYM>.txt before the stop
 RECS = os.path.join(REVIEWS, "schedule", "recommendations.tsv")   # v1.7: the coordinator's ledger (the recap appends)
 CASH_READY = os.path.join(REVIEWS, "cash_readiness")              # v1.7: <D>.tsv, the ~17:45 ET cash-readiness review
+LEADS = os.path.join(REVIEWS, "schedule", "leads.tsv")             # v1.8: the coordinator's leads ledger (read only)
 DUP_JACCARD = 0.8                            # v1.2: the near-duplicate title bar (word sets), documented above
 DUP_STOPWORDS = ("the", "and", "for", "with", "from", "into", "its", "our", "than", "then")   # not words of a title
 DUE_AFTER_MIN = 40             # after the close, as the nightly review (review_kit.DUE_AFTER_MIN)
@@ -624,6 +645,12 @@ def cmd_context(a):
               "adds your proposals and maintenance itself):" % a.recs]
     lines += ["  %s %s %s: %s" % (r["id"], r["date"], r["status"], r["what"][:110]) for r in read_ledger(a.recs)[0]
               if r["date"] <= a.day] or ["  (none)"]
+    _lr, _lb, _le = read_leads(a.leads)             # v1.8 (LEADS.1)
+    lines += ["", "Leads that progressed on %s (%s; the PDF's section 8 lists them by itself; a lead marked recommend "
+              "incorporating becomes a NEW recommendation by itself - never write one for it):" % (a.day, a.leads)]
+    lines += (["  NOT READ (%s)" % _le] if _le else
+              ["  %s %s: %s" % (r["id"], r["status"], r["lead"][:110]) for r in _lr if r["last_progress"] == a.day]
+              or ["  (none)"])
     lines += ["", "Maintenance already proposed by earlier recaps (do not repeat an id):"]
     lines += ["  " + r for r in prior_maintenance(a.notes_dir, a.day)] or ["  (none)"]
     lines += ["", "Open backlog rows: %s" % os.path.join(a.work, "backlog_open.txt"),
@@ -1067,15 +1094,18 @@ def rec_dup(c, rows):
     return None
 
 
-def rec_append(day, notes, ledger, cash_ready=CASH_READY, figs=None):
+def rec_append(day, notes, ledger, cash_ready=CASH_READY, figs=None, leads=None):
     """-> (appended rows, dups [(what, id)], refused [(what, reasons)], problems). Appends to `ledger` (created with
-    REC_HEADER when missing); every existing byte is kept, every new row is NEW. Raises ValueError on a bad header."""
+    REC_HEADER when missing); every existing byte is kept, every new row is NEW. Raises ValueError on a bad header.
+    v1.8: `leads` (a leads ledger path, None = not read) adds lead_recs, the leads marked recommend incorporating."""
     rows, problems = read_ledger(ledger)
     if problems and problems[0].startswith("ledger header"):
         raise ValueError(problems[0])
     sr, refused = session_recs(day, notes, figs if figs is not None else set())
     cr, crefused = cash_ready_recs(day, cash_ready)
-    cands = [dict(c, date=day) for c in own_recs(day, notes) + sr] + cr
+    lr, lrefused = lead_recs(day, leads) if leads else ([], [])
+    crefused = crefused + lrefused
+    cands = [dict(c, date=day) for c in own_recs(day, notes) + sr + lr] + cr
     seen, new, dups = list(rows), [], []
     for c in cands:
         d = rec_dup(c, seen)
@@ -1187,6 +1217,187 @@ def rec_section(day, ledger=RECS, cal=None, cal_err=None, now=None):
     return {"rows": out, "problems": problems}
 
 
+# ── leads (v1.8, LEADS.1): the standing leads that made forward progress on DAY ────────────────────────────────────
+LEAD_COLS = ("id", "opened", "lead", "source_study", "evidence", "status", "next_step", "decision_read",
+             "last_progress", "progress_note")
+LEAD_FORWARD = ("FORWARD", "FORWARD-SHADOW")
+LEAD_ORDER = ("RECOMMEND", "FORWARD", "FORWARD-SHADOW", "CHECKING", "RUNNING", "INPUT", "PARKED")   # then the rest, CLOSED last
+LEAD_ROWS_MAX = 12             # the section stays short (the operator likes the recap's format)
+LEAD_RECOMMEND_RX = re.compile(r"\brecommend(s|ed|ing)?\s+incorporat", re.I)
+LEAD_STUDY_RX = re.compile(r"\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b")    # a study folder name, e.g. PARK_S2_20261126
+LEAD_DATE_RX = re.compile(r"^\d{4}-\d\d-\d\d$")
+
+
+def read_leads(path):
+    """-> (rows, problems, err). err is the reason the ledger was NOT READ (missing, unreadable, bad header); a
+    malformed row is skipped with a problem, never raised. Comment (#) and blank lines are skipped."""
+    if not path or not os.path.exists(path):
+        return [], [], "not found: %s" % path
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            lines = [ln.rstrip("\r\n") for ln in fh if ln.strip() and not ln.lstrip().startswith("#")]
+    except OSError as e:
+        return [], [], "%s: %s" % (type(e).__name__, e)
+    if not lines or tuple(c.strip() for c in lines[0].split("\t")) != LEAD_COLS:
+        return [], [], "header is %r, not %s" % ((lines[0][:120] if lines else ""), "\t".join(LEAD_COLS))
+    rows, bad = [], []
+    for i, ln in enumerate(lines[1:], 2):
+        f = ln.split("\t")
+        if len(f) != len(LEAD_COLS):
+            bad.append("leads row %d (%s): %d fields, not %d - skipped" % (i, _cell(f[0])[:12] or "?", len(f),
+                                                                         len(LEAD_COLS)))
+            continue
+        r = {k: _cell(v) for k, v in zip(LEAD_COLS, f)}
+        if not r["id"]:
+            bad.append("leads row %d: no id - skipped" % i)
+            continue
+        if r["last_progress"] and not LEAD_DATE_RX.match(r["last_progress"]):
+            bad.append("leads row %s: last_progress %r is not a YYYY-MM-DD date - skipped"
+                       % (r["id"], r["last_progress"][:20]))
+            continue
+        r["status"] = r["status"].upper()
+        rows.append(r)
+    return rows, bad, None
+
+
+def lead_recommends(r):
+    return r["status"].startswith("RECOMMEND") or LEAD_RECOMMEND_RX.search(r["progress_note"]) is not None
+
+
+def _lead_rank(r):
+    if lead_recommends(r):
+        return 0
+    st = r["status"]
+    if st.startswith("CLOSED"):
+        return len(LEAD_ORDER) + 1
+    return LEAD_ORDER.index(st) if st in LEAD_ORDER else len(LEAD_ORDER)
+
+
+def lead_study_dirs(source_study, studies=STUDIES):
+    """-> [folder] the study folders a lead's source_study names: each exact name, or the ONE folder starting with
+    a name given without its date suffix. Names only (no path separators), so nothing outside `studies` is read."""
+    out = []
+    try:
+        have = sorted(n for n in os.listdir(studies) if os.path.isdir(os.path.join(studies, n)))
+    except OSError:
+        return out
+    for tok in LEAD_STUDY_RX.findall(source_study or ""):
+        hit = [tok] if tok in have else [n for n in have if n.startswith(tok + "_")]
+        if len(hit) == 1 and hit[0] not in out:
+            out.append(hit[0])
+    return out
+
+
+def forward_line(folder, studies=STUDIES, cutoff=None):
+    """-> (text, dry) the cumulative line of the newest FORWARD*SUMMARY.md in a study folder, labelled with the
+    file's own date (ET); (None, dry) when there is none (dry = only a *_TEST* dry-run summary exists)."""
+    d = os.path.join(studies, folder)
+    every = [p for p in glob.glob(os.path.join(d, "FORWARD*SUMMARY*.md")) if os.path.isfile(p)]
+    real = [p for p in every if "TEST" not in os.path.basename(p).upper()]
+    if not real:
+        return None, bool(every)
+    p = max(real, key=os.path.getmtime)
+    try:
+        txt = open(p, encoding="utf-8", errors="replace").read()
+    except OSError as e:
+        return "%s NOT READ (%s)" % (os.path.basename(p), type(e).__name__), False
+    m = re.search(r"^\*\*Status:\*\*\s*(.+)$", txt, re.M) or re.search(r"^(Sessions\b.+)$", txt, re.M)
+    line = _first_sentence(m.group(1), 110) if m else "no cumulative line in %s" % os.path.basename(p)
+    if not re.search(r"\d+\s*/\s*\d+|\bn\s*=\s*\d+|\d+ (counted )?sessions?|fires", line):
+        n = re.search(r"(\d+)\s*/\s*(\d+)\s+counted", txt)
+        if n:
+            line += " (%s/%s counted)" % n.groups()
+    t = datetime.fromtimestamp(os.path.getmtime(p), ET)
+    lab = t.strftime("%m-%d %H:%M ET")
+    if cutoff is not None and t > cutoff:
+        lab += ", after this recap"
+    return "%s: %s" % (lab, line.replace("**", "").rstrip(" .")), False
+
+
+def lead_forward_cell(r, studies=STUDIES, cutoff=None):
+    if r["status"] not in LEAD_FORWARD:
+        return "-"
+    parts, dry = [], False
+    for f in lead_study_dirs(r["source_study"], studies):
+        line, d_ = forward_line(f, studies, cutoff)
+        dry = dry or d_
+        if line:
+            parts.append(line)
+    if not parts:
+        parts = ["no forward record yet (dry run only)" if dry else "no forward summary yet"]
+    read_ = r["decision_read"] if r["decision_read"] not in ("", "-") else "?"
+    return "; ".join(parts) + " · decision read " + read_
+
+
+def lead_section(day, ledger=LEADS, studies=STUDIES, now=None):
+    """-> {"lines": [str], "rows": [[ID, Lead, Status, Progress, Forward scorer]] (header first), "more": str|None,
+    "problems": [..]} for daily_brief's section 8. Read only; never raises on a bad ledger or row."""
+    rows, problems, err = read_leads(ledger)
+    if len(problems) > 3:
+        problems = problems[:3] + ["and %d more malformed leads row(s)" % (len(problems) - 3)]
+    hdr = [["ID", "Lead", "Status", "Progress today · next", "Forward scorer (last run before the recap)"]]
+    out = {"lines": [], "rows": hdr, "more": None, "problems": problems}
+    if err:
+        out["lines"] = ["No lead progress today.", "Leads ledger NOT READ (%s)." % err]
+        return out
+    try:
+        cutoff = datetime.combine(date.fromisoformat(day), time(17, 0), ET)
+    except ValueError:
+        cutoff = None
+    moved = sorted((r for r in rows if r["last_progress"] == day), key=lambda r: (_lead_rank(r), rows.index(r)))
+    standing = [r for r in rows if not r["status"].startswith("CLOSED")]
+
+    def counts(rs):
+        c = {}
+        for r in rs:
+            c[r["status"] or "?"] = c.get(r["status"] or "?", 0) + 1
+        return ", ".join("%d %s" % (n, s) for s, n in sorted(c.items(), key=lambda x: (-x[1], x[0])))
+
+    if not moved:
+        out["lines"] = ["No lead progress today.",
+                        "Standing leads: %s%s." % (counts(standing) or "none",
+                                                   "; %d closed" % (len(rows) - len(standing))
+                                                   if len(rows) > len(standing) else "")]
+        return out
+    out["lines"] = ["%d lead(s) moved on %s: %s." % (len(moved), day[5:], counts(moved))]
+    for r in moved[:LEAD_ROWS_MAX]:
+        prog = r["progress_note"] or "-"
+        if lead_recommends(r):
+            prog = "RECOMMEND INCORPORATING (in section 9) · " + prog
+        if r["next_step"] and r["next_step"] != "-":
+            prog += " · next: " + r["next_step"]
+        lead = r["lead"] if len(r["lead"]) <= 110 else r["lead"][:108].rsplit(" ", 1)[0] + " ..."
+        out["rows"].append([r["id"], lead, r["status"] or "?", prog[:170],
+                            lead_forward_cell(r, studies, cutoff)])
+    if len(moved) > LEAD_ROWS_MAX:
+        out["more"] = "Also moved today: %s (the ledger %s)." % (
+            ", ".join("%s %s" % (r["id"], r["status"]) for r in moved[LEAD_ROWS_MAX:]), ledger)
+    return out
+
+
+def lead_recs(day, ledger=LEADS):
+    """Source 4 (v1.8) -> (candidates, refused) from the leads that progressed on `day` and are marked recommend
+    incorporating: one decision row each, [ref <lead id>], checked by rec_problems (no figure check: the
+    coordinator's file). A missing or unreadable ledger is no candidates."""
+    rows, _bad, err = read_leads(ledger)
+    good, refused = [], []
+    if err:
+        return good, refused
+    for r in rows:
+        if r["last_progress"] != day or not lead_recommends(r):
+            continue
+        c = {"what": _cell("Incorporate lead %s: %s" % (r["id"], r["lead"]))[:REC_WHAT_MAX],
+             "why": _first_sentence(r["evidence"] or r["progress_note"] or "see the leads ledger"),
+             "type": "decision", "touches": "none",
+             "note": "leads ledger %s %s [ref %s]" % (day, r["source_study"][:60], r["id"])}
+        why = rec_problems(c)
+        if why:
+            refused.append(("lead %s" % r["id"], why))
+            continue
+        good.append(c)
+    return good, refused
+
+
 def cmd_recs(a):
     try:
         notes = _load(a.notes) if a.notes and os.path.exists(a.notes) else {}
@@ -1202,7 +1413,7 @@ def cmd_recs(a):
     figs = rec_figures(**srcs)
     try:
         new, dups, refused, problems = rec_append(a.day, notes if isinstance(notes, dict) else {}, a.ledger,
-                                                  a.cash_ready, figs)
+                                                  a.cash_ready, figs, a.leads)
     except ValueError as e:
         print("REFUSED the ledger is not readable: %s (ledger untouched)" % e)
         return 1
@@ -1269,6 +1480,7 @@ def main(argv=None):
     p.add_argument("--otv5", default=OTV5)
     p.add_argument("--trades", default=CB.TRADES)
     p.add_argument("--recs", default=RECS)       # v1.7: the ledger, listed read only
+    p.add_argument("--leads", default=LEADS)     # v1.8: the leads ledger, listed read only
     p = sub.add_parser("validate")
     p.add_argument("--day", required=True)
     p.add_argument("--notes", required=True)
@@ -1286,6 +1498,7 @@ def main(argv=None):
     p.add_argument("--notes", required=True)
     p.add_argument("--ledger", default=RECS)
     p.add_argument("--cash-ready", default=CASH_READY)
+    p.add_argument("--leads", default=LEADS)     # v1.8: lead_recs (recommend incorporating), read only
     p.add_argument("--facts", default=None)
     p.add_argument("--review", default=None)
     p.add_argument("--cash-books", default=None)

@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
-# day_trader_pro/tools/daily_recap.sh — v1.3
+# day_trader_pro/tools/daily_recap.sh — v1.4
+# v1.4 (2026-11-26) — dtp r585 / LEADS.1. The leads ledger ($REVIEWS/schedule/leads.tsv, the coordinator's, read only)
+#   goes to context (the day's progressed leads), to the recs step (a lead marked recommend incorporating becomes a
+#   NEW recommendation) and to the brief (section 8, "Leads — forward progress"). No new env variable: the path is
+#   derived from REVIEWS, like the sandbox's.
 # v1.3 (2026-11-24) — dtp r584 / RECS.1. After the queue append, `daily_recap.py recs` appends the day's
 #   recommendations to the ledger (RECS, ~/reviews/schedule/recommendations.tsv: the recap's queued studies and its
 #   maintenance, the session's checked "recommendations", the cash-readiness review's rows from CASH_READY) as NEW,
@@ -58,6 +62,7 @@ NOTES_DIR="${DAILY_RECAP_NOTES:-$OUTDIR/notes}"
 QUEUE="${DAILY_RECAP_QUEUE:-$REVIEWS/WEEKEND_STUDIES.md}"
 RECS="${DAILY_RECAP_RECS:-$REVIEWS/schedule/recommendations.tsv}"     # v1.3: the recommendations ledger
 CASH_READY="${DAILY_RECAP_CASH_READY:-$REVIEWS/cash_readiness}"     # v1.3: the cash-readiness review's <D>.tsv
+LEADS="$REVIEWS/schedule/leads.tsv"                                   # v1.4: the leads ledger (read only)
 MODEL_NOTES="${DAILY_RECAP_MODEL_NOTES:-$NOTES_DIR/2026-11-20.json}"
 LOG="${DAILY_RECAP_LOG:-/home/ubuntu/daily_recap.log}"
 LEDGER="${DAILY_RECAP_LEDGER:-/home/ubuntu/daily_recap.ledger}"
@@ -149,7 +154,7 @@ if ! timeout "$FACTS_S" "$BRIEF_PY" -I "$BRIEF" --date "$DAY" --facts "$WORK/fac
   echo "  🔴 the data pass failed for $DAY - see $LOG"; ledger "FAILED facts day=$DAY"; exit 1
 fi
 "$PY" "$HELPER" context --day "$DAY" --work "$WORK" --queue "$QUEUE" --notes-dir "$NOTES_DIR" \
-  --botlogs "$OUTDIR/botlogs" --trades "$REVIEWS/trades" --recs "$RECS" >> "$LOG" 2>&1 \
+  --botlogs "$OUTDIR/botlogs" --trades "$REVIEWS/trades" --recs "$RECS" --leads "$LEADS" >> "$LOG" 2>&1 \
   || { ledger "FAILED context day=$DAY"; exit 1; }
 
 # ── the session (skipped when valid notes for the day already exist) ──
@@ -203,7 +208,7 @@ if [ -f "$NOTES" ] && "$PY" "$HELPER" validate --day "$DAY" --notes "$NOTES" --q
   else
     STATUS="PARTIAL"; ledger "WARN no_queue day=$DAY $QUEUE"
   fi
-  RECSOUT="$("$PY" "$HELPER" recs --day "$DAY" --notes "$NOTES" --ledger "$RECS" --cash-ready "$CASH_READY" \
+  RECSOUT="$("$PY" "$HELPER" recs --day "$DAY" --notes "$NOTES" --ledger "$RECS" --cash-ready "$CASH_READY" --leads "$LEADS" \
     --facts "$WORK/facts.json" --review "$REVIEW" --cash-books "$WORK/cash_books.json" \
     --runaway-watch "$WORK/runaway_watch.json" 2>&1)"; rrc=$?
   log "$RECSOUT"
@@ -214,7 +219,7 @@ else
   STATUS="PARTIAL"; NOTES_ARG="--notes $WORK/none.json"; ledger "WARN notes_missing_or_invalid day=$DAY session=$SESSION"
 fi
 if ! timeout "$PDF_S" "$BRIEF_PY" -I "$BRIEF" --date "$DAY" $NOTES_ARG --out "$OUTDIR" \
-      --summary-json "$WORK/summary.json" --recs "$RECS" >> "$LOG" 2>&1 || [ ! -f "$PDF" ]; then
+      --summary-json "$WORK/summary.json" --recs "$RECS" --leads "$LEADS" >> "$LOG" 2>&1 || [ ! -f "$PDF" ]; then
   echo "  🔴 NO PDF BUILT for $DAY - see $LOG"; ledger "FAILED pdf day=$DAY session=$SESSION"; exit 1
 fi
 cp "$WORK/summary.json" "$NOTES_DIR/$DAY.summary.json" 2>/dev/null

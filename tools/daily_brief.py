@@ -1,6 +1,16 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/daily_brief.py  v1.8  -  the post-trading-day brief (PDF) for any session.
+day_trader_pro/tools/daily_brief.py  v1.9  -  the post-trading-day brief (PDF) for any session.
+v1.9  2026-11-26  dtp r585 / LEADS.1 — NEW SECTION 8, "LEADS — FORWARD PROGRESS"; THE RECOMMENDATIONS ARE SECTION 9, STILL
+      LAST. The operator, 2026-11-26: "If you could include in the daily recap any standing leads under evaluation
+      that made forward progress (further study, shadow, seeded a new study, or recommend incorporating)." After
+      section 7: one head line and one short table from the coordinator's leads ledger ~/reviews/schedule/leads.tsv
+      (--leads; tools/daily_recap.lead_section, read only): ONLY the leads whose last_progress is the day (id, lead,
+      status, the progress note and next step, and for a FORWARD / FORWARD-SHADOW lead its forward scorer's last
+      cumulative line, dated, beside the decision read), at most twelve rows, the rest on one line. Nothing moved:
+      "No lead progress today." and the standing leads counted by status. A failed read prints NOT READ with the
+      reason; a malformed row is a note. A lead marked recommend incorporating also reaches section 9 as a NEW row
+      (daily_recap `recs`). Sections 1-7 and 9 are otherwise unchanged.
 v1.8  2026-11-24  dtp r584 / RECS.1 — SECTION 8, "RECOMMENDATIONS — FOR APPROVAL", THE LAST SECTION. The operator,
       2026-11-24: "I would like the final section to contain a summary of the recommendations so we can get those
       approved & scheduled." After section 7 (only the Sources list follows): one numbered table from
@@ -81,7 +91,8 @@ v1.0  2026-11-21  the first build, by hand, outside the repo (the 11-20 brief).
 Usage:
   /home/ubuntu/venvs/daily_brief/bin/python -I tools/daily_brief.py --date 2026-11-20 \
       [--notes ~/reviews/daily_brief/notes/2026-11-20.json] [--out ~/reviews/daily_brief] \
-      [--facts FILE.json] [--summary-json FILE.json] [--recs ~/reviews/schedule/recommendations.tsv]
+      [--facts FILE.json] [--summary-json FILE.json] [--recs ~/reviews/schedule/recommendations.tsv] \
+      [--leads ~/reviews/schedule/leads.tsv]
 
 READ-ONLY. Reads the S3 warehouse (control's read-only role) and local files; writes one PDF
 (<out>/daily_brief_<date>.pdf), or with --facts one JSON file, and nothing else. No box, no broker, no service
@@ -774,6 +785,17 @@ def schedule(now=None):
 
 
 RECS_DEFAULT = os.path.expanduser("~/reviews/schedule/recommendations.tsv")
+LEADS_DEFAULT = os.path.expanduser("~/reviews/schedule/leads.tsv")    # v1.9: the coordinator's leads ledger
+
+
+def lead_progress(day, ledger=None, now=None):
+    """v1.9 -> (tools/daily_recap.lead_section's dict, None) or (None, reason). Read only."""
+    try:
+        sys.path.insert(0, os.path.join(DTP_ROOT, "tools"))
+        import daily_recap as DR                         # noqa: E402  (stdlib + dtp modules only)
+        return DR.lead_section(day, ledger or LEADS_DEFAULT, now=now), None
+    except Exception as e:                               # noqa: BLE001
+        return None, "%s: %s" % (type(e).__name__, e)
 
 
 def recommendations(day, ledger=None, now=None):
@@ -830,7 +852,7 @@ def watch_chart(RW, sc):
     return buf, 1.05 * rows_ + 0.2
 
 
-def build(day, notes, out_dir, recs=None):
+def build(day, notes, out_dir, recs=None, leads=None):
     c = compute(day)
     trades, tmeta, dropped, by_sym = c["trades"], c["tmeta"], c["dropped"], c["by_sym"]
     sym_pnl, order, bars, binfo, proxied, vix = (c["sym_pnl"], c["order"], c["bars"], c["binfo"], c["proxied"],
@@ -1142,9 +1164,26 @@ def build(day, notes, out_dir, recs=None):
                     "touches the boxes and overlaps RTH, the close, the wake + sweep, the study dispatch or another "
                     "planned box row is flagged COLLISION. Report only: nothing here runs or moves a job.", "small"))
 
-    # ── Section 8 (v1.8): the recommendations, for approval — the LAST section (only the Sources list follows) ──
+    # ── Section 8 (v1.9): the standing leads that made forward progress on the day (tools/daily_recap.py, read only) ──
+    st.append(Spacer(1, 8))
+    st.append(P("8. Leads — forward progress", "h1"))
+    lsec, lerr = lead_progress(day, leads)
+    if lsec is None:
+        st.append(P(f"Leads: NOT READ ({lerr}).", "small"))
+    else:
+        for ln_ in lsec["lines"]:
+            st.append(P(ln_))
+        if len(lsec["rows"]) > 1:
+            st.append(table(lsec["rows"], [x * inch for x in (0.36, 2.1, 1.0, 1.84, 2.1)]))
+        if lsec["more"]:
+            st.append(P(lsec["more"], "small"))
+        for pr_ in lsec["problems"]:
+            st.append(P("Note: " + pr_, "small"))
+
+    # ── Section 9 (v1.8; section 8 until v1.9): the recommendations, for approval — the LAST section (only the
+    #    Sources list follows) ──
     st.append(PageBreak())
-    st.append(P("8. Recommendations — for approval", "h1"))
+    st.append(P("9. Recommendations — for approval", "h1"))
     st.append(P("Each line is for a yes or a no, by its id. The recap appends its own proposals to "
                 "~/reviews/schedule/recommendations.tsv as NEW and never marks one approved; the coordinator records "
                 "each answer there (APPROVED with its slot, or DECLINED). An open item carries forward on every recap "
@@ -1192,6 +1231,7 @@ def main():
     ap.add_argument("--facts", default=None, help="write the data pass to this JSON file and build no PDF")
     ap.add_argument("--summary-json", default=None, help="also write the run summary to this JSON file")
     ap.add_argument("--recs", default=None, help="the recommendations ledger (default %s)" % RECS_DEFAULT)
+    ap.add_argument("--leads", default=None, help="the leads ledger (default %s)" % LEADS_DEFAULT)
     a = ap.parse_args()
     day = ws._valid(a.date)
     if a.facts:
@@ -1202,7 +1242,7 @@ def main():
     npath = a.notes or os.path.join(NOTES_DIR, f"{day}.json")
     notes = json.load(open(npath)) if os.path.exists(npath) else None
     print(f"notes: {npath if notes else 'none (data-only brief)'}")
-    path, summ = build(day, notes, a.out, a.recs)
+    path, summ = build(day, notes, a.out, a.recs, a.leads)
     print(path)
     print(json.dumps(summ, indent=1, default=str))
     if a.summary_json:

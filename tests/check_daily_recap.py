@@ -1,6 +1,33 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_daily_recap.py  v1.9
+day_trader_pro/tests/check_daily_recap.py  v1.10
+v1.10 2026-11-26  dtp r585 / LEADS.1 (daily_recap v1.8, daily_recap.sh v1.4, daily_brief v1.9). The operator,
+      2026-11-26: "If you could include in the daily recap any standing leads under evaluation that made forward
+      progress (further study, shadow, seeded a new study, or recommend incorporating)." R11 wants daily_brief v1.9;
+      R26 finds the recommendations as section 9, still last; R29 passes a fixture --leads and holds lead_recs to the
+      no-APPROVED rule; R6 wants the real ~/reviews/schedule/leads.tsv untouched by the wrapper's run. NEW (each BORN
+      RED on 38d06e2):
+  R31 the section is present: daily_brief has "8. Leads — forward progress" after section 7 and before section 9,
+      from daily_recap.lead_section (head line, the table, the "Also moved" line, notes, NOT READ on a failure); the
+      wrapper passes --leads "$LEADS" to context, recs and the brief, LEADS is $REVIEWS/schedule/leads.tsv (no new
+      env variable), the brief takes --leads
+  R32 only the DAY's rows: from a fixture ledger, the leads whose last_progress is the day and no other (earlier,
+      later, blank), recommend-incorporating first, CLOSED last; a FORWARD / FORWARD-SHADOW row carries a forward
+      cell, any other "-"; more than LEAD_ROWS_MAX moved leads cap the table, the rest on one "Also moved today" line
+  R33 graceful on an empty or missing ledger: missing -> "No lead progress today." and "Leads ledger NOT READ (not
+      found: ...)", a header-only ledger -> "Standing leads: none.", a bad header -> NOT READ, a quiet day -> the
+      standing leads counted by status (closed apart); context prints NOT READ / (none) and goes on
+  R34 no crash on a malformed row: a short row, a long row, a row with no id and a row whose last_progress is not a
+      date are each skipped with a note, the good rows still listed; more than three notes fold into one line;
+      lead_recs and context on the same ledger run clean
+  R35 the forward line is dated: the newest FORWARD*SUMMARY.md's Status line labelled with the file's own ET date and
+      time and the lead's decision read; a name without its date suffix resolves to its one folder; a *_TEST* dry run
+      only -> "no forward record yet (dry run only)", none -> "no forward summary yet"; a summary written after the
+      day's 17:00 says "after this recap"; the PARK "Sessions ..." form is read too
+  R36 recommend incorporating becomes a recommendation: rec_append with the leads ledger appends one NEW decision row
+      "Incorporate lead L-nn: ..." with [ref L-nn] for a lead that progressed on the day and recommends it, nothing
+      for one that progressed earlier or only moved forward; a re-run appends nothing; a lead breaking the proposal
+      rules is refused by name; `recs` through main() with --leads appends it; context lists the day's leads
 v1.9  2026-11-24  dtp r584 / RECS.1 (daily_recap v1.7, daily_recap.sh v1.3, daily_brief v1.8, the prompt v1.11). The
       operator, 2026-11-24: "I would like the final section to contain a summary of the recommendations so we can get
       those approved & scheduled." R11 wants daily_brief v1.8; R23 the prompt v1.11; R18 counts three --runaway-watch
@@ -447,6 +474,8 @@ ro0 = snapshot(real_out) if os.path.isdir(real_out) else {}
 before = snapshot(SB)
 real_recs = os.path.expanduser("~/reviews/schedule/recommendations.tsv")
 rr0 = os.stat(real_recs).st_mtime_ns if os.path.exists(real_recs) else None
+real_leads = os.path.expanduser("~/reviews/schedule/leads.tsv")             # v1.10: read only, never written
+rl0 = os.stat(real_leads).st_mtime_ns if os.path.exists(real_leads) else None
 SBRECS = os.path.join(REV, "schedule", "recommendations.tsv")              # v1.9: the sandbox ledger
 r6 = wrap([], "2026-11-23T17:00")
 after = snapshot(SB)
@@ -469,12 +498,13 @@ q1 = read(QUEUE)
 restored = "JUNK FROM THE SESSION" not in q1 and "QUEUE_RESTORED day=2026-11-23" in ledger() and "### WS.25 —" in q1
 rq1 = os.stat(real_q).st_mtime_ns if os.path.exists(real_q) else None
 rr1 = os.stat(real_recs).st_mtime_ns if os.path.exists(real_recs) else None
+rl1 = os.stat(real_leads).st_mtime_ns if os.path.exists(real_leads) else None
 ro1 = snapshot(real_out) if os.path.isdir(real_out) else {}
 ck("R6", r6.returncode == 0 and not outside and not work_left and iso and unatt and perm and restored
-   and rq0 == rq1 and ro0 == ro1 and rr0 == rr1,
+   and rq0 == rq1 and ro0 == ro1 and rr0 == rr1 and rl0 == rl1,
    "changed outside the allowed paths: %s; WORK left: %s; isolated %s, unattended+TMPDIR %s, acceptEdits+add-dir %s; "
    "a session's queue edit restored (then the appender's own items): %s; the real queue and ~/reviews/daily_brief "
-   "and the real recommendations ledger untouched" % (outside[:3], work_left, iso, unatt, perm, restored))
+   "and the real recommendations and leads ledgers untouched" % (outside[:3], work_left, iso, unatt, perm, restored))
 
 # ── R7 ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
 import study_dispatch as SD  # noqa: E402
@@ -611,11 +641,11 @@ try:
     comp = True
 except py_compile.PyCompileError:
     comp = False
-ck("R11", comp and "daily_brief.py  v1.8" in gs and 'NOTES_DIR = os.path.expanduser("~/reviews/daily_brief/notes")' in gs
+ck("R11", comp and "daily_brief.py  v1.9" in gs and 'NOTES_DIR = os.path.expanduser("~/reviews/daily_brief/notes")' in gs
    and "--facts" in gs and "--summary-json" in gs and "/home/ubuntu/venvs/daily_brief" in gs
    and not os.path.exists(os.path.join(TOOLS, "venv")) and not os.path.exists(os.path.join(TOOLS, "notes"))
    and "11-20 showed" not in gs and os.path.exists(os.path.join(TOOLS, "daily_brief.requirements.txt")),
-   "tools/daily_brief.py v1.8 compiles; notes under ~/reviews/daily_brief/notes; no venv or notes in the repo")
+   "tools/daily_brief.py v1.9 compiles; notes under ~/reviews/daily_brief/notes; no venv or notes in the repo")
 
 # ── R12 ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
 _r12q = os.path.join(TMP, "q12.md")
@@ -998,16 +1028,17 @@ def _ledger_rows(path):
 try:
     _bs26 = read(os.path.join(TOOLS, "daily_brief.py"))
     _ws26 = read(WRAP)
-    _i8 = _bs26.find('P("8. Recommendations — for approval", "h1")')
+    _i8 = _bs26.find('P("9. Recommendations — for approval", "h1")')   # v1.10: section 9 (the leads are 8)
     _after8 = _bs26[_i8:] if _i8 >= 0 else ""
     _sec = DR.rec_section("2026-11-24", os.path.join(TMP, "no_ledger.tsv"), None, "x")
     _ok26 = (_i8 > _bs26.find('P("7. The schedule, now to tomorrow 17:00 ET", "h1")') > 0
+             and _i8 > _bs26.find('P("8. Leads — forward progress", "h1")') > 0
              and _i8 < _bs26.find("# ── sources ──") and _after8.count('"h1")') == 1
              and "DR.rec_section(day, ledger or RECS_DEFAULT, cal, cerr, now)" in _bs26
              and "rsec, rerr = recommendations(day, recs)" in _bs26 and 'notes.get("recommendations_refused")' in _bs26
              and 'f"Recommendations: NOT READ ({rerr}).' in _bs26 and _sec["rows"] == [_HDR26]
              and '--recs "$RECS"' in _ws26 and _ws26.count('"$RECS"') >= 3 and 'recs --day "$DAY"' in _ws26)
-    _m26 = "section 8 at %d (section 7 before it, sources after it, %d h1 from it); header %s" % (
+    _m26 = "section 9 at %d (sections 7 and 8 before it, sources after it, %d h1 from it); header %s" % (
         _i8, _after8.count('"h1")'), _sec["rows"][0])
 except Exception as e:                                   # noqa: BLE001 (HEAD: no section 8, no rec_section)
     _ok26, _m26 = False, "%s: %s" % (type(e).__name__, e)
@@ -1141,13 +1172,14 @@ try:
          "id": "REC-20991231-9", "slot": "2026-11-25 18:30 ET", "decided_on": "2026-11-24"},
         {"what": "Bad line", "why": "y", "type": "nope", "touches": "control"}])))
     _rc29 = DR.main(["recs", "--day", "2026-11-24", "--notes", _n29p, "--ledger", _L29,
-                     "--cash-ready", os.path.join(TMP, "r29", "none")])
+                     "--cash-ready", os.path.join(TMP, "r29", "none"), "--leads", os.path.join(TMP, "r29", "none.tsv")])
     _t29 = read(_L29)
     _rows29 = _ledger_rows(_L29)
     _src = read(HELPER)
     _tree = _ast.parse(_src)
     _fns = {n.name: _ast.get_source_segment(_src, n) for n in _tree.body if isinstance(n, _ast.FunctionDef)}
-    _path = "".join(_fns.get(k, "MISSING") for k in ("rec_append", "own_recs", "session_recs", "cash_ready_recs"))
+    _path = "".join(_fns.get(k, "MISSING") for k in ("rec_append", "own_recs", "session_recs", "cash_ready_recs",
+                                                     "lead_recs"))
     _nn29 = json.loads(read(_n29p))
     _ok29 = (_rc29 == 0 and _t29.startswith(_pre29) and len(_rows29) == 3
              and _rows29[2]["id"] == "REC-20261124-1" and _rows29[2]["status"] == "NEW"
@@ -1186,6 +1218,232 @@ except Exception as e:                                   # noqa: BLE001
 except SystemExit as e:                                  # HEAD: argparse refuses context's unknown --recs
     _ok30, _m30 = False, "SystemExit %s (context takes no --recs)" % e
 ck("R30", _ok30, _m30)
+
+# ── R31-R36 (v1.10, LEADS.1): the leads that made forward progress ─────────────────────────────────────────────────
+_LCOLS = ["id", "opened", "lead", "source_study", "evidence", "status", "next_step", "decision_read", "last_progress",
+          "progress_note"]
+_LHDR = "\t".join(_LCOLS) + "\n"
+_LT_HDR = ["ID", "Lead", "Status", "Progress today · next", "Forward scorer (last run before the recap)"]
+
+
+def _lead(i, lead, st, lp, src="-", nxt="-", dr="-", note="moved", ev="ev"):
+    return "\t".join([i, "2026-11-20", lead, src, ev, st, nxt, dr, lp, note]) + "\n"
+
+
+def _mtime_et(p, y, mo, d, h, mi):
+    t = datetime(y, mo, d, h, mi, tzinfo=ET).timestamp()
+    os.utime(p, (t, t))
+
+
+_D31 = os.path.join(TMP, "r31")
+_ST31 = os.path.join(_D31, "studies")
+# the studies: one with a real summary (11-25 19:05 ET), one dry run only, one with none, one written after the recap
+write(os.path.join(_ST31, "ALPHA_EXITS_20261120", "FORWARD_SUMMARY.md"),
+      "# FORWARD_SUMMARY - ALPHA\n\nGenerated.\n\n**Status:** NOT DECIDABLE: 3/20 counted sessions (from 2026-11-23). "
+      "No decision may be taken.\n")
+write(os.path.join(_ST31, "ALPHA_EXITS_20261120", "FORWARD_SUMMARY_TEST.md"), "**Status:** DRY 9/20 counted\n")
+_mtime_et(os.path.join(_ST31, "ALPHA_EXITS_20261120", "FORWARD_SUMMARY.md"), 2026, 11, 25, 19, 5)
+_mtime_et(os.path.join(_ST31, "ALPHA_EXITS_20261120", "FORWARD_SUMMARY_TEST.md"), 2026, 11, 26, 9, 0)
+write(os.path.join(_ST31, "BETA_PARK_20261120", "FORWARD_S2_SUMMARY_TEST.md"), "# DRY RUN\nSessions: 2\n")
+os.makedirs(os.path.join(_ST31, "GAMMA_NONE_20261120"), exist_ok=True)
+write(os.path.join(_ST31, "DELTA_LATE_20261120", "FORWARD_SUMMARY.md"), "**Status:** NOT DECIDABLE: 4/20 counted.\n")
+_mtime_et(os.path.join(_ST31, "DELTA_LATE_20261120", "FORWARD_SUMMARY.md"), 2026, 11, 26, 18, 45)
+write(os.path.join(_ST31, "EPS_PARK_20261120", "FORWARD_SUMMARY.md"),
+      "# PARK forward\n\nSessions scored: 5 (2026-11-30 .. 2026-12-04); index PARK fires with quotes: 7 of the pass "
+      "bar's 20; booked PARK rows: 7\n")
+_mtime_et(os.path.join(_ST31, "EPS_PARK_20261120", "FORWARD_SUMMARY.md"), 2026, 12, 4, 19, 1)
+_L31 = os.path.join(_D31, "leads.tsv")
+write(_L31, "# leads fixture\n" + _LHDR
+      + _lead("L-01", "Alpha exits beat booked", "FORWARD", "2026-11-26", "ALPHA_EXITS_20261120", dr="~50 / ~100 sessions")
+      + _lead("L-02", "Old lead moved yesterday", "FORWARD", "2026-11-25", "ALPHA_EXITS_20261120")
+      + _lead("L-03", "Shadow lead", "FORWARD-SHADOW", "2026-11-26", "BETA_PARK / GAMMA_NONE_20261120",
+              dr="20 index fires")
+      + _lead("L-04", "Closed lead", "CLOSED-as-trigger", "2026-11-26")
+      + _lead("L-05", "Parked lead", "PARKED", "2026-11-26", nxt="revisit later")
+      + _lead("L-06", "Incorporate-worthy lead", "CHECKING", "2026-11-26", "ALPHA_EXITS_20261120",
+              note="recommend incorporating after the live-fill check", ev="Booked edge held. Second sentence.")
+      + _lead("L-07", "Future lead", "FORWARD", "2026-11-27")
+      + _lead("L-08", "Never progressed", "INPUT", "")
+      + _lead("L-09", "Late scorer lead", "FORWARD", "2026-11-26", "DELTA_LATE_20261120", dr="~50 sessions"))
+
+# R31
+try:
+    _bs31 = read(os.path.join(TOOLS, "daily_brief.py"))
+    _ws31 = read(WRAP)
+    _i7 = _bs31.find('P("7. The schedule, now to tomorrow 17:00 ET", "h1")')
+    _i8l = _bs31.find('P("8. Leads — forward progress", "h1")')
+    _i9 = _bs31.find('P("9. Recommendations — for approval", "h1")')
+    _mid = _bs31[_i8l:_i9] if 0 < _i8l < _i9 else ""
+    _ok31 = (0 < _i7 < _i8l < _i9 and _mid.count('"h1")') == 1
+             and "lsec, lerr = lead_progress(day, leads)" in _mid and 'f"Leads: NOT READ ({lerr}).' in _mid
+             and 'lsec["lines"]' in _mid and 'lsec["rows"]' in _mid and 'lsec["more"]' in _mid
+             and 'lsec["problems"]' in _mid
+             and "DR.lead_section(day, ledger or LEADS_DEFAULT, now=now)" in _bs31
+             and 'ap.add_argument("--leads"' in _bs31 and "build(day, notes, a.out, a.recs, a.leads)" in _bs31
+             and 'LEADS="$REVIEWS/schedule/leads.tsv"' in _ws31 and _ws31.count('--leads "$LEADS"') == 3
+             and "DAILY_RECAP_LEADS" not in _ws31 and 'recs --day "$DAY"' in _ws31)
+    _m31 = "sections 7/8/9 at %d/%d/%d; --leads passes %d; h1 in section 8: %d" % (
+        _i7, _i8l, _i9, _ws31.count('--leads "$LEADS"'), _mid.count('"h1")'))
+except Exception as e:                                   # noqa: BLE001 (HEAD: no section 8 leads)
+    _ok31, _m31 = False, "%s: %s" % (type(e).__name__, e)
+ck("R31", _ok31, _m31)
+
+# R32
+try:
+    _s32 = DR.lead_section("2026-11-26", _L31, _ST31)
+    _r32 = {r[0]: r for r in _s32["rows"][1:]}
+    _ids32 = [r[0] for r in _s32["rows"][1:]]
+    # the cap: LEAD_ROWS_MAX + 3 leads moved on one day
+    _n32 = DR.LEAD_ROWS_MAX + 3
+    _Lcap = os.path.join(_D31, "cap.tsv")
+    write(_Lcap, _LHDR + "".join(_lead("L-%02d" % k, "Lead %d" % k, "INPUT", "2026-11-26") for k in range(1, _n32 + 1)))
+    _c32 = DR.lead_section("2026-11-26", _Lcap, _ST31)
+    _ok32 = (_s32["rows"][0] == _LT_HDR and _ids32 == ["L-06", "L-01", "L-09", "L-03", "L-05", "L-04"]
+             and "L-02" not in _r32 and "L-07" not in _r32 and "L-08" not in _r32
+             and _s32["lines"][0].startswith("6 lead(s) moved on 11-26:")
+             and _r32["L-05"][4] == "-" and _r32["L-04"][4] == "-" and _r32["L-06"][4] == "-"
+             and _r32["L-01"][4] != "-" and _r32["L-03"][4] != "-"
+             and _r32["L-06"][3].startswith("RECOMMEND INCORPORATING") and "next: revisit later" in _r32["L-05"][3]
+             and _s32["more"] is None
+             and len(_c32["rows"]) == DR.LEAD_ROWS_MAX + 1 and _c32["more"] is not None
+             and _c32["more"].startswith("Also moved today: ") and _c32["more"].count("INPUT") == 3)
+    _m32 = "rows %s; cap %d rows + more=%r" % (_ids32, len(_c32["rows"]) - 1, (_c32["more"] or "")[:60])
+except Exception as e:                                   # noqa: BLE001 (HEAD: no lead_section)
+    _ok32, _m32 = False, "%s: %s" % (type(e).__name__, e)
+ck("R32", _ok32, _m32)
+
+# R33
+try:
+    _miss33 = os.path.join(_D31, "missing.tsv")
+    _a33 = DR.lead_section("2026-11-26", _miss33, _ST31)
+    _Lh = os.path.join(_D31, "header_only.tsv")
+    write(_Lh, "# only a header\n" + _LHDR)
+    _b33 = DR.lead_section("2026-11-26", _Lh, _ST31)
+    _Lb = os.path.join(_D31, "bad_header.tsv")
+    write(_Lb, "id\tlead\tstatus\nL-01\tx\tFORWARD\n")
+    _c33 = DR.lead_section("2026-11-26", _Lb, _ST31)
+    _Le = os.path.join(_D31, "empty.tsv")
+    write(_Le, "")
+    _e33 = DR.lead_section("2026-11-26", _Le, _ST31)
+    _q33 = DR.lead_section("2026-11-30", _L31, _ST31)
+    _w33 = os.path.join(TMP, "w33")
+    DR.main(["context", "--day", "2026-11-26", "--work", _w33, "--queue", _q17, "--notes-dir", os.path.join(TMP, "nd33"),
+             "--studies", os.path.join(TMP, "st33"), "--weekly", os.path.join(TMP, "wk33"),
+             "--otv5-backlog", os.path.join(TMP, "nobl"), "--hygiene", os.path.join(TMP, "hy33"),
+             "--botlogs", os.path.join(TMP, "bl33"), "--trades", os.path.join(TMP, "tr33"),
+             "--recs", os.path.join(TMP, "nr33.tsv"), "--leads", _miss33])
+    _cx33 = read(os.path.join(_w33, "context.md"))
+    _ok33 = (_a33["lines"] == ["No lead progress today.", "Leads ledger NOT READ (not found: %s)." % _miss33]
+             and _a33["rows"] == [_LT_HDR]
+             and _b33["lines"] == ["No lead progress today.", "Standing leads: none."] and _b33["rows"] == [_LT_HDR]
+             and _c33["lines"][0] == "No lead progress today." and "NOT READ (header is" in _c33["lines"][1]
+             and "NOT READ (header is" in _e33["lines"][1]
+             and _q33["lines"] == ["No lead progress today.",
+                                   "Standing leads: 4 FORWARD, 1 CHECKING, 1 FORWARD-SHADOW, 1 INPUT, 1 PARKED; "
+                                   "1 closed."]
+             and "Leads that progressed on 2026-11-26" in _cx33 and "  NOT READ (not found:" in _cx33)
+    _m33 = "missing %s; header-only %s; bad header %s; quiet %s" % (_a33["lines"][1][:40], _b33["lines"][1],
+                                                                    _c33["lines"][1][:40], _q33["lines"][1])
+except Exception as e:                                   # noqa: BLE001
+    _ok33, _m33 = False, "%s: %s" % (type(e).__name__, e)
+except SystemExit as e:                                  # HEAD: context takes no --leads
+    _ok33, _m33 = False, "SystemExit %s (context takes no --leads)" % e
+ck("R33", _ok33, _m33)
+
+# R34
+try:
+    _Lm = os.path.join(_D31, "malformed.tsv")
+    write(_Lm, _LHDR
+          + _lead("L-01", "Good lead", "FORWARD", "2026-11-26", "ALPHA_EXITS_20261120")
+          + "L-02\tshort row\tFORWARD\t2026-11-26\n"
+          + _lead("L-03", "Long row", "FORWARD", "2026-11-26").rstrip("\n") + "\textra\tcells\n"
+          + _lead("", "No id", "FORWARD", "2026-11-26")
+          + _lead("L-05", "Bad date", "FORWARD", "Thursday")
+          + "\x00\x01 junk \t\n"
+          + _lead("L-07", "Second good lead", "PARKED", "2026-11-26"))
+    _s34 = DR.lead_section("2026-11-26", _Lm, _ST31)
+    _ids34 = [r[0] for r in _s34["rows"][1:]]
+    _pr34 = _s34["problems"]
+    _lr34 = DR.lead_recs("2026-11-26", _Lm)
+    _w34 = os.path.join(TMP, "w34")
+    DR.main(["context", "--day", "2026-11-26", "--work", _w34, "--queue", _q17, "--notes-dir", os.path.join(TMP, "nd34"),
+             "--studies", os.path.join(TMP, "st34"), "--weekly", os.path.join(TMP, "wk34"),
+             "--otv5-backlog", os.path.join(TMP, "nobl"), "--hygiene", os.path.join(TMP, "hy34"),
+             "--botlogs", os.path.join(TMP, "bl34"), "--trades", os.path.join(TMP, "tr34"),
+             "--recs", os.path.join(TMP, "nr34.tsv"), "--leads", _Lm])
+    _cx34 = read(os.path.join(_w34, "context.md"))
+    _rows_m, _bad_m, _err_m = DR.read_leads(_Lm)
+    _ok34 = (_ids34 == ["L-01", "L-07"] and len(_pr34) == 4 and _pr34[3] == "and 2 more malformed leads row(s)"
+             and len(_bad_m) == 5 and any("L-02): 4 fields, not 10" in x for x in _bad_m)
+             and any("12 fields, not 10" in x for x in _bad_m) and any("no id" in x for x in _bad_m)
+             and any("'Thursday' is not a YYYY-MM-DD date" in x for x in _bad_m)
+             and _err_m is None and _lr34 == ([], []) and "  L-01 FORWARD: Good lead" in _cx34)
+    _m34 = "rows %s; notes %s" % (_ids34, _pr34)
+except Exception as e:                                   # noqa: BLE001
+    _ok34, _m34 = False, "%s: %s" % (type(e).__name__, e)
+except SystemExit as e:
+    _ok34, _m34 = False, "SystemExit %s" % e
+ck("R34", _ok34, _m34)
+
+# R35
+try:
+    _r35 = {r[0]: r for r in DR.lead_section("2026-11-26", _L31, _ST31)["rows"][1:]}
+    _f1, _f3, _f9 = _r35["L-01"][4], _r35["L-03"][4], _r35["L-09"][4]
+    _Lp = os.path.join(_D31, "park.tsv")
+    write(_Lp, _LHDR + _lead("L-01", "PARK stop", "FORWARD", "2026-12-07", "EPS_PARK", dr="20 index fires"))
+    _f_p = DR.lead_section("2026-12-07", _Lp, _ST31)["rows"][1][4]
+    _ok35 = (_f1 == "11-25 19:05 ET: NOT DECIDABLE: 3/20 counted sessions (from 2026-11-23) · decision read ~50 / "
+                    "~100 sessions"
+             and _f3 == "no forward record yet (dry run only) · decision read 20 index fires"
+             and DR.lead_study_dirs("BETA_PARK / GAMMA_NONE_20261120", _ST31) == ["BETA_PARK_20261120",
+                                                                                 "GAMMA_NONE_20261120"]
+             and DR.lead_study_dirs("../etc + operator direction 11-26", _ST31) == []
+             and DR.forward_line("GAMMA_NONE_20261120", _ST31) == (None, False)
+             and "lead_forward_cell" in read(HELPER)
+             and _f9.startswith("11-26 18:45 ET, after this recap: NOT DECIDABLE: 4/20 counted")
+             and _f_p.startswith("12-04 19:01 ET: Sessions scored: 5 (2026-11-30 .. 2026-12-04); index PARK fires "
+                                 "with quotes: 7 of the pass bar's 20")
+             and _f_p.endswith(" · decision read 20 index fires"))
+    _m35 = "L-01 %r | L-03 %r | L-09 %r | PARK %r" % (_f1, _f3, _f9[:50], _f_p[:60])
+except Exception as e:                                   # noqa: BLE001
+    _ok35, _m35 = False, "%s: %s" % (type(e).__name__, e)
+ck("R35", _ok35, _m35)
+
+# R36
+try:
+    _L36 = os.path.join(TMP, "r36", "recommendations.tsv")
+    _n36 = dict(NOTES_OK, proposals=[], maintenance={})
+    _new36, _dup36, _ref36, _ = DR.rec_append("2026-11-26", _n36, _L36, os.path.join(TMP, "r36", "none"), set(), _L31)
+    _rows36 = _ledger_rows(_L36)
+    _b36 = read(_L36)
+    _new36b, _dup36b, _, _ = DR.rec_append("2026-11-26", _n36, _L36, os.path.join(TMP, "r36", "none"), set(), _L31)
+    _same36 = read(_L36) == _b36
+    _new36c, _, _, _ = DR.rec_append("2026-11-25", _n36, _L36, os.path.join(TMP, "r36", "none"), set(), _L31)
+    _Lr = os.path.join(TMP, "r36", "rule.tsv")
+    write(_Lr, _LHDR + _lead("L-20", "Place a resting take-profit order at +50%", "RECOMMEND", "2026-11-26"))
+    _, _, _ref36d, _ = DR.rec_append("2026-11-26", _n36, os.path.join(TMP, "r36", "rule_recs.tsv"),
+                                     os.path.join(TMP, "r36", "none"), set(), _Lr)
+    _L36e = os.path.join(TMP, "r36", "main_recs.tsv")
+    _np36 = os.path.join(TMP, "r36", "notes.json")
+    write(_np36, json.dumps(_n36))
+    _rc36 = DR.main(["recs", "--day", "2026-11-26", "--notes", _np36, "--ledger", _L36e,
+                     "--cash-ready", os.path.join(TMP, "r36", "none"), "--leads", _L31])
+    _rows36e = _ledger_rows(_L36e)
+    _ok36 = (len(_rows36) == 1 and _rows36[0]["id"] == "REC-20261126-1" and _rows36[0]["status"] == "NEW"
+             and _rows36[0]["what"] == "Incorporate lead L-06: Incorporate-worthy lead"
+             and _rows36[0]["why"] == "Booked edge held." and _rows36[0]["type"] == "decision"
+             and _rows36[0]["touches"] == "none" and "[ref L-06]" in _rows36[0]["note"]
+             and _rows36[0]["slot"] == "" and _new36b == [] and _same36 and _dup36b and _dup36b[0][1] == "REC-20261126-1"
+             and _new36c == []
+             and any(w == "lead L-20" and any("resting take-profit" in x for x in y) for w, y in _ref36d)
+             and _rc36 == 0 and [r["what"] for r in _rows36e] == ["Incorporate lead L-06: Incorporate-worthy lead"])
+    _m36 = "rows %s; re-run dups %s; refused %s" % ([(r["id"], r["what"][:40]) for r in _rows36], _dup36b,
+                                                    [w for w, _y in _ref36d])
+except Exception as e:                                   # noqa: BLE001 (HEAD: rec_append takes no leads)
+    _ok36, _m36 = False, "%s: %s" % (type(e).__name__, e)
+except SystemExit as e:
+    _ok36, _m36 = False, "SystemExit %s (recs takes no --leads)" % e
+ck("R36", _ok36, _m36)
 
 shutil.rmtree(TMP, ignore_errors=True)
 print()
