@@ -1,4 +1,6 @@
-# THE SATURDAY BRIEF — spec v3.3
+# THE SATURDAY BRIEF — spec v3.4
+
+**v3.4 · 2026-11-27 · dtp r586 (SATLONG.1, REC-20261126-4)**: two additions; the layout, the brief's own timer, the run order and the CLOSE are unchanged. The operator, 2026-11-26: *"that Saturday report should be the long form version of what was left out of the nightly reports to keep them lightweight & relevant"*. One new scorer, `tools/saturday_long.py` v1.0 (`--fri <Fri> --out <WORK>`, read only), writes both. (1) **Paper vs cash — edge transfer (2A).** Per cash box and symbol: the cash trades against each fire's paper twin, else the strict-fill model's prediction (precomputed, or computed by the study's own code), the slippage against the row's mark, fees beside, and the cumulative book from each symbol's cash start, flagged against the minimum-edge baseline `MIN_EDGE_EV_PER_TRADE_USD` (a named constant in the tool, 0 until the operator sets it; never a config or env knob). (2) **Leads — full ledger (2B).** Every row of `~/reviews/schedule/leads.tsv` by status, and every forward scorer's full cumulative block, dated. Gate `tests/check_saturday_brief.py` v2.7 (S42–S47).
 
 **v3.3 · 2026-11-22 · dtp r575 (HALF.2, RWATCH.1)**: two additions; the layout, the brief's own timer, the run order and the CLOSE are unchanged. (1) **A half day is a non-trading day.** The operator, 2026-11-22: *"Yes, just treat them as bank holidays. No trading."* OTV5 r145 opens nothing on a 13:00 half day (2026-11-27, 2026-12-24); the boxes still wake and record data. `tools/weekly_facts.py` v1.1 leaves half days out of the week's sessions the way `cash_books` does (r574), names them in its header, and puts any trade dated on one on a DEFECT line (it stays in every total). Rule 15 below; 4.4 says so. (2) **The Runaway equity watch (2A).** The operator, 2026-11-22: *"I would keep any poor performers on runaway on notice to potentially be cut"* and *"Can you put a trend bar for runaway on the equities to see if they are trending in the right direction or the wrong direction for that setup?"* The list (NVDA, AMD, META) and the cut bar are frozen in `~/reviews/runaway_watch_20261122/WATCH.md` (sealed); `tools/runaway_watch.py` v1.0 scores them; 2A quotes it every Saturday. Gate `tests/check_saturday_brief.py` v2.4 (S39, S40), `tests/check_runaway_watch.py` v1.0.
 
@@ -353,6 +355,26 @@ n beside). One paragraph of commentary quotes it, never re-derives it, and says 
 trades is a small sample. A RECOMMEND CUT goes to section 4 as a recommendation for the operator's yes, never a
 decision; the list and the bar are never re-argued. Report only.
 
+**Paper vs cash — edge transfer (v3.4)**, standing, every Saturday from the first cash session (QQQ, 2026-11-30). The
+operator, 2026-11-26: *"that Saturday report should be the long form version of what was left out of the nightly
+reports to keep them lightweight & relevant"*. One scorer computes it,
+`tools/saturday_long.py --fri <Fri> --out <WORK>` (`<WORK>/edge_transfer.md`). A box is in CASH mode on a day when its
+Service mode start line says LIVE, else when it booked a cash row that day (`review_kit.split`'s own rule). Per symbol,
+for the week and cumulative from the symbol's own cash start: the cash trades' realised P&L (paper_trade 0); each
+trade's comparator for the same fire, named on its row: its **paper twin** (a paper row on the same box and day, same
+setup and side, opened within `TWIN_JOIN_S`), else the **strict-fill model's prediction** for that trade_id
+(`~/reviews/studies/C5_STRICT_20261124` v1.1 at the 1 s headline delay, then
+`RUNAWAY_LIVEFILL_CHECK_20261126`'s headline variant; with no precomputed row, that study's own model code computes it
+in the tool, read only and hash-checked, on the trade's quote window cached under `<WORK>/livefill_cache/`), else NOT
+MEASURED by trade_id with the data failure named; the entry and exit slippage against
+the mark recorded on the row's warehouse record (entry: the selection quote's midpoint; exit: the mark at the exit
+trigger), so the same fills at the mark = cash + entry slip + exit slip; fees beside, never inside EV; the cumulative EV
+with its day-bootstrap interval and n; and **BELOW BASELINE** when the cumulative net EV a trade is under
+`MIN_EDGE_EV_PER_TRADE_USD`. The baseline is the operator's call: a named constant in the tool (0, a placeholder, until
+they set it), never a config or env knob, changed by a one-line land. A week with none: "No cash trades this week.",
+with the boxes that were in cash mode and traded nothing. A BELOW BASELINE symbol goes to section 4 for the operator's
+yes. Report only.
+
 **Decisions in progress (every Saturday brief dated on or before 2026-12-04).** The operator decides the Hunt and
 OGAP before the 12-04 cash test; until then 2A shows the numbers they decide on. From 2026-12-05 the OGAP line and
 the Hunt line leave the brief; OGAP vs PARK stays every Saturday until its rule's decision point or the operator's
@@ -460,6 +482,16 @@ before testing. Every item marked OPEN is run blind, and since v2.6 they run ON 
 
 Queued items don't count against the cap of five new proposals. Sessions add items by appending to the file
 (IDs WS.<n>, never reused); nothing in this spec needs to change when they do.
+
+**Leads — full ledger (v3.4)**, standing, every Saturday. The daily recap's section 8 shows only the leads that moved
+that day; the brief carries the long form, from the same `tools/saturday_long.py` run (`<WORK>/leads_full.md`): every
+row of `~/reviews/schedule/leads.tsv` (read with `daily_recap.read_leads`, the recap's own reader), grouped by status
+(recommend incorporating first, then FORWARD, FORWARD-SHADOW, CHECKING, RUNNING, INPUT, PARKED, the rest, CLOSED last),
+each with its evidence, next step and decision read; then, for every FORWARD and FORWARD-SHADOW lead, each forward
+scorer summary (`FORWARD*SUMMARY*.md` in the study folders its source_study names, never a `*_TEST*` dry run): its
+Status line and its whole cumulative block, dated with the file's own ET time. A missing ledger or a bad header is NOT
+READ (to NOT MEASURED); a malformed row is skipped and named. A lead is never a finding before its decision read; one
+marked recommend incorporating goes to section 4 for the operator's yes.
 
 **Standing studies (kept from the old Saturday rows; GIVE.2 and DAY.1 closed at OTV5 r81, v3.1):**
 - **CUT.1, fleet:** OTV5 ends Runaway and Breakout entries at 10:29 (`RUNAWAY_END`, `BREAKOUT_END`) and records

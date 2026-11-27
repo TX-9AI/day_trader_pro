@@ -3,7 +3,7 @@ The operator is asleep. Nothing is sent: when they ask, a session shows them the
 index and then one section (or one part, 1A..4) at a time. The file you write is the brief.
 
 READ FIRST, IN THIS ORDER:
-  1. /home/ubuntu/day_trader_pro/docs/SATURDAY_BRIEF.md  the operator's spec (v3.3), in full. It is the authority
+  1. /home/ubuntu/day_trader_pro/docs/SATURDAY_BRIEF.md  the operator's spec (v3.4), in full. It is the authority
   2. /home/ubuntu/OTV5/docs/WORKING_AGREEMENT.md         §0, §0.1, §0.5, §12, §17, §31, §36a
   3. /home/ubuntu/OTV5/docs/GENESIS.md                   the last 12 rows
   4. /home/ubuntu/OTV5/docs/BACKLOG.md                   PART 1 (open rows), section H in full
@@ -140,6 +140,21 @@ THE NUMBERS FIRST (spec "The numbers (v3.0)"), before section 1 (about 30 s, S3 
        forward trades is a small sample: say so. A RECOMMEND CUT goes to section 4 as a recommendation for the
        operator's yes, never a decision. QUOTE ITS FIGURES; never re-derive one; never a different bar or list, never a
        cut of a symbol not on it. REPORT ONLY; never call the paper dollars "paper size".
+     · PAPER VS CASH — EDGE TRANSFER (standing, every Saturday; dtp r586 SATLONG.1; the operator, 2026-11-26: "that
+       Saturday report should be the long form version of what was left out of the nightly reports to keep them
+       lightweight & relevant"). One scorer writes this part and 2B's full leads ledger (seconds; S3 reads only):
+         cd /home/ubuntu/day_trader_pro && ./venv/bin/python -I tools/saturday_long.py --fri <this Friday> --out <WORK>
+       It writes <WORK>/edge_transfer.md, <WORK>/leads_full.md and <WORK>/saturday_long.json. QUOTE IT; never
+       re-derive a figure it prints. For every box in CASH mode on a day of the week (its Service mode LIVE start line,
+       else a cash row that day: review_kit's one rule), per symbol: the cash trades' realised P&L against each trade's
+       COMPARATOR for the same fire (its paper twin when one exists, else the strict-fill model's prediction for that
+       trade_id: C5_STRICT v1.1's row, then RUNAWAY_LIVEFILL_CHECK's, else that model computed by the tool on the trade's
+       own quote stream; NOT MEASURED only for a data failure, by trade_id with its reason; the source named on every row), the entry and exit slippage against the mark recorded on the row, fees beside (never in EV), and the
+       CUMULATIVE book from each symbol's own cash start with its interval and the minimum-edge flag (BELOW BASELINE
+       when the cumulative net EV a trade is under the tool's MIN_EDGE_EV_PER_TRADE_USD; the value is the operator's
+       call: say so, never propose a number yourself). A week with none prints "No cash trades this week.": quote it
+       and say which boxes were in cash mode with no trade. A BELOW BASELINE symbol goes to section 4 as a
+       recommendation for the operator's yes, never a decision; a few cash trades are a small sample: say n each time.
      · DECISIONS IN PROGRESS, every Saturday brief dated on or before 2026-12-04 (the operator decides the Hunt and
        OGAP before the 12-04 cash test). REPORT ONLY; none of them makes an R-item in section 4.
      · OGAP (standing, every Saturday from 2026-11-16 through 2026-12-04; OTV5 OGAP.1, Park's friend's opening-gap trade; QQQ paper to OTV5 r148, paper on every box from r149 OGAP.4,
@@ -213,6 +228,13 @@ THE NUMBERS FIRST (spec "The numbers (v3.0)"), before section 1 (about 30 s, S3 
        before), each with a timeout, no new item in the last 45 minutes before the DEADLINE; update the
        item's Status yourself; list the dispatch failure and every unfinished item under NOT MEASURED.
        Queued items do not count against the cap of five NEW proposals.
+     · LEADS — FULL LEDGER (standing, every Saturday; dtp r586 SATLONG.1; the daily recap shows only the day's movers,
+       this is the long form): <WORK>/leads_full.md from the same tools/saturday_long.py run. Show EVERY row of
+       ~/reviews/schedule/leads.tsv grouped by status (recommend incorporating first, CLOSED last) with its evidence,
+       next step and decision read, then, for each FORWARD / FORWARD-SHADOW lead, every forward scorer summary in
+       full: its Status line and its whole cumulative block, with the date the file was written (never a *_TEST* dry
+       run, which it names apart). QUOTE IT; a lead is never a finding before its decision read; a ledger NOT READ goes
+       to NOT MEASURED; a lead marked recommend incorporating goes to section 4 for the operator's yes.
      · the standing studies (CUT.1, PIN.3) as the spec says, and NEW PROPOSALS: at most five, each
        with a hypothesis, the data, a pass bar written BEFORE testing, the expected $ effect and the cost. Search
        the backlog, the queue and last week's brief first, so a failed study is not proposed again as new.

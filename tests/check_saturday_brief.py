@@ -1,6 +1,20 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_saturday_brief.py  v2.6
+day_trader_pro/tests/check_saturday_brief.py  v2.7
+v2.7  2026-11-27  dtp r586 (SATLONG.1, REC-20261126-4). The operator, 2026-11-26: "that Saturday report should be the long
+      form version of what was left out of the nightly reports to keep them lightweight & relevant". NEW S42-S47, the
+      one new scorer tools/saturday_long.py DRIVEN on fixtures: S42 2A carries PAPER VS CASH - EDGE TRANSFER (after the
+      Runaway watch) and 2B LEADS - FULL LEDGER in the prompt and spec v3.4, and the scorer writes both parts; S43 the
+      cash/paper pairing (a cash row's paper twin: same box, day, setup and side within TWIN_JOIN_S, never a walled
+      PARK row or a row 300 s away; else the C5_STRICT v1.1 1 s model row; else NOT MEASURED), the slippage against the
+      row's mark, a paper box never listed; S44 the empty week ("No cash trades this week.", a cash box with no trade
+      named with its cumulative book); S45 every ledger row by status with its evidence, a malformed row skipped and
+      named, a bad header or missing ledger NOT READ, never a crash; S46 every forward scorer's Status line and whole
+      cumulative block, dated, the daily log and *_TEST* dry runs never shown as the record; S47 the minimum-edge
+      baseline is one named constant (0, a TODO: the operator's call), never a config or env knob; S48 a cash trade
+      with no twin and no precomputed row is priced by RUNAWAY_LIVEFILL_CHECK's own model (read only, hash-checked, a
+      child interpreter, cached quotes), a data failure stays NOT MEASURED and says which. S36's spec anchor
+      accepts v3.3 or later (v2.6's exact v3.3 anchor is red on spec v3.4). BORN RED on 8ce8189 at S42-S48.
 v2.6  2026-11-24  dtp r583 (CASHBOOK.3). NEW S41: 1C shows C5 beside C1-C4 (prompt): the same scorer, C5 frozen in
       ~/reviews/cash_candidate_c5_20261124/PREREG.md, its own "C5 forward" table from 2026-11-24 apart from C1-C4's
       forward window, the ranking tag, and C5's in-sample and combined figures never evidence (only its forward figures
@@ -904,7 +918,7 @@ _b2 = _p36.split("### 2B.", 1)[-1].split("## 3.", 1)[0]
 _sh36 = open(SH).read()
 ck("S36", "<WORK>/study_dispatch_nightly_<YYYY-MM-DD>" in _b2 and "study_dispatch.py status --out <WORK>/study_dispatch_nightly_" in _b2
    and "2B covers EVERY run of the week" in _b2 and "at most 3 at once" in _b2 and "PARK and Runaway" in _b2
-   and "# THE SATURDAY BRIEF — spec v3.3" in spec and "**The whole week's runs (v3.2).**" in spec
+   and re.search(r"# THE SATURDAY BRIEF — spec v3\.([3-9]|\d\d)\n", spec) is not None and "**The whole week's runs (v3.2).**" in spec
    and "study_dispatch_nightly_<YYYY-MM-DD>" in _s36 and "Mon–Fri 17:15 ET" in _s36
    and 'NIGHTLY the week' in _sh36 and "study_dispatch_nightly_20??-??-??" in _sh36
    and _sh36.index("_nightly=") < _sh36.index('timeout "$BUDGET_S"'),
@@ -974,6 +988,247 @@ ck("S41", "C5 BESIDE C1-C4" in _c1 and "cash_candidate_c5_20261124/PREREG.md" in
    and "C5'S IN-SAMPLE AND COMBINED FIGURES ARE NEVER EVIDENCE" in _c1 and "ONLY C5'S FORWARD FIGURES COUNT" in _c1
    and '"(hindsight list; forward from 11-24)"' in _c1 and _c1.find("C5 BESIDE C1-C4") > _c1.find("THE CASH CANDIDATE BOOKS C1-C4"),
    "1C shows C5 beside C1-C4: its own forward table from 11-24, hindsight in-sample never evidence")
+
+# S42-S47 (v2.7, dtp r586 / SATLONG.1): the long form - paper vs cash edge transfer (2A) and the full leads ledger (2B),
+# one scorer tools/saturday_long.py, DRIVEN on fixtures (no S3: the warehouse rows are injected or --no-warehouse).
+from datetime import datetime          # noqa: E402
+from zoneinfo import ZoneInfo          # noqa: E402
+SL = os.path.join(ROOT, "tools", "saturday_long.py")
+_sl_src = open(SL).read() if os.path.exists(SL) else ""
+_a2_42 = _p36.split("### 2A.", 1)[-1].split("### 2B.", 1)[0]
+_b2_42 = _p36.split("### 2B.", 1)[-1].split("## 3.", 1)[0]
+_sa2_42 = _s36.split("### 2A. TOP EARNING SETUP CONDITIONS, AND WHERE TO LOOK FOR EDGE")[-1].split("### 2B.", 1)[0]
+_sb2_42 = _s36.split("### 2B. THE WEEK'S STUDIES")[-1].split("## 3. BOT PERFORMANCE", 1)[0]
+_TC42 = ("sym,trade_id,strategy,direction,contracts,entry_premium,exit_premium,pnl_usd,entry_time,exit_time,exit_reason,"
+         "fee,mfe_premium,entry_exec_premium,exit_exec_premium,pnl_exec_usd,would_fill_live,paper_trade,after_cap")
+
+
+def _fx42(root):
+    """A reviews tree: QQQ in cash mode 11-30 and 12-01 (Service mode LIVE), SPX paper. 11-30: cash k1 with a paper
+    twin t1 (25 s), a paper Runaway t9 300 s after k3 (no twin), a walled PARK p1 (another setup, no twin), cash k2 with a
+    C5_STRICT model row (1 s: -150; a 0.5 s decoy), cash k3 with neither; an SPX paper row (a paper box)."""
+    for d, modes in (("2026-11-30", {"QQQ": "LIVE", "SPX": "PAPER"}), ("2026-12-01", {"QQQ": "LIVE"}),
+                     ("2026-12-07", {"QQQ": "LIVE"})):
+        bd = os.path.join(root, "daily_brief", "botlogs", d)
+        os.makedirs(bd, exist_ok=True)
+        for sym, m in modes.items():
+            open(os.path.join(bd, sym + ".txt"), "w").write(
+                "%s 13:51:04 [INFO ] __main__: Service mode: %s | %s | risk=$1050/trade\n" % (d, m, sym))
+    os.makedirs(os.path.join(root, "trades"), exist_ok=True)
+    rows = [("QQQ", "k1", "RunawayContinuation", "long", 2, 1.00, 1.50, 100.0, "14:40:05", 2.0, 0),
+            ("QQQ", "t1", "RunawayContinuation", "long", 2, 0.98, 1.52, 108.0, "14:40:30", 2.0, 1),
+            ("QQQ", "t9", "RunawayContinuation", "long", 1, 0.90, 1.00, 10.0, "16:05:00", 2.0, 1),
+            ("QQQ", "p1", "PARK", "long", 2, 1.00, 2.00, 200.0, "14:40:10", 2.0, 1),
+            ("QQQ", "k2", "RunawayContinuation", "short", 3, 2.00, 1.60, -120.0, "15:30:00", 2.0, 0),
+            ("QQQ", "k3", "RunawayContinuation", "long", 1, 1.00, 1.10, 10.0, "16:00:00", 2.0, 0),
+            ("SPX", "s1", "RunawayContinuation", "long", 1, 5.00, 6.00, 100.0, "14:41:00", 2.0, 1)]
+    with open(os.path.join(root, "trades", "2026-11-30.csv"), "w") as fh:
+        fh.write(_TC42 + "\n")
+        for (sy, ti, stg, dr, c, ep, xp, pnl, hms, fee, pap) in rows:
+            fh.write("%s,%s,%s,%s,%d,%.2f,%.2f,%.2f,2026-11-30T%s+00:00,2026-11-30T16:30:00+00:00,trail,%.2f,,,,,,%d,\n"
+                     % (sy, ti, stg, dr, c, ep, xp, pnl, hms, fee, pap))
+    c5 = os.path.join(root, "studies", "C5_STRICT_20261124")
+    os.makedirs(c5, exist_ok=True)
+    with open(os.path.join(c5, "results_v1_1.csv"), "w") as fh:
+        fh.write("day,trade_id,symbol,delay,filled,strict_pnl,scorable\n"
+                 "2026-11-30,k2,QQQ,0.5,1,-999.0,1\n2026-11-30,k2,QQQ,1.0,1,-150.0,1\n")
+    return [dict(trade_id="k1", entry_bid=0.98, entry_ask=1.00, exit_mark_at_trigger=1.52),
+            dict(trade_id="k2", entry_bid=1.98, entry_ask=2.04, exit_bid=1.58, exit_ask=1.64)]
+
+
+_t42 = tempfile.mkdtemp(prefix="chk_satbrief_long_")
+_wh42 = _fx42(_t42)
+_E = _E0 = _E1 = None
+_err42 = ""
+try:
+    sys.path.insert(0, os.path.join(ROOT, "tools"))
+    import saturday_long as SLM          # noqa: E402
+    _E = SLM.edge_transfer("2026-12-04", _t42, os.path.join(_t42, "studies"), wh_rows=_wh42)
+    _E0 = SLM.edge_transfer("2026-11-27", _t42, os.path.join(_t42, "studies"), use_wh=False)   # before any cash day
+    _E1 = SLM.edge_transfer("2026-12-11", _t42, os.path.join(_t42, "studies"), use_wh=False)   # cash box, no trade
+except Exception as _e42:                # a crash is a red, never a stop
+    _err42 = "%s: %s" % (type(_e42).__name__, _e42)
+_o42 = os.path.join(_t42, "out")
+r42 = subprocess.run([sys.executable, "-I", SL, "--fri", "2026-12-04", "--out", _o42, "--no-warehouse",
+                      "--reviews", _t42], capture_output=True, text=True, timeout=300)
+_md42 = open(os.path.join(_o42, "edge_transfer.md")).read() if r42.returncode == 0 else ""
+_ld42 = open(os.path.join(_o42, "leads_full.md")).read() if r42.returncode == 0 else ""
+
+ck("S42", "· PAPER VS CASH — EDGE TRANSFER" in _a2_42 and "tools/saturday_long.py --fri <this Friday> --out <WORK>" in _a2_42
+   and _a2_42.find("THE RUNAWAY EQUITY WATCH") < _a2_42.find("· PAPER VS CASH — EDGE TRANSFER") < _a2_42.find("· DECISIONS IN PROGRESS")
+   and "QUOTE IT" in _a2_42 and "No cash trades this week." in _a2_42 and "MIN_EDGE_EV_PER_TRADE_USD" in _a2_42
+   and "· LEADS — FULL LEDGER" in _b2_42 and "<WORK>/leads_full.md" in _b2_42 and "EVERY row" in _b2_42
+   and "never a *_TEST* dry run" in _b2_42
+   and "**Paper vs cash — edge transfer (v3.4)**" in _sa2_42 and "**Leads — full ledger (v3.4)**" in _sb2_42
+   and re.search(r"# THE SATURDAY BRIEF — spec v3\.([4-9]|\d\d)", spec) is not None and "**v3.4 ·" in spec
+   and r42.returncode == 0 and _md42.startswith("# Paper vs cash - edge transfer (2A)")
+   and _ld42.startswith("# Leads - full ledger (2B)"),
+   "2A carries the edge transfer after the Runaway watch, 2B the full leads ledger, spec v3.4 says so, and the one "
+   "scorer writes both parts (rc=%s %s)" % (r42.returncode, (r42.stderr or "")[-200:]))
+
+_tr = {t["tid"]: t for t in (_E or {}).get("trades", [])}
+_q = next((x for x in (_E or {}).get("symbols", []) if x["sym"] == "QQQ"), None)
+_k1, _k2, _k3 = _tr.get("k1", {}), _tr.get("k2", {}), _tr.get("k3", {})
+ck("S43", _E is not None and _E["cash_boxes"] == ["QQQ"] and sorted(_tr) == ["k1", "k2", "k3"]
+   and _k1.get("cmp") == 108.0 and str(_k1.get("cmp_src", "")).startswith("paper twin t1")
+   and _k2.get("cmp") == -150.0 and "C5_STRICT v1.1" in str(_k2.get("cmp_src")) and _k3.get("cmp") is None
+   and _E["not_measured"] == ["k3"] and _E["no_slip"] == ["k3"]
+   and abs((_k1.get("entry_slip") or 0) - 2.0) < 1e-6 and abs((_k1.get("exit_slip") or 0) - 4.0) < 1e-6
+   and abs((_k1.get("mark_pnl") or 0) - 106.0) < 1e-6
+   and abs((_k2.get("entry_slip") or 0) + 3.0) < 1e-6 and abs((_k2.get("exit_slip") or 0) - 3.0) < 1e-6
+   and _q is not None and _q["week"]["n"] == 3 and _q["week"]["n_cmp"] == 2 and _q["week"]["n_twin"] == 1
+   and abs(_q["week"]["diff"] - 22.0) < 1e-6 and abs(_q["week"]["net"] - (-16.0)) < 1e-6
+   and _q["cash_start"] == "2026-11-30" and _q["flag"] == "BELOW BASELINE"
+   and SLM.flag(_q["cum"], baseline=-10.0) == "at or above"
+   and "SPX" not in [x["sym"] for x in _E["symbols"]] and "NOT MEASURED (no comparator): k3." in _md42
+   and "C5_STRICT v1.1" in _md42 and "paper twin t1" in _md42,
+   "cash rows pair with their paper twin (same box, day, setup, side, within the window; never a walled PARK or a row "
+   "300 s away), else the model's 1 s row, else NOT MEASURED; slippage against the row's mark; a paper box is not "
+   "listed (%s)" % (_err42 or "trades %s" % sorted(_tr)))
+
+_md0 = SLM.render_edge(_E0) if _E0 else ""
+_md1 = SLM.render_edge(_E1) if _E1 else ""
+_q1 = next((x for x in (_E1 or {}).get("symbols", []) if x["sym"] == "QQQ"), None)
+ck("S44", _E0 is not None and _E0["empty"] and _E0["cash_boxes"] == [] and "No cash trades this week." in _md0
+   and "## Cumulative" not in _md0
+   and _E1 is not None and _E1["empty"] and _E1["cash_boxes"] == ["QQQ"] and "No cash trades this week." in _md1
+   and "Boxes in cash mode with no cash trade: QQQ." in _md1 and _q1 is not None and _q1["cum"]["n"] == 3
+   and _q1["cash_start"] == "2026-11-30" and "## Cumulative since each symbol's cash start" in _md1,
+   "an empty week prints 'No cash trades this week.'; a cash box with no trade is named and keeps its cumulative book")
+
+_lt = os.path.join(_t42, "leads")
+os.makedirs(_lt)
+_LH = "\t".join(("id", "opened", "lead", "source_study", "evidence", "status", "next_step", "decision_read",
+                 "last_progress", "progress_note"))
+open(os.path.join(_lt, "good.tsv"), "w").write("\n".join([
+    _LH,
+    "L-01\t2026-11-26\tSPX exits A\tSTUDY_A_20261126\t+$10/session in-sample\tFORWARD\tnightly scorer\t~50 sessions\t2026-11-26\topened",
+    "L-02\t2026-11-26\tclosed one\t-\tfailed\tCLOSED-checked\t-\t-\t2026-11-26\tclosed",
+    "L-03\t2026-11-26\tbad row\tonly four fields",
+    "L-04\t2026-11-26\tparked one\tSTUDY_C\tthin\tPARKED\trevisit\t-\t2026-11-20\tparked",
+    "L-05\t2026-11-26\tshadow B\tSTUDY_B_20261126\tpost hoc\tFORWARD-SHADOW\tnightly\t~50 sessions\t2026-11-26\tfrozen",
+    "L-06\t2026-11-26\tadopt it\tSTUDY_A_20261126\tpassed\tRECOMMEND\tincorporate\t20 fires\t2026-11-27\trecommend incorporating"]) + "\n")
+open(os.path.join(_lt, "badhdr.tsv"), "w").write("id\tlead\nL-01\tx\n")
+_sa = os.path.join(_t42, "studies", "STUDY_A_20261126")
+_sb = os.path.join(_t42, "studies", "STUDY_B_20261126")
+os.makedirs(_sa)
+os.makedirs(_sb)
+open(os.path.join(_sa, "FORWARD_SUMMARY.md"), "w").write(
+    "# FORWARD_SUMMARY - STUDY_A frozen arms\n\nGenerated.\n\n**Status:** NOT DECIDABLE: 3/20 counted sessions.\n\n"
+    "## Cumulative (counted sessions only)\n\n**All:** n=4, diff +$12/session [-5, +30]\n\n| arm | diff |\n|---|---|\n"
+    "| A1 | +12 |\n\n## Daily log (one row per DAY)\n\n| day | x |\n|---|---|\n| 2026-11-30 | DAILYROW |\n")
+open(os.path.join(_sa, "FORWARD_SUMMARY_TEST.md"), "w").write("**Status:** TESTROW\n")
+open(os.path.join(_sb, "FORWARD_SUMMARY_TEST.md"), "w").write("**Status:** TESTROW\n")
+_ts = datetime(2026, 11, 28, 2, 0, tzinfo=ZoneInfo("America/New_York")).timestamp()
+os.utime(os.path.join(_sa, "FORWARD_SUMMARY.md"), (_ts, _ts))
+_st42 = os.path.join(_t42, "studies")
+_Lg = _Lb = _Lm = None
+_err45 = ""
+try:
+    _Lg = SLM.leads_full(os.path.join(_lt, "good.tsv"), _st42)
+    _Lb = SLM.leads_full(os.path.join(_lt, "badhdr.tsv"), _st42)
+    _Lm = SLM.leads_full(os.path.join(_lt, "missing.tsv"), _st42)
+    _rg, _rb, _rm = SLM.render_leads(_Lg), SLM.render_leads(_Lb), SLM.render_leads(_Lm)
+except Exception as _e45:
+    _err45 = "%s: %s" % (type(_e45).__name__, _e45)
+    _rg = _rb = _rm = ""
+_ids = [r["id"] for g in (_Lg or {}).get("groups", []) for r in g["rows"]]
+_gs = [g["status"] for g in (_Lg or {}).get("groups", [])]
+ck("S45", not _err45 and _ids == ["L-06", "L-01", "L-05", "L-04", "L-02"] and _gs[0] == "RECOMMEND"
+   and _gs[-1].startswith("CLOSED") and "Skipped (malformed): leads row 4 (L-03)" in _rg
+   and "+$10/session in-sample" in _rg and "nightly scorer" in _rg and "~50 sessions" in _rg
+   and "2026-11-20: parked" in _rg
+   and _Lb is not None and _Lb["err"] and "Leads ledger NOT READ (header is" in _rb
+   and _Lm is not None and "Leads ledger NOT READ (not found:" in _rm,
+   "every ledger row by status (recommend first, CLOSED last) with evidence, next step and decision read; a malformed "
+   "row skipped and named; a bad header or a missing ledger NOT READ, never a crash (%s)" % (_err45 or _ids))
+
+_sc = {s["folder"]: s for s in (_Lg or {}).get("scorers", []) if s.get("folder")}
+_fa = (_sc.get("STUDY_A_20261126") or {}).get("files") or [{}]
+ck("S46", "STUDY_A_20261126" in _sc and _sc["STUDY_A_20261126"]["leads"] == ["L-01"]
+   and _fa[0].get("dated") == "2026-11-28 02:00 ET" and "dated 2026-11-28 02:00 ET" in _rg
+   and "Status: NOT DECIDABLE: 3/20 counted sessions." in _rg and "#### Cumulative (counted sessions only)" in _rg
+   and "**All:** n=4, diff +$12/session [-5, +30]" in _rg and "| A1 | +12 |" in _rg
+   and "DAILYROW" not in _rg and "TESTROW" not in _rg
+   and "Dry runs in the folder (never counted, not shown): FORWARD_SUMMARY_TEST.md." in _rg
+   and "No forward summary yet (dry run only: FORWARD_SUMMARY_TEST.md)." in _rg
+   and "STUDY_C" not in _sc and len(_fa) == 1,
+   "each FORWARD / FORWARD-SHADOW lead's scorer: the Status line and the whole cumulative block, dated with the file's "
+   "ET time; the daily log and *_TEST* dry runs never shown as a record")
+
+_m47 = re.search(r"^MIN_EDGE_EV_PER_TRADE_USD = (\S+)$", _sl_src, re.M)
+_doc47 = _sl_src[max(0, _sl_src.find("THE MINIMUM-EDGE BASELINE")):(_m47.start() if _m47 else 0)]
+_cfgs = [os.path.join(ROOT, f) for f in ("config.py", "tools/menu_functions.sh", "menu_functions.sh", "menu_registry.sh")]
+_knob = [f for f in _cfgs if os.path.exists(f) and "MIN_EDGE" in open(f).read()]
+ck("S47", _m47 is not None and float(_m47.group(1)) == 0.0 and "TODO(operator)" in _doc47
+   and "operator's call" in _doc47 and "never a config or env knob" in _doc47
+   and "os.environ" not in _sl_src and "getenv" not in _sl_src and not _knob
+   and _sl_src.count("MIN_EDGE_EV_PER_TRADE_USD") >= 3
+   and "Minimum-edge baseline: net EV a trade below $0.00" in _md42
+   and "MIN_EDGE_EV_PER_TRADE_USD" in _sa2_42 and "never a config or env knob" in _sa2_42,
+   "the minimum-edge baseline is ONE named constant in saturday_long.py (0, a placeholder), its TODO says it is the "
+   "operator's call, nothing reads it from the environment or config, and the brief prints it")
+
+# S48 (v2.7, dtp r586 / SATLONG.1b): a cash trade with no twin and no precomputed model row is priced by the live-fill
+# model itself (RUNAWAY_LIVEFILL_CHECK's code, read only, hash-checked, in a child interpreter) from a cached quote
+# window; a data failure (no option symbol; no quotes and no S3 read) still renders NOT MEASURED, saying which.
+_c48 = os.path.join(_t42, "lfcache")
+os.makedirs(_c48)
+_te48 = datetime(2026, 11, 30, 15, 0, 0, tzinfo=ZoneInfo("UTC")).timestamp()
+_tx48 = _te48 + 600
+_q48, _t = [], _te48 - 180
+while _t < _te48 + 6 * 3600:
+    if _t < _te48 + 3:
+        _q48.append([_t, 1.00, 1.02])
+    elif _t < _tx48 - 30:
+        _q48.append([_t, 0.97, 0.98] if _te48 + 20 <= _t < _te48 + 35 else [_t, 0.99, 1.01])
+    elif _t < _tx48 + 20:
+        _q48.append([_t, 1.20, 1.22])
+    else:
+        _q48.append([_t, 1.24, 1.25] if _tx48 + 40 <= _t < _tx48 + 60 else [_t, 1.21, 1.23])
+    _t += 1.5
+json.dump({"q": _q48}, open(os.path.join(_c48, "k4.json"), "w"))
+_cash48 = [dict(trade_id=k, _day="2026-11-30", sym="QQQ", contracts=n, entry_time="2026-11-30T15:00:00+00:00",
+                exit_time="2026-11-30T15:10:00+00:00", exit_reason="trail") for k, n in (("k4", "2"), ("k5", "1"), ("k6", "1"))]
+_wh48 = {"k4": dict(trade_id="k4", option_symbol="QQQ   261130C00606000", entry_bid=1.00, entry_ask=1.02, exit_bid=1.20,
+                    exit_ask=1.22, exit_reason="orb_trail_stop pnl=20%"),
+         "k5": dict(trade_id="k5"), "k6": dict(trade_id="k6", option_symbol="QQQ   261130C00606000")}
+_err48, _m48, _v48 = "", {}, {}
+try:
+    _m48 = SLM.compute_models(_cash48, _wh48, _c48, fetch=False)
+    _v48 = {c["trade_id"]: SLM.trade_view(c, None, _m48.get(c["trade_id"]), _wh48[c["trade_id"]]) for c in _cash48}
+except Exception as _e48:
+    _err48 = "%s: %s" % (type(_e48).__name__, _e48)
+_k4m = _m48.get("k4") or ()
+# ... and through the part itself: a cash box's only trade, no twin, no precomputed row -> the computed comparator
+_r48 = os.path.join(_t42, "r48")
+os.makedirs(os.path.join(_r48, "daily_brief", "botlogs", "2026-11-30"))
+os.makedirs(os.path.join(_r48, "trades"))
+open(os.path.join(_r48, "daily_brief", "botlogs", "2026-11-30", "QQQ.txt"), "w").write(
+    "2026-11-30 09:15:04 [INFO ] __main__: Service mode: LIVE | QQQ | risk=$1050/trade\n")
+with open(os.path.join(_r48, "trades", "2026-11-30.csv"), "w") as fh:
+    fh.write(_TC42 + "\nQQQ,k4,RunawayContinuation,long,2,1.00,1.21,42.00,2026-11-30T15:00:00+00:00,"
+             "2026-11-30T15:10:00+00:00,trail,2.00,,,,,,0,\n")
+_E48 = None
+try:
+    _E48 = SLM.edge_transfer("2026-12-04", _r48, os.path.join(_r48, "studies"), wh_rows=[_wh48["k4"]], cache=_c48,
+                             fetch=False)
+except Exception as _e48b:
+    _err48 = _err48 or "%s: %s" % (type(_e48b).__name__, _e48b)
+_t48 = {t["tid"]: t for t in (_E48 or {}).get("trades", [])}
+ck("S48", not _err48 and len(_k4m) == 3 and (_t48.get("k4") or {}).get("cmp") == 42.0
+   and "computed" in (_t48.get("k4") or {}).get("cmp_src", "") and (_E48 or {}).get("not_measured") == []
+   and (SLM.LIVEFILL_DELAY_S, SLM.LIVEFILL_MODE, SLM.LIVEFILL_START) == (1.0, "strict", "post") and _k4m[0] == 42.0 and _k4m[1] is True and "computed" in _k4m[2]
+   and (_v48.get("k4") or {}).get("cmp") == 42.0 and "computed" in (_v48.get("k4") or {}).get("cmp_src", "")
+   and (_v48.get("k5") or {}).get("cmp") is None and "no option symbol" in (_v48.get("k5") or {}).get("cmp_src", "")
+   and (_v48.get("k6") or {}).get("cmp") is None and "no cached quotes" in (_v48.get("k6") or {}).get("cmp_src", "")
+   and "NOT MEASURED" in (_v48.get("k6") or {}).get("cmp_src", "")
+   and SLM.LIVEFILL_SHA in _sl_src and SLM.QX_SHA in _sl_src and '"--livefill-worker"' in _sl_src
+   and "import fill_v2 as F" in _sl_src and "sys.dont_write_bytecode = True" in _sl_src and "fill_v2.py" not in [os.path.basename(f) for f in os.listdir(os.path.join(ROOT, "tools"))],
+   "a QQQ cash trade with no twin and no precomputed row gets the live-fill model's own prediction (imported read only, "
+   "hash-checked, cached quotes): %s; a data failure stays NOT MEASURED and says which (%s)"
+   % (_k4m, _err48 or {k: v.get("cmp_src") for k, v in _v48.items() if k != "k4"}))
+shutil.rmtree(_t42, ignore_errors=True)
 
 print()
 if FAILS:
