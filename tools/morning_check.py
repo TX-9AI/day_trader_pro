@@ -1,6 +1,16 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tools/morning_check.py — v1.4
+day_trader_pro/tools/morning_check.py — v1.5
+v1.5  2026-11-27  dtp r587 / CAP.12 (OTV5 r164) — A CUT OPTION-CANDLES RUN READS "PARTIAL - RESUMES", NOT "DID NOT RUN". OTV5
+      capture_all v5.10 writes the run's one manifest at the start (status started), after every chunk (partial: chunks
+      done / planned, the contracts still owed per series and day) and at the end (complete), so a run the conductor's
+      16:40 ET takedown stops (SPX, 11-24 / 11-25) leaves a key; the box's state file resumes it at the next close. The
+      09:50 run now reads the NEWEST manifest of last night's (dt=<session> or the night after): complete -> "N run(s)"
+      as before; partial / started -> "N run(s) partial d/p" and a NOTE naming the chunks, the contract-series owed and
+      the oldest day owed, "resumes at the next close" - not red; but a day owed OPT_OWED_RED_DAYS (9) or more calendar
+      days before the check day is RED (OTV5 asks a day for 12 days, then it is gone). A manifest from before r164 has no
+      status and was written only at the end -> complete; one that cannot be read still counts as a run (a note). No
+      manifest at all stays RED as in v1.2. Read-only: one more get per box symbol.
 v1.4  2026-11-14  dtp r555 / AM.12 — now_et() goes through dtp ettime.now_et (always aware); the naive
       fallback to a zoneless clock is gone (test_ettime T4).
 v1.3  2026-11-10  dtp r547 (§5 hygiene) — THE BUCKET COMES FROM config.WAREHOUSE_BUCKET. v1.2 carried its own literal
@@ -232,6 +242,7 @@ import config  # noqa: E402
 BUCKET = config.WAREHOUSE_BUCKET   # CONST.1: one bucket literal, in config.py (check_const_parity P2)
 ETH_CHECK_FROM = "2026-11-10"          # the first morning after OTV5 r98's candles-recent first runs (11-09 16:12 ET)
 OPT_CHECK_FROM = "2026-11-11"          # the first morning after OTV5 r104's option-candles first runs (the 11-10 close)
+OPT_OWED_RED_DAYS = 9                  # v1.5: a partial run still owing a day this old pages (OTV5 asks a day for 12 days)
 
 
 def _sessions_before(day, n, trading_fn=None):
@@ -256,6 +267,20 @@ def _utc_ms(d):
 def _d(ms):
     from datetime import timezone
     return datetime.fromtimestamp(ms / 1000, timezone.utc).date()
+
+
+def _opt_run_status(s3, key):
+    """v1.5 -> (status, manifest) for one raw/option_candles_runs object (OTV5 capture_all v5.10: complete / partial /
+    started). One from before OTV5 r164 carries no status and was written only at the end -> complete; one that cannot
+    be read -> ("unreadable", {}), still a run."""
+    import gzip
+    try:
+        man = json.loads(gzip.decompress(s3.get_object(Bucket=BUCKET, Key=key)["Body"].read()))
+    except Exception:                                                      # noqa: BLE001
+        return "unreadable", {}
+    if not isinstance(man, dict):
+        return "unreadable", {}
+    return str(man.get("status") or "complete"), man
 
 
 def daily_bars_check(day, syms, s3=None, trading_fn=None):
@@ -321,6 +346,27 @@ def daily_bars_check(day, syms, s3=None, trading_fn=None):
             if not runs:
                 reds.append("%s: no option-candles run after the %s close (raw/option_candles_runs): last night's "
                             "capture_all option-candles did not run" % (sym, prev[0]))
+            else:
+                newest = max(runs, key=lambda k: (k.split("/dt=", 1)[-1][:10], k.rsplit("/", 1)[-1]))
+                status, man = _opt_run_status(s3, newest)
+                if status in ("partial", "started"):
+                    owed = [o for o in (man.get("owed") or []) if isinstance(o, dict)]
+                    n_owed = sum(int(o.get("contracts") or 0) for o in owed)
+                    oldest = min((str(o.get("day")) for o in owed if o.get("day")), default="")
+                    opt_txt += " partial %s/%s" % (man.get("chunks_done", "?"), man.get("chunks_planned", "?"))
+                    notes.append("%s: option-candles partial after the %s close (%s of %s chunks; %d contract-series "
+                                 "owed, oldest %s%s) - resumes at the next close" % (
+                                     sym, prev[0], man.get("chunks_done", "?"), man.get("chunks_planned", "?"), n_owed,
+                                     oldest or "-", "; " + str(man["error"])[:80] if man.get("error") else ""))
+                    if oldest and oldest <= (datetime.strptime(day, "%Y-%m-%d").date()
+                                             - timedelta(days=OPT_OWED_RED_DAYS)).isoformat():
+                        reds.append("%s: option-candles still owes %s after the %s close (partial %s/%s): it falls out "
+                                    "of capture_all's 12-day window soon" % (sym, oldest, prev[0],
+                                                                            man.get("chunks_done", "?"),
+                                                                            man.get("chunks_planned", "?")))
+                elif status == "unreadable":
+                    notes.append("%s: option-candles manifest %s unreadable - counted as a run" % (
+                        sym, newest.rsplit("/", 1)[-1]))
         lines.append("%-5s daily  feed %s  full_1d %s  1d_eth %s  options %s" % (
             sym, "ok" if feed_ok else "MISSING", _d(full) if full else "none",
             eth_txt, opt_txt))

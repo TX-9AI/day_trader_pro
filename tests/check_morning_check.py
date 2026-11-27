@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """
-day_trader_pro/tests/check_morning_check.py  v1.2
+day_trader_pro/tests/check_morning_check.py  v1.3
+v1.3  2026-11-27  dtp r587 / CAP.12 (OTV5 r164) — M16 the newest option-candles manifest's status (tools/morning_check v1.5):
+      complete, a pre-r164 manifest (no status) and a partial followed by a complete run are "N run(s)" with no note;
+      partial / started are a note "partial - resumes at the next close" (chunks, contract-series owed, oldest day) and
+      "partial d/p" in the line, not red; a partial still owing a day 9+ days old is RED; no manifest stays RED.
 v1.2  2026-11-09  dtp r545 / CAP.7 — M15 last night's option-candles manifest per box symbol (tools/morning_check v1.2).
 v1.1  2026-11-08  dtp r542 / CAP.6 — M14 the 09:50 run's daily-candle check (tools/morning_check v1.1), on a fake bucket;
       M5/M6 inject a green daily check so they still test only the shadow rows.
@@ -25,6 +29,9 @@ shipped command lines through bash on this host and a real throwaway git repo.
   M14  daily candles (hunt run): all present -> no red and "daily candles ok" in the line; a missing raw/candles daily,
        a raw/candles_full 1d older than 4 sessions, and (from 2026-11-10) a 1d_eth without the previous session are
        each RED by symbol; a pre-r98 object filed under dt=<session - 1> still counts; before 11-10 no 1d_eth check
+  M15  last night's option-candles manifest per box symbol: none -> RED (from 11-11; VIX has none)
+  M16  (v1.3) the newest manifest's status: complete / pre-r164 -> a run; partial / started -> a note, not red;
+       a partial owing a day 9+ days old -> RED
 """
 import json
 import os
@@ -298,6 +305,44 @@ ck("M15", [r for r in r15 if "option-candles" in r] == [
        "option-candles did not run"]
    and not any("VIX" in r for r in r15) and r15pre == [] and any("options 1 run(s)" in l for l in l15),
    "%r | pre %r | %r" % (r15, r15pre, l15[:2]))
+
+# M16 — v1.3: the newest manifest's status (OTV5 capture_all v5.10: started / partial / complete)
+def _man(**kw):
+    return _gz.compress(json.dumps(kw).encode())
+
+
+pv16 = _date(2026, 12, 2)
+syms16 = ["AMD", "SPX", "NVDA", "UNH", "TSLA", "CVX", "GOOGL"]
+b16 = bucket(pv16, syms16)
+R = "raw/option_candles_runs/dt=%s/sym=%s/%s.json.gz"
+b16[R % ("2026-12-02", "AMD", "161230")] = _man(status="complete", chunks_done=28, chunks_planned=28, owed=[],
+                                                series=[], contracts_served=10)
+b16[R % ("2026-12-02", "SPX", "161205")] = _man(status="partial", chunks_done=40, chunks_planned=90,
+                                                owed=[{"label": "1m", "day": "2026-11-30", "contracts": 300},
+                                                      {"label": "5m", "day": "2026-12-02", "contracts": 120}],
+                                                resumes="the next close, from data/option_candles_state.json")
+b16[R % ("2026-12-02", "NVDA", "161201")] = _man(series=[{"label": "1m_bid"}], contracts_served=5)   # pre-r164
+b16[R % ("2026-12-02", "UNH", "161201")] = _man(status="partial", chunks_done=3, chunks_planned=9,
+                                                owed=[{"label": "1d", "day": "2026-11-23", "contracts": 6}])
+b16[R % ("2026-12-03", "TSLA", "000105")] = _man(status="started", chunks_done=0, chunks_planned=12, owed=[])
+b16[R % ("2026-12-02", "GOOGL", "161201")] = _man(status="partial", chunks_done=1, chunks_planned=9, owed=[])
+b16[R % ("2026-12-02", "GOOGL", "163001")] = _man(status="complete", chunks_done=8, chunks_planned=8, owed=[])
+r16, n16, l16 = M.daily_bars_check("2026-12-03", syms16, FakeS3(b16), wk)
+o16 = [r for r in r16 if "option-candles" in r]
+line = {l.split()[0]: l for l in l16}
+ck("M16", o16 == [
+                  "UNH: option-candles still owes 2026-11-23 after the 2026-12-02 close (partial 3/9): it falls out of "
+                  "capture_all's 12-day window soon",
+                  "CVX: no option-candles run after the 2026-12-02 close (raw/option_candles_runs): last night's "
+                  "capture_all option-candles did not run"]
+   and "SPX: option-candles partial after the 2026-12-02 close (40 of 90 chunks; 420 contract-series owed, oldest "
+       "2026-11-30) - resumes at the next close" in n16
+   and any(n.startswith("TSLA: option-candles partial after the 2026-12-02 close (0 of 12 chunks") for n in n16)
+   and not any(n.startswith(("AMD:", "NVDA:", "GOOGL:", "CVX:")) for n in n16)
+   and "options 1 run(s) partial 40/90" in line["SPX"] and line["AMD"].endswith("options 1 run(s)")
+   and line["NVDA"].endswith("options 1 run(s)") and line["GOOGL"].endswith("options 2 run(s)")
+   and "partial 0/12" in line["TSLA"],
+   "reds %r | notes %r | lines %r" % (o16, n16, l16))
 
 print()
 if FAILS:
